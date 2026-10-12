@@ -70,6 +70,7 @@ class DirectUploadService:
         uploaded_by: Actor | None = None,
         *,
         purpose: Literal["product", "input_assembly"] = "product",
+        temporary: bool = False,
     ) -> UploadSession:
         """Open a resumable product or generic input-assembly upload session."""
         name = display_name(filename)
@@ -102,8 +103,13 @@ class DirectUploadService:
             created_at=datetime.now(UTC),
             uploaded_by=uploaded_by,
             purpose=purpose,
+            temporary=temporary,
         )
         with self.database.transaction(write=True) as tx:
+            if temporary:
+                from src.services.orchestration.uploads.temporary import register_temporary
+
+                register_temporary(tx, upload_id, uploaded_by.user_id if uploaded_by else "anonymous")
             tx.execute(
                 "INSERT INTO r2s_upload_sessions(upload_id, payload) VALUES (?, ?)",
                 (upload_id, session.model_dump_json()),
@@ -241,6 +247,12 @@ class DirectUploadService:
             ).fetchone()
             if row is None or UploadSession.model_validate_json(row[0]).status != "VERIFYING":
                 raise RuntimeStateConflictError("phiên upload đã đổi trạng thái")
+            if session.temporary:
+                marker = tx.execute(
+                    "SELECT deleting FROM r2s_temporary_uploads WHERE upload_id=?" + tx.lock_suffix(), (upload_id,)
+                ).fetchone()
+                if marker is None or marker[0]:
+                    raise RuntimeStateConflictError("Upload tạm đã được hủy")
             if record is not None:
                 tx.execute(
                     "INSERT INTO r2s_uploads(upload_id, payload) VALUES (?, ?)",

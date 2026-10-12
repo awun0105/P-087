@@ -60,6 +60,13 @@ function file(size: number): File {
 }
 
 describe("directUpload", () => {
+  it("registers the temporary upload ID before any multipart bytes are sent", async () => {
+    const server = fakeServer({ size: 10 });
+    const started = vi.fn(() => expect(server.putPart).not.toHaveBeenCalled());
+    await directUpload(file(10), { temporary: true, onStarted: started, onProgress: vi.fn(), signal: new AbortController().signal }, server.deps);
+    expect(started).toHaveBeenCalledWith("upload-1");
+    expect(JSON.parse(String(server.api.mock.calls[0][1]?.body))).toMatchObject({ temporary: true });
+  });
   it("upload đủ phần, báo tiến độ tới 100%, chờ server kiểm tra rồi xóa id nối lại", async () => {
     const server = fakeServer({ size: 10 });
     const progress: number[] = [];

@@ -159,7 +159,7 @@ def test_registration_operation_migration_is_latest_and_additive(tmp_path: Path)
         legacy.execute("INSERT INTO r2s_projects(project_id,payload) VALUES ('preserved-project','{}')")
 
     database = RuntimeDatabase(f"sqlite:///{path}")
-    assert LATEST_SCHEMA_VERSION == 18
+    assert LATEST_SCHEMA_VERSION == 19
     assert database.schema_version() == LATEST_SCHEMA_VERSION
     with database.transaction() as tx:
         assert tx.execute("SELECT project_id FROM r2s_projects").fetchall() == [("preserved-project",)]

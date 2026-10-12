@@ -204,6 +204,8 @@ export interface UploadHandle {
 export interface UploadVideoOptions {
   resumeIdentity?: string;
   keepResumeKey?: boolean;
+  temporary?: boolean;
+  onUploadId?: (uploadId: string) => void;
 }
 
 /**
@@ -225,7 +227,7 @@ export function uploadVideo(
       throw new ApiError(413, `Video vượt giới hạn ${formatLimit(config.max_bytes)}`);
     }
     if (!config.direct) {
-      proxy = proxyUpload(file, onProgress);
+      proxy = proxyUpload(file, onProgress, options.temporary);
       if (controller.signal.aborted) proxy.abort();
       return proxy.promise;
     }
@@ -237,6 +239,8 @@ export function uploadVideo(
         signal: controller.signal,
         resumeIdentity: options.resumeIdentity,
         keepResumeKey: options.keepResumeKey,
+        temporary: options.temporary,
+        onStarted: options.onUploadId,
       },
       { api: apiFetch, putPart: xhrPutPart, sleep: (ms) => new Promise((r) => setTimeout(r, ms)), storage: browserStorage() },
     );
@@ -260,6 +264,8 @@ export interface PreparedVideoUploadOptions {
   onVerifying?: () => void;
   onUploadedRecord?: (record: UploadRecord) => void;
   existingRecord?: UploadRecord | null;
+  temporary?: boolean;
+  onUploadId?: (uploadId: string) => void;
 }
 
 interface PreparedVideoUploadDependencies {
@@ -352,7 +358,7 @@ export function uploadPreparedVideo(
         prepared.file,
         options.onProgress,
         options.onVerifying,
-        { resumeIdentity: identity, keepResumeKey: true },
+        { resumeIdentity: identity, keepResumeKey: true, temporary: options.temporary, onUploadId: options.onUploadId },
       );
       if (controller.signal.aborted) activeUpload.abort();
       record = await activeUpload.promise;
@@ -399,10 +405,10 @@ function formatLimit(bytes: number): string {
 }
 
 /** Đường cũ: stream cả file qua API (`/uploads`) khi deployment chưa có kho file. */
-function proxyUpload(file: File, onProgress: (fraction: number) => void): UploadHandle {
+function proxyUpload(file: File, onProgress: (fraction: number) => void, temporary = false): UploadHandle {
   const request = new XMLHttpRequest();
   const promise = new Promise<UploadRecord>((resolve, reject) => {
-    request.open("POST", `${API}/uploads?filename=${encodeURIComponent(file.name)}`);
+    request.open("POST", `${API}/uploads?filename=${encodeURIComponent(file.name)}${temporary ? "&temporary=true" : ""}`);
     request.setRequestHeader("Content-Type", file.type || "application/octet-stream");
     request.upload.onprogress = (event) => {
       if (event.lengthComputable && event.total > 0) onProgress(event.loaded / event.total);

@@ -219,6 +219,11 @@ def create_scene_from_upload(
             detail="Worker chưa dùng file thông số chung; không nhận thông số tùy chỉnh",
         )
     try:
+        from src.services.orchestration.uploads.temporary import TemporaryUploadService
+
+        TemporaryUploadService(uploads.database, uploads.resolver).reserve(
+            [upload.upload_id, *([lidar.upload_id] if lidar is not None else [])]
+        )
         project = registry.create_project_from_upload(
             upload,
             request,

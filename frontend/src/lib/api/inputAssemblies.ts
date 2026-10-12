@@ -54,6 +54,8 @@ export function uploadAssemblyFile(
   file: File,
   accountId: string,
   onProgress: (fraction: number) => void,
+  temporary = false,
+  onUploadId?: (uploadId: string) => void,
 ): AssemblyFileUploadHandle {
   const controller = new AbortController();
   let request: XMLHttpRequest | null = null;
@@ -71,6 +73,8 @@ export function uploadAssemblyFile(
           onProgress,
           signal: controller.signal,
           purpose: "input_assembly",
+          temporary,
+          onStarted: onUploadId,
           resumeIdentity: `${accountId}:${file.name}:${file.size}:${file.lastModified}`,
         },
         {
@@ -87,7 +91,7 @@ export function uploadAssemblyFile(
     return new Promise<AssemblyUploadResponse>((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       request = xhr;
-      xhr.open("POST", `${API}/input-assemblies/uploads?filename=${encodeURIComponent(file.name)}`);
+      xhr.open("POST", `${API}/input-assemblies/uploads?filename=${encodeURIComponent(file.name)}${temporary ? "&temporary=true" : ""}`);
       xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
       xhr.upload.onprogress = (event) => {
         if (event.lengthComputable && event.total > 0) onProgress(event.loaded / event.total);

@@ -42,6 +42,8 @@ export interface DirectUploadOptions {
   keepResumeKey?: boolean;
   /** Store a verified file in the grouped-input inventory rather than the legacy product path. */
   purpose?: "product" | "input_assembly";
+  temporary?: boolean;
+  onStarted?: (uploadId: string) => void;
   concurrency?: number;
   maxAttempts?: number;
   pollMs?: number;
@@ -99,6 +101,7 @@ async function openSession(file: File, options: DirectUploadOptions, deps: Direc
       filename: file.name,
       size_bytes: file.size,
       ...(options.purpose === "input_assembly" ? { purpose: options.purpose } : {}),
+      ...(options.temporary ? { temporary: true } : {}),
     }),
   });
   writeSaved(deps.storage, key, state.upload_id);
@@ -110,6 +113,7 @@ export async function directUpload(file: File, options: DirectUploadOptions, dep
   const concurrency = options.concurrency ?? 4;
   const maxAttempts = options.maxAttempts ?? 4;
   const session = await openSession(file, options, deps);
+  options.onStarted?.(session.upload_id);
   const key = resumeKey(file, options.resumeIdentity, options.purpose);
   if (session.status === "READY") {
     options.onProgress(1);

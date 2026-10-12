@@ -114,3 +114,4 @@ class UploadSession(BaseModel):
     purpose: Literal["product", "input_assembly"] = Field(
         default="product", exclude_if=lambda value: value == "product"
     )
+    temporary: bool = Field(default=False, exclude_if=lambda value: value is False)

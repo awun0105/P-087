@@ -216,6 +216,11 @@ def _checked_resolution(
     authorize_input_assembly_access(user, assembly_id, stored.snapshot.owner_id)
     for upload_id in sorted({item.upload_id for item in stored.snapshot.files}):
         authorize_staged_input_upload_mutation(user, service.get_upload(upload_id), operation="chạy assembly")
+    from src.services.orchestration.uploads.temporary import TemporaryUploadService
+
+    TemporaryUploadService(service.database, deps.registry().runtime_resolver).reserve(
+        [item.upload_id for item in stored.snapshot.files]
+    )
     service.verify_upload_sources(stored)
     resolved = service.resolve(assembly_id, revision)
     if resolved.report.report_checksum != expected_checksum:
@@ -241,6 +246,7 @@ def _response(record: StagedInputUploadRecord) -> AssemblyUploadResponse:
 async def upload_assembly_input(
     request: Request,
     filename: str = Query(..., min_length=1, max_length=255),
+    temporary: bool = Query(default=False),
     user: UserRecord | None = Depends(require_contributor),
 ) -> AssemblyUploadResponse:
     """Proxy upload fallback for generic sidecars; cloud deployments can use resumable direct upload."""
@@ -250,7 +256,7 @@ async def upload_assembly_input(
         async for chunk in request.stream():
             if chunk:
                 await run_in_threadpool(pending.publication.write, chunk)
-        record = await run_in_threadpool(service.finish_assembly, pending, actor_of(user))
+        record = await run_in_threadpool(service.finish_assembly, pending, actor_of(user), temporary=temporary)
         return _response(record)
     except ArtifactTooLargeError as error:
         raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail=str(error)) from error

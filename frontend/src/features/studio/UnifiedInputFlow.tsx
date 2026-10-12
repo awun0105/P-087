@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ArrowDown, ArrowUp, Check, FileCheck2, FileUp, Loader2, Play, Trash2, X } from "lucide-react";
 
@@ -22,6 +22,7 @@ import {
   type AssemblyFileUploadHandle,
 } from "@/lib/api/inputAssemblies";
 import { uploadPreparedVideo } from "@/lib/api/studio";
+import { temporaryUploads } from "@/lib/api/temporaryUploads";
 import type { DataOrigin, SourceRightsAttestation } from "@/lib/contracts/studio";
 import type {
   CandidateState,
@@ -63,6 +64,13 @@ const TIMESTAMP_UNIT_LABELS: Record<string, string> = {
 };
 /** Chờ người dùng gõ xong ô khai báo trước khi tự phân tích, để không tạo một revision cho mỗi phím. */
 const AUTO_ANALYZE_DELAY_MS = 700;
+
+function discardUploads(uploadIds: string[], keepalive = false) {
+  if (!uploadIds.length) return;
+  void temporaryUploads("discard", uploadIds, keepalive).catch((cause: unknown) => {
+    console.warn("Chưa dọn được upload đã bỏ; máy chủ sẽ dọn khi hết phiên.", cause);
+  });
+}
 
 type UploadStatus = "selected" | "preparing" | "uploading" | "ready" | "failed" | "cancelled";
 
@@ -308,6 +316,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
   const [dragging, setDragging] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [analysisFailed, setAnalysisFailed] = useState(false);
   const [snapshot, setSnapshot] = useState<InputAssemblySnapshot | null>(null);
   const [report, setReport] = useState<InputResolutionReport | null>(null);
   const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
@@ -336,13 +345,16 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
   const preparationControllers = useRef(new Map<string, AbortController>());
   const preparedArtifacts = useRef(new Map<string, VideoPreparedArtifact>());
   const mounted = useRef(true);
+  const temporaryIds = useRef(new Set<string>());
+  const removedEntries = useRef(new Set<string>());
+  const entryUploads = useRef(new Map<string, Set<string>>());
+  const leaving = useRef(false);
   const processedLegacyId = useRef<string | null>(null);
   // Phân tích tự chạy sau mỗi thay đổi input (debounce); `analyzeRef` luôn trỏ bản `analyze` của render mới nhất.
   const autoAnalyzeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Tăng mỗi khi input đổi: kết quả của lần phân tích bắt đầu trước đó không còn đúng và phải bị bỏ.
   const inputGeneration = useRef(0);
   const analyzeRef = useRef<(auto: boolean) => Promise<void>>(async () => undefined);
-  const processing = useProcessingForm(intent === "video_reconstruction");
 
   const includedEntries = useMemo(() => entries.filter((item) => item.included), [entries]);
   const stagedEntries = useMemo(() => includedEntries.filter((item) => item.staged), [includedEntries]);
@@ -360,25 +372,33 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
   const hasMixedSceneKinds = observedVideos.length > 0 && observedGaussians.length > 0;
   const activeCandidate = report?.candidates.find((item) => item.candidate_id === selectedCandidateId) ??
     report?.candidates.find((item) => item.candidate_id === report.recommended_candidate_id) ?? null;
+  const videoProcessing = activeCandidate
+    ? activeCandidate.candidate_kind === "video_recipe"
+    : intent === "video_reconstruction" || (intent !== "gaussian_view_import" && observedVideos.length > 0 && !hasMixedSceneKinds);
+  const processing = useProcessingForm(videoProcessing);
+  const visibleDiagnostics = report?.diagnostics.filter((item) =>
+    !["ROUTE_AUTO_SELECTED", "ALTERNATIVE_ROUTE_NOT_USED"].includes(item.code)
+  ) ?? [];
   const isGuest = me?.user?.role === "guest";
   const guestQuotaEmpty = isGuest && me?.quota?.remaining === 0;
-  const processingBlocked = Boolean(processing.options && (
-    !processing.values || processing.loading || processing.evaluating || processing.error || processing.evaluation?.blocking
+  const processingBlocked = Boolean(videoProcessing && (
+    !processing.options || !processing.values || !processing.evaluation || processing.loading || processing.evaluating || processing.error || processing.evaluation.blocking
   ));
 
   /** Kết quả cũ không còn đúng: xoá và tự phân tích lại sau một nhịp để gộp nhiều thay đổi liên tiếp. */
-  function scheduleAutoAnalyze() {
+  const scheduleAutoAnalyze = useCallback(() => {
     if (autoAnalyzeTimer.current) clearTimeout(autoAnalyzeTimer.current);
     autoAnalyzeTimer.current = setTimeout(() => void analyzeRef.current(true), AUTO_ANALYZE_DELAY_MS);
-  }
+  }, []);
 
-  function invalidateResolution() {
+  const invalidateResolution = useCallback(() => {
     inputGeneration.current += 1;
     setReport(null);
+    setAnalysisFailed(false);
     setSelectedCandidateId(null);
     setError(null);
     scheduleAutoAnalyze();
-  }
+  }, [scheduleAutoAnalyze]);
 
   function clearDraft() {
     try {
@@ -397,6 +417,58 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
     if (!mounted.current) return;
     setEntries((current) => current.map((item) => item.id === entryId ? { ...item, ...patch } : item));
   }
+
+  const trackUpload = useCallback((uploadId: string, entryId?: string) => {
+    if (!mounted.current || leaving.current || (entryId && removedEntries.current.has(entryId))) { discardUploads([uploadId], true); return; }
+    temporaryIds.current.add(uploadId);
+    if (entryId) {
+      const uploads = entryUploads.current.get(entryId) ?? new Set<string>();
+      uploads.add(uploadId);
+      entryUploads.current.set(entryId, uploads);
+    }
+    void temporaryUploads("heartbeat", [uploadId]).catch((cause: unknown) => {
+      setError(errorMessage(cause, "Không giữ được phiên upload; hãy tải lại file."));
+    });
+  }, []);
+
+  useEffect(() => {
+    leaving.current = false;
+    const uploads = temporaryIds.current;
+    const leave = () => {
+      leaving.current = true;
+      for (const abort of handles.current.values()) abort();
+      for (const controller of preparationControllers.current.values()) controller.abort();
+      if (!uploads.size) return;
+      discardUploads([...uploads], true);
+      try { window.sessionStorage.removeItem(draftKey); }
+      catch (cause: unknown) { console.warn("Không xóa được bản nháp trong trình duyệt.", cause); }
+    };
+    const returnToPage = (event: PageTransitionEvent) => {
+      if (!event.persisted) return;
+      leaving.current = false;
+      uploads.clear();
+      entryUploads.current.clear();
+      setEntries([]);
+      setReport(null);
+      setSnapshot(null);
+      setSceneName("");
+      setError(null);
+      setNotice(null);
+    };
+    window.addEventListener("pagehide", leave);
+    window.addEventListener("pageshow", returnToPage);
+    const heartbeat = setInterval(() => {
+      if (uploads.size) void temporaryUploads("heartbeat", [...uploads]).catch((cause: unknown) => {
+        console.warn("Không gia hạn được phiên upload.", cause);
+      });
+    }, 60_000);
+    return () => {
+      clearInterval(heartbeat);
+      window.removeEventListener("pagehide", leave);
+      window.removeEventListener("pageshow", returnToPage);
+      leave();
+    };
+  }, [draftKey]);
 
   useEffect(() => {
     mounted.current = true;
@@ -462,6 +534,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
       }
       if (!alive) return;
       setEntries(restored);
+      for (const entry of restored) if (entry.staged) trackUpload(entry.staged.upload_id);
       const cloudIds = restored.flatMap((entry) => entry.staged?.staged_files
         .filter((item) => CLOUD_FORMATS.has(item.observed_format)).map((item) => item.file_id) ?? []);
       const ordered = draft.scan_order.filter((id) => cloudIds.includes(id));
@@ -489,10 +562,11 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
       if (restored.length) setNotice("Đã khôi phục các upload của tài khoản này và xác minh lại với máy chủ.");
       if (missing.length) setError(`Không thể khôi phục một số upload đã hết hạn hoặc không còn quyền truy cập: ${missing.join(", ")}`);
       setDraftLoaded(true);
+      if (restored.length) invalidateResolution();
     }
     void restoreDraft();
     return () => { alive = false; };
-  }, [accountId, draftKey]);
+  }, [accountId, draftKey, invalidateResolution, trackUpload]);
 
   useEffect(() => {
     if (!draftLoaded) return;
@@ -566,6 +640,8 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
       };
       setEntries((current) => current.some((item) => item.staged?.upload_id === legacyUploadId) ? current : [...current, entry]);
       appendScanFiles(staged);
+      trackUpload(staged.upload_id);
+      invalidateResolution();
       setNotice("Đã nối upload cũ vào inventory chung; file đã xác minh không cần tải lại.");
       const videoName = staged.staged_files.find((item) => VIDEO_FORMATS.has(item.observed_format))?.source_file.original_name;
       if (videoName) setSceneName((current) => current || videoName.replace(/\.[^.]+$/, ""));
@@ -573,7 +649,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
       if (alive) setError(errorMessage(cause, "Không thể nối upload cũ vào inventory chung."));
     });
     return () => { alive = false; };
-  }, [draftLoaded, params, me]);
+  }, [draftLoaded, params, me, invalidateResolution, trackUpload]);
 
   useEffect(() => {
     const legacySource = params.get("source");
@@ -633,6 +709,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
       patchEntry(entry.id, { status: "uploading", progress: null, error: null });
       try {
         const staged = await stageExistingInputUpload(entry.legacyUploadId);
+        trackUpload(staged.upload_id, entry.id);
         appendScanFiles(staged);
         patchEntry(entry.id, { status: "ready", progress: 1, staged, error: null });
         invalidateResolution();
@@ -662,10 +739,14 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
         patchEntry(entry.id, { status: "uploading", progress: 0, error: null });
         const upload = uploadPreparedVideo(prepared, {
           accountId,
+          temporary: true,
+          onUploadId: (uploadId) => trackUpload(uploadId, entry.id),
+          onUploadedRecord: (record) => { trackUpload(record.upload_id, entry.id); patchEntry(entry.id, { legacyUploadId: record.upload_id }); },
           onProgress: (progress) => patchEntry(entry.id, { progress }),
         });
         handles.current.set(entry.id, upload.abort);
         const record = await upload.promise;
+        trackUpload(record.upload_id, entry.id);
         handles.current.delete(entry.id);
         patchEntry(entry.id, { legacyUploadId: record.upload_id, progress: 1 });
         const staged = await stageExistingInputUpload(record.upload_id);
@@ -679,9 +760,12 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
           entry.file,
           accountId,
           (progress) => patchEntry(entry.id, { progress }),
+          true,
+          (uploadId) => trackUpload(uploadId, entry.id),
         );
         handles.current.set(entry.id, upload.abort);
         const staged = await upload.promise;
+        trackUpload(staged.upload_id, entry.id);
         handles.current.delete(entry.id);
         appendScanFiles(staged);
         patchEntry(entry.id, { status: "ready", staged, progress: 1, error: null });
@@ -721,6 +805,15 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
 
   function removeEntry(entryId: string) {
     const removed = entries.find((item) => item.id === entryId);
+    removedEntries.current.add(entryId);
+    setSnapshot(null);
+    cancelEntry(entryId);
+    const uploadId = removed?.staged?.upload_id ?? removed?.legacyUploadId;
+    const abandoned = entryUploads.current.get(entryId) ?? new Set<string>();
+    if (uploadId) abandoned.add(uploadId);
+    for (const id of abandoned) temporaryIds.current.delete(id);
+    discardUploads([...abandoned]);
+    entryUploads.current.delete(entryId);
     const removedFileIds = new Set(removed?.staged?.staged_files.map((item) => item.file_id) ?? []);
     const prepared = preparedArtifacts.current.get(entryId);
     preparedArtifacts.current.delete(entryId);
@@ -833,6 +926,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
       return;
     }
     setBusy(true);
+    setAnalysisFailed(false);
     setError(null);
     setNotice(null);
     setReport(null);
@@ -854,6 +948,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
       if (cloudOverride !== undefined) setCloudState(cloudOverride ?? "");
     } catch (cause: unknown) {
       setError(errorMessage(cause, "Không phân tích được tập input."));
+      setAnalysisFailed(true);
     } finally {
       setBusy(false);
     }
@@ -904,6 +999,8 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
           name: sceneName.trim(),
         });
         clearDraft();
+        discardUploads([...temporaryIds.current], true);
+        temporaryIds.current.clear();
         router.push(`/imports/${encodeURIComponent(imported.imported_scene.import_id)}`);
         return;
       }
@@ -938,6 +1035,8 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
       });
       if (isGuest) void refresh();
       clearDraft();
+      discardUploads([...temporaryIds.current], true);
+      temporaryIds.current.clear();
       router.push(`/scenes/${encodeURIComponent(result.job.job_id)}`);
     } catch (cause: unknown) {
       if (isGuest) await refresh();
@@ -1249,24 +1348,21 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
         </Card>
       )}
 
-      {entries.length > 0 && (
-        <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
-          <p className="max-w-2xl text-sm text-ink-muted">Hệ thống tự chọn cách xử lý phù hợp từ các file bạn thêm. Sẵn sàng chỉ nghĩa là dữ liệu chạy được, chưa phải kết quả kiểm tra hình học hay va chạm đã đạt.</p>
-          <Button onClick={() => void analyze()} disabled={busy || adding || !stagedEntries.length || includedEntries.some((item) => item.status !== "ready") || (hasMixedSceneKinds && !intent)}>
-            {busy ? <><Loader2 className="size-4 animate-spin" aria-hidden /> Đang phân tích</> : "Phân tích lại"}
-          </Button>
+      {notice && <Notice tone="ochre" className="mt-4">{notice}</Notice>}
+      {error && <div role="alert" className="mt-4"><Notice tone="rust">{error}</Notice></div>}
+      {analysisFailed && <Button variant="secondary" onClick={() => void analyze()} disabled={busy || adding}>Thử lại</Button>}
+      {busy && stagedEntries.length > 0 && <p className="mt-4 text-sm text-ink-muted" role="status">Đang đọc dữ liệu đầu vào…</p>}
+
+      {videoProcessing && (
+        <div className="mt-6 space-y-3">
+          {processing.options && processing.values && <ProcessingSettings parameters={processing.options.parameters} values={processing.values} editable evaluation={processing.evaluation} capability={processing.options.capability} activePreset={processing.activePreset} onPreset={processing.applyPreset} onChange={processing.setValue} note={processing.options.resource_note} />}
+          {!processing.error && (processing.loading || !processing.values) && <Card className="p-5" role="status">Đang tải cấu hình xử lý…</Card>}
+          {processing.error && <Notice tone="rust">{processing.options ? "Không kiểm tra được cấu hình xử lý." : "Không tải được cấu hình xử lý."} {processing.error}<Button type="button" size="sm" variant="secondary" onClick={processing.retry}>Thử lại</Button></Notice>}
         </div>
       )}
 
-      {notice && <Notice tone="ochre" className="mt-4">{notice}</Notice>}
-      {error && <div role="alert" className="mt-4"><Notice tone="rust">{error}</Notice></div>}
-
       {report && (
-        <section className="mt-6 space-y-4" aria-labelledby="resolution-heading">
-          <div>
-            <h2 id="resolution-heading" className="text-lg font-bold">Kết quả nhận diện và hướng xử lý</h2>
-            <p className="mt-1 text-sm text-ink-muted">Kết quả ứng với bộ file hiện tại (lần {report.assembly_revision}); đổi file hoặc khai báo thì hệ thống tự phân tích lại.</p>
-          </div>
+        <section className="mt-6 space-y-4" aria-label="Thiết lập scene">
           {estimatedUnits.length > 0 && (
             <Notice tone="ochre">
               Đã tự suy đơn vị thời gian theo tần số lấy mẫu: {estimatedUnits.join("; ")}. Nếu sai, chọn file ở mục
@@ -1282,11 +1378,11 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
               </ul>
             </Card>
           )}
-          {report.diagnostics.length > 0 && (
+          {visibleDiagnostics.length > 0 && (
             <Card className="p-5">
               <h3 className="text-sm font-semibold">Ghi chú về file</h3>
               <ul className="mt-2 space-y-1 text-sm">
-                {report.diagnostics.map((item) => {
+                {visibleDiagnostics.map((item) => {
                   const names = item.related_file_ids.map((id) => fileNamesById.get(id)).filter((name): name is string => Boolean(name));
                   return (
                     <li key={`${item.code}:${item.related_file_ids.join(",")}`} className={item.severity === "error" ? "text-rust" : "text-ink-muted"}>
@@ -1354,8 +1450,6 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
                       {processing.options?.anonymize_available && <label className="flex items-start gap-2"><input type="checkbox" checked={autoAnonymize || Boolean(processing.options.anonymize_enforced)} disabled={Boolean(processing.options.anonymize_enforced)} onChange={(event) => setAutoAnonymize(event.target.checked)} className="mt-1 size-4 accent-ember-strong" /><span>Tự động che khuôn mặt và biển số trước khi dựng 3D.<span className="mt-0.5 block text-xs text-ink-muted">Lớp bảo vệ thêm: bộ phát hiện có thể bỏ sót, nên vẫn cần xác nhận ở dòng trên. Vùng bị che sẽ hiện thành mảng đen trong scene.{processing.options.anonymize_enforced ? " Máy xử lý này luôn bật bước che." : ""}</span></span></label>}
                       <label className="flex items-start gap-2"><input type="checkbox" checked={retention} onChange={(event) => setRetention(event.target.checked)} className="mt-1 size-4 accent-ember-strong" />Tôi hiểu dữ liệu và kết quả được lưu để xử lý scene.</label>
                     </div>
-                    {processing.options && processing.values && <ProcessingSettings parameters={processing.options.parameters} values={processing.values} editable evaluation={processing.evaluation} capability={processing.options.capability} activePreset={processing.activePreset} onPreset={processing.applyPreset} onChange={processing.setValue} note={processing.options.resource_note} />}
-                    {processing.error && <Notice tone={processing.options ? "rust" : "ochre"}>{processing.error} {!processing.options && "Server sẽ dùng cấu hình mặc định."}<Button type="button" size="sm" variant="secondary" onClick={processing.retry}>Thử lại</Button></Notice>}
                     {guestQuotaEmpty && <Notice tone="ochre">Đã dùng hết 3 lượt Guest hôm nay; quota reset lúc 00:00 giờ Việt Nam.</Notice>}
                   </>
                 )}

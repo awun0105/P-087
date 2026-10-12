@@ -318,6 +318,9 @@ def _start_capability_heartbeat(
                     idle = admission.machine_idle() if admission is not None else False
                     previous = probe_capability(worker_root, idle=idle, previous=previous)
                     record_capability(database, previous)
+                    from src.services.orchestration.uploads.temporary import TemporaryUploadService
+
+                    TemporaryUploadService(database, registry.runtime_resolver).purge_expired()
                     if admission is not None:
                         admission.touch()
             except Exception as error:  # noqa: BLE001 - luồng nền: lỗi đo/DB không được làm chết heartbeat

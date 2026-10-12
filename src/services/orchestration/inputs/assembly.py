@@ -295,6 +295,15 @@ class InputAssemblyService:
         snapshot = stored.snapshot
         payload = stored.model_dump_json()
         with self.database.transaction(write=True) as tx:
+            for upload_id in sorted({item.upload_id for item in snapshot.files}):
+                marker = tx.execute(
+                    "SELECT deleting FROM r2s_temporary_uploads WHERE upload_id=?" + tx.lock_suffix(), (upload_id,)
+                ).fetchone()
+                source = tx.execute(
+                    "SELECT 1 FROM r2s_input_uploads WHERE upload_id=?" + tx.lock_suffix(), (upload_id,)
+                ).fetchone()
+                if source is None or (marker is not None and marker[0]):
+                    raise InputAssemblyConflictError("Upload đã bị bỏ; hãy tải lại file")
             head = tx.execute(
                 "SELECT owner_id,revision FROM r2s_input_assembly_heads WHERE assembly_id=?" + tx.lock_suffix(),
                 (snapshot.assembly_id,),

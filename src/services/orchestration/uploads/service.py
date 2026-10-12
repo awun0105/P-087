@@ -103,7 +103,9 @@ class VideoUploadService:
         uri = f"artifact://jobs/{upload_id}/input/source{suffix or '.bin'}"
         return PendingUpload(upload_id, name, media_type, StreamingPublication(self.resolver, uri, self.max_bytes))
 
-    def finish(self, pending: PendingUpload, uploaded_by: Actor | None = None) -> UploadRecord:
+    def finish(
+        self, pending: PendingUpload, uploaded_by: Actor | None = None, *, temporary: bool = False
+    ) -> UploadRecord:
         """Nhận diện loại, commit bytes rồi ghi record (kèm người tải lên); file sai loại không được lưu."""
         publication = pending.publication
         with publication.staged_path().open("rb") as stream:
@@ -122,13 +124,19 @@ class VideoUploadService:
             uploaded_by=uploaded_by,
         )
         with self.database.transaction(write=True) as tx:
+            if temporary:
+                from src.services.orchestration.uploads.temporary import register_temporary
+
+                register_temporary(tx, record.upload_id, uploaded_by.user_id if uploaded_by else "anonymous")
             tx.execute(
                 "INSERT INTO r2s_uploads(upload_id, payload) VALUES (?, ?)",
                 (record.upload_id, record.model_dump_json()),
             )
         return record
 
-    def finish_assembly(self, pending: PendingUpload, uploaded_by: Actor | None = None) -> StagedInputUploadRecord:
+    def finish_assembly(
+        self, pending: PendingUpload, uploaded_by: Actor | None = None, *, temporary: bool = False
+    ) -> StagedInputUploadRecord:
         """Probe and store generic assembly bytes without weakening legacy upload rules."""
         publication = pending.publication
         path = publication.staged_path()
@@ -184,6 +192,10 @@ class VideoUploadService:
             received_at=datetime.now(UTC),
         )
         with self.database.transaction(write=True) as tx:
+            if temporary:
+                from src.services.orchestration.uploads.temporary import register_temporary
+
+                register_temporary(tx, staged.upload_id, uploaded_by.user_id if uploaded_by else "anonymous")
             if legacy is not None:
                 tx.execute(
                     "INSERT INTO r2s_uploads(upload_id,payload) VALUES (?,?)",

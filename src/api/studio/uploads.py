@@ -8,7 +8,7 @@ store qua API (local/không có kho file). File I/O đồng bộ chạy qua thre
 import logging
 import tempfile
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from fastapi.concurrency import run_in_threadpool
@@ -40,6 +40,33 @@ from src.services.orchestration.uploads.video_preparation import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+class TemporaryUploadRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    upload_ids: list[Annotated[str, Field(pattern=r"^upload-[a-zA-Z0-9_-]+$")]] = Field(max_length=100)
+
+
+@router.post("/uploads/temporary/{action}")
+def temporary_uploads(
+    action: Literal["heartbeat", "discard"],
+    request: TemporaryUploadRequest,
+    user: UserRecord | None = Depends(require_contributor),
+) -> dict[str, list[str]]:
+    from src.services.orchestration.uploads.temporary import TemporaryUploadService
+
+    uploads = deps.uploads()
+    service = TemporaryUploadService(uploads.database, uploads.resolver)
+    owner_id = user.user_id if user else "anonymous"
+    try:
+        if action == "heartbeat":
+            service.renew(request.upload_ids, owner_id)
+            return {"deleted": []}
+        return {"deleted": service.discard(request.upload_ids, owner_id)}
+    except PermissionError as error:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(error)) from error
+    except RuntimeStateConflictError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
 
 
 class UploadResponse(UploadRecord):
@@ -74,6 +101,7 @@ class UploadListResponse(BaseModel):
 async def upload_video(
     request: Request,
     filename: str = Query(..., min_length=1, max_length=255),
+    temporary: bool = Query(default=False),
     user: UserRecord | None = Depends(require_contributor),
 ) -> UploadResponse:
     """Nhận bytes video trong body; bytes gốc được giữ nguyên, checksum tính khi ghi."""
@@ -86,7 +114,7 @@ async def upload_video(
         async for chunk in request.stream():
             if chunk:
                 await run_in_threadpool(pending.publication.write, chunk)
-        record = await run_in_threadpool(service.finish, pending, actor_of(user))
+        record = await run_in_threadpool(service.finish, pending, actor_of(user), temporary=temporary)
         return UploadResponse.from_record(record)
     except ArtifactTooLargeError as error:
         raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail=str(error)) from error
@@ -195,6 +223,7 @@ class DirectUploadRequest(BaseModel):
     filename: str = Field(min_length=1, max_length=255)
     size_bytes: int = Field(gt=0)
     purpose: Literal["product", "input_assembly"] = "product"
+    temporary: bool = False
 
 
 class DirectUploadState(BaseModel):
@@ -269,6 +298,7 @@ def begin_direct_upload(
                 request.size_bytes,
                 actor_of(user),
                 purpose=request.purpose,
+                temporary=request.temporary,
             )
         )
     except (UploadError, ArtifactAlreadyExistsError) as error:

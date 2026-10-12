@@ -380,6 +380,16 @@ MIGRATIONS: tuple[tuple[int, tuple[str, ...]], ...] = (
         ),
     ),
 )
+MIGRATIONS += (
+    (
+        19,
+        (
+            "CREATE TABLE r2s_temporary_uploads (upload_id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, "
+            "expires_at TEXT NOT NULL, protected_until TEXT, deleting INTEGER NOT NULL DEFAULT 0)",
+            "CREATE INDEX r2s_temporary_uploads_by_expiry ON r2s_temporary_uploads(expires_at)",
+        ),
+    ),
+)
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
 #: DB đã kiểm/chạy migration trong tiến trình này. API tạo RuntimeDatabase mỗi request;

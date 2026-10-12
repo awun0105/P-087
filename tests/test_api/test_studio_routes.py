@@ -96,6 +96,41 @@ async def test_upload_streams_video_and_lists_it(client: AsyncClient, studio: Si
 
 
 @pytest.mark.asyncio
+async def test_abandoned_upload_cleanup_removes_bytes_and_assembly_rows(
+    client: AsyncClient, studio: SimpleNamespace
+) -> None:
+    uploaded = await client.post(
+        "/api/v1/uploads?filename=input.mp4&temporary=true", content=b"\x00\x00\x00\x18ftypmp42"
+    )
+    assert uploaded.status_code == 201
+    upload_id = uploaded.json()["upload_id"]
+    assert (await client.post(f"/api/v1/input-assemblies/uploads/{upload_id}/stage")).status_code == 200
+    assembled = await client.post(
+        "/api/v1/input-assemblies", json={"upload_ids": [upload_id], "declarations": {}, "bindings": []}
+    )
+    assert assembled.status_code == 201, assembled.text
+    assembly_id = assembled.json()["assembly_id"]
+    deleted = await client.post("/api/v1/uploads/temporary/discard", json={"upload_ids": [upload_id]})
+    assert deleted.status_code == 200 and deleted.json()["deleted"] == [upload_id]
+    assert (await client.get(f"/api/v1/input-assemblies/uploads/{upload_id}")).status_code == 404
+    assert (await client.get(f"/api/v1/input-assemblies/{assembly_id}")).status_code == 404
+    assert not (studio.root / "artifacts/jobs" / upload_id).exists()
+
+
+@pytest.mark.asyncio
+async def test_upload_cleanup_enforces_owner(client: AsyncClient, studio: SimpleNamespace) -> None:
+    uploaded = await client.post(
+        "/api/v1/uploads?filename=input.mp4&temporary=true", content=b"\x00\x00\x00\x18ftypmp42"
+    )
+    upload_id = uploaded.json()["upload_id"]
+    with studio.registry.persistence.database.transaction(write=True) as tx:
+        tx.execute("UPDATE r2s_temporary_uploads SET owner_id=? WHERE upload_id=?", ("other-user", upload_id))
+    refused = await client.post("/api/v1/uploads/temporary/discard", json={"upload_ids": [upload_id]})
+    assert refused.status_code == 403
+    assert (studio.root / "artifacts/jobs" / upload_id / "input/source.mp4").exists()
+
+
+@pytest.mark.asyncio
 async def test_existing_verified_upload_can_be_staged_for_unified_input_without_copying_bytes(
     client: AsyncClient, studio: SimpleNamespace
 ) -> None:
@@ -321,7 +356,7 @@ async def test_input_assembly_run_is_durable_idempotent_and_worker_revalidates_r
 
     uploaded = await client.post(
         "/api/v1/input-assemblies/uploads",
-        params={"filename": "walk.mp4"},
+        params={"filename": "walk.mp4", "temporary": True},
         content=b"\x00\x00\x00\x14ftypqt  fake-mp4",
     )
     assert uploaded.status_code == 201, uploaded.text
@@ -380,6 +415,11 @@ async def test_input_assembly_run_is_durable_idempotent_and_worker_revalidates_r
     with studio.registry.persistence.database.transaction() as tx:
         assert tx.execute("SELECT COUNT(*) FROM r2s_input_runs").fetchone() == (1,)
     assert deps.input_assemblies().get_upload(uploaded.json()["upload_id"]).project_ids == [project.project_id]
+    cleanup = await client.post(
+        "/api/v1/uploads/temporary/discard", json={"upload_ids": [uploaded.json()["upload_id"]]}
+    )
+    assert cleanup.status_code == 200 and cleanup.json()["deleted"] == []
+    assert deps.uploads().get(uploaded.json()["upload_id"])
 
     runtime_path.write_text(
         seal_runtime_registry(

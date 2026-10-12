@@ -8,6 +8,7 @@ from src.api.auth import auth_service, require_contributor
 from src.api.ownership import authorize_upload_mutation, owner_mutation_allowed
 from src.api.studio import deps
 from src.services.orchestration.auth import Actor, UserRecord
+from src.services.orchestration.jobs.database import RuntimeStateConflictError
 from src.services.orchestration.uploads import UploadNotFoundError
 from src.services.orchestration.uploads.scene_imports import (
     CameraPoseRecord,
@@ -146,6 +147,10 @@ def create_import(
     try:
         upload = deps.uploads().get(request.upload_id)
         authorize_upload_mutation(user, upload, operation="tạo scene import từ")
+        from src.services.orchestration.uploads.temporary import TemporaryUploadService
+
+        uploads = deps.uploads()
+        TemporaryUploadService(uploads.database, uploads.resolver).reserve([upload.upload_id])
         settings = deps.settings()
         record = _service().create(
             upload,
@@ -158,7 +163,7 @@ def create_import(
         )
     except UploadNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
-    except SceneImportError as error:
+    except (SceneImportError, RuntimeStateConflictError) as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     return _view(record, user, _legacy_creator_names([record]))
 
