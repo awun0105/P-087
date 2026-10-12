@@ -1,4 +1,5 @@
 TASK: CFG-02-VOCAB-TREE-ASSET
+STATUS: COMPLETED (2026-10-13)
 
 ## Ý TƯỞNG & ĐỘNG LỰC THỰC HIỆN (WHY & WHAT)
 - **Tại sao cần task này (Why):** Khi người dùng quay video đi quanh phòng theo vòng tròn 360° (điểm kết thúc trùng điểm xuất phát), chế độ `sequential_matcher` thông thường chỉ so khớp các ảnh cạnh nhau theo thời gian ($t$ với $t+1$). Khi camera quay đủ một vòng và nhìn lại điểm xuất phát ở frame cuối cùng, khoảng cách thời gian giữa frame đầu và frame cuối quá xa nên COLMAP không biết chúng là cùng một nơi, dẫn đến mô hình bị vặn xoắn hoặc đứt gãy thành hai mảng rời rạc. Để khâu vòng lặp (loop closure), COLMAP bắt buộc phải dùng một từ điển thị giác nhị phân (Vocabulary Tree, ~112 MB). Nếu không có script tải tự động và cơ chế kiểm tra sẵn sàng, pipeline sẽ bị crash khi người dùng kích hoạt loop detection.
@@ -64,3 +65,24 @@ EVIDENCE:
 - File `scripts/assets/download_vocab_tree.py`
 - File `src/services/reconstruction/adapters/vocab_tree.py`
 - Test log `.venv/bin/pytest tests/test_reconstruction/test_vocab_tree_asset.py`
+
+## Implementation and executable evidence — 2026-10-13
+
+- Added `Settings.product_colmap_vocab_tree`; an explicit path takes precedence over the canonical repo asset. Missing, partial, non-regular or corrupt files are unavailable. Availability hashes are cached by file metadata and rechecked after mutation.
+- Added standalone stdlib downloader with socket timeout, `.part` resume via HTTP Range, restart when Range is ignored, process lock, SHA-256 + exact size verification and atomic publication. `--check-only` performs no download or writes; a verified existing asset skips the network.
+- Real asset installed locally at the specified canonical path: **117,893,693 bytes**. Large binary and lock/partial files stay under ignored `data/`, not in Git.
+- **Source correction from current evidence:** task's `https://demuc.de/colmap/vocab_tree_clustering_flickr100k_words256K.bin` returns HTTP 404. The author's [current download page](https://demuc.de/colmap/) links [COLMAP release 3.11.1](https://github.com/colmap/colmap/releases/download/3.11.1/vocab_tree_flickr100K_words256K.bin). Downloaded that official 256K asset and kept the requested local filename.
+- SHA-256 pin: `d2055600452a531b5b0a62aa5943e1a07195273dc4eeebcf23d3a924d881d53a`. This is the project pin measured from official release bytes, **not a publisher-signed/published digest**; the supplied task contained no checksum and GitHub metadata lookup was rate limited. Future downloads must match this pin.
+- Real-source downloader exercised with a 1 MiB partial file; completed successfully and published the verified asset. `python3 scripts/assets/download_vocab_tree.py --check-only` returned **0**. Runtime helper reported available with default location.
+- `.venv/bin/pytest tests/test_reconstruction/test_vocab_tree_asset.py tests/test_config.py -v`: **19 passed** (12 asset cases + 7 settings cases). Tests include missing/corrupt/mutated files, env override, idempotence, check-only without network, resume, ignored Range, truncated transfer, wrong Content-Range, wrong checksum, complete partial and invalid timeout.
+- Ruff check/format passed for all 4 changed Python files. Full commands/output: [CFG-02-VERIFICATION.log](reports/CFG-02-VERIFICATION.log).
+
+Pre-flight (GUIDE.md Rule 13):
+- codegraph: inspected Settings, COLMAP artifact staging/config/runtime and existing weight-management helper; Settings callers checked (API, workers, scripts, settings tests).
+- impact: new opt-in setting and new asset helper/CLI; existing reconstruction commands/job artifact contracts unchanged. Settings shared callers retain old defaults.
+- understand: UNVERIFIED — understand-anything tool unavailable; current source/callers and official upstream download page used instead.
+- minimal-code: reuse Settings and stdlib hashing/urllib/locking/atomic replace; no dependency or request-time downloader added.
+- checks: 19 focused tests passed; Ruff lint/format clean; graphify AST update run.
+- DevTools: n/a — no rendered UI change.
+
+Scope limit: asset-management proof only; no live COLMAP loop-matching or 360-scene quality claim. Matching modes belong to CFG-03.

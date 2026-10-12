@@ -52,6 +52,8 @@ class Settings(BaseSettings):
     product_fixture_mode: bool = False
     product_processing_config: Path | None = None
     product_colmap_use_gpu: bool = False
+    #: Từ điển COLMAP chuẩn, tải bằng scripts/assets/download_vocab_tree.py; None dùng vị trí chuẩn trong repo.
+    product_colmap_vocab_tree: Path | None = None
     product_runtime_manifest: Path | None = None
     #: Runtime qualification registry for grouped input recipes; absent means no new recipe dispatch is enabled.
     product_input_runtime_registry: Path | None = None

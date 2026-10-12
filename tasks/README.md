@@ -44,7 +44,7 @@ flowchart TD
 | STT | Mã Task | Trạng Thái | Mô Tả & Mục Tiêu | File Trọng Tâm |
 | :---: | :--- | :---: | :--- | :--- |
 | **01** | [`CFG-01-TOOL-INSPECT.md`](file:///home/lqaq/PROJECT/AI20K/P-087/tasks/CFG-01-TOOL-INSPECT.md) | ✅ **DONE** | Audit & kiểm tra codebase 8 chặng, điền `CONFIG_CATALOG.md` | `docs/execution/CONFIG_CATALOG.md` |
-| **02** | [`CFG-02-VOCAB-TREE-ASSET.md`](file:///home/lqaq/PROJECT/AI20K/P-087/tasks/CFG-02-VOCAB-TREE-ASSET.md) | ⏳ Ready | Script tải tự động `vocab_tree.bin` (~112 MB) & adapter helper | `scripts/assets/download_vocab_tree.py` |
+| **02** | [`CFG-02-VOCAB-TREE-ASSET.md`](file:///home/lqaq/PROJECT/AI20K/P-087/tasks/CFG-02-VOCAB-TREE-ASSET.md) | ✅ **DONE** | Script tải tự động `vocab_tree.bin` (~112 MB) & adapter helper | `scripts/assets/download_vocab_tree.py` |
 | **03** | [`CFG-03-COLMAP-MATCHING-MODES.md`](file:///home/lqaq/PROJECT/AI20K/P-087/tasks/CFG-03-COLMAP-MATCHING-MODES.md) | ⏳ Ready | Mở rộng 3 matching modes (`sequential`, `vocab_tree`, `exhaustive`) | `src/services/reconstruction/rgb/pose/camera_pose.py`<br/>`colmap_runtime.py` |
 | **04** | [`CFG-04-VOXEL-GEOMETRY-CONFIG.md`](file:///home/lqaq/PROJECT/AI20K/P-087/tasks/CFG-04-VOXEL-GEOMETRY-CONFIG.md) | ⏳ Ready | Mở rộng Voxel mesh (`smooth` / `faces`) & cờ `--voxel-floor-fill` | `src/services/reconstruction/rgb/geometry/voxel.py` |
 | **05** | [`CFG-05-SCENE-OBJECTIFY-CONFIG.md`](file:///home/lqaq/PROJECT/AI20K/P-087/tasks/CFG-05-SCENE-OBJECTIFY-CONFIG.md) | ⏳ Ready | Gỡ hardcode `_MAX_OBJECTS=60`, truyền config xuống CoACD/LaMa | `src/services/orchestration/scene/objectify.py` |
