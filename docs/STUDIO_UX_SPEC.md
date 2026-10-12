@@ -397,13 +397,15 @@ S01–S14 là mã **màn hình UX**, không phải task ID. Một số là tab/p
 ### S03 — Scene mới: nguồn và thiết lập
 
 - **Purpose / entry:** `Scene mới`; gom tạo project/scene và input thành một flow.
-- **Required information:** bước `Nguồn dữ liệu` rồi `Thiết lập & bắt đầu`; input nhận diện, tên scene, khai báo, cấu hình, giới hạn và cảnh báo.
-- **Primary action:** bước đầu `Dùng file này`; bước sau `Bắt đầu xử lý`.
+- **Required information:** luồng video tại `/new` gồm `Chọn dữ liệu` → `Cấu hình xử lý` → `Xác nhận và tạo scene`; input nhận diện, tên scene, khai báo, cấu hình, giới hạn và cảnh báo.
+- **Primary action:** `Tiếp tục` ở hai bước đầu; `Tạo scene` tại bước xác nhận. `Quay lại` giữ file, cấu hình và khai báo đã nhập.
 - **Secondary actions:** tải/chọn file khác, dùng file đã tải, thử mẫu, mở cấu hình chi tiết, trở lại bước trước.
 - **States:** empty/dropzone, uploading có %, verifying, file hợp lệ, không hỗ trợ/sai nội dung, video sẵn sàng tạo job, 3DGS chỉ mở import, attestation thiếu, resource blocking, submit/import pending/error. Sample dùng cấu hình read-only.
 - **Exit / transition:** S05 khi đã tạo project và job; S14 cho import; sample replay rồi S06; hủy tạo về S01. Không mất tên/khai báo khi mở/đóng thông số nâng cao.
 
 **Biến thể mẫu:** thay form khai báo bằng nguồn mẫu, video và cấu hình chỉ đọc; CTA `Xem quá trình dựng mẫu`. Khi sample không tải được, thử lại hoặc chọn mẫu khác; không hiển thị form upload lỗi. Sau xác nhận chuyển sang biến thể replay tại S05.
+
+**DECISION (user, 13/10/2026):** chia luồng tạo scene từ video thành ba bước để giảm kéo trang. Chuyển bước trong cùng trang, không upload/resolve lại khi đầu vào không đổi. Chỉ rời luồng hoặc bỏ file mới dọn upload chưa dùng; đổi input phải kiểm tra lại trước khi tiếp tục. Cấu hình phải được xác nhận trước khi tới bước cuối; tạo job vẫn giữ các gate hiện có.
 
 **DECISION (user, 02/10/2026):** preset `Maximum` dùng phần tài nguyên còn trống
 ở snapshot worker gần nhất, kèm thời điểm đo; đây là ước lượng, không giữ chỗ tài
