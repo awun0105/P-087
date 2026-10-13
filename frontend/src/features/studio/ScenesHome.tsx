@@ -210,9 +210,9 @@ export function ScenesHome() {
           </p>
         )}
         {signedIn && shown.length > 0 && view === "grid" && (
-          <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <ul className="grid auto-rows-fr gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {pagination.items.map((scene) => (
-              <li key={scene.project.project_id} className="relative">
+              <li key={scene.project.project_id} className="relative min-w-0">
                 <SceneCard scene={scene} />
                 {/* Nằm ngoài thẻ link của card: nút trong link là HTML không hợp lệ và bấm sẽ điều hướng. */}
                 {resourceCapabilityAllowed(me, scene.capabilities?.can_delete_project) && (
@@ -248,7 +248,7 @@ function SceneCard({ scene }: { scene: SceneSummary }) {
         job && "hover:border-line-strong hover:shadow-md",
       )}
     >
-      <div className="relative aspect-video w-full bg-paper-sunken">
+      <div className="relative aspect-video w-full shrink-0 overflow-hidden bg-paper-sunken">
         {job && hasFrames && !thumbnailFailed ? (
           // eslint-disable-next-line @next/next/no-img-element -- JPEG nhỏ do API tạo, không qua next/image
           <img
@@ -257,10 +257,10 @@ function SceneCard({ scene }: { scene: SceneSummary }) {
             loading="lazy"
             decoding="async"
             onError={() => setThumbnailFailed(true)}
-            className="size-full object-cover"
+            className="absolute inset-0 size-full object-cover"
           />
         ) : (
-          <div className="grid size-full place-items-center text-ink-subtle">
+          <div className="absolute inset-0 grid size-full place-items-center text-ink-subtle">
             <Film className="size-8" aria-hidden />
           </div>
         )}
@@ -269,7 +269,7 @@ function SceneCard({ scene }: { scene: SceneSummary }) {
           {status.label}
         </Badge>
       </div>
-      <div className="flex flex-1 flex-col p-5">
+      <div className="flex min-w-0 flex-1 flex-col p-5">
         <h3 className="flex items-center gap-2 truncate text-base font-bold text-ink">
           <span className="truncate">{scene.project.name}</span>
           {scene.project.demo_baseline && <Badge tone="neutral" className="shrink-0" title="Scene có mốc gốc để khôi phục">Có mốc gốc</Badge>}
