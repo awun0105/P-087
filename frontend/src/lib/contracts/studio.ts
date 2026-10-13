@@ -708,10 +708,12 @@ export function parseStageViews(value: unknown): StageView[] {
 export interface ModeResult {
   mode: "rgb_only" | "user_anchor" | "lidar";
   title: string;
-  status: "mock" | "measured" | "missing";
+  status: "mock" | "estimated" | "confirmed" | "measured" | "missing";
   note: string;
   steps: string[];
   scale_m_per_sfm_unit: number | null;
+  relative_uncertainty?: number | null;
+  frames_used?: number | null;
   camera_height_mean_m: number | null;
   camera_height_range_m: [number, number] | null;
 }
@@ -730,17 +732,20 @@ export interface ModeComparison {
   lidar_ground_truth_assisted: boolean;
 }
 
-/** Cột "mock" không bao giờ được mang số (không hiển thị số giả). */
+/** Chỉ trạng thái có kết quả thật mới được mang tỉ lệ; `mock` còn nhận từ API cũ. */
 export function parseModeComparison(value: unknown): ModeComparison {
   if (!isRecord(value) || !Array.isArray(value.modes) || value.modes.length !== 3) {
     throw new Error("So sánh 3 hướng từ backend không hợp lệ");
   }
   for (const mode of value.modes) {
-    if (!isRecord(mode) || typeof mode.title !== "string" || !["mock", "measured", "missing"].includes(String(mode.status))) {
+    if (!isRecord(mode) || typeof mode.title !== "string" || !["mock", "estimated", "confirmed", "measured", "missing"].includes(String(mode.status))) {
       throw new Error("Một hướng so sánh không hợp lệ");
     }
-    if (mode.status !== "measured" && mode.scale_m_per_sfm_unit != null) throw new Error("Hướng chưa đo không được có số tỉ lệ");
-    if (mode.status === "measured" && !isFiniteNumber(mode.scale_m_per_sfm_unit)) throw new Error("Thiếu tỉ lệ đo được");
+    const available = ["estimated", "confirmed", "measured"].includes(String(mode.status));
+    if (!available && mode.scale_m_per_sfm_unit != null) throw new Error("Hướng chưa có kết quả không được có số tỉ lệ");
+    if (available && (!isFiniteNumber(mode.scale_m_per_sfm_unit) || mode.scale_m_per_sfm_unit <= 0)) throw new Error("Thiếu tỉ lệ hợp lệ");
+    if (mode.relative_uncertainty != null && (!isFiniteNumber(mode.relative_uncertainty) || mode.relative_uncertainty < 0)) throw new Error("Độ bất định không hợp lệ");
+    if (mode.frames_used != null && (!Number.isInteger(mode.frames_used) || Number(mode.frames_used) < 1)) throw new Error("Số ảnh không hợp lệ");
   }
   return value as unknown as ModeComparison;
 }

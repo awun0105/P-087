@@ -97,7 +97,7 @@ def measure_on_lidar(job_id: str, request: LidarMeasureRequest) -> LidarMeasurem
 
 @router.get("/jobs/{job_id}/metric/comparison", response_model=ModeComparison, responses=_ERRORS)
 def metric_comparison(job_id: str) -> ModeComparison:
-    """Demo 3 hướng: RGB only (mô phỏng) / anchor người dùng / LiDAR trên cùng scene."""
+    """Số đo và nguồn tỉ lệ: đề xuất MoGe-2 / kết quả đã xác nhận / LiDAR."""
     try:
         return _service(job_id).comparison(job_id)
     except MetricConfirmationError as error:

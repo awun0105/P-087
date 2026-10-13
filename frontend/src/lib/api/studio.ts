@@ -507,7 +507,7 @@ export function confirmMetric(jobId: string, input: MetricInput, previewChecksum
   });
 }
 
-/** Demo 3 hướng tỉ lệ trên cùng scene: RGB only (mô phỏng), anchor người dùng, LiDAR. */
+/** Số đo và nguồn tỉ lệ của scene: đề xuất MoGe-2, kết quả đã xác nhận, LiDAR. */
 export async function getModeComparison(jobId: string, signal?: AbortSignal): Promise<ModeComparison> {
   const data = await apiFetch<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/metric/comparison`, { signal });
   return parseModeComparison(data);
