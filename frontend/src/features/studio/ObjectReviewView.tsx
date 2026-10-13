@@ -367,6 +367,10 @@ export function ObjectReviewView({
 
   const previews = useMemo(() => new Set((catalog?.entries ?? []).filter((item) => item.has_preview).map((item) => item.family)), [catalog]);
   // Scene theo vật (pipeline v2): mỗi vật có Gaussian riêng. Vật đã loại/xoá hoặc đang ẩn không vẽ.
+  const missingSourcePolicies = (scene?.objects ?? []).filter((object) =>
+    object.state === "CANDIDATE" && object.visual_ref?.artifact_type === "ObjectGaussians" &&
+    !["DELETED", "MERGED"].includes(String(object.provenance.review)) &&
+    !representations.some((item) => item.object_id === object.id));
   const splats = useMemo<OverlayObject[]>(
     () => (scene?.objects ?? []).flatMap((object) => {
       const policy = representations.find((item) => item.object_id === object.id);
@@ -378,8 +382,13 @@ export function ObjectReviewView({
         rotation_xyzw: object.transform.rotation_quaternion_xyzw,
         visible: visible && (policy ? policy.visual_policy === "object" : isPlaced(object)),
       };
+      if (!policy && object.state === "CANDIDATE" && object.visual_ref?.artifact_type === "ObjectGaussians") {
+        editingRoot.url = null;
+        return [editingRoot];
+      }
       if (policy?.visual_policy !== "source" || !policy.source_visual_required) return [editingRoot];
       editingRoot.url = null;
+      editingRoot.visible = visible && isPlaced(object);
       if (!policy.source_transform || policy.readiness_blockers.length) return [editingRoot];
       return [editingRoot, {
         id: `source:${object.id}`,
@@ -1067,6 +1076,7 @@ export function ObjectReviewView({
             </div>
             <div className="flex-1 overflow-y-auto">
               <ObjectifyNotice jobId={jobId} revision={scene.scene_revision} onRevision={() => setReload((value) => value + 1)} />
+              {missingSourcePolicies.length > 0 && <Notice tone="rust" className="m-3">SOURCE_POLICY_MISSING: Không có metadata nguồn để đặt Gaussian của {missingSourcePolicies.map((item) => item.id).join(", ")}. Hãy tải lại scene.</Notice>}
               {representations.some((item) => item.readiness_blockers.length) && (
                 <Notice tone="rust" className="m-3">Representation chưa đầy đủ: {representations.flatMap((item) => item.readiness_blockers.map((code) => `${item.object_id}: ${code}`)).join(", ")}</Notice>
               )}

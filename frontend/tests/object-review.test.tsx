@@ -969,7 +969,7 @@ describe("ObjectReviewView", () => {
     const gaussians = { ...ref, artifact_type: "ObjectGaussians", artifact_uri: "artifact://jobs/job-a/scene/objects/x.ply" };
     base.objects[0] = { ...base.objects[0], visual_ref: gaussians } as (typeof base.objects)[0];
     base.objects.push({ ...base.objects[0], id: "candidate-002", name: "Vật thể 2" });
-    routeFetch({ "/scene": [reply({ scene: base })] });
+    routeFetch({ "/scene": [reply({ scene: base, representations: base.objects.map((item) => ({ object_id: item.id, visual_policy: "source", source_visual_required: true, source_transform: item.transform, readiness_blockers: [] })) })] });
     const onSave = vi.fn();
     render(<ObjectReviewView jobId="job-a" onSaveState={onSave} />);
     fireEvent.click(await screen.findByText("Vật thể 1"));
@@ -1003,7 +1003,8 @@ describe("ObjectReviewView", () => {
   it("đổi job reset viewport hide dù object ID trùng nhau", async () => {
     const base = scene("rev-001", "CANDIDATE");
     base.objects[0] = { ...base.objects[0], visual_ref: { ...ref, artifact_type: "ObjectGaussians" } } as (typeof base.objects)[0];
-    routeFetch({ "/scene": [reply({ scene: base }), reply({ scene: base })] });
+    const response = { scene: base, representations: [{ object_id: "candidate-001", visual_policy: "source", source_visual_required: true, source_transform: base.objects[0].transform, readiness_blockers: [] }] };
+    routeFetch({ "/scene": [reply(response), reply(response)] });
     const view = render(<ObjectReviewView jobId="job-a" />);
     fireEvent.click(await screen.findByText("Vật thể 1"));
     fireEvent.click(screen.getByRole("button", { name: "Ẩn trên màn hình" }));
@@ -1026,6 +1027,16 @@ describe("ObjectReviewView", () => {
     fireEvent.click(screen.getByText("Vật thể 1"));
     fireEvent.click(screen.getByRole("button", { name: "Ẩn trên màn hình" }));
     expect(JSON.parse(view.dataset.objects!)[1].visible).toBe(false);
+  });
+
+  it("missing SOURCE metadata cannot silently place a moved Candidate at current pose", async () => {
+    const base = scene("rev-001", "CANDIDATE");
+    base.objects[0] = { ...base.objects[0], visual_ref: { ...ref, artifact_type: "ObjectGaussians" } } as (typeof base.objects)[0];
+    routeFetch({ "/scene": [reply({ scene: base })] });
+    render(<ObjectReviewView jobId="job-a" />);
+    expect(await screen.findByText(/SOURCE_POLICY_MISSING/)).toBeInTheDocument();
+    const objects = JSON.parse(screen.getByTestId("metric-scene").dataset.objects!);
+    expect(objects.every((item: { url: string | null }) => item.url === null)).toBe(true);
   });
 
 });

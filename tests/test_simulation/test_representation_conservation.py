@@ -181,7 +181,25 @@ def test_move_then_ignore_retains_extraction_pose_and_delete_omits(
     )
 
 
-@pytest.mark.parametrize("damage", ["missing", "checksum", "pose", "rotation", "membership", "rows", "empty_claim"])
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "missing",
+        "checksum",
+        "pose",
+        "rotation",
+        "membership",
+        "rows",
+        "empty_claim",
+        "labels_checksum",
+        "attribute",
+        "context",
+        "stale_revision",
+        "background",
+        "background_checksum",
+        "background_missing",
+    ],
+)
 def test_bad_source_evidence_blocks_preflight_and_capability(tmp_path: Path, damage: str) -> None:
     registry, scene, _ = _fixture(tmp_path, 1)
     item = scene.objects[0]
@@ -217,6 +235,50 @@ def test_bad_source_evidence_blocks_preflight_and_capability(tmp_path: Path, dam
                 )
             }
         )
+    elif damage == "background_missing":
+        scene = scene.model_copy(
+            update={"environment": scene.environment.model_copy(update={"visual_master_ref": None})}
+        )
+    elif damage == "background_checksum":
+        registry.runtime_resolver.require(scene.environment.visual_master_ref).write_bytes(b"bad background")
+    elif damage == "background":
+        scene = scene.model_copy(
+            update={
+                "environment": scene.environment.model_copy(
+                    update={"visual_master_ref": scene.environment.membership.source_visual_ref}
+                )
+            }
+        )
+    elif damage == "labels_checksum":
+        registry.runtime_resolver.require(scene.environment.membership.labels_ref).write_bytes(b"bad")
+    elif damage == "attribute":
+        rows = read_gaussian_ply(registry.runtime_resolver.require(item.visual_ref).read_bytes()).copy()
+        rows["opacity"] += 1
+        payload = write_gaussian_ply(rows)
+        ref = item.visual_ref.model_copy(
+            update={
+                "artifact_checksum": "sha256:" + hashlib.sha256(payload).hexdigest(),
+                "artifact_uri": item.visual_ref.artifact_uri.replace(".ply", "-changed.ply"),
+            }
+        )
+        registry.scene.store.publish(ref, payload)
+        item = item.model_copy(update={"visual_ref": ref})
+    elif damage == "context":
+        item = item.model_copy(
+            update={
+                "source_collision": item.source_collision.model_copy(
+                    update={
+                        "source_geometry_ref": item.source_collision.source_geometry_ref.model_copy(
+                            update={"artifact_checksum": "sha256:" + "f" * 64}
+                        )
+                    }
+                )
+            }
+        )
+    elif damage == "stale_revision":
+        item = item.model_copy(
+            update={"source_collision": item.source_collision.model_copy(update={"extraction_revision": "rev-stale"})}
+        )
     else:
         item = item.model_copy(
             update={"visual_ref": None, "provenance": {"membership_reassign_blocker": "NO_SOURCE_GAUSSIANS"}}
@@ -226,6 +288,7 @@ def test_bad_source_evidence_blocks_preflight_and_capability(tmp_path: Path, dam
     assert issues
     preflight = run_preflight(scene, artifact_resolver=registry.runtime_resolver.require)
     assert preflight.blocking_result != "PASS"
+    assert next(rule for rule in preflight.rules if rule.rule_id == "REPRESENTATION_INCOMPLETE").result == "FAIL"
     capability = assess_export_capabilities(
         scene, runtime_qualified=True, runtime_version="fixture", resolve_artifact=registry.runtime_resolver.require
     )
@@ -268,3 +331,75 @@ def test_actual_usd_runner_keeps_sixty_source_candidates(tmp_path: Path) -> None
     actual_positions = np.asarray(actual["positions"])
     assert np.allclose(actual_positions[np.argsort(actual_positions[:, 0])], expected)
     assert actual["count"] == 61 and actual["degree"] == 1
+
+
+def test_merged_membership_emits_primary_source_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    registry, scene, master = _fixture(tmp_path, 2)
+    primary, secondary = scene.objects
+    payload = write_gaussian_ply(master[:2])  # Primary source origin is zero; world-aligned axes.
+    visual = primary.visual_ref.model_copy(
+        update={
+            "artifact_uri": primary.visual_ref.artifact_uri.replace(".ply", "-merged.ply"),
+            "artifact_checksum": "sha256:" + hashlib.sha256(payload).hexdigest(),
+        }
+    )
+    registry.scene.store.publish(visual, payload)
+    primary = primary.model_copy(update={"visual_ref": visual})
+    secondary = secondary.model_copy(
+        update={"visual_ref": None, "provenance": {"review": "MERGED", "merged_into": primary.id}}
+    )
+    membership = scene.environment.membership.model_copy(
+        update={"label_to_object_id": {"0": primary.id, "1": primary.id}}
+    )
+    scene = scene.model_copy(
+        update={
+            "objects": [primary, secondary],
+            "environment": scene.environment.model_copy(update={"membership": membership}),
+        }
+    )
+    assert not representation_issues(scene, registry.runtime_resolver.require)
+    request = _request(registry, scene, tmp_path, monkeypatch)
+    assert len(request["environment"]["extra_gaussians"]) == 1
+    assert not request["objects"]
+    rows = read_gaussian_ply(Path(request["environment"]["extra_gaussians"][0]["ply"]).read_bytes())
+    assert np.array_equal(rows, master[:2])
+
+
+def test_verified_empty_membership_does_not_emit_phantom_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registry, scene, master = _fixture(tmp_path, 1)
+    membership = scene.environment.membership
+    payload = np.asarray([-1, -1], dtype="<i4").tobytes()
+    labels = membership.labels_ref.model_copy(
+        update={
+            "artifact_uri": membership.labels_ref.artifact_uri.replace(".bin", "-empty.bin"),
+            "artifact_checksum": "sha256:" + hashlib.sha256(payload).hexdigest(),
+        }
+    )
+    registry.scene.store.publish(labels, payload)
+    background_payload = write_gaussian_ply(master)
+    background = scene.environment.visual_master_ref.model_copy(
+        update={
+            "artifact_uri": scene.environment.visual_master_ref.artifact_uri.replace(".ply", "-empty.ply"),
+            "artifact_checksum": "sha256:" + hashlib.sha256(background_payload).hexdigest(),
+        }
+    )
+    registry.scene.store.publish(background, background_payload)
+    item = scene.objects[0].model_copy(
+        update={"visual_ref": None, "provenance": {"membership_reassign_blocker": "NO_SOURCE_GAUSSIANS"}}
+    )
+    scene = scene.model_copy(
+        update={
+            "objects": [item],
+            "environment": scene.environment.model_copy(
+                update={
+                    "membership": membership.model_copy(update={"labels_ref": labels}),
+                    "visual_master_ref": background,
+                }
+            ),
+        }
+    )
+    assert not representation_issues(scene, registry.runtime_resolver.require)
+    request = _request(registry, scene, tmp_path, monkeypatch)
+    assert not request["objects"] and not request["environment"]["extra_gaussians"]

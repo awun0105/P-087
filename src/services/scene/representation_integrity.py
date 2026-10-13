@@ -48,6 +48,29 @@ def representation_issues(
             raise ValueError("source row count differs from membership")
     except (ArtifactStoreError, OSError, ValueError, TypeError, KeyError, StopIteration):
         return issues + [(item.object_id, "SOURCE_MEMBERSHIP_INVALID") for item in required]
+    try:
+        expected_background = master[labels == membership.background_label]
+        correction = scene.provenance.get("membership_correction")
+        provenance = (
+            correction
+            if isinstance(correction, dict) and correction.get("operation") == "reassign"
+            else scene.provenance
+        )
+        inpainted = provenance.get("inpainted_gaussians", 0)
+        if isinstance(inpainted, bool) or not isinstance(inpainted, int) or inpainted < 0:
+            raise ValueError("background fill count is unsupported")
+        ref = scene.environment.visual_master_ref
+        if ref is None:
+            if len(expected_background) or inpainted:
+                raise ValueError("source background visual is missing")
+        else:
+            background = read_gaussian_ply(read(ref))
+            if background.dtype != master.dtype or len(background) != len(expected_background) + inpainted:
+                raise ValueError("background source/fill row layout or count differs")
+            if not np.array_equal(background[: len(expected_background)], expected_background):
+                raise ValueError("background does not preserve original background rows before fill")
+    except (ArtifactStoreError, OSError, ValueError, TypeError, KeyError, StopIteration):
+        issues.extend((item.object_id, "SOURCE_BACKGROUND_INVALID") for item in required)
     objects = {item.id: item for item in scene.objects}
     for disposition in required:
         item = objects[disposition.object_id]
