@@ -6,7 +6,9 @@ from pathlib import Path
 from src.models.contracts.artifacts import Identifier, ProductArtifactRef
 from src.models.contracts.identity import canonical_content_checksum
 from src.models.contracts.scene import SceneIR
-from src.models.contracts.validation import PreflightReport, PreflightRule, RuleResult
+from src.models.contracts.validation import PreflightReport, PreflightRule, PreflightRuleId, RuleResult
+from src.services.scene.representation_composition import scene_representations
+from src.services.scene.representation_integrity import representation_issues
 from src.services.simulation.preflight.rules import (
     check_collider_presence,
     check_collision_source_coverage,
@@ -58,6 +60,24 @@ def run_preflight(
             )
         )
 
+    if any(item.source_visual_required or item.readiness_blockers for item in scene_representations(scene)):
+        resolve = artifact_resolver
+        if resolve is None and artifact_store_root is not None:
+
+            def resolve(ref: ProductArtifactRef) -> Path:
+                return artifact_store_root / ref.artifact_uri.removeprefix("artifact://")
+
+        issues = representation_issues(scene, resolve)
+        rules.append(
+            PreflightRule(
+                rule_id=PreflightRuleId.REPRESENTATION_INCOMPLETE,
+                severity="blocking",
+                result=RuleResult.FAIL if issues else RuleResult.PASS,
+                affected_object_ids=sorted({object_id for object_id, _ in issues}),
+                evidence_refs=[],
+                remediation="; ".join(f"{object_id}: {code}" for object_id, code in issues) or None,
+            )
+        )
     blocking_result = evaluate_blocking_result(rules)
 
     placeholder_checksum = "sha256:" + "0" * 64

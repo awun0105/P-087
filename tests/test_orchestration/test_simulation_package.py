@@ -17,7 +17,7 @@ import pytest
 from src.config import Settings
 from src.models.contracts.artifacts import ProductArtifactRef
 from src.models.contracts.reconstruction import ReconstructionBundle
-from src.models.contracts.scene import ColliderType
+from src.models.contracts.scene import ColliderType, SceneObjectState
 from src.models.contracts.validation import RuleResult
 from src.services.orchestration.review import simulation_package as simulation_package_service
 from src.services.orchestration.review.simulation_package import BUILD_CONFIG, build_simulation_package, current_package
@@ -109,7 +109,7 @@ def test_confirmed_objects_become_a_sealed_package(tmp_path: Path) -> None:
     } <= names
     capability = json.loads(archive.read("export_capability.json"))
     assert capability["status"] == "supported" and capability["effective_mode"] == "legacy_box"
-    assert capability["builder_version"] == "usd-export-capabilities-v2"
+    assert capability["builder_version"] == "usd-export-capabilities-v3"
     usda = archive.read("scene.usda").decode()
     assert "prepend references = @./environment_collision.usda@" in usda and "GroundPlane" in usda
     # Gọi lại trên cùng revision: trả gói cũ, không tạo revision mới.
@@ -194,7 +194,13 @@ def test_unsupported_convex_export_returns_capability_block_without_revision(
     collider = item.collider.model_copy(
         update={"collider_type": ColliderType.CONVEX_DECOMPOSITION, "geometry_ref": None, "dimensions_xyz_m": None}
     )
-    draft = enriched.model_copy(update={"objects": [item.model_copy(update={"active": True, "collider": collider})]})
+    draft = enriched.model_copy(
+        update={
+            "objects": [
+                item.model_copy(update={"active": True, "state": SceneObjectState.CONFIRMED, "collider": collider})
+            ]
+        }
+    )
     registry.scene.publish_next(job.job_id, scene.scene_revision, draft, "test_unsupported_convex")
     current_revision = registry.scene.current(job.job_id).scene.scene_revision
     monkeypatch.setattr(
@@ -231,7 +237,13 @@ def test_runner_failure_blocks_before_scene_revision_publication(
             "dimensions_xyz_m": None,
         }
     )
-    draft = enriched.model_copy(update={"objects": [item.model_copy(update={"active": True, "collider": collider})]})
+    draft = enriched.model_copy(
+        update={
+            "objects": [
+                item.model_copy(update={"active": True, "state": SceneObjectState.CONFIRMED, "collider": collider})
+            ]
+        }
+    )
     registry.scene.publish_next(job.job_id, scene.scene_revision, draft, "test_hybrid_runner_failure")
     edited = registry.scene.current(job.job_id).scene
     apply_object_action(registry.scene, job.job_id, edited.objects[0].id, "confirm", edited.scene_revision)

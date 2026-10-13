@@ -64,6 +64,8 @@ from src.services.scene.collision_ownership import (
     bind_source_collision_ownership,
     read_triangle_memberships,
 )
+from src.services.scene.representation_composition import VisualPolicy, scene_representations
+from src.services.scene.representation_integrity import representation_issues
 from src.services.simulation.colliders.carve import (
     COLLISION_CARVE_MARGIN_M,
     CarveBox,
@@ -98,7 +100,7 @@ ENVIRONMENT_LAYER = "environment_collision.usda"
 BUILD_CONFIG = {
     **physics_build_config({}),
     "builder": "real2sim-studio-simulation-package-v6-physics-config",
-    "capability_contract": "usd-export-capabilities-v2",
+    "capability_contract": "usd-export-capabilities-v3",
     "requested_mode": "auto",
     "effective_mode": "legacy_box",
     "runtime_usd_version": None,
@@ -111,7 +113,7 @@ BUILD_CONFIG = {
 HYBRID_BUILD_CONFIG = {
     **physics_build_config({}),
     "builder": "real2sim-studio-simulation-package-v6-physics-config-hybrid",
-    "capability_contract": "usd-export-capabilities-v2",
+    "capability_contract": "usd-export-capabilities-v3",
     "requested_mode": "auto",
     "effective_mode": "hybrid",
     "runtime_probe": "hybrid-runner-probe-v2",
@@ -605,16 +607,22 @@ def _hybrid_layers(
     resolve = registry.runtime_resolver.require
     collision = output / "environment_collision.ply"
     trimesh.Trimesh(background.vertices, background.faces, process=False).export(collision)
+    issues = representation_issues(scene, resolve)
+    if issues:
+        raise ValueError(f"visual representation incomplete: {issues}")
+    dispositions = {item.object_id: item for item in scene_representations(scene)}
     objects, extra = [], []
     for item in scene.objects:
-        if not item.active:
-            continue
+        disposition = dispositions[item.id]
         gaussians = item.visual_ref if item.visual_ref and item.visual_ref.artifact_type == "ObjectGaussians" else None
-        if _is_pending(item):
-            if gaussians is not None:
-                extra.append({"ply": str(resolve(gaussians)), "translation": list(item.transform.translation_xyz)})
+        if disposition.visual_policy == VisualPolicy.SOURCE:
+            if disposition.source_visual_required and gaussians is not None:
+                pose = disposition.source_transform
+                if pose is None:
+                    raise ValueError(f"source pose missing for {item.id}")
+                extra.append({"ply": str(resolve(gaussians)), "translation": list(pose.translation_xyz)})
             continue
-        if not (item.active and item.state == SceneObjectState.CONFIRMED):
+        if not disposition.export_as_object:
             continue
         collider = item.collider
         if collider is None:
@@ -820,7 +828,7 @@ def _cache_matches(
     capability = package.export_capability
     if capability is None or capability.status != ExportCapabilityStatus.SUPPORTED:
         return False
-    if capability.builder_version != "usd-export-capabilities-v2" or capability.blockers:
+    if capability.builder_version != "usd-export-capabilities-v3" or capability.blockers:
         return False
     if package.preflight.blocking_result != RuleResult.PASS:
         return False
