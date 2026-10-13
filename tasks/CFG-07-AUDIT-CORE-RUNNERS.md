@@ -1,5 +1,9 @@
 TASK: CFG-07-AUDIT-CORE-RUNNERS
 
+STATUS: COMPLETED — PASS, ready for CFG-08 presets and API layer.
+
+Final report: `tasks/reports/AUDIT_01_CORE_RUNNERS_REPORT.md`. Mandatory old and new suites: 172 passed, no skips; ruff check passed and 357 files passed format check. Additional simulation/package/native USD regressions: 108 passed. Source-path remediation is completed and recorded in CFG-04/CFG-06; all named checklist requirements are verified. No production or Isaac acceptance is claimed.
+
 ## Ý TƯỞNG & ĐỘNG LỰC THỰC HIỆN (WHY & WHAT)
 - **Tại sao cần task này (Why):** Sau khi hoàn thành loạt 5 task can thiệp vào các core runners cấp thấp (CFG-02 đến CFG-06: Tải Vocab Tree, COLMAP matcher, Lưới Voxel, Tách vật thể CoACD, Vật lý OpenUSD), hệ thống có nguy cơ tiềm ẩn rất lớn:
   1. Một lỗi nhỏ trong câu lệnh sinh CLI (như sai tên cờ, sai dấu phẩy, thiếu khoảng trắng) có thể làm vỡ quy trình thực thi subprocess khi chạy thật.
