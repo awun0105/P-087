@@ -83,5 +83,18 @@ def recommend_preset(
     name = select_preset_name(preferences)
     if name not in presets.presets:
         raise ValueError(f"scenario preset missing from catalog: {name}")
-    params = scale_for_machine(presets.presets[name], capability, preferences.target_capacity, presets=presets)
+    values = dict(presets.presets[name])
+    single = preferences.subject_scope == "single_object"
+    indoor = preferences.environment == "indoor"
+    overrides = {
+        "colmap.matching_mode": "exhaustive"
+        if preferences.input_type == "photo_set"
+        else ("sequential_vocab_tree" if preferences.input_type == "video_loop_360" else "sequential"),
+        "scene.max_objects": 1 if single else values.get("scene.max_objects", 60),
+        "geometry.external_fill_size_m": 1.6 if indoor and not single else 0,
+        "geometry.floor_fill_size_m": 1.6 if not indoor and not single else 0,
+        "simulation.ground_plane": "enabled" if indoor else "disabled",
+    }
+    values.update({key: value for key, value in overrides.items() if key in values})
+    params = scale_for_machine(values, capability, preferences.target_capacity, presets=presets)
     return name, params

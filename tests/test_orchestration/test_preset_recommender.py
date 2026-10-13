@@ -9,7 +9,7 @@ import pytest
 from src.services.orchestration.processing.config import load_presets
 from src.services.orchestration.processing.models import MachineCapability, ScenarioPreferences
 from src.services.orchestration.processing.recommender import RecommendationUnavailableError, recommend_preset
-from src.services.orchestration.processing.resources import estimate_gb
+from src.services.orchestration.processing.resources import SFM_KEYS, SPLAT_KEYS, estimate_gb
 
 
 def machine(vram: float, ram: float = 32, disk: float = 100) -> MachineCapability:
@@ -63,6 +63,17 @@ def test_every_scenario_has_a_valid_deterministic_catalog_entry(
     )
     assert name == expected
     assert presets.validate_params(params) == params
+    assert (
+        params["colmap.matching_mode"]
+        == {"photo_set": "exhaustive", "video_loop_360": "sequential_vocab_tree", "video_continuous": "sequential"}[
+            input_type
+        ]
+    )
+    assert params["geometry.external_fill_size_m"] == (1.6 if environment == "indoor" and scope == "full_room" else 0)
+    assert params["geometry.floor_fill_size_m"] == (1.6 if environment == "outdoor" and scope == "full_room" else 0)
+    assert params["simulation.ground_plane"] == ("enabled" if environment == "indoor" else "disabled")
+    if scope == "single_object":
+        assert params["scene.max_objects"] == 1
     assert recommend_preset(prefs, worker, presets) == (name, params)
     params["brush.max_splats"] = 0
     assert presets.model_dump() == original
@@ -94,7 +105,8 @@ def test_unusable_worker_is_not_recommended_as_safe(target: str) -> None:
 def test_unknown_worker_uses_minimum_without_claiming_measurement() -> None:
     presets, _ = load_presets(Path("configs/product/processing_presets_v1.json"))
     _, values = recommend_preset(preferences(target_capacity="machine_maximum"), None, presets)
-    assert values == presets.presets["minimum_quality"]
+    assert all(values[key] == presets.presets["minimum_quality"][key] for key in SFM_KEYS + SPLAT_KEYS)
+    assert values["geometry.external_fill_size_m"] == 1.6
 
 
 def test_busy_worker_uses_recorded_idle_budget() -> None:

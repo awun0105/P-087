@@ -180,14 +180,24 @@ def test_maximum_for_machine_stays_below_warning_and_valid(machine: MachineCapab
     assert set(statuses.values()) <= {"ok"}, statuses
 
 
-def test_parameter_groups_partition_all_preset_parameters() -> None:
+def test_resource_driver_groups_do_not_include_downstream_controls() -> None:
     presets, _ = load_presets(PRESETS)
     all_keys = {spec.key for spec in presets.parameters}
     sfm_set = set(SFM_KEYS)
     splat_set = set(SPLAT_KEYS)
 
     assert sfm_set.isdisjoint(splat_set), f"Trùng lặp giữa SFM và SPLAT: {sfm_set & splat_set}"
-    assert sfm_set | splat_set == all_keys, f"Thiếu hoặc thừa key: {all_keys ^ (sfm_set | splat_set)}"
+    assert sfm_set | splat_set <= all_keys
+    assert all(key.startswith(("sampling.", "colmap.")) for key in sfm_set)
+    assert all(key.startswith("brush.") for key in splat_set)
+    assert {spec.group for spec in presets.parameters} == {
+        "sampling",
+        "colmap",
+        "brush",
+        "geometry",
+        "scene",
+        "simulation",
+    }
 
 
 @pytest.mark.parametrize(

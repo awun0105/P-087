@@ -1,5 +1,47 @@
 TASK: CFG-09-PRESETS-SCHEMA-BACKEND
 
+STATUS: DONE — six-group catalog, sealed configuration dispatch and downstream consumers verified.
+
+## Implementation and evidence (2026-10-13)
+
+- Catalog: 8 presets, 35 declared parameters across sampling, colmap, brush, geometry, scene and simulation. Every preset validates and produces the six groups. COLMAP configuration validates against the real `ColmapConfig` contract.
+- `PresetName = str` was completed in CFG-08. Added groups use independent dictionaries and omit empty defaults so legacy serialized job bytes are unchanged.
+- Dispatch accepts the complete historical 11-key parameter set without changing its effective native defaults. Incomplete new parameter sets still use strict catalog validation. Artifact reads verify their job-bound checksum.
+- Geometry: finalize now reads the sealed job controls, overlays the deployment profile, validates it, and carries mesh mode, resolution and both fill options into VoxelConfig. Zero fill means disabled. Nonzero external fill upgrades a legacy profile to schema 1.2. Added default fields remain absent from old serialized geometry profiles. Existing bundle publication records the effective profile snapshot and checksum.
+- Objectify: initial extraction and reobjectify both use `objectify_with_retry`; it loads the sealed scene controls once and preserves provider groups across retries. Reobjectify queue identity now includes the job configuration checksum.
+- Simulation: the catalog's enabled/disabled ground-plane choice is normalized to a boolean at the job boundary; the native physics contract remains strict. Existing friction, restitution and carve-margin consumers receive their values.
+- Recommendation overlays preserve input mode, environment and single-object intent even when multiple scenarios share a preset name. Resource scaling changes only existing SFM/3DGS drivers.
+- Catalog adjustment: `scene.max_objects` permits 1 with step 1 rather than the example minimum 5/step 5, so the single-object scenario can actually retain one object. Tests cover this for all input/environment/capacity combinations.
+
+### Additional required source paths
+
+The user clarified that may-modify lists are examples, not a source-path restriction. Inspection required these paths beyond the initial three schema files:
+
+- `src/services/reconstruction/finalize.py`: geometry profile validation, overlays and native voxel forwarding.
+- `src/services/orchestration/jobs/runner.py`: sealed configuration loading before finalize dispatch.
+- `src/services/orchestration/scene/objectify.py`: shared initial/retry/reobjectify consumer.
+- `src/services/orchestration/scene/objectify_queue.py`: bind queue identity to per-job controls.
+- `src/services/orchestration/review/simulation_package.py`: ground-plane choice normalization.
+- `src/services/orchestration/processing/recommender.py`: scenario-specific overlays for all six groups.
+- `tests/test_reconstruction/test_rec05_finalize_quality.py`, `tests/test_orchestration/test_worker_cleanup.py`, `tests/test_orchestration/test_preset_recommender.py`, `tests/test_orchestration/test_processing_config.py`: native-boundary, request-capture and regression coverage.
+
+### Verification
+
+- `.venv/bin/pytest tests/test_orchestration/test_processing_presets_schema.py tests/test_orchestration/test_processing_config.py tests/test_orchestration/test_preset_recommender.py -v`: **90 passed**, including all named schema tests and 36 scenario combinations. Log: `tasks/reports/CFG09-SCHEMA-VERIFICATION.log`.
+- `.venv/bin/pytest tests/test_orchestration/test_processing_presets_schema.py tests/test_orchestration/test_processing_config.py tests/test_orchestration/test_preset_recommender.py tests/integration/test_studio_processing_job.py tests/test_scene/test_objectify_config_override.py tests/test_orchestration/test_scene_objectify_queue.py tests/test_simulation/test_simulation_config_override.py tests/test_orchestration/test_worker_cleanup.py tests/test_reconstruction/test_rec05_finalize_quality.py tests/test_reconstruction/test_gaussian_outlier_filter.py tests/test_reconstruction/test_quality_port.py -q`: **203 passed**, no skips. Log: `tasks/reports/CFG09-CONSUMER-VERIFICATION.log`.
+- `ruff check src/services/orchestration/` plus changed reconstruction/tests: clean. Matching `ruff format --check`: **119 files already formatted**. Log: `tasks/reports/CFG09-STATIC-CHECKS.log`.
+- `git diff --check`: clean. `graphify update .`: AST graph refreshed.
+- These checks prove configuration and consumer plumbing with fixture/native USD coverage. They do not establish new GPU scene quality, Isaac simulation, browser UX or production acceptance. Those broader gates remain in later tasks.
+
+### Pre-flight (GUIDE.md Rule 13)
+
+- codegraph: explored schema/config/dispatch, GeometryProfile/build_voxel_config/load_geometry_profile, run_finalize_job, objectify_with_retry and simulation consumer paths.
+- impact: Studio job creation and dispatch; finalize and geometry quality snapshots; extraction/reobjectify retries and queue identity; simulation package creation/cache.
+- understand: UNVERIFIED — understand-anything is unavailable in this session; business flow traced through current callers, task contracts and existing tests.
+- minimal-code: reused sealed artifact resolver, existing profile models, provider config validation, retry wrapper and physics normalization boundary; no new dependency.
+- checks: Python checks and counts above; TypeScript/eslint/vitest n/a for this backend task.
+- DevTools: n/a — no rendered UI change; UI contracts/wizard remain CFG-12/13 and browser gate CFG-14.
+
 ## Ý TƯỞNG & ĐỘNG LỰC THỰC HIỆN (WHY & WHAT)
 - **Tại sao cần task này (Why):** Trong `src/services/orchestration/processing/models.py`, các nhóm thông số đang bị chặn cứng bởi Pydantic validation:
   `group: Literal["sampling", "colmap", "brush"]`

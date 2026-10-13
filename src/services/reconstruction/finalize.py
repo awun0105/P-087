@@ -99,6 +99,8 @@ class GeometryProfile(ContractModel):
     gpu_index: int = Field(ge=0, strict=True)
     max_gaussian_scale_log: FiniteFloat | None = 1.0
     external_fill_size_m: FiniteFloat | None = Field(default=None, gt=0)
+    floor_fill_size_m: FiniteFloat | None = Field(default=None, gt=0, exclude_if=lambda value: value is None)
+    collision_mesh: Literal["smooth", "faces"] = Field(default="smooth", exclude_if=lambda value: value == "smooth")
 
     @model_serializer(mode="wrap")
     def _versioned_payload(self, handler: SerializerFunctionWrapHandler) -> dict:
@@ -131,11 +133,12 @@ def build_voxel_config(
 ) -> VoxelConfig:
     """Keep the requested cleanup profile intact; reject crops that require coarser voxels."""
     low, high = crop
-    if profile.external_fill_size_m is not None:
+    fill_size = max(profile.external_fill_size_m or 0, profile.floor_fill_size_m or 0)
+    if fill_size:
         require_voxel_capacity(
             tuple(upper - lower for lower, upper in zip(low, high, strict=True)),
             profile.resolution_m,
-            profile.external_fill_size_m,
+            fill_size,
         )
     volume_m3 = math.prod(upper - lower for lower, upper in zip(low, high, strict=True))
     minimum_resolution_m = (volume_m3 / _MAX_VOXEL_CELLS) ** (1 / 3) if volume_m3 > 0 else 0.0
@@ -165,6 +168,8 @@ def build_voxel_config(
         statistical_outlier_removal=profile.statistical_outlier_removal,
         max_gaussian_scale_log=profile.max_gaussian_scale_log,
         external_fill_size_m=profile.external_fill_size_m,
+        floor_fill_size_m=profile.floor_fill_size_m,
+        collision_mesh=profile.collision_mesh,
     )
 
 
@@ -664,9 +669,24 @@ def load_finalize_result(
     return result
 
 
-def load_geometry_profile(path: Path) -> GeometryProfile:
-    """Đọc file thông số REC-05 (không default ngầm)."""
-    return GeometryProfile.model_validate(json.loads(path.read_text()))
+def load_geometry_profile(path: Path, *, overrides: dict[str, object] | None = None) -> GeometryProfile:
+    """Load the deployment profile and validate explicit per-job geometry controls."""
+    profile = GeometryProfile.model_validate(json.loads(path.read_text()))
+    if not overrides:
+        return profile
+    allowed = {"resolution_m", "collision_mesh", "external_fill_size_m", "floor_fill_size_m"}
+    if unknown := overrides.keys() - allowed:
+        raise ValueError(f"Unsupported geometry controls: {sorted(unknown)}")
+    values = dict(overrides)
+    for key in ("external_fill_size_m", "floor_fill_size_m"):
+        if key in values:
+            if isinstance(values[key], bool):
+                raise ValueError(f"{key} must be a number")
+            if values[key] == 0:
+                values[key] = None
+    if values.get("external_fill_size_m") is not None:
+        values["schema_version"] = "1.2"
+    return GeometryProfile.model_validate(profile.model_dump() | values)
 
 
 class ConfirmationSummary(ContractModel):

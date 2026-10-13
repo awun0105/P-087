@@ -182,6 +182,7 @@ def _config_checksum(job: JobManifest, settings: Settings, mode: ObjectifyMode) 
             "operation": "reobjectify",
             "mode": mode,
             "runtime_manifest_checksum": job.runtime_manifest_checksum,
+            "job_config_checksum": job.config_checksum,
             "objectify_attempts": settings.product_objectify_attempts,
             "scene_timeout_seconds": settings.product_scene_timeout_seconds,
             "floor_profile_checksum": FloorFitProfile().checksum(),

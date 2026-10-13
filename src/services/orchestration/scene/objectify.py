@@ -40,6 +40,7 @@ from src.models.contracts.scene import (
     SceneObjectState,
 )
 from src.services.orchestration.jobs.database import RuntimeTransaction
+from src.services.orchestration.processing.config import load_job_config
 from src.services.orchestration.projects.registry import ProjectRegistry
 from src.services.orchestration.scene.errors import SceneRevisionConflictError
 from src.services.orchestration.scene.floor_evidence import publish_floor_fit_evidence, scene_floor_fit_summary
@@ -513,6 +514,14 @@ def objectify_with_retry(
     Lỗi GPU thường thoáng qua (hết VRAM do tiến trình khác, driver) nên đáng thử lại; hết số lần thì ném
     `ObjectifyError` kèm lỗi cuối — nơi gọi **không** tự lùi về đường hộp mà để người dùng chọn.
     """
+    if scene_config is None:
+        processing = load_job_config(job.job_id, job.config_checksum, registry.runtime_resolver)
+        if processing is not None and processing.scene:
+            groups: dict[str, dict[str, object]] = {"scene": {}, "coacd": {}, "inpaint": {}}
+            for key, value in processing.scene.items():
+                group, name = key.split("_", 1) if key.startswith(("coacd_", "inpaint_")) else ("scene", key)
+                groups[group][name] = value
+            scene_config = ObjectifyConfig.model_validate(groups).model_dump(exclude_unset=True)
     attempts = settings.product_objectify_attempts
     last: Exception | None = None
     for number in range(1, attempts + 1):

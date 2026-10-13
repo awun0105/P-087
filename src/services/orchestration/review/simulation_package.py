@@ -199,6 +199,11 @@ def _job_simulation_config(registry: ProjectRegistry, job_id: str) -> dict[str, 
     values = payload.get("simulation", {})
     if not isinstance(values, dict):
         raise ValueError("job simulation config must be an object")
+    ground = values.get("ground_plane")
+    if isinstance(ground, str):
+        if ground not in {"enabled", "disabled"}:
+            raise ValueError("job ground_plane must be enabled or disabled")
+        values["ground_plane"] = ground == "enabled"
     return physics_build_config(values)
 
 

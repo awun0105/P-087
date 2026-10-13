@@ -100,6 +100,7 @@ from src.services.orchestration.jobs.workspace import attempt_lease, cleanup_att
 from src.services.orchestration.processing import is_presets_file, load_presets
 from src.services.orchestration.processing.capability import latest as latest_capability
 from src.services.orchestration.processing.capability import measure_capacity
+from src.services.orchestration.processing.config import load_job_config
 from src.services.orchestration.processing.observed import load_usages
 from src.services.orchestration.processing.telemetry import (
     Outcome,
@@ -1669,10 +1670,13 @@ def run_finalize_job(job_id: str, *, expected_checksum: str | None = None) -> Jo
     if not awaiting_finalize(job):
         raise RuntimeStateConflictError("Job không chờ bước hoàn tất")
     confirmation, decision_checksum = _authorized_decision(registry, job)
-    profile = load_geometry_profile(settings.product_geometry_config)
+    registry.runtime_resolver.sync_down(job_id)
+    processing = load_job_config(job_id, job.config_checksum, registry.runtime_resolver)
+    profile = load_geometry_profile(
+        settings.product_geometry_config, overrides=dict(processing.geometry) if processing else None
+    )
     if settings.product_geometry_gpu_index is not None:
         profile = profile.model_copy(update={"gpu_index": settings.product_geometry_gpu_index})
-    registry.runtime_resolver.sync_down(job_id)
     if job.status == JobStatus.QUEUED:
         # Retry sau lỗi bước hoàn tất: attempt mới bắt đầu thẳng ở hình học (CAS claim).
         job = registry.transition_job(
