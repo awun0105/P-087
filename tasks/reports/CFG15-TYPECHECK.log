@@ -1,0 +1,6 @@
+
+> frontend@0.1.0 typecheck /home/lqaq/PROJECT/AI20K/P-087/frontend
+> next typegen && tsc --noEmit
+
+Generating route types...
+✓ Types generated successfully

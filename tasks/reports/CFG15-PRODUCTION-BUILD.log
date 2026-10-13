@@ -1,0 +1,46 @@
+
+> frontend@0.1.0 build /home/lqaq/PROJECT/AI20K/P-087/frontend
+> next build
+
+▲ Next.js 16.3.6 (Turbopack)
+✓ Running next.config.ts took 31ms
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 4.7s
+  Running TypeScript ...
+  Finished TypeScript in 13.4s ...
+  Collecting page data using 11 workers ...
+  Generating static pages using 11 workers (0/18) ...
+  Generating static pages using 11 workers (4/18)
+  Generating static pages using 11 workers (8/18)
+  Generating static pages using 11 workers (13/18)
+✓ Generating static pages using 11 workers (18/18) in 554ms
+  Finalizing page optimization ...
+
+Route (app)
+┌ ○ /
+├ ○ /_not-found
+├ ○ /account
+├ ƒ /api/v1/input-assemblies/uploads
+├ ƒ /api/v1/uploads
+├ ○ /icon.svg
+├ ○ /imports
+├ ƒ /imports/[importId]
+├ ○ /jobs
+├ ○ /login
+├ ○ /new
+├ ○ /new/import-scene
+├ ○ /new/import-video
+├ ○ /new/try-demo
+├ ○ /overview
+├ ○ /register
+├ ƒ /samples/[sampleId]/scene
+├ ○ /scenes
+├ ƒ /scenes/[jobId]
+├ ƒ /scenes/[jobId]/stages/[stageId]
+├ ○ /team
+└ ○ /trash
+
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand

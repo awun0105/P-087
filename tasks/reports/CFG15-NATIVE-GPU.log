@@ -1,0 +1,12 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.1.1, pluggy-1.6.0 -- /home/lqaq/PROJECT/AI20K/P-087/.venv/bin/python3
+cachedir: .pytest_cache
+rootdir: /home/lqaq/PROJECT/AI20K/P-087
+plugins: langsmith-0.14.0, anyio-4.15.1, asyncio-1.4.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 2 items
+
+tests/test_reconstruction/test_rec05_real_codec.py::test_real_gpu_rejects_before_skipped_carve PASSED [ 50%]
+tests/test_reconstruction/test_rec05_similarity_gpu.py::test_transformed_room_real_gpu PASSED [100%]
+
+============================== 2 passed in 9.04s ===============================
