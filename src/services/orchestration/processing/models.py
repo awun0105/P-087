@@ -13,7 +13,18 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from src.models.contracts.artifacts import Checksum
 
 ParamValue = int | float | str
-PresetName = Literal["minimum_quality", "maximum"]
+PresetName = str
+
+
+class ScenarioPreferences(BaseModel):
+    """User-declared capture scenario and desired worker capacity."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    input_type: Literal["video_continuous", "video_loop_360", "photo_set"]
+    environment: Literal["indoor", "outdoor"]
+    subject_scope: Literal["single_object", "full_room"]
+    target_capacity: Literal["minimum_quality", "balanced", "machine_maximum"]
 
 
 class ParameterChoice(BaseModel):

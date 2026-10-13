@@ -1,5 +1,26 @@
 TASK: CFG-08-SCENARIO-PRESETS-CATALOG
 
+STATUS: COMPLETED — deterministic scenario catalog and resource recommendations verified.
+
+## Implementation and verification (2026-10-13)
+
+- Added strict `ScenarioPreferences` and six named scenario entries in the actual product catalog. Photos select indoor/outdoor photo presets first; video single-object scans select `video_single_object`; outdoor room captures use `video_outdoor_forward`; indoor room captures distinguish continuous and loop video. Tests cover all 36 preference combinations.
+- `scale_for_machine` takes the catalog explicitly as a keyword argument so it uses authoritative limits and calibrated coefficients, rather than hidden defaults. It reuses `maximum_for_machine` to search SfM and training budgets separately, preserving scenario choices and other non-resource controls.
+- Minimum quality caps the search at the existing minimum-quality values; balanced caps it at scenario values; machine maximum uses the maximum profile. Known idle VRAM/RAM/disk measurements bound the result below the warning threshold. An impossible floor, missing GPU, or incomplete idle measurement raises `RecommendationUnavailableError`.
+- Unknown workers receive minimum-quality settings without claiming measured safety. A resource heuristic cannot guarantee that a future runtime never encounters OOM; live admission and actual runtime checks remain necessary. No unsupported worker is silently called safe.
+- Additional required file: `configs/product/processing_presets_v1.json`. `PresetName` becomes `str` here because the real catalog cannot load six scenario names with the former two-name Literal. The rest of CFG-09 schema/group/worker work remains pending.
+- New plus existing processing configuration suites: 78 passed, no skips. Log: `tasks/reports/CFG-08-VERIFICATION.log`. Cases include 4 GB versus 24 GB VRAM, independent RAM scaling, mutation isolation, busy-worker idle baseline and impossible budgets.
+- Ruff check and format check clean for processing and new test; `git diff --check` clean. Processing API regressions: 2 passed, 55 unrelated tests deselected. Log: `tasks/reports/CFG-08-API-VERIFICATION.log`.
+- Scenario catalog currently covers the existing parameter groups. New matching, geometry, objectify and simulation controls are added in CFG-09 before API/UI integration; no new pipeline run or UI acceptance is claimed here.
+
+Pre-flight (GUIDE.md Rule 13)
+- codegraph: processing models, resource estimate/search and their config/API callers inspected.
+- impact: expanded catalog identifiers affect config loading and processing options; existing processing regressions pass.
+- understand: n/a — new recommender uses the already traced resource model and queue idle-budget policy.
+- minimal-code: rung 2 — reuse maximum_for_machine, estimate_gb and catalog validation.
+- checks: 78 processing/recommender tests and 2 processing API tests passed; ruff clean.
+- DevTools: n/a — UI-free service/config change.
+
 ## Ý TƯỞNG & ĐỘNG LỰC THỰC HIỆN (WHY & WHAT)
 - **Tại sao cần task này (Why):** Người dùng thực tế (kỹ sư robotics, nhà nghiên cứu AI) không thể và không nên phải nhớ hàng chục con số kỹ thuật chi tiết (như SIFT features 8192, overlap 10, external fill 1.6m, CoACD concavity 0.08). Thay vào đó, họ chỉ biết loại dữ liệu mình vừa quay:
   1. Loại quay: Video đi bộ liên tục / Video quay vòng 360° / Tập ảnh rời.
