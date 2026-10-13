@@ -325,7 +325,7 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
       <SceneTabs tabs={tabs} current={current} onChange={(next) => openTab(next)} />
       {locked && <p role="status" className="px-4 py-2 text-sm text-ink-muted">{locked}. Đang hiển thị Tiến trình.</p>}
       {requestedTab && !["progress", "studio", "review", "results"].includes(requestedTab) && <p role="status" className="px-4 py-2 text-sm text-ink-muted">Tab không hợp lệ; đã mở vùng mặc định.</p>}
-      {current === "studio" && preview && (
+      {current === "studio" && preview && (waitingMetric || GAUSSIAN_EDIT_ENABLED) && (
         <div className="flex items-center justify-end gap-2 border-b border-line bg-paper-raised px-4 py-1.5 sm:px-6">
           {canMutateJob ? (
             <div className="flex shrink-0 items-center gap-1" role="group" aria-label="Chế độ Studio">
