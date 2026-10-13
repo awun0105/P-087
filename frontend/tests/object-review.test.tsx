@@ -964,4 +964,52 @@ describe("ObjectReviewView", () => {
     fireEvent.click(openRight);
     expect(screen.getByText("Chọn một vật")).toBeInTheDocument();
   });
+  it("Ẩn/Hiện Candidate chỉ đổi viewport, giữ revision và không gọi backend", async () => {
+    const base = scene("rev-001", "CANDIDATE");
+    const gaussians = { ...ref, artifact_type: "ObjectGaussians", artifact_uri: "artifact://jobs/job-a/scene/objects/x.ply" };
+    base.objects[0] = { ...base.objects[0], visual_ref: gaussians } as (typeof base.objects)[0];
+    base.objects.push({ ...base.objects[0], id: "candidate-002", name: "Vật thể 2" });
+    routeFetch({ "/scene": [reply({ scene: base })] });
+    const onSave = vi.fn();
+    render(<ObjectReviewView jobId="job-a" onSaveState={onSave} />);
+    fireEvent.click(await screen.findByText("Vật thể 1"));
+    const requests = vi.mocked(fetch).mock.calls.length;
+    const saves = onSave.mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: "Ẩn trên màn hình" }));
+    expect(screen.getByTestId("splats")).toHaveTextContent("candidate-001:ply:false");
+    expect(screen.getByTestId("splats")).toHaveTextContent("candidate-002:ply:true");
+    expect(JSON.parse(screen.getByTestId("metric-scene").dataset.boxes!)).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "Bật trong mô phỏng" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Hiện trên màn hình" }));
+    expect(screen.getByTestId("splats")).toHaveTextContent("candidate-001:ply:true");
+    expect(JSON.parse(screen.getByTestId("metric-scene").dataset.boxes!)).toHaveLength(2);
+    expect(vi.mocked(fetch).mock.calls).toHaveLength(requests);
+    expect(onSave.mock.calls).toHaveLength(saves);
+  });
+
+  it("Tắt mô phỏng là lệnh backend riêng, không dùng nút Ẩn viewport", async () => {
+    const base = scene("rev-001", "CONFIRMED", "CONFIRMED");
+    const disabled = scene("rev-002", "CONFIRMED", "CONFIRMED");
+    disabled.objects[0].active = false;
+    routeFetch({ "/objects/candidate-001/hide": [reply({ scene: disabled })], "/scene": [reply({ scene: base })] });
+    render(<ObjectReviewView jobId="job-a" />);
+    fireEvent.click(await screen.findByText("Vật thể 1"));
+    fireEvent.click(screen.getByRole("button", { name: "Tắt trong mô phỏng" }));
+    expect(await screen.findByRole("button", { name: "Bật trong mô phỏng" })).toBeInTheDocument();
+    const call = vi.mocked(fetch).mock.calls.find(([url]) => String(url).includes("/objects/candidate-001/hide"));
+    expect(JSON.parse(call![1]!.body as string)).toMatchObject({ active: false, expected_scene_revision: "rev-001" });
+  });
+
+  it("đổi job reset viewport hide dù object ID trùng nhau", async () => {
+    const base = scene("rev-001", "CANDIDATE");
+    base.objects[0] = { ...base.objects[0], visual_ref: { ...ref, artifact_type: "ObjectGaussians" } } as (typeof base.objects)[0];
+    routeFetch({ "/scene": [reply({ scene: base }), reply({ scene: base })] });
+    const view = render(<ObjectReviewView jobId="job-a" />);
+    fireEvent.click(await screen.findByText("Vật thể 1"));
+    fireEvent.click(screen.getByRole("button", { name: "Ẩn trên màn hình" }));
+    expect(screen.getByTestId("splats")).toHaveTextContent("candidate-001:ply:false");
+    view.rerender(<ObjectReviewView jobId="job-b" />);
+    await waitFor(() => expect(screen.getByTestId("splats")).toHaveTextContent("candidate-001:ply:true"));
+  });
+
 });

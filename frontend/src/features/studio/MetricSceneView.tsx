@@ -60,7 +60,7 @@ export function MetricSceneView({
   tool = "none",
   onTool,
   onDuplicate,
-  onToggleActive,
+  onToggleVisibility,
   onDelete,
   onDeselect,
 }: {
@@ -96,7 +96,7 @@ export function MetricSceneView({
   selectedObject?: {
     id: string;
     name: string;
-    active: boolean;
+    viewportHidden: boolean;
     canTransform: boolean;
   } | null;
   /** Chế độ công cụ gizmo hiện tại. */
@@ -104,8 +104,8 @@ export function MetricSceneView({
   onTool?: (tool: GizmoMode | "none") => void;
   /** Nhân bản vật đang chọn. */
   onDuplicate?: () => void;
-  /** Bật/tắt trạng thái ẩn khỏi mô phỏng cho vật đang chọn. */
-  onToggleActive?: () => void;
+  /** Ẩn/hiện vật trong viewport, không ghi SceneIR. */
+  onToggleVisibility?: () => void;
   /** Xoá vật đang chọn. */
   onDelete?: () => void;
   /** Bỏ chọn vật. */
@@ -535,19 +535,19 @@ export function MetricSceneView({
             </button>
           )}
 
-          {onToggleActive && (
+          {onToggleVisibility && (
             <button
               type="button"
-              onClick={onToggleActive}
+              onClick={onToggleVisibility}
               className={cn(
                 "flex items-center gap-1 rounded px-2 py-1 transition-colors",
-                !selectedObject.active
+                selectedObject.viewportHidden
                   ? "bg-rust/20 text-rust font-medium"
                   : "text-on-dark/80 hover:bg-on-dark/10 hover:text-on-dark",
               )}
-              title={selectedObject.active ? "Ẩn khỏi mô phỏng" : "Hiện lại trong mô phỏng"}
+              title={!selectedObject.viewportHidden ? "Ẩn trên màn hình" : "Hiện trên màn hình"}
             >
-              {selectedObject.active ? (
+              {!selectedObject.viewportHidden ? (
                 <>
                   <EyeOff className="size-3.5" aria-hidden />
                   <span>Ẩn</span>
