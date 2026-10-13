@@ -317,6 +317,12 @@ function ParameterField({
   onChange: (value: ParamValue) => void;
 }) {
   const id = useId();
+  if (!editable && value === undefined) return (
+    <div className="rounded-xl border border-line bg-paper-raised p-3">
+      <p className="text-sm font-medium">{spec.label}</p>
+      <p className="mt-1 text-xs text-ink-muted">Không được ghi lại trong video mẫu.</p>
+    </div>
+  );
   const tone =
     status === "danger"
       ? "border-rust bg-rust-soft/60"

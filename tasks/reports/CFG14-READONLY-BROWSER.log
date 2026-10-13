@@ -1,0 +1,4 @@
+Script ran on page and returned:
+```json
+{"url":"/new/try-demo?sample=aisle-cw","readOnly":true,"wizard":false,"controls":21,"allDisabled":true,"unrecorded":24}
+```

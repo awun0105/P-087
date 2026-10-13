@@ -1,5 +1,19 @@
 TASK: CFG-14-AUDIT-UI-UX
 
+STATUS: PASS — Ready for Final E2E Verification.
+
+## Implementation and evidence (2026-10-13)
+
+- Audit report: `tasks/reports/AUDIT_03_UI_UX_REPORT.md`, with requirement-by-requirement evidence for transitions, read-only mode, debounce, errors, TypeScript and regression coverage.
+- Added exact fake-clock verification for the 300 ms debounce and cancellation of old evaluation requests.
+- Added actual create-scene component coverage for evaluation HTTP 500, retained edited values, blocked continuation and successful Retry.
+- Found and repaired invented fallback values in historical read-only samples: absent recorded fields now explicitly say they were not recorded.
+- Required source/test files: `frontend/src/features/studio/ProcessingSettings.tsx`, `frontend/tests/processing-settings.test.tsx`, `frontend/tests/ux-processing-form.test.tsx`, `frontend/tests/unified-input-flow.test.tsx`.
+- Focused contract/component/hook suites: 19 passed. Full frontend run: 538 passed; the subsequently added UI recovery case passed in the 28-case actual-flow suite. TypeScript and ESLint clean.
+- Chrome DevTools opened the actual aisle-cw sample and verified no wizard, all 21 recorded controls disabled, 24 unrecorded fields displayed honestly, and an empty console error/warning list. Local QA uses temporary database state, not production acceptance.
+- graphify updated after source changes. No backend source changes.
+
+
 ## Ý TƯỞNG & ĐỘNG LỰC THỰC HIỆN (WHY & WHAT)
 - **Tại sao cần task này (Why):** Sau khi hoàn thành việc triển khai Frontend Contracts (CFG-12) và Scenario Wizard UI (CFG-13), giao diện Web Studio có rất nhiều trạng thái động (state transitions) phức tạp giữa UI và API:
   1. Khi người dùng click chọn chip Scenario Wizard, state phải tự động nhảy toàn bộ values và badge preset. Nhưng nếu họ chỉnh tay 1 ô slider sau đó, UI có tự động chuyển sang chế độ "Đang dùng thông số tùy chỉnh" không, hay vẫn báo là đang dùng preset kịch bản?

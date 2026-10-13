@@ -1,0 +1,28 @@
+
+ RUN  v3.2.7 /home/lqaq/PROJECT/AI20K/P-087/frontend
+
+ ✓ tests/unified-input-flow.test.tsx (28 tests) 20392ms
+   ✓ unified input flow > shows processing settings for an automatically selected video and sends the chosen preset  1239ms
+   ✓ unified input flow > automatically resolves a legacy upload and hides redundant notices  763ms
+   ✓ unified input flow > only shows Retry after an automatic resolution request fails  795ms
+   ✓ unified input flow > keeps edited processing values and recovers through Retry after evaluation returns 500  1831ms
+   ✓ unified input flow > discards the upload when removed and sends a keepalive cleanup on leaving  879ms
+   ✓ unified input flow > keeps uploads, processing and confirmation fields when moving back, without repeating requests  1021ms
+   ✓ unified input flow > cannot leave input selection while uploads or resolution are incomplete  800ms
+   ✓ unified input flow > revalidates changed input before advancing again and still allows abandoned files to be removed  1566ms
+   ✓ unified input flow > waits for processing options before allowing a video job to start  917ms
+   ✓ unified input flow > shows an options error and retries without silently starting with default settings  919ms
+   ✓ unified input flow > shows report-level diagnostics (e.g. a broken calibration) with the file they refer to  727ms
+   ✓ unified input flow > analyzes by itself once every file is verified, without pressing Analyze  790ms
+   ✓ unified input flow > lists why the create button is disabled and never shows internal route codes  802ms
+   ✓ unified input flow > tells the user which timestamp units were estimated and how to correct them  717ms
+   ✓ unified input flow > prepares each dropped video before upload and requires an explicit choice for ambiguous videos  1592ms
+   ✓ unified input flow > shows unqualified R6 diagnostics while keeping the supplied R4 recipe as a usable fallback  852ms
+   ✓ unified input flow > requires explicit timestamp sensor roles and preserves separate RGB and LiDAR units  1492ms
+   ✓ unified input flow > drops a stale analysis when inputs change mid-flight and analyzes again with the new values  1481ms
+   ✓ unified input flow > routes a staged SOG through the durable view import without exposing continuation  797ms
+
+ Test Files  1 passed (1)
+      Tests  28 passed (28)
+   Start at  13:05:02
+   Duration  22.37s (transform 364ms, setup 166ms, collect 606ms, tests 20.39s, environment 755ms, prepare 105ms)

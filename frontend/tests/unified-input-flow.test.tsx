@@ -338,6 +338,23 @@ describe("unified input flow", () => {
     expect(screen.queryByRole("button", { name: "Thử lại" })).not.toBeInTheDocument();
   });
 
+  it("keeps edited processing values and recovers through Retry after evaluation returns 500", async () => {
+    mocks.search = new URLSearchParams("upload=upload-existing");
+    mocks.resolve.mockReset().mockResolvedValue({ report: report("ready", [videoCandidate("only", "file-upload-existing", "ready")], "only") });
+    render(<UnifiedInputFlow />);
+    await screen.findByRole("heading", { name: "Chỉ video" });
+    await nextStep();
+    mocks.evaluateProcessing.mockResolvedValueOnce({ ok: false, error: new ApiError(500, "QA evaluation failure") });
+    fireEvent.change(screen.getByLabelText("Số ảnh tối đa", { selector: "input[type=number]" }), { target: { value: "30" } });
+    await screen.findByText(/Không kiểm tra được cấu hình xử lý/);
+    expect(screen.getByLabelText("Số ảnh tối đa", { selector: "input[type=number]" })).toHaveValue(30);
+    expect(screen.getByRole("button", { name: "Tiếp tục" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Thử lại" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Tiếp tục" })).toBeEnabled());
+    expect(screen.queryByText(/Không kiểm tra được cấu hình xử lý/)).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Số ảnh tối đa", { selector: "input[type=number]" })).toHaveValue(30);
+  });
+
   it("discards the upload when removed and sends a keepalive cleanup on leaving", async () => {
     mocks.resolve.mockReset().mockResolvedValue({ report: report("ready", [videoCandidate("only", "file-upload-1", "ready")], "only") });
     const view = render(<UnifiedInputFlow />);

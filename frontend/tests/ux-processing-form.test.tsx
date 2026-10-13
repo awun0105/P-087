@@ -16,6 +16,34 @@ const options: ProcessingOptions = {
 };
 beforeEach(() => { vi.resetAllMocks(); vi.mocked(getProcessingOptions).mockResolvedValue({ ok: true, data: options }); vi.mocked(evaluateProcessing).mockResolvedValue({ ok: true, data: evaluation }); });
 describe("thông số nháp và evaluation hiện hành", () => {
+  it("debounces edits for 300 ms after the last change and aborts an older evaluation", async () => {
+    vi.useFakeTimers();
+    const hook = renderHook(() => useProcessingForm(true));
+    try {
+      await act(async () => { await Promise.resolve(); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      expect(hook.result.current.values).toEqual({ frames: 10 });
+      vi.mocked(evaluateProcessing).mockClear();
+      act(() => hook.result.current.setValue("frames", 20));
+      await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+      expect(evaluateProcessing).not.toHaveBeenCalled();
+      act(() => hook.result.current.setValue("frames", 30));
+      await act(async () => { await vi.advanceTimersByTimeAsync(299); });
+      expect(evaluateProcessing).not.toHaveBeenCalled();
+      await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+      expect(evaluateProcessing).toHaveBeenCalledTimes(1);
+      expect(evaluateProcessing).toHaveBeenLastCalledWith({ frames: 30 }, expect.any(AbortSignal));
+      const signal = vi.mocked(evaluateProcessing).mock.calls[0][1]!;
+      act(() => hook.result.current.setValue("frames", 40));
+      expect(signal.aborted).toBe(true);
+      await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+      expect(evaluateProcessing).toHaveBeenCalledTimes(2);
+      expect(evaluateProcessing).toHaveBeenLastCalledWith({ frames: 40 }, expect.any(AbortSignal));
+    } finally {
+      hook.unmount();
+      vi.useRealTimers();
+    }
+  });
   it("manual edits cancel a pending suggestion so a late response cannot overwrite them", async () => {
     let resolve!: (value: Awaited<ReturnType<typeof suggestProcessingPreset>>) => void;
     vi.mocked(suggestProcessingPreset).mockImplementation(() => new Promise((done) => { resolve = done; }));

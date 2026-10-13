@@ -67,4 +67,12 @@ describe("scenario wizard", () => {
     for (const control of document.querySelectorAll("input, select")) expect(control).toBeDisabled();
     expect(screen.getByText("Mô phỏng · OpenUSD")).toBeInTheDocument();
   });
+
+  it("does not invent a default for controls absent from an older sample", () => {
+    const recorded = Object.fromEntries(Object.entries(values).filter(([key]) => key !== "geometry.collision_mesh"));
+    render(<ProcessingSettings parameters={parameters} values={recorded} editable={false} />);
+    expect(screen.getByText("Không được ghi lại trong video mẫu.")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Kiểu lưới")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Cách ghép ảnh")).toHaveValue("sequential");
+  });
 });
