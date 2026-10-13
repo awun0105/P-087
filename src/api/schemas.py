@@ -12,7 +12,7 @@ của domain, không phải của HTTP — route import thẳng từ đó, khôn
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 from src.models.contracts.artifacts import Checksum, Identifier, JsonObject, ProductArtifactRef
 from src.models.contracts.manifests import (
@@ -198,7 +198,7 @@ class ObjectActionRequest(ApiModel):
     """Body cho các object action: confirm/ignore/hide/delete/rename (PRODUCT-07)."""
 
     expected_scene_revision: Identifier
-    active: bool | None = None
+    active: StrictBool | None = None
     name: str | None = None
     # action = label (ADR 0007): nhãn lớp; khối lượng người dùng nhập (bỏ trống = mặc định của nhãn).
     semantic_class: str | None = Field(default=None, max_length=64)
