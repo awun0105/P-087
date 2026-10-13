@@ -30,6 +30,7 @@ from src.services.orchestration.projects.models import DemoBaseline, InputVideoS
 from src.services.orchestration.projects.privacy import project_block_reason
 from src.services.orchestration.review.lifecycle import has_isaac_runtime_proof
 from src.services.orchestration.scene.models import SceneEditResult, SceneRevision, VisualBinding
+from src.services.scene.representation_composition import RepresentationDisposition, scene_representations
 
 __all__ = [
     "ApiErrorResponse",
@@ -140,6 +141,7 @@ class SceneResponse(ApiModel):
     supersedes_revision: Identifier | None = None
     scene: SceneIR
     visual: VisualBinding
+    representations: list[RepresentationDisposition] = Field(default_factory=list)
 
 
 class SceneEditResponse(ApiModel):
@@ -151,6 +153,7 @@ class SceneEditResponse(ApiModel):
     scene_uri: str
     scene_checksum: Checksum
     scene: SceneIR
+    representations: list[RepresentationDisposition] = Field(default_factory=list)
 
 
 class LidarCollisionSourceSelectionRequest(ApiModel):
@@ -347,6 +350,7 @@ def scene_response(revision: SceneRevision, visual: VisualBinding) -> SceneRespo
         supersedes_revision=revision.supersedes_revision,
         scene=revision.scene,
         visual=visual,
+        representations=scene_representations(revision.scene),
     )
 
 
@@ -379,4 +383,5 @@ def scene_edit_response(result: SceneEditResult) -> SceneEditResponse:
         scene_uri=result.revision.scene_reference.artifact_uri,
         scene_checksum=result.revision.scene_reference.artifact_checksum,
         scene=result.revision.scene,
+        representations=scene_representations(result.revision.scene),
     )

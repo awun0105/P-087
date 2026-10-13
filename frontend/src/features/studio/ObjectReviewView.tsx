@@ -48,7 +48,7 @@ import {
   type SceneCatalog,
 } from "@/lib/api/studio";
 import { cn } from "@/lib/cn";
-import type { ColliderEditCommand, ProductArtifactRef, SceneIR, SceneObject } from "@/lib/contracts/api";
+import type { ColliderEditCommand, ObjectRepresentation, ProductArtifactRef, SceneIR, SceneObject } from "@/lib/contracts/api";
 import type { StageView } from "@/lib/contracts/studio";
 
 // Chỉ dùng khi scene không có 3DGS: tải three.js theo nhu cầu, không kéo vào mọi lần mở Studio.
@@ -244,6 +244,7 @@ export function ObjectReviewView({
   onSaveState?: (state: SaveState) => void;
   sceneStateControls?: ReactNode;
 }) {
+  const [representations, setRepresentations] = useState<ObjectRepresentation[]>([]);
   const [scene, setScene] = useState<SceneIR | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [missing, setMissing] = useState(false);
@@ -251,7 +252,8 @@ export function ObjectReviewView({
   const [selected, setSelected] = useState<string | null>(null);
   const [viewportHidden, setViewportHidden] = useState({ jobId, ids: new Set<string>() });
   const hiddenIds = useMemo(() => viewportHidden.jobId === jobId ? viewportHidden.ids : new Set<string>(), [viewportHidden, jobId]);
-  const acceptScene = (next: SceneIR) => {
+  const acceptScene = (next: SceneIR, policies: ObjectRepresentation[] = []) => {
+    setRepresentations(policies);
     setScene(next);
     const retained = new Set(next.objects.filter((item) => !["DELETED", "MERGED"].includes(String(item.provenance.review))).map((item) => item.id));
     setViewportHidden((previous) => ({ jobId, ids: new Set(previous.jobId === jobId ? [...previous.ids].filter((id) => retained.has(id)) : []) }));
@@ -332,7 +334,7 @@ export function ObjectReviewView({
     getJobScene(jobId, controller.signal).then((result) => {
       if (controller.signal.aborted) return;
       if (result.ok) {
-        acceptScene(result.data.scene);
+        acceptScene(result.data.scene, result.data.representations);
         if (keepErrorAfterReload.current) keepErrorAfterReload.current = false;
         else setError(null);
         setMissing(false);
@@ -366,15 +368,28 @@ export function ObjectReviewView({
   const previews = useMemo(() => new Set((catalog?.entries ?? []).filter((item) => item.has_preview).map((item) => item.family)), [catalog]);
   // Scene theo vật (pipeline v2): mỗi vật có Gaussian riêng. Vật đã loại/xoá hoặc đang ẩn không vẽ.
   const splats = useMemo<OverlayObject[]>(
-    () =>
-      (scene?.objects ?? []).map((object) => ({
+    () => (scene?.objects ?? []).flatMap((object) => {
+      const policy = representations.find((item) => item.object_id === object.id);
+      const visible = !hiddenIds.has(object.id);
+      const editingRoot: OverlayObject = {
         id: object.id,
         ...objectVisual(jobId, object, previews),
         position: object.transform.translation_xyz,
         rotation_xyzw: object.transform.rotation_quaternion_xyzw,
-        visible: isPlaced(object) && !hiddenIds.has(object.id),
-      })),
-    [scene, jobId, previews, hiddenIds],
+        visible: visible && (policy ? policy.visual_policy === "object" : isPlaced(object)),
+      };
+      if (policy?.visual_policy !== "source" || !policy.source_visual_required) return [editingRoot];
+      editingRoot.url = null;
+      if (!policy.source_transform || policy.readiness_blockers.length) return [editingRoot];
+      return [editingRoot, {
+        id: `source:${object.id}`,
+        ...objectVisual(jobId, object, previews),
+        position: policy.source_transform.translation_xyz,
+        rotation_xyzw: policy.source_transform.rotation_quaternion_xyzw,
+        visible,
+      }];
+    }),
+    [scene, representations, jobId, previews, hiddenIds],
   );
 
   // Vật động (vật lý của SceneIR) đang đặt trong scene: khi Đi bộ, người đi đẩy được chúng (ADR 0010).
@@ -434,7 +449,7 @@ export function ObjectReviewView({
     [visibleObjects, selected, jobId, theme, currentColliderDraft, hiddenIds], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
-  async function run(mutate: (revision: string) => Promise<{ scene: SceneIR }>) {
+  async function run(mutate: (revision: string) => Promise<{ scene: SceneIR; representations?: ObjectRepresentation[] }>) {
     if (!scene || mutationInFlight.current) return;
     mutationInFlight.current = true;
     const revision = scene.scene_revision;
@@ -444,8 +459,9 @@ export function ObjectReviewView({
     setError(null);
     onSaveState?.({ status: "saving", revision });
     try {
-      const next = (await mutate(revision)).scene;
-      acceptScene(next);
+      const response = await mutate(revision);
+      const next = response.scene;
+      acceptScene(next, response.representations);
       onSaveState?.({ status: "saved", revision: next.scene_revision });
     } catch (cause: unknown) {
       // 409: scene đã đổi ở lượt khác — phải tải revision mới trước khi ghi (§S06 recovery).
@@ -1051,6 +1067,9 @@ export function ObjectReviewView({
             </div>
             <div className="flex-1 overflow-y-auto">
               <ObjectifyNotice jobId={jobId} revision={scene.scene_revision} onRevision={() => setReload((value) => value + 1)} />
+              {representations.some((item) => item.readiness_blockers.length) && (
+                <Notice tone="rust" className="m-3">Representation chưa đầy đủ: {representations.flatMap((item) => item.readiness_blockers.map((code) => `${item.object_id}: ${code}`)).join(", ")}</Notice>
+              )}
               {error && (
                 <Notice tone="rust" className="m-3">
                   {error}

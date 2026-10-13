@@ -39,7 +39,7 @@ vi.mock("@/features/studio/MetricSceneView", () => ({
     onTool?: (tool: "translate" | "rotate" | "none") => void;
     onDelete?: () => void;
   }) => (
-    <div data-testid="metric-scene" data-boxes={JSON.stringify(boxes)} data-physics-objects={JSON.stringify(physicsObjects)}>
+    <div data-testid="metric-scene" data-objects={JSON.stringify(objects)} data-boxes={JSON.stringify(boxes)} data-physics-objects={JSON.stringify(physicsObjects)}>
       {boxes.map((box) => `${box.id}:${box.color}`).join(",")}
       <span data-testid="splats">{objects.map((item) => `${item.id}:${item.url ? "ply" : "none"}:${item.visible}`).join(",")}</span>
       <span data-testid="gizmo">{gizmo ? `${gizmo.id}:${gizmo.mode}` : "none"}</span>
@@ -1010,6 +1010,22 @@ describe("ObjectReviewView", () => {
     expect(screen.getByTestId("splats")).toHaveTextContent("candidate-001:ply:false");
     view.rerender(<ObjectReviewView jobId="job-b" />);
     await waitFor(() => expect(screen.getByTestId("splats")).toHaveTextContent("candidate-001:ply:true"));
+  });
+
+  it("Candidate moved B keeps one source Gaussian at A and no independent physics", async () => {
+    const base = scene("rev-001", "CANDIDATE");
+    base.objects[0] = { ...base.objects[0], visual_ref: { ...ref, artifact_type: "ObjectGaussians" } } as (typeof base.objects)[0];
+    const pose = { ...base.objects[0].transform, translation_xyz: [8, 9, 10] };
+    routeFetch({ "/scene": [reply({ scene: base, representations: [{ object_id: "candidate-001", visual_policy: "source", source_visual_required: true, source_transform: pose, readiness_blockers: [] }] })] });
+    render(<ObjectReviewView jobId="job-a" />);
+    const view = await screen.findByTestId("metric-scene");
+    const objects = JSON.parse(view.dataset.objects!);
+    expect(objects.filter((item: { url: string | null }) => item.url)).toHaveLength(1);
+    expect(objects[1]).toMatchObject({ id: "source:candidate-001", position: [8, 9, 10], visible: true });
+    expect(JSON.parse(view.dataset.physicsObjects!)).toHaveLength(0);
+    fireEvent.click(screen.getByText("Vật thể 1"));
+    fireEvent.click(screen.getByRole("button", { name: "Ẩn trên màn hình" }));
+    expect(JSON.parse(view.dataset.objects!)[1].visible).toBe(false);
   });
 
 });

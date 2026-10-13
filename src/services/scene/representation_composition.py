@@ -1,8 +1,9 @@
 """Chính sách representation thuần, độc lập visibility tạm thời của Studio."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 
+from src.models.contracts.coordinates import Transform
 from src.models.contracts.scene import SceneIR, SceneObject, SceneObjectOrigin, SceneObjectState
 
 
@@ -19,6 +20,7 @@ class RepresentationDisposition:
     export_as_object: bool
     source_visual_required: bool
     readiness_blockers: tuple[str, ...] = ()
+    source_transform: Transform | None = None
 
 
 def resolve_representation(obj: SceneObject, *, split_visuals: bool = False) -> RepresentationDisposition:
@@ -51,4 +53,30 @@ def scene_representations(scene: SceneIR) -> list[RepresentationDisposition]:
     split = scene.environment.membership is not None or str(scene.provenance.get("object_extraction", "")).startswith(
         "objectify_v1("
     )
-    return [resolve_representation(item, split_visuals=split) for item in scene.objects]
+    results = []
+    for item in scene.objects:
+        result = resolve_representation(item, split_visuals=split)
+        if result.source_visual_required and item.visual_ref is not None:
+            owner = item.source_collision
+            blockers = list(result.readiness_blockers)
+            pose = None
+            if owner is None:
+                blockers.append("SOURCE_POSE_MISSING")
+            elif owner.source_geometry_ref not in (
+                scene.environment.geometry_ref,
+                scene.environment.collision_source_ref,
+            ):
+                blockers.append("SOURCE_CONTEXT_INVALID")
+            elif (
+                scene.environment.membership
+                and owner.extraction_revision != scene.environment.membership.extraction_revision
+            ):
+                blockers.append("SOURCE_CONTEXT_INVALID")
+            elif owner.source_transform.rotation_quaternion_xyzw not in ((0, 0, 0, 1), (0, 0, 0, -1)):
+                # Objectify PLY rows have world-aligned local axes; do not invent a rotation bake.
+                blockers.append("SOURCE_ROTATION_UNSUPPORTED")
+            else:
+                pose = owner.source_transform
+            result = replace(result, readiness_blockers=tuple(blockers), source_transform=pose)
+        results.append(result)
+    return results

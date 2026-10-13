@@ -399,7 +399,16 @@ export interface VisualBinding {
   unavailable_reason: string | null;
 }
 
+export interface ObjectRepresentation {
+  object_id: string;
+  visual_policy: "source" | "object" | "omit";
+  source_visual_required: boolean;
+  source_transform: SceneObject["transform"] | null;
+  readiness_blockers: string[];
+}
+
 export interface SceneResponse {
+  representations?: ObjectRepresentation[];
   job_id: string;
   scene_id: string;
   supersedes_revision: string | null;
@@ -431,6 +440,7 @@ export interface ColliderEditCommand {
 }
 
 export interface SceneEditResponse {
+  representations?: ObjectRepresentation[];
   job_id: string;
   previous_scene_revision: string;
   scene_revision: string;

@@ -79,3 +79,19 @@ def test_user_added_candidate_cannot_claim_reconstructed_source_content() -> Non
         .model_copy(update={"state": SceneObjectState.CANDIDATE, "active": False, "origin": "user_added"})
     )
     assert resolve_representation(item).readiness_blockers == ("SOURCE_REPRESENTATION_UNSUPPORTED",)
+
+
+def test_source_pose_is_never_guessed_from_moved_candidate() -> None:
+    scene = _scene()
+    item = scene.objects[0]
+    item = item.model_copy(
+        update={
+            "state": SceneObjectState.CANDIDATE,
+            "active": False,
+            "visual_ref": item.geometry_ref.model_copy(update={"artifact_type": "ObjectGaussians"}),
+            "source_collision": None,
+        }
+    )
+    result = scene_representations(scene.model_copy(update={"objects": [item]}))[0]
+    assert result.source_transform is None
+    assert "SOURCE_POSE_MISSING" in result.readiness_blockers
