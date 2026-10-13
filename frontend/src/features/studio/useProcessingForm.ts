@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { PresetKey } from "@/features/studio/ProcessingSettings";
-import { evaluateProcessing, getProcessingOptions } from "@/lib/api/studio";
-import type { ParamValue, ProcessingEvaluation, ProcessingOptions } from "@/lib/contracts/studio";
+import { evaluateProcessing, getProcessingOptions, suggestProcessingPreset } from "@/lib/api/studio";
+import type { ParamValue, ProcessingEvaluation, ProcessingOptions, ScenarioPreferences } from "@/lib/contracts/studio";
 import { errorMessage } from "@/lib/ui-error";
 
 /** Đối chiếu draft với schema hiện hành trước khi gửi evaluate/create. */
@@ -40,6 +40,11 @@ export function useProcessingForm(enabled: boolean, restored?: Record<string, Pa
   const [evaluating, setEvaluating] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
   const pending = useRef<AbortController | null>(null);
+  const pendingSuggestion = useRef<AbortController | null>(null);
+  const suggestedKey = useRef<string | null>(null);
+  const [suggesting, setSuggesting] = useState(false);
+  const [scenarioPreset, setScenarioPreset] = useState<string | null>(null);
+  const [scenarioPreferences, setScenarioPreferences] = useState<ScenarioPreferences | null>(null);
   const applied = useRef(false);
   useEffect(() => {
     if (!options || !draftReady || applied.current) return;
@@ -74,6 +79,7 @@ export function useProcessingForm(enabled: boolean, restored?: Record<string, Pa
 
   useEffect(() => {
     if (!values || !options) return;
+    if (suggestedKey.current === JSON.stringify(values)) return;
     const timer = setTimeout(() => {
       pending.current?.abort();
       const controller = new AbortController();
@@ -89,11 +95,15 @@ export function useProcessingForm(enabled: boolean, restored?: Record<string, Pa
     return () => { clearTimeout(timer); pending.current?.abort(); };
   }, [values, options, retryKey]);
 
-  useEffect(() => () => pending.current?.abort(), []);
+  useEffect(() => () => { pending.current?.abort(); pendingSuggestion.current?.abort(); }, []);
 
   const [selectedPreset, setSelectedPreset] = useState<PresetKey | null>(null);
 
   const setValue = useCallback((key: string, value: ParamValue) => {
+    suggestedKey.current = null;
+    pendingSuggestion.current?.abort();
+    setSuggesting(false);
+    setScenarioPreset(null);
     setError(null);
     setSelectedPreset(null);
     setValues((current) => (current ? { ...current, [key]: value } : current));
@@ -102,6 +112,10 @@ export function useProcessingForm(enabled: boolean, restored?: Record<string, Pa
   const applyPreset = useCallback(
     (preset: PresetKey) => {
       if (options) { 
+        suggestedKey.current = null;
+        pendingSuggestion.current?.abort();
+        setSuggesting(false);
+        setScenarioPreset(null);
         setError(null); 
         setSelectedPreset(preset);
         setValues({ ...options.presets[preset] }); 
@@ -109,6 +123,34 @@ export function useProcessingForm(enabled: boolean, restored?: Record<string, Pa
     },
     [options],
   );
+
+  const applyScenario = useCallback(async (preferences: ScenarioPreferences) => {
+    if (!options) return;
+    pendingSuggestion.current?.abort();
+    pending.current?.abort();
+    setEvaluating(false);
+    const controller = new AbortController();
+    pendingSuggestion.current = controller;
+    setSuggesting(true);
+    setScenarioPreferences(preferences);
+    setError(null);
+    const result = await suggestProcessingPreset(preferences, controller.signal);
+    if (controller.signal.aborted) return;
+    setSuggesting(false);
+    if (!result.ok) { setError(errorMessage(result.error)); return; }
+    const normalized = restoreProcessing(options, result.data.params);
+    if (Object.keys(result.data.params).length !== options.parameters.length ||
+        options.parameters.some((spec) => normalized[spec.key] !== result.data.params[spec.key])) {
+      setError("Gợi ý cấu hình không khớp thông số hiện hành. Hãy tải lại trang.");
+      return;
+    }
+    setSelectedPreset(null);
+    setScenarioPreset(result.data.preset_name);
+    suggestedKey.current = JSON.stringify(normalized);
+    setValues(normalized);
+    setEvaluation(result.data.evaluation);
+    setEvaluatedKey(JSON.stringify(normalized));
+  }, [options]);
 
   let activePreset: PresetKey | null = null;
   if (options && values) {
@@ -121,6 +163,6 @@ export function useProcessingForm(enabled: boolean, restored?: Record<string, Pa
     }
   }
 
-  const retry = () => { setError(null); setRetryKey((key) => key + 1); };
-  return { options, values, evaluation: values && JSON.stringify(values) === evaluatedKey ? evaluation : null, error, loading: !options && !error, evaluating: evaluating || !!(options && values && JSON.stringify(values) !== evaluatedKey && !error), activePreset, setValue, applyPreset, retry };
+  const retry = () => { suggestedKey.current = null; setError(null); setRetryKey((key) => key + 1); };
+  return { options, values, evaluation: values && JSON.stringify(values) === evaluatedKey ? evaluation : null, error, loading: !options && !error, evaluating: suggesting || evaluating || !!(options && values && JSON.stringify(values) !== evaluatedKey && !error), suggesting, scenarioPreset, scenarioPreferences, activePreset, setValue, applyPreset, applyScenario, retry };
 }

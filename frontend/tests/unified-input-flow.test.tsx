@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   temporaryUploads: vi.fn(),
   processingOptions: vi.fn(),
   evaluateProcessing: vi.fn(),
+  suggestProcessing: vi.fn(),
   search: new URLSearchParams(),
 }));
 
@@ -44,6 +45,7 @@ vi.mock("@/lib/api/studio", () => ({
   uploadPreparedVideo: mocks.uploadPrepared,
   getProcessingOptions: mocks.processingOptions,
   evaluateProcessing: mocks.evaluateProcessing,
+  suggestProcessingPreset: mocks.suggestProcessing,
 }));
 vi.mock("@/lib/api/inputAssemblies", () => ({
   createInputAssembly: mocks.create,
@@ -271,6 +273,7 @@ describe("unified input flow", () => {
     window.sessionStorage.clear();
     mocks.processingOptions.mockReset().mockResolvedValue({ ok: true, data: processingOptions });
     mocks.evaluateProcessing.mockReset().mockResolvedValue({ ok: true, data: processingOptions.default_evaluation });
+    mocks.suggestProcessing.mockReset().mockResolvedValue({ ok: true, data: { preset_name: "video_indoor_walkthrough", params: { "sampling.max_frames": 100 }, evaluation: processingOptions.default_evaluation } });
     mocks.prepareVideo.mockResolvedValue({ dispose: vi.fn(), file: new File(["prepared"], "normalized.mp4", { type: "video/mp4" }), frameMapFile: new File(["map"], "frame-map.jsonl"), manifest: {} });
     let nextUpload = 0;
     mocks.uploadPrepared.mockImplementation((_prepared, options) => {
@@ -302,7 +305,7 @@ describe("unified input flow", () => {
     expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ requested_intent: null }));
     expect(screen.queryByRole("button", { name: /Tạo scene/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("radio", { name: /Tối đa cho máy này/ }));
-    await waitFor(() => expect(mocks.evaluateProcessing).toHaveBeenCalledWith({ "sampling.max_frames": 100 }, expect.any(AbortSignal)));
+    await waitFor(() => expect(mocks.suggestProcessing).toHaveBeenCalledWith(expect.objectContaining({ target_capacity: "machine_maximum" }), expect.any(AbortSignal)));
     await nextStep();
     completeVideoAttestation();
     await waitFor(() => expect(screen.getByRole("button", { name: /Tạo scene/ })).toBeEnabled());
@@ -366,7 +369,7 @@ describe("unified input flow", () => {
     const evaluations = mocks.evaluateProcessing.mock.calls.length;
 
     fireEvent.click(screen.getByRole("button", { name: "Quay lại" }));
-    expect(screen.getByRole("radio", { name: /Tối đa cho máy này/ })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("radio", { name: /Tối đa cho máy này/ })).toBeChecked();
     fireEvent.click(screen.getByRole("button", { name: "Quay lại" }));
     expect(screen.getByRole("button", { name: "Bỏ warehouse.mp4" })).toBeInTheDocument();
     await nextStep();

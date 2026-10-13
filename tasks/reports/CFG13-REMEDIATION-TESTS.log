@@ -1,0 +1,33 @@
+
+ RUN  v3.2.7 /home/lqaq/PROJECT/AI20K/P-087/frontend
+
+ ✓ tests/processing-settings.test.tsx (2 tests) 584ms
+   ✓ scenario wizard > applies environment and capture choices through the API and shows all advanced groups  556ms
+ ✓ tests/ux-processing-form.test.tsx (5 tests) 1311ms
+   ✓ thông số nháp và evaluation hiện hành > đợi draft rồi công bố đúng giá trị; không lộ preset mặc định để ghi đè draft  408ms
+   ✓ thông số nháp và evaluation hiện hành > evaluation cũ bị ẩn khi sửa; lỗi có thể thử lại mà không mất values  759ms
+ ✓ tests/object-review.test.tsx (31 tests) 3740ms
+ ✓ tests/unified-input-flow.test.tsx (27 tests) 19218ms
+   ✓ unified input flow > shows processing settings for an automatically selected video and sends the chosen preset  1309ms
+   ✓ unified input flow > automatically resolves a legacy upload and hides redundant notices  755ms
+   ✓ unified input flow > only shows Retry after an automatic resolution request fails  892ms
+   ✓ unified input flow > discards the upload when removed and sends a keepalive cleanup on leaving  1113ms
+   ✓ unified input flow > keeps uploads, processing and confirmation fields when moving back, without repeating requests  1243ms
+   ✓ unified input flow > cannot leave input selection while uploads or resolution are incomplete  801ms
+   ✓ unified input flow > revalidates changed input before advancing again and still allows abandoned files to be removed  1605ms
+   ✓ unified input flow > waits for processing options before allowing a video job to start  917ms
+   ✓ unified input flow > shows an options error and retries without silently starting with default settings  914ms
+   ✓ unified input flow > shows report-level diagnostics (e.g. a broken calibration) with the file they refer to  722ms
+   ✓ unified input flow > analyzes by itself once every file is verified, without pressing Analyze  766ms
+   ✓ unified input flow > lists why the create button is disabled and never shows internal route codes  791ms
+   ✓ unified input flow > tells the user which timestamp units were estimated and how to correct them  719ms
+   ✓ unified input flow > prepares each dropped video before upload and requires an explicit choice for ambiguous videos  1624ms
+   ✓ unified input flow > shows unqualified R6 diagnostics while keeping the supplied R4 recipe as a usable fallback  865ms
+   ✓ unified input flow > requires explicit timestamp sensor roles and preserves separate RGB and LiDAR units  1492ms
+   ✓ unified input flow > drops a stale analysis when inputs change mid-flight and analyzes again with the new values  1470ms
+   ✓ unified input flow > routes a staged SOG through the durable view import without exposing continuation  788ms
+
+ Test Files  4 passed (4)
+      Tests  65 passed (65)
+   Start at  12:52:41
+   Duration  21.67s (transform 949ms, setup 1.09s, collect 2.35s, tests 24.85s, environment 4.00s, prepare 529ms)

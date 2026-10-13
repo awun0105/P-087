@@ -44,7 +44,7 @@ import { VideoPreparationError, type VideoPreparationPhase } from "@/lib/media/v
 import { prepareVideoForUpload, type VideoPreparedArtifact, type VideoPreparationProgress } from "@/lib/media/video-normalization";
 import { errorMessage } from "@/lib/ui-error";
 import { formatBytes } from "@/lib/format";
-import { ProcessingSettings } from "@/features/studio/ProcessingSettings";
+import { ProcessingSettings, scenarioLabel } from "@/features/studio/ProcessingSettings";
 import { useProcessingForm } from "@/features/studio/useProcessingForm";
 import { FlowStepper } from "@/features/studio/FlowStepper";
 
@@ -1469,7 +1469,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
           </ul>
           {step === 2 && videoProcessing && (
             <>
-              <p className="mt-3 text-sm text-ink-muted">Cấu hình: {processing.activePreset === "minimum_quality" ? "Tối thiểu · chất lượng tốt" : processing.activePreset === "machine_maximum" ? "Tối đa cho máy này" : "Tùy chỉnh"}.</p>
+              <p className="mt-3 text-sm text-ink-muted">Cấu hình: {processing.scenarioPreset ? scenarioLabel(processing.scenarioPreset, processing.scenarioPreferences) : processing.activePreset === "minimum_quality" ? "Tối thiểu · chất lượng tốt" : processing.activePreset === "machine_maximum" ? "Tối đa cho máy này" : "Tùy chỉnh"}.</p>
               <details className="mt-2 text-sm">
                 <summary className="cursor-pointer text-ink-muted">Xem thông số đã chọn</summary>
                 <dl className="mt-3 grid gap-2 sm:grid-cols-2">
@@ -1489,7 +1489,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
 
       {step === 1 && videoProcessing && (
         <div className="mt-6 space-y-3">
-          {processing.options && processing.values && <ProcessingSettings parameters={processing.options.parameters} values={processing.values} editable evaluation={processing.evaluation} capability={processing.options.capability} activePreset={processing.activePreset} onPreset={processing.applyPreset} onChange={processing.setValue} note={processing.options.resource_note} />}
+          {processing.options && processing.values && <ProcessingSettings parameters={processing.options.parameters} values={processing.values} editable evaluation={processing.evaluation} capability={processing.options.capability} activePreset={processing.activePreset} onPreset={processing.applyPreset} onChange={processing.setValue} onScenario={processing.applyScenario} scenarioPreset={processing.scenarioPreset} scenarioPreferences={processing.scenarioPreferences} suggesting={processing.suggesting} note={processing.options.resource_note} />}
           {!processing.error && (processing.loading || !processing.values) && <Card className="p-5" role="status">Đang tải cấu hình xử lý…</Card>}
           {processing.error && <Notice tone="rust">{processing.options ? "Không kiểm tra được cấu hình xử lý." : "Không tải được cấu hình xử lý."} {processing.error}<Button type="button" size="sm" variant="secondary" onClick={processing.retry}>Thử lại</Button></Notice>}
         </div>

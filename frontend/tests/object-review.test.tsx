@@ -881,8 +881,8 @@ describe("ObjectReviewView", () => {
     });
     render(<ObjectReviewView jobId="job-a" />);
 
-    expect(await screen.findByText(/không thành công sau 3 lần thử/)).toBeTruthy();
-    expect(screen.getByText(/hết VRAM/)).toBeTruthy();
+    expect(await screen.findByText("Tách theo vật không thành công.")).toBeTruthy();
+    expect(screen.getByText(/sau 3 lần: hết VRAM/)).toBeTruthy();
     expect(screen.getByRole("button", { name: /Chạy lại tách theo vật/ })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Dùng hộp ứng viên/ }));
 

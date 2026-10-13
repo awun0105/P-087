@@ -1,7 +1,7 @@
 "use client";
 
-import { AlertTriangle, Cpu, Gauge, HardDrive, Lock, MemoryStick, Sparkles } from "lucide-react";
-import { useId } from "react";
+import { AlertTriangle, Box, Camera, Cpu, Gauge, HardDrive, Home, Lock, MemoryStick, Sparkles } from "lucide-react";
+import { useId, useState } from "react";
 
 import { Badge, Card } from "@/components/studio/primitives";
 import { cn } from "@/lib/cn";
@@ -12,12 +12,16 @@ import type {
   ProcessingEvaluation,
   ResourceEstimate,
   ResourceStatus,
+  ScenarioPreferences,
 } from "@/lib/contracts/studio";
 
 const GROUPS: { key: ParameterSpec["group"]; title: string; hint: string }[] = [
   { key: "sampling", title: "Lấy mẫu khung hình", hint: "Video → ảnh đưa vào dựng 3D" },
   { key: "colmap", title: "Ước lượng camera · COLMAP", hint: "Vị trí và hướng camera của từng ảnh" },
   { key: "brush", title: "Dựng 3D Gaussian Splatting · Brush", hint: "Huấn luyện scene trên GPU" },
+  { key: "geometry", title: "Lưới va chạm Voxel", hint: "Chọn kiểu lưới, độ phân giải và cách lấp vùng trống" },
+  { key: "scene", title: "Tách vật thể · CoACD", hint: "Nhận diện vật thể, tạo collider và vá nền" },
+  { key: "simulation", title: "Mô phỏng · OpenUSD", hint: "Sàn và vật liệu vật lý mặc định khi xuất gói" },
 ];
 
 export type PresetKey = "minimum_quality" | "machine_maximum";
@@ -45,6 +49,10 @@ export function ProcessingSettings({
   onPreset,
   onChange,
   note,
+  onScenario,
+  scenarioPreset,
+  scenarioPreferences,
+  suggesting = false,
 }: {
   parameters: ParameterSpec[];
   values: Record<string, ParamValue>;
@@ -56,6 +64,10 @@ export function ProcessingSettings({
   onPreset?: (preset: PresetKey) => void;
   onChange?: (key: string, value: ParamValue) => void;
   note?: string;
+  onScenario?: (preferences: ScenarioPreferences) => Promise<void>;
+  scenarioPreset?: string | null;
+  scenarioPreferences?: ScenarioPreferences | null;
+  suggesting?: boolean;
 }) {
   const statusOf = (key: string) => evaluation?.parameters.find((item) => item.key === key);
   const flagged = evaluation?.parameters.some((item) => item.status !== "ok") ?? false;
@@ -69,7 +81,7 @@ export function ProcessingSettings({
           </h2>
           <p className="mt-1 text-sm text-ink-muted">
             {editable
-              ? "Mặc định là cấu hình tối thiểu cho chất lượng tốt. Tăng dần tới mức tối đa mà máy xử lý chịu được."
+              ? "Chọn kịch bản để nhận cấu hình phù hợp với dữ liệu và máy xử lý. Bạn có thể chỉnh thêm ở phần chi tiết."
               : "Thông số thật đã dùng khi xử lý sẵn video mẫu này — chỉ để xem."}
           </p>
         </div>
@@ -81,7 +93,9 @@ export function ProcessingSettings({
         )}
       </div>
 
-      {editable && onPreset && (
+      {editable && onScenario && <ScenarioWizard onChange={onScenario} suggesting={suggesting} initialPreferences={scenarioPreferences} />}
+      {scenarioPreset && <p className="mt-3 text-sm" role="status">Đã áp dụng: <Badge tone="neutral">{scenarioLabel(scenarioPreset, scenarioPreferences)}</Badge></p>}
+      {editable && onPreset && !onScenario && (
         <div role="radiogroup" aria-label="Preset thông số" className="mt-5 grid gap-2 sm:grid-cols-2">
           {(Object.keys(PRESET_LABEL) as PresetKey[]).map((key) => (
             <button
@@ -104,12 +118,12 @@ export function ProcessingSettings({
           ))}
         </div>
       )}
-      {editable && activePreset === null && <p className="mt-2 text-xs text-ink-subtle">Đang dùng thông số tùy chỉnh.</p>}
+      {editable && activePreset === null && !scenarioPreset && <p className="mt-2 text-xs text-ink-subtle">Đang dùng thông số tùy chỉnh.</p>}
 
       <MachinePanel capability={capability} machineLabel={machineLabel} evaluation={evaluation} editable={editable} />
 
       {/* Thông số chi tiết thu gọn khi đang dùng preset và không có ô cảnh báo (STUDIO_UX_SPEC.md P3). */}
-      <details className="group mt-6" open={!editable || activePreset === null || flagged}>
+      <details className="group mt-6" open={!editable || (activePreset === null && !scenarioPreset) || flagged}>
         <summary className="cursor-pointer text-sm font-medium text-ink-muted select-none hover:text-ink">
           Thông số chi tiết ({parameters.length} tham số)
         </summary>
@@ -145,6 +159,58 @@ export function ProcessingSettings({
       {note && <p className="mt-5 text-xs leading-relaxed text-ink-subtle">{note}</p>}
     </Card>
   );
+}
+
+export const SCENARIO_LABELS: Record<string, string> = {
+  video_indoor_walkthrough: "Video trong nhà", video_indoor_orbital_360: "Video quay vòng trong nhà",
+  video_single_object: "Quét một vật thể", video_outdoor_forward: "Video ngoài trời",
+  photo_collection_indoor: "Bộ ảnh trong nhà", photo_collection_outdoor: "Bộ ảnh ngoài trời",
+};
+
+export function scenarioLabel(preset: string, preferences?: ScenarioPreferences | null): string {
+  const target = preferences ? { minimum_quality: "Tối thiểu cho máy này", balanced: "Cân bằng", machine_maximum: "Tối đa cho máy này" }[preferences.target_capacity] : null;
+  return [SCENARIO_LABELS[preset] ?? preset, target].filter(Boolean).join(" · ");
+}
+
+const SCENARIO_QUESTIONS = [
+  { key: "input_type", label: "Kiểu quay", icon: Camera, choices: [
+    { value: "video_continuous", label: "Video đi bộ liên tục" }, { value: "video_loop_360", label: "Video quay vòng 360°" }, { value: "photo_set", label: "Tập ảnh rời" },
+  ] },
+  { key: "environment", label: "Không gian", icon: Home, choices: [
+    { value: "indoor", label: "Trong nhà" }, { value: "outdoor", label: "Ngoài trời" },
+  ] },
+  { key: "subject_scope", label: "Phạm vi", icon: Box, choices: [
+    { value: "single_object", label: "Một vật thể" }, { value: "full_room", label: "Toàn bộ căn phòng" },
+  ] },
+  { key: "target_capacity", label: "Mức xử lý", icon: Sparkles, choices: [
+    { value: "minimum_quality", label: "Tối thiểu cho máy này" }, { value: "balanced", label: "Cân bằng" }, { value: "machine_maximum", label: "Tối đa cho máy này" },
+  ] },
+] as const;
+
+function ScenarioWizard({ onChange, suggesting, initialPreferences }: { onChange: (preferences: ScenarioPreferences) => Promise<void>; suggesting: boolean; initialPreferences?: ScenarioPreferences | null }) {
+  const id = useId();
+  const [preferences, setPreferences] = useState<ScenarioPreferences | null>(initialPreferences ?? null);
+  const choose = (key: keyof ScenarioPreferences, value: ScenarioPreferences[keyof ScenarioPreferences]) => {
+    const next = { ...(preferences ?? { input_type: "video_continuous", environment: "indoor", subject_scope: "full_room", target_capacity: "balanced" } as ScenarioPreferences), [key]: value };
+    setPreferences(next);
+    void onChange(next);
+  };
+  return <section aria-label="Chọn nhanh kịch bản" className="mt-5 space-y-4">
+    <h3 className="text-sm font-semibold">Chọn nhanh kịch bản</h3>
+    <p className="text-xs text-ink-muted">Chọn một mục để áp dụng gợi ý. Các lựa chọn dưới đây chỉ thay thông số, không đổi file đã tải lên.</p>
+    {SCENARIO_QUESTIONS.map((question) => <fieldset key={question.key}>
+      <legend className="mb-2 flex items-center gap-1.5 text-sm font-medium"><question.icon className="size-4" aria-hidden />{question.label}</legend>
+      <div className="flex flex-wrap gap-2">{question.choices.map((choice) => <label key={choice.value} className={cn(
+        "flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm focus-within:ring-2 focus-within:ring-ember",
+        preferences?.[question.key] === choice.value ? "border-ember bg-ember-soft/60" : "border-line hover:border-line-strong",
+      )}>
+        <input type="radio" name={`${id}-${question.key}`} checked={preferences?.[question.key] === choice.value} className="accent-ember-strong"
+          onClick={() => { if (preferences?.[question.key] === choice.value) choose(question.key, choice.value); }}
+          onChange={() => choose(question.key, choice.value)} />{choice.label}
+      </label>)}</div>
+    </fieldset>)}
+    {suggesting && <p role="status" className="text-xs text-ink-muted">Đang gợi ý cấu hình…</p>}
+  </section>;
 }
 
 const RESOURCE_META: Record<ResourceEstimate["resource"], { label: string; icon: typeof Cpu }> = {
