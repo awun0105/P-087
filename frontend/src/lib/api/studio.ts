@@ -30,6 +30,7 @@ import {
   parseMetricPreview,
   parseModeComparison,
   parseStageViews,
+  parseSuggestResponse,
   type DemoManifest,
   type DemoPublishResult,
   type DemoSelection,
@@ -46,6 +47,8 @@ import {
   type ParamValue,
   type ProcessingEvaluation,
   type ProcessingOptions,
+  type ScenarioPreferences,
+  type SuggestResponse,
   type SampleSummary,
   type SceneFromUpload,
   type SceneSummary,
@@ -127,6 +130,21 @@ export function createSceneFromUpload(
 /** Thông số chỉnh được, preset và cấu hình máy worker (từ file cấu hình chung). */
 export function getProcessingOptions(): Promise<ApiResult<ProcessingOptions>> {
   return fetchApi<ProcessingOptions>(`${API}/processing/options`);
+}
+
+export async function suggestProcessingPreset(
+  preferences: ScenarioPreferences,
+  signal?: AbortSignal,
+): Promise<ApiResult<SuggestResponse>> {
+  const result = await fetchApi<unknown>(`${API}/processing/suggest`, {
+    method: "POST", body: JSON.stringify(preferences), signal,
+  });
+  if (!result.ok) return result;
+  try {
+    return { ok: true, data: parseSuggestResponse(result.data) };
+  } catch (error) {
+    return { ok: false, error: new ApiError(502, error instanceof Error ? error.message : "Gợi ý cấu hình không hợp lệ") };
+  }
 }
 
 /** Ước lượng tài nguyên của bộ thông số so với máy worker. */

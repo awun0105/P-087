@@ -1,5 +1,29 @@
 TASK: CFG-12-FRONTEND-CONTRACTS
 
+STATUS: DONE — shared types and parsed suggestion client verified.
+
+## Implementation and verification (2026-10-13)
+
+- ParameterSpec supports all six groups. ProcessingOptions presets accept named catalog entries. Added ScenarioPreferences and SuggestResponse matching the verified backend schema.
+- Added parseSuggestResponse using existing record/finite-number helpers. Rejects invalid parameters, missing evaluation, invalid resource entries and unknown evaluated keys before form updates.
+- suggestProcessingPreset posts to the actual `/api/v1/processing/suggest` route, supports AbortSignal, preserves backend errors and returns a recoverable ApiError for invalid successful payloads.
+- Used the repository's existing `ApiResult` type; the task's `ApiResponse` spelling does not exist in the current client. No duplicate response abstraction or route alias was added.
+- Added `frontend/tests/studio-contracts.test.ts` because the named test file did not previously exist.
+- `pnpm exec vitest run tests/studio-contracts.test.ts tests/ux-processing-form.test.tsx`: 13 passed, two files. `pnpm exec eslint src/lib/contracts/studio.ts src/lib/api/studio.ts tests/studio-contracts.test.ts`: clean. Log: `tasks/reports/CFG12-FRONTEND-TESTS.log`.
+- `pnpm typecheck`: next type generation and tsc --noEmit passed. Log: `tasks/reports/CFG12-TYPECHECK.log`.
+- `git diff --check`: clean. graphify AST graph refreshed.
+- Preexisting metric-comparison edits in the same contract/client files were preserved and excluded from this task's staged patch.
+
+### Pre-flight (GUIDE.md Rule 13)
+
+- codegraph: ParameterSpec/ProcessingOptions callers, current client ApiResult/fetchApi, existing validation helpers, ProcessingSettings and useProcessingForm consumers.
+- impact: options/form types and new client function; existing callers typecheck. New parser/client covered by tests.
+- understand: UNVERIFIED — understand-anything unavailable; backend audit and current client error flow inspected directly.
+- minimal-code: reused ApiResult, fetchApi, ApiError and existing record/number helpers; no dependency.
+- checks: TypeScript and ESLint clean, Vitest 13 passed.
+- DevTools: n/a — contracts/client only, no rendered UI change. Wizard implementation is CFG-13.
+
+
 ## Ý TƯỞNG & ĐỘNG LỰC THỰC HIỆN (WHY & WHAT)
 - **Tại sao cần task này (Why):** Frontend TypeScript hiện tại đang gò bó nghiêm ngặt các kiểu dữ liệu (`ParameterSpec.group` chỉ là `"sampling" | "colmap" | "brush"`, `ProcessingOptions.presets` chỉ có 3 keys). Nếu không cập nhật file hợp đồng `studio.ts` và API client `frontend/src/lib/api/studio.ts`, TypeScript compiler (`tsc --noEmit`) sẽ báo lỗi đỏ toàn bộ dự án khi nhận các nhóm cấu hình mới và frontend không thể gọi hàm gọi API gợi ý preset `/processing/suggest`.
 - **Yêu cầu cốt lõi (What):** Mở rộng type definitions trong `frontend/src/lib/contracts/studio.ts` (thêm `ScenarioPreferences`, mở rộng `group` và `presets`), đồng thời bổ sung hàm gọi API `suggestProcessingPreset()` trong `frontend/src/lib/api/studio.ts`.

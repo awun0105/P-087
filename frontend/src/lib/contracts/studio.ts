@@ -360,7 +360,7 @@ export type ParamValue = number | string;
 
 export interface ParameterSpec {
   key: string;
-  group: "sampling" | "colmap" | "brush";
+  group: "sampling" | "colmap" | "brush" | "geometry" | "scene" | "simulation";
   label: string;
   description: string;
   kind: "number" | "integer" | "choice";
@@ -411,7 +411,7 @@ export interface ProcessingEvaluation {
 export interface ProcessingOptions {
   profile_id: string;
   parameters: ParameterSpec[];
-  presets: { minimum_quality: Record<string, ParamValue>; maximum: Record<string, ParamValue>; machine_maximum: Record<string, ParamValue> };
+  presets: Record<string, Record<string, ParamValue>>;
   capability: MachineCapability | null;
   default_evaluation: ProcessingEvaluation;
   resource_note: string;
@@ -419,6 +419,50 @@ export interface ProcessingOptions {
   anonymize_available?: boolean;
   /** Deployment bắt buộc che cho mọi job: lựa chọn hiện ở trạng thái bật và không tắt được. */
   anonymize_enforced?: boolean;
+}
+
+export interface ScenarioPreferences {
+  input_type: "video_continuous" | "video_loop_360" | "photo_set";
+  environment: "indoor" | "outdoor";
+  subject_scope: "single_object" | "full_room";
+  target_capacity: "minimum_quality" | "balanced" | "machine_maximum";
+}
+
+export interface SuggestResponse {
+  preset_name: string;
+  params: Record<string, ParamValue>;
+  evaluation: ProcessingEvaluation;
+}
+
+/** Reject malformed suggestions before applying them to the configuration form. */
+export function parseSuggestResponse(value: unknown): SuggestResponse {
+  const validStatus = (status: unknown) => ["ok", "warn", "danger", "unknown"].includes(String(status));
+  if (!isRecord(value) || typeof value.preset_name !== "string" || !value.preset_name.trim() ||
+      !isRecord(value.params) || Object.keys(value.params).length === 0 ||
+      !Object.values(value.params).every((item) => typeof item === "string" || isFiniteNumber(item))) {
+    throw new Error("Gợi ý cấu hình từ backend không hợp lệ");
+  }
+  const evaluation = value.evaluation;
+  if (!isRecord(evaluation) || typeof evaluation.blocking !== "boolean" || typeof evaluation.note !== "string" ||
+      !Array.isArray(evaluation.resources) || evaluation.resources.length !== 3 ||
+      !Array.isArray(evaluation.parameters) || evaluation.parameters.length === 0) {
+    throw new Error("Đánh giá tài nguyên của gợi ý không hợp lệ");
+  }
+  const resources = new Set<string>();
+  for (const item of evaluation.resources) {
+    if (!isRecord(item) || !["vram", "ram", "disk"].includes(String(item.resource)) ||
+        !isFiniteNumber(item.required_gb) || item.required_gb < 0 ||
+        !(item.available_gb === null || (isFiniteNumber(item.available_gb) && item.available_gb >= 0)) ||
+        !validStatus(item.status) || typeof item.message !== "string") {
+      throw new Error("Số liệu tài nguyên của gợi ý không hợp lệ");
+    }
+    resources.add(String(item.resource));
+  }
+  if (resources.size !== 3 || !evaluation.parameters.every((item) =>
+    isRecord(item) && typeof item.key === "string" && Object.hasOwn(value.params as object, item.key) &&
+    validStatus(item.status) && (item.message === null || typeof item.message === "string")
+  )) throw new Error("Thông số đánh giá của gợi ý không hợp lệ");
+  return value as unknown as SuggestResponse;
 }
 
 export interface SampleSummary {
