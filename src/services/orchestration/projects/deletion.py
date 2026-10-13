@@ -54,6 +54,19 @@ _SAFE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 _TABLE_COLUMNS: dict[str, tuple[str, ...]] = {
     "r2s_projects": ("project_id", "payload"),
     "r2s_jobs": ("job_id", "project_id", "version", "manifest_ref", "owner_user_id"),
+    "r2s_input_runs": (
+        "requester_id",
+        "idempotency_key",
+        "request_fingerprint",
+        "job_id",
+        "project_id",
+        "assembly_id",
+        "revision",
+        "report_checksum",
+        "recipe_checksum",
+        "recipe_ref",
+        "payload",
+    ),
     "r2s_job_events": ("job_id", "version", "payload"),
     "r2s_scene_requests": ("job_id", "status", "payload"),
     "r2s_scene_heads": ("job_id", "generation", "allocation_sequence", "head_checksum", "payload"),
@@ -80,7 +93,7 @@ _TABLE_COLUMNS: dict[str, tuple[str, ...]] = {
         "payload",
     ),
 }
-_KEY_WIDTH = {"r2s_job_events": 2, "r2s_scene_head_backfill_items": 2}
+_KEY_WIDTH = {"r2s_input_runs": 2, "r2s_job_events": 2, "r2s_scene_head_backfill_items": 2}
 #: Con trước cha, theo khoá ngoại của schema runtime.
 _DELETE_ORDER = (
     "r2s_scene_requests",
@@ -89,6 +102,7 @@ _DELETE_ORDER = (
     "r2s_scene_head_repairs",
     "r2s_scene_heads",
     "r2s_job_events",
+    "r2s_input_runs",
     "r2s_jobs",
     "r2s_projects",
     "r2s_import_operations",
@@ -367,6 +381,7 @@ class _Collector:
             + backfill_items
             + publications
             + self._select("r2s_job_events", "job_id=? ORDER BY version", (job_id,))
+            + self._select("r2s_input_runs", "job_id=?", (job_id,))
         )
         for kind in ("artifact", "worker", "rerun"):
             self._add_item(kind, job_id)

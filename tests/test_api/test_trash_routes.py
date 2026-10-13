@@ -17,7 +17,7 @@ from src.services.orchestration.jobs.database import RuntimeDatabase
 from src.services.orchestration.jobs.profile import ExecutionProfile
 from src.services.orchestration.projects.registry import ProjectRegistry
 from src.services.orchestration.uploads import VideoUploadService
-from tests.test_orchestration.test_scene_deletion import _scene, _upload
+from tests.test_orchestration.test_scene_deletion import _input_run, _scene, _upload
 
 PASSWORD = "mat-khau-du-dai-123"
 
@@ -70,6 +70,27 @@ async def client():
 async def _scene_names(client: AsyncClient) -> list[str]:
     scenes = (await client.get("/api/v1/scenes")).json()["scenes"]
     return sorted(scene["project"]["name"] for scene in scenes)
+
+
+@pytest.mark.asyncio
+async def test_scene_created_from_assembly_can_be_trashed_and_restored(
+    client: AsyncClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    world = _world(tmp_path, monkeypatch, auth_required=False)
+    project_id, job_id = _scene(world, _upload(world), "Assembly scene")
+    _input_run(world, project_id, job_id, "accepted-run")
+    with world.database.transaction() as tx:
+        original = tx.execute("SELECT * FROM r2s_input_runs").fetchall()
+
+    response = await client.delete(f"/api/v1/scenes/{project_id}")
+    assert response.status_code == 200, response.text
+    entry_id = response.json()["entry_id"]
+    assert await _scene_names(client) == []
+    restored = await client.post("/api/v1/trash/restore", json={"entry_ids": [entry_id]})
+    assert restored.json() == {"done": [entry_id], "failed": []}
+    assert await _scene_names(client) == ["Assembly scene"]
+    with world.database.transaction() as tx:
+        assert tx.execute("SELECT * FROM r2s_input_runs").fetchall() == original
 
 
 @pytest.mark.asyncio

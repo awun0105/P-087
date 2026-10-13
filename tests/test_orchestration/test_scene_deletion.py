@@ -58,6 +58,7 @@ MP4 = b"\x00\x00\x00\x18ftypmp42"
 _TABLES = (
     "r2s_projects",
     "r2s_jobs",
+    "r2s_input_runs",
     "r2s_job_events",
     "r2s_scene_requests",
     "r2s_scene_heads",
@@ -181,6 +182,62 @@ def _import(world: SimpleNamespace, upload: UploadRecord, name: str) -> str:
 def _rows(world: SimpleNamespace) -> dict[str, list[tuple]]:
     with world.database.transaction() as tx:
         return {table: sorted(tx.execute(f"SELECT * FROM {table}").fetchall()) for table in _TABLES}
+
+
+def _input_run(world: SimpleNamespace, project_id: str, job_id: str, key: str) -> None:
+    """Persist the accepted-run foreign keys used by the create-scene input flow."""
+    with world.database.transaction(write=True) as tx:
+        tx.execute(
+            "INSERT INTO r2s_input_assemblies(assembly_id, revision, owner_id, payload) "
+            "VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING",
+            ("shared-assembly", 1, "creator", "{}"),
+        )
+        tx.execute(
+            "INSERT INTO r2s_input_resolutions(report_checksum, assembly_id, revision, owner_id, payload) "
+            "VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
+            ("shared-report", "shared-assembly", 1, "creator", "{}"),
+        )
+        tx.execute(
+            "INSERT INTO r2s_input_runs(requester_id, idempotency_key, request_fingerprint, job_id, "
+            "project_id, assembly_id, revision, report_checksum, recipe_checksum, recipe_ref, payload) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "creator",
+                key,
+                "fingerprint",
+                job_id,
+                project_id,
+                "shared-assembly",
+                1,
+                "shared-report",
+                "recipe",
+                "{}",
+                "{}",
+            ),
+        )
+
+
+def test_input_run_survives_trash_restore_without_removing_shared_assembly(world: SimpleNamespace) -> None:
+    project_id, job_id = _scene(world, _upload(world), "From assembly")
+    other_project, other_job = _scene(world, _upload(world, "other.mp4"), "Shared assembly")
+    _input_run(world, project_id, job_id, "first-run")
+    _input_run(world, other_project, other_job, "second-run")
+    before = _rows(world)
+
+    entry = _delete(world, project_ids=[project_id])
+    with world.database.transaction() as tx:
+        assert tx.execute("SELECT job_id FROM r2s_input_runs").fetchall() == [(other_job,)]
+        assert tx.execute("SELECT COUNT(*) FROM r2s_input_assemblies").fetchone()[0] == 1
+        assert tx.execute("SELECT COUNT(*) FROM r2s_input_resolutions").fetchone()[0] == 1
+    record = get_trash_entry(world.database, entry)
+    assert [row.values["job_id"] for row in record.plan.rows if row.table == "r2s_input_runs"] == [job_id]
+
+    restore_deletion(world.context, entry)
+    assert _rows(world) == before
+
+    # Permanent deletion must also work, leaving the other scene's assembly binding intact.
+    purge_deletion(world.context, _delete(world, project_ids=[project_id]))
+    assert world.registry.get_job(other_job).job_id == other_job
 
 
 def _files(world: SimpleNamespace) -> dict[str, str]:
