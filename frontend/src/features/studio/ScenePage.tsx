@@ -5,7 +5,7 @@ import { isGuestQuotaExceededError, resourceCapabilityAllowed } from "@/lib/api/
 import { errorMessage } from "@/lib/ui-error";
 
 import dynamic from "next/dynamic";
-import { Box, Package, Pencil, ShieldCheck, Workflow } from "lucide-react";
+import { ArrowLeft, Box, Package, Pencil, ShieldCheck, Workflow } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Badge } from "@/components/studio/primitives";
@@ -291,8 +291,12 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
 
   return (
     <ObjectifyContext.Provider value={objectify}>
-    <main className="flex h-[calc(100dvh-3rem)] flex-col">
+    <main aria-label={current === "studio" ? "Studio toàn màn hình" : undefined} className={cn("flex flex-col", current === "studio" ? "fixed inset-0 z-40 h-dvh bg-paper" : "h-[calc(100dvh-3rem)]")}>
       <div className="relative z-20 flex flex-wrap items-center gap-2 border-b border-line bg-paper-raised px-4 py-3 sm:px-6">
+        {current === "studio" && <button type="button" aria-label="Thoát Studio, về Tiến trình" title="Về Tiến trình" onClick={() => openTab("progress")}
+          className="flex size-9 shrink-0 items-center justify-center rounded-lg text-ink-muted hover:bg-paper-sunken hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ember">
+          <ArrowLeft className="size-5" aria-hidden />
+        </button>}
         <div className="mr-2 min-w-0">
           <h1 className="truncate text-base font-bold">{info?.name ?? "Đang tải scene…"}</h1>
         </div>
@@ -322,7 +326,7 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
             onRestored={(revision) => setSave({ status: "saved", revision })} />}
         </div>
       </div>
-      <SceneTabs tabs={tabs} current={current} onChange={(next) => openTab(next)} />
+      {current !== "studio" && <SceneTabs tabs={tabs} current={current} onChange={(next) => openTab(next)} />}
       {locked && <p role="status" className="px-4 py-2 text-sm text-ink-muted">{locked}. Đang hiển thị Tiến trình.</p>}
       {requestedTab && !["progress", "studio", "review", "results"].includes(requestedTab) && <p role="status" className="px-4 py-2 text-sm text-ink-muted">Tab không hợp lệ; đã mở vùng mặc định.</p>}
       {current === "studio" && preview && (waitingMetric || GAUSSIAN_EDIT_ENABLED) && (
@@ -347,7 +351,7 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
         </div>
       )}
       {error && <ErrorFeedback message={error} className="m-3" retryLabel="Tải lại trạng thái" retry={() => void poll(new AbortController().signal)} />}
-      <div id={`scene-panel-${current}`} role="tabpanel" aria-labelledby={`scene-tab-${current}`} className="relative min-h-0 flex-1 overflow-y-auto">
+      <div id={`scene-panel-${current}`} role={current === "studio" ? "region" : "tabpanel"} aria-label={current === "studio" ? "Nội dung Studio" : undefined} aria-labelledby={current === "studio" ? undefined : `scene-tab-${current}`} className="relative min-h-0 flex-1 overflow-y-auto">
         {current === "studio" && !preview && <TabLoading />}
         {current === "progress" && (
           <ProgressTab

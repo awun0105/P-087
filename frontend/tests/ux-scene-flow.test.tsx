@@ -74,6 +74,18 @@ const ref = (type: string, path: string, stage = "ST-VISUAL-RECON") => ({ artifa
   vi.mocked(getPreview).mockResolvedValue({ ok: true, data: parsePreview({ schema_version: "1.0", artifact_type: "ReconstructionPreview", job_id: "job-1", attempt_id: "a1", source_input_checksum: "sha256:" + "b".repeat(64), format: "gaussian_sog", producer: "brush", producer_version: "fixture", metric_status: "UNCONFIRMED", coordinate_frame: "sfm_world", unit: "arbitrary", delivery_ref: ref("GaussianSOG", "scene.sog"), source_visual_ref: ref("BrushVisualArtifact", "visual.json"), camera_pose_ref: ref("CameraPoseArtifact", "poses.json", "ST-CAMERA-POSE") }, "job-1") });
 });
 describe("workflow scene", () => {
+  it("Studio mở toàn màn hình; nút thoát quay về Tiến trình của job", async () => {
+    history.replaceState({}, "", "/scenes/job-1?tab=studio");
+    render(<PageTitleProvider><ScenePage jobId="job-1" /></PageTitleProvider>);
+    await screen.findByRole("region", { name: "Canvas stub" });
+    expect(screen.getByRole("main", { name: "Studio toàn màn hình" })).toHaveClass("fixed", "inset-0", "h-dvh");
+    expect(screen.queryByRole("tablist", { name: "Vùng của scene" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Thoát Studio, về Tiến trình" }));
+    await screen.findByRole("heading", { name: "Tiến trình xử lý" });
+    expect(location.pathname).toBe("/scenes/job-1");
+    expect(location.search).toContain("tab=progress");
+    expect(screen.queryByRole("main", { name: "Studio toàn màn hình" })).toBeNull();
+  });
   it("chuông là nơi duy nhất hiện thông báo trên mọi tab; không còn khung dưới thanh tab, trống thì nói rõ", async () => {
     vi.mocked(getJobProgress).mockResolvedValue({ ok: true, data: failedProgress(true) });
     const view = render(<PageTitleProvider><ScenePage jobId="job-1" /></PageTitleProvider>);
