@@ -1,5 +1,6 @@
 """Per-job configuration survives artifact loading without weakening checksum checks."""
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -105,6 +106,26 @@ def test_pre_extension_job_dispatch_preserves_empty_new_groups(tmp_path: Path) -
     assert resolved.geometry == resolved.scene == resolved.simulation == {}
     assert resolved.colmap == old.colmap
     assert resolver.require(reference).read_bytes() == payload
+
+
+def test_legacy_profile_file_dispatch_keeps_independent_empty_groups(tmp_path: Path) -> None:
+    """Operator profiles with only COLMAP/Brush remain executable after the schema expansion."""
+    presets, checksum = load_presets(PRESETS)
+    config = build_job_config(presets, checksum, presets.presets["minimum_quality"], None)
+    payload = json.dumps({"colmap": config.colmap, "brush": config.brush}).encode()
+    path = tmp_path / "legacy.json"
+    path.write_bytes(payload)
+    profile = ExecutionProfile(
+        config_checksum=sha256_bytes(payload), runtime_manifest_checksum="sha256:" + "d" * 64, seed=None
+    )
+    job = SimpleNamespace(job_id="job-legacy", config_checksum=profile.config_checksum)
+    first = resolve_job_processing(job, profile, path, ArtifactResolver(tmp_path), 240)
+    second = resolve_job_processing(job, profile, path, ArtifactResolver(tmp_path), 240)
+    assert first.sample_fps == 3 and first.max_frames == 240
+    assert first.colmap == config.colmap and first.brush == config.brush
+    assert first.geometry == first.scene == first.simulation == {}
+    first.geometry["resolution_m"] = 0.1
+    assert second.geometry == {}
 
 
 def test_sealed_scene_and_simulation_controls_reach_consumers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

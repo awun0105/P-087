@@ -1,5 +1,17 @@
 TASK: CFG-11-AUDIT-BACKEND-API
 
+STATUS: PASS — Ready for Frontend Layer.
+
+## Audit checkpoint (2026-10-13)
+
+- Required six suites: 190 passed, no skips (`tasks/reports/CFG11-REQUIRED-SUITES.log`). HTTP matrix covers all 36 combinations, including the 12 input/environment/scope combinations under each capacity target.
+- Initial complete orchestration/API run: 1268 passed, one failure. The role matrix had not classified the new stateless suggestion endpoint or three earlier upload/camera endpoints.
+- Necessary additional file: `tests/test_api/test_role_matrix.py`. Classified `/processing/suggest` as public stateless calculation, temporary upload actions and camera edits as authenticated; actual router guards remain unchanged. All six role-matrix tests pass (`tasks/reports/CFG11-ROLE-MATRIX.log`).
+- Necessary additional file: `tests/test_orchestration/test_processing_presets_schema.py`. Added real two-group legacy profile dispatch coverage and independent empty group defaults. Thirteen dispatch/schema cases pass (`tasks/reports/CFG11-DISPATCH-VERIFICATION.log`).
+- Static checks: clean; 142 API/orchestration source files formatted (`tasks/reports/CFG11-STATIC-CHECKS.log`).
+- Full suite rerun: 1269 passed, no skips, 15 HTTPX deprecation warnings in 102.11 seconds. The new legacy-file test was added after collection and passed separately in the 13-case dispatch suite. Report: `tasks/reports/AUDIT_02_BACKEND_API_REPORT.md`. All required audit items have executable evidence.
+
+
 ## Ý TƯỞNG & ĐỘNG LỰC THỰC HIỆN (WHY & WHAT)
 - **Tại sao cần task này (Why):** Sau khi hoàn thành loạt 3 task về Presets, Pydantic Schema và REST API (CFG-08, CFG-09, CFG-10), hệ thống backend đã bổ sung nhiều endpoint và thay đổi cách resolve cấu hình của Job.
   1. Nếu endpoint `POST /api/studio/processing/suggest` trả về sai kiểu dữ liệu hoặc thiếu trường `evaluation`, frontend sẽ crash ngay khi người dùng bấm vào bất kỳ ô wizard nào.

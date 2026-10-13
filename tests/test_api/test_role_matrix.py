@@ -21,6 +21,7 @@ PUBLIC = {
     ("POST", "/auth/register"),
     ("POST", "/auth/register/guest"),
     ("POST", "/processing/evaluate"),
+    ("POST", "/processing/suggest"),
     ("GET", "/processing/options"),
     ("GET", "/samples"),
     ("GET", "/samples/{sample_id}"),
@@ -47,6 +48,8 @@ AUTHENTICATED = {
     ("POST", "/imports"),
     ("DELETE", "/imports/{import_id}"),
     ("GET", "/imports/{import_id}"),
+    ("PATCH", "/imports/{import_id}/camera"),
+    ("DELETE", "/imports/{import_id}/camera"),
     ("POST", "/imports/{import_id}/cancel"),
     ("GET", "/imports/{import_id}/content/{filename}"),
     ("POST", "/imports/{import_id}/retry"),
@@ -139,6 +142,7 @@ AUTHENTICATED = {
     ("POST", "/trash/restore"),
     ("GET", "/uploads"),
     ("POST", "/uploads"),
+    ("POST", "/uploads/temporary/{action}"),
     ("GET", "/uploads/config"),
     ("POST", "/uploads/direct"),
     ("GET", "/uploads/direct/{upload_id}"),
@@ -221,6 +225,7 @@ def test_mutating_routes_are_never_public_except_login_flow_and_stateless_calcul
         ("POST", "/auth/register"),
         ("POST", "/auth/register/guest"),
         ("POST", "/processing/evaluate"),
+        ("POST", "/processing/suggest"),
     }
     mutating = {route for route in PUBLIC if route[0] in {"POST", "PUT", "PATCH", "DELETE"}}
     assert mutating == allowed

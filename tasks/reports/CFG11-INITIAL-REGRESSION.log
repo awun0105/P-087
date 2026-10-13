@@ -1,0 +1,50 @@
+........................................................................ [  5%]
+........................................................................ [ 11%]
+........................................................................ [ 17%]
+........................................................................ [ 22%]
+........................................................................ [ 28%]
+........................................................................ [ 34%]
+........................................................................ [ 39%]
+........................................................................ [ 45%]
+........................................................................ [ 51%]
+........................................................................ [ 56%]
+........................................................................ [ 62%]
+........................................................................ [ 68%]
+........................................................................ [ 73%]
+........................................................................ [ 79%]
+........................................................................ [ 85%]
+...........................................F............................ [ 90%]
+........................................................................ [ 96%]
+.............................................                            [100%]
+=================================== FAILURES ===================================
+_________________ test_every_route_is_classified_exactly_once __________________
+
+    def test_every_route_is_classified_exactly_once() -> None:
+        groups = {"PUBLIC": PUBLIC, "AUTHENTICATED": AUTHENTICATED, "REVIEWER": REVIEWER}
+        declared = [route for routes in groups.values() for route in routes]
+        assert len(declared) == len(set(declared)), "route nằm trong nhiều nhóm"
+        actual = _actual()
+>       assert set(actual) == set(declared), {
+            "route mới chưa khai báo": sorted(set(actual) - set(declared)),
+            "khai báo nhưng không còn route": sorted(set(declared) - set(actual)),
+        }
+E       AssertionError: {'route mới chưa khai báo': [('DELETE', '/imports/{import_id}/camera'), ('PATCH', '/imports/{import_id}/camera'), ('POST', '/processing/suggest'), ('POST', '/uploads/temporary/{action}')], 'khai báo nhưng không còn route': []}
+E       assert {('DELETE', '...uth/me'), ...} == {('DELETE', '.../users'), ...}
+E
+E         Extra items in the left set:
+E         ('POST', '/uploads/temporary/{action}')
+E         ('PATCH', '/imports/{import_id}/camera')
+E         ('POST', '/processing/suggest')
+E         ('DELETE', '/imports/{import_id}/camera')
+E         Use -v to get more diff
+
+tests/test_api/test_role_matrix.py:196: AssertionError
+=============================== warnings summary ===============================
+tests/test_api/test_error_view.py: 15 warnings
+  /home/lqaq/PROJECT/AI20K/P-087/.venv/lib/python3.12/site-packages/httpx/_client.py:1768: DeprecationWarning: Setting per-request cookies=<...> is being deprecated, because the expected behaviour on cookie persistence is ambiguous. Set cookies directly on the client instance instead.
+    return await self.request(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_api/test_role_matrix.py::test_every_route_is_classified_exactly_once
+1 failed, 1268 passed, 15 warnings in 157.42s (0:02:37)

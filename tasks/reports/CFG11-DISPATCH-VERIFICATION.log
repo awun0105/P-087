@@ -1,0 +1,23 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.1.1, pluggy-1.6.0 -- /home/lqaq/PROJECT/AI20K/P-087/.venv/bin/python3
+cachedir: .pytest_cache
+rootdir: /home/lqaq/PROJECT/AI20K/P-087
+plugins: langsmith-0.14.0, anyio-4.15.1, asyncio-1.4.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 13 items
+
+tests/test_orchestration/test_processing_presets_schema.py::test_sealed_job_controls_are_verified_before_downstream_consumption PASSED [  7%]
+tests/test_orchestration/test_processing_presets_schema.py::test_legacy_job_without_processing_artifact_keeps_deployment_defaults PASSED [ 15%]
+tests/test_orchestration/test_processing_presets_schema.py::test_every_preset_reaches_dispatch_with_all_six_groups[minimum_quality] PASSED [ 23%]
+tests/test_orchestration/test_processing_presets_schema.py::test_every_preset_reaches_dispatch_with_all_six_groups[maximum] PASSED [ 30%]
+tests/test_orchestration/test_processing_presets_schema.py::test_every_preset_reaches_dispatch_with_all_six_groups[video_indoor_walkthrough] PASSED [ 38%]
+tests/test_orchestration/test_processing_presets_schema.py::test_every_preset_reaches_dispatch_with_all_six_groups[video_indoor_orbital_360] PASSED [ 46%]
+tests/test_orchestration/test_processing_presets_schema.py::test_every_preset_reaches_dispatch_with_all_six_groups[video_single_object] PASSED [ 53%]
+tests/test_orchestration/test_processing_presets_schema.py::test_every_preset_reaches_dispatch_with_all_six_groups[video_outdoor_forward] PASSED [ 61%]
+tests/test_orchestration/test_processing_presets_schema.py::test_every_preset_reaches_dispatch_with_all_six_groups[photo_collection_indoor] PASSED [ 69%]
+tests/test_orchestration/test_processing_presets_schema.py::test_every_preset_reaches_dispatch_with_all_six_groups[photo_collection_outdoor] PASSED [ 76%]
+tests/test_orchestration/test_processing_presets_schema.py::test_pre_extension_job_dispatch_preserves_empty_new_groups PASSED [ 84%]
+tests/test_orchestration/test_processing_presets_schema.py::test_legacy_profile_file_dispatch_keeps_independent_empty_groups PASSED [ 92%]
+tests/test_orchestration/test_processing_presets_schema.py::test_sealed_scene_and_simulation_controls_reach_consumers PASSED [100%]
+
+============================== 13 passed in 0.14s ==============================
