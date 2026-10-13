@@ -1,8 +1,8 @@
 """Bản demo của scene.
 
-Hai việc khác nhau:
-- **Mốc gốc** (`/demo/baseline`, `/demo/reset`): đánh dấu mốc (Reviewer) rồi khôi phục scene về mốc đó (Editor). Khôi
-  phục tạo revision SceneIR mới mang nội dung của mốc gốc; không chạy lại bước xử lý nào.
+Ba thao tác riêng:
+- **Trạng thái đã lưu** (`/demo/baseline`, `/demo/reset`): Reviewer lưu scene hiện tại; Editor quay lại trạng thái đó.
+- **Bản gốc** (`/demo/restore-root`): quay về revision đầu tiên cố định, giữ nguyên trạng thái đã lưu và lịch sử.
 - **Đặt làm bản demo** (`/demo/publish`): Reviewer xuất scene vào thư viện mẫu (`PRODUCT_DEMO_DIR`), nơi `/new/try-demo`
   đọc. Thư viện mẫu công khai, nên chỉ xuất khi project đã xác nhận quyền sử dụng và ẩn danh, và Reviewer xác nhận.
 """
@@ -27,7 +27,7 @@ from src.services.orchestration.samples.export import (
     publish_job_bundle,
     published_sample_id,
 )
-from src.services.orchestration.scene.demo import DemoState, clear_demo, demo_state, mark_demo, reset_demo
+from src.services.orchestration.scene.demo import DemoState, clear_demo, demo_state, mark_demo, reset_demo, restore_root
 from src.services.orchestration.scene.errors import (
     SceneError,
     SceneNotAvailableError,
@@ -46,7 +46,7 @@ class DemoResetRequest(BaseModel):
 
 
 class DemoStateResponse(DemoState):
-    """Trạng thái mốc gốc kèm mẫu tương ứng trong thư viện mẫu (None = chưa xuất)."""
+    """Trạng thái đã lưu và bản gốc kèm mẫu tương ứng trong thư viện mẫu."""
 
     published_sample_id: str | None = None
 
@@ -103,13 +103,13 @@ def _run(job_id: str, action: str, operation: Callable[[ProjectRegistry, str], D
 
 @router.get("/jobs/{job_id}/demo", response_model=DemoStateResponse)
 def get_demo_state(job_id: str) -> DemoStateResponse:
-    """Scene có mốc gốc không, có đang đúng mốc gốc không và đã có trong thư viện mẫu chưa."""
+    """Trạng thái đã lưu, bản gốc và mẫu đã xuất của scene."""
     return _with_publication(_run(job_id, "đọc trạng thái demo", demo_state), job_id)
 
 
 @router.post("/jobs/{job_id}/demo/baseline", response_model=DemoStateResponse)
 def post_demo_baseline(job_id: str, user: UserRecord | None = Depends(auth.require_reviewer)) -> DemoStateResponse:
-    """Lấy revision hiện tại làm bản demo gốc (chỉ Reviewer)."""
+    """Lưu trạng thái hiện tại, thay thế trạng thái đã lưu trước đó (chỉ Reviewer)."""
     state = _run(job_id, "đánh dấu bản demo", lambda registry, job: mark_demo(registry, job, actor_of(user)))
     if user is not None:
         auth.auth_service().audit(user.user_id, "demo.mark", job_id, {"scene_revision": state.current_revision})
@@ -118,7 +118,7 @@ def post_demo_baseline(job_id: str, user: UserRecord | None = Depends(auth.requi
 
 @router.delete("/jobs/{job_id}/demo/baseline", response_model=DemoStateResponse)
 def delete_demo_baseline(job_id: str, user: UserRecord | None = Depends(auth.require_reviewer)) -> DemoStateResponse:
-    """Bỏ đánh dấu bản demo (chỉ Reviewer); nội dung scene giữ nguyên."""
+    """Bỏ trạng thái đã lưu (chỉ Reviewer); nội dung scene giữ nguyên."""
     state = _run(job_id, "bỏ đánh dấu bản demo", clear_demo)
     if user is not None:
         auth.auth_service().audit(user.user_id, "demo.clear", job_id, {})
@@ -129,13 +129,27 @@ def delete_demo_baseline(job_id: str, user: UserRecord | None = Depends(auth.req
 def post_demo_reset(
     job_id: str, request: DemoResetRequest, user: UserRecord | None = Depends(require_contributor)
 ) -> DemoStateResponse:
-    """Khôi phục scene về bản demo gốc bằng một revision mới."""
+    """Quay lại trạng thái đã lưu bằng một revision mới."""
     authorize_job_mutation(user, deps.registry(), job_id, operation="khôi phục bản demo của")
     state = _run(
         job_id, "khôi phục bản demo", lambda registry, job: reset_demo(registry, job, request.expected_scene_revision)
     )
     if user is not None:
         auth.auth_service().audit(user.user_id, "demo.reset", job_id, {"scene_revision": state.current_revision})
+    return _with_publication(state, job_id)
+
+
+@router.post("/jobs/{job_id}/demo/restore-root", response_model=DemoStateResponse)
+def post_demo_restore_root(
+    job_id: str, request: DemoResetRequest, user: UserRecord | None = Depends(require_contributor)
+) -> DemoStateResponse:
+    """Khôi phục scene về bản gốc ban đầu (rev-001) bằng một revision mới."""
+    authorize_job_mutation(user, deps.registry(), job_id, operation="khôi phục bản gốc của")
+    state = _run(
+        job_id, "khôi phục bản gốc", lambda registry, job: restore_root(registry, job, request.expected_scene_revision)
+    )
+    if user is not None:
+        auth.auth_service().audit(user.user_id, "demo.restore_root", job_id, {"scene_revision": state.current_revision})
     return _with_publication(state, job_id)
 
 

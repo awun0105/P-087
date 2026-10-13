@@ -93,6 +93,15 @@ export async function resetDemo(jobId: string, expectedRevision: string): Promis
   }));
 }
 
+/** Đưa scene về bản gốc ban đầu (rev-001) bằng một revision mới; `expectedRevision` là revision đang thấy trên màn hình. */
+export async function restoreRoot(jobId: string, expectedRevision: string): Promise<DemoState> {
+  return parseDemoState(await apiFetch<unknown>(`/api/v1/jobs/${encodeURIComponent(jobId)}/demo/restore-root`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ expected_scene_revision: expectedRevision }),
+  }));
+}
+
 /** Kết quả xem được của từng bước (frame, camera, 3DGS, collision mesh). */
 export async function getStageViews(jobId: string, signal?: AbortSignal): Promise<StageView[]> {
   const data = await apiFetch<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/stage-views`, { signal });

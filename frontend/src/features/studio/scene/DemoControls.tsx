@@ -1,6 +1,6 @@
 "use client";
 
-import { Bookmark, BookmarkX, Clapperboard, Loader2, RotateCcw } from "lucide-react";
+import { Bookmark, BookmarkX, Clapperboard, History, Loader2, RotateCcw } from "lucide-react";
 import { useCallback, useEffect, useId, useState } from "react";
 
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/shadcn/dialog";
@@ -8,15 +8,15 @@ import { notifySuccess } from "@/components/studio/feedback";
 import { Badge, Button, buttonVariants } from "@/components/studio/primitives";
 import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
 import { useAuth } from "@/features/studio/AuthProvider";
-import { canDecideReview, isReviewer } from "@/lib/api/auth";
-import { clearDemo, getDemoState, markDemo, publishDemo, resetDemo } from "@/lib/api/studio";
+import { canDecideReview, canEdit, isReviewer } from "@/lib/api/auth";
+import { clearDemo, getDemoState, markDemo, publishDemo, resetDemo, restoreRoot } from "@/lib/api/studio";
 import type { DemoState } from "@/lib/contracts/studio";
 import { errorMessage } from "@/lib/ui-error";
 
 /**
  * Hai việc khác nhau trên header scene, tách rõ để khỏi nhầm:
  *
- * - **Mốc gốc** (ai cũng khôi phục được, Reviewer đặt/bỏ): lưu revision hiện tại để sau khi chỉnh sửa có thể đưa scene
+ * - **Trạng thái đã lưu** (Reviewer lưu/bỏ): lưu revision hiện tại để sau khi chỉnh sửa có thể đưa scene
  *   về đúng lúc đó. Khôi phục tạo revision mới (lịch sử còn nguyên), không chạy lại bước xử lý nào.
  * - **Đặt làm bản demo** (chỉ Reviewer): xuất scene vào thư viện mẫu để mọi người xem ở `/new/try-demo`. Thư viện mẫu
  *   công khai nên hộp thoại đòi Reviewer xác nhận được công khai; backend còn kiểm lời khai quyền sử dụng và ẩn danh.
@@ -40,6 +40,7 @@ export function DemoControls({
 }) {
   const { me } = useAuth();
   const reviewer = isReviewer(me);
+  const editable = canEdit(me);
   // Xuất vào thư viện công khai luôn cần phiên Reviewer thật (backend từ chối nếu tắt đăng nhập).
   const canPublish = canDecideReview(me);
   const [state, setState] = useState<DemoState | null>(null);
@@ -77,35 +78,48 @@ export function DemoControls({
   const baseline = state.baseline;
   const publishedId = state.published_sample_id ?? null;
   // Scene thường và người xem không phải Reviewer: không có gì về bản demo để hiện.
-  if (!baseline && !publishedId && !reviewer) return null;
+  if (!baseline && !publishedId && !editable) return null;
   async function restore() {
     if (!state?.current_revision) return;
-    if (!window.confirm("Đưa scene về mốc gốc? Mọi chỉnh sửa sau mốc gốc vẫn nằm trong lịch sử revision; không bước xử lý nào chạy lại.")) return;
-    const next = await run(() => resetDemo(jobId, state.current_revision!), "Đã khôi phục về mốc gốc.");
+    if (!window.confirm("Quay lại trạng thái đã lưu?")) return;
+    const next = await run(() => resetDemo(jobId, state.current_revision!), "Đã quay lại trạng thái đã lưu.");
+    if (next?.current_revision) onRestored(next.current_revision);
+  }
+  async function restoreOriginal() {
+    if (!state?.current_revision) return;
+    if (!window.confirm("Về bản gốc lúc scene được tạo xong? Trạng thái đã lưu vẫn được giữ để bạn quay lại.")) return;
+    const next = await run(() => restoreRoot(jobId, state.current_revision!), "Đã khôi phục về bản gốc ban đầu.");
     if (next?.current_revision) onRestored(next.current_revision);
   }
   return (
     <div className="flex flex-wrap items-center gap-2">
-      {baseline && <Badge tone="neutral" title={`Mốc gốc: ${baseline.scene_revision}`}>Có mốc gốc</Badge>}
-      {baseline && (
-        <Button size="sm" variant="secondary" disabled={busy || state.at_baseline} onClick={() => void restore()}
-          title={state.at_baseline ? "Scene đang đúng mốc gốc." : "Đưa scene về đúng lúc được đặt mốc gốc."}>
-          <RotateCcw aria-hidden />
-          {state.at_baseline ? "Đang ở mốc gốc" : "Khôi phục về mốc gốc"}
+      {baseline && <Badge tone="neutral" title={`Trạng thái đã lưu: ${baseline.scene_revision}`}>Có trạng thái đã lưu</Badge>}
+      {reviewer && (
+        <Button size="sm" variant="ghost" disabled={busy} onClick={() => void run(() => markDemo(jobId), "Đã lưu trạng thái scene hiện tại.")}
+          title={baseline ? "Lưu scene hiện tại, thay thế trạng thái đã lưu trước đó." : "Lưu trạng thái hiện tại để quay lại về sau."}>
+          <Bookmark aria-hidden />
+          Lưu trạng thái
         </Button>
       )}
-      {reviewer && !baseline && (
-        <Button size="sm" variant="ghost" disabled={busy} onClick={() => void run(() => markDemo(jobId), "Đã đặt mốc gốc cho scene.")}
-          title="Lưu trạng thái hiện tại của scene làm mốc để khôi phục về sau.">
-          <Bookmark aria-hidden />
-          Đặt mốc gốc
+      {editable && (
+        <Button size="sm" variant="ghost" disabled={busy || Boolean(state.at_root)} onClick={() => void restoreOriginal()}
+          title={state.at_root ? "Scene đang ở bản gốc ban đầu." : "Về bản gốc lúc scene được tạo xong; giữ nguyên trạng thái đã lưu."}>
+          <History aria-hidden />
+          Về bản gốc
+        </Button>
+      )}
+      {baseline && editable && (
+        <Button size="sm" variant="secondary" disabled={busy || state.at_baseline} onClick={() => void restore()}
+          title={state.at_baseline ? "Scene đang ở trạng thái đã lưu." : "Đưa scene về trạng thái bạn đã lưu."}>
+          <RotateCcw aria-hidden />
+          Quay lại trạng thái đã lưu
         </Button>
       )}
       {reviewer && baseline && (
         <Button size="sm" variant="ghost" disabled={busy}
-          onClick={() => { if (window.confirm("Bỏ mốc gốc? Nội dung scene giữ nguyên.")) void run(() => clearDemo(jobId), "Đã bỏ mốc gốc."); }}>
+          onClick={() => { if (window.confirm("Bỏ trạng thái đã lưu?")) void run(() => clearDemo(jobId), "Đã bỏ trạng thái đã lưu."); }}>
           <BookmarkX aria-hidden />
-          Bỏ mốc gốc
+          Bỏ trạng thái đã lưu
         </Button>
       )}
       {publishedId ? (

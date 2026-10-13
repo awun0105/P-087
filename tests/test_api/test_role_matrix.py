@@ -72,6 +72,7 @@ AUTHENTICATED = {
     ("GET", "/jobs/{job_id}/attempts"),
     ("GET", "/jobs/{job_id}/demo"),
     ("POST", "/jobs/{job_id}/demo/reset"),
+    ("POST", "/jobs/{job_id}/demo/restore-root"),
     ("GET", "/jobs/{job_id}/evaluation"),
     ("GET", "/jobs/{job_id}/evaluation/report.md"),
     ("GET", "/jobs/{job_id}/lidar-overlay"),

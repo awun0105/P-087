@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DemoControls } from "@/features/studio/scene/DemoControls";
-import { clearDemo, getDemoState, markDemo, publishDemo, resetDemo } from "@/lib/api/studio";
+import { clearDemo, getDemoState, markDemo, publishDemo, resetDemo, restoreRoot } from "@/lib/api/studio";
 import type { DemoState } from "@/lib/contracts/studio";
 
 const auth: { me: { auth_required: boolean; user: { user_id: string; display_name: string; role: string } | null } } = {
@@ -11,12 +11,12 @@ const auth: { me: { auth_required: boolean; user: { user_id: string; display_nam
 };
 vi.mock("@/features/studio/AuthProvider", () => ({ useAuth: () => auth }));
 vi.mock("@/lib/api/studio", () => ({
-  getDemoState: vi.fn(), markDemo: vi.fn(), clearDemo: vi.fn(), resetDemo: vi.fn(), publishDemo: vi.fn(),
+  getDemoState: vi.fn(), markDemo: vi.fn(), clearDemo: vi.fn(), resetDemo: vi.fn(), restoreRoot: vi.fn(), publishDemo: vi.fn(),
 }));
 
 const baseline = { job_id: "job-a", scene_revision: "rev-001", marked_at: "2026-10-03T00:00:00Z" };
-function demo(current: string, atBaseline: boolean, marked = true, published: string | null = null): DemoState {
-  return { job_id: "job-a", baseline: marked ? baseline : null, current_revision: current, at_baseline: atBaseline, published_sample_id: published };
+function demo(current: string, atBaseline: boolean, marked = true, published: string | null = null, atRoot = false): DemoState {
+  return { job_id: "job-a", baseline: marked ? baseline : null, current_revision: current, at_baseline: atBaseline, at_root: atRoot, published_sample_id: published };
 }
 
 beforeEach(() => {
@@ -26,11 +26,12 @@ beforeEach(() => {
 });
 
 describe("DemoControls: mốc gốc", () => {
-  it("scene chưa có mốc gốc và chưa xuất: Editor không thấy gì", async () => {
+  it("Editor có thể về bản gốc ngay cả khi chưa lưu trạng thái", async () => {
     vi.mocked(getDemoState).mockResolvedValue(demo("rev-002", false, false));
-    const { container } = render(<DemoControls jobId="job-a" revision="rev-002" sceneReady onRestored={vi.fn()} />);
+    render(<DemoControls jobId="job-a" revision="rev-002" sceneReady onRestored={vi.fn()} />);
     await waitFor(() => expect(getDemoState).toHaveBeenCalled());
-    expect(container).toBeEmptyDOMElement();
+    expect(await screen.findByRole("button", { name: "Về bản gốc" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Lưu trạng thái" })).toBeNull();
   });
 
   it("khôi phục gửi revision đang thấy và báo revision mới cho Studio", async () => {
@@ -38,11 +39,11 @@ describe("DemoControls: mốc gốc", () => {
     vi.mocked(resetDemo).mockResolvedValue(demo("rev-005", true));
     const restored = vi.fn();
     render(<DemoControls jobId="job-a" revision="rev-004" sceneReady onRestored={restored} />);
-    expect(await screen.findByText("Có mốc gốc")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Khôi phục về mốc gốc" }));
+    expect(await screen.findByText("Có trạng thái đã lưu")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Quay lại trạng thái đã lưu" }));
     await waitFor(() => expect(restored).toHaveBeenCalledWith("rev-005"));
     expect(resetDemo).toHaveBeenCalledWith("job-a", "rev-004");
-    expect(screen.getByRole("button", { name: "Đang ở mốc gốc" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Quay lại trạng thái đã lưu" })).toBeDisabled();
   });
 
   it("Reviewer đặt và bỏ mốc gốc; Editor không có hai nút này", async () => {
@@ -51,15 +52,56 @@ describe("DemoControls: mốc gốc", () => {
     vi.mocked(markDemo).mockResolvedValue(demo("rev-002", true));
     vi.mocked(clearDemo).mockResolvedValue(demo("rev-002", false, false));
     render(<DemoControls jobId="job-a" revision="rev-002" sceneReady onRestored={vi.fn()} />);
-    fireEvent.click(await screen.findByRole("button", { name: "Đặt mốc gốc" }));
-    expect(await screen.findByRole("button", { name: "Bỏ mốc gốc" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Bỏ mốc gốc" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Lưu trạng thái" }));
+    expect(await screen.findByRole("button", { name: "Bỏ trạng thái đã lưu" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Bỏ trạng thái đã lưu" }));
     await waitFor(() => expect(clearDemo).toHaveBeenCalledWith("job-a"));
+  });
+
+  it("Reviewer thấy nút 'Về bản gốc' kế nút 'Lưu trạng thái', bấm về bản gốc gọi restoreRoot", async () => {
+    auth.me = { auth_required: true, user: { user_id: "u1", display_name: "Reviewer", role: "reviewer" } };
+    vi.mocked(getDemoState).mockResolvedValue(demo("rev-002", false, false, null, false));
+    vi.mocked(restoreRoot).mockResolvedValue(demo("rev-003", false, false, null, true));
+    const restored = vi.fn();
+    render(<DemoControls jobId="job-a" revision="rev-002" sceneReady onRestored={restored} />);
+    expect(await screen.findByRole("button", { name: "Lưu trạng thái" })).toBeInTheDocument();
+    const btnRoot = screen.getByRole("button", { name: "Về bản gốc" });
+    expect(btnRoot).toBeInTheDocument();
+    fireEvent.click(btnRoot);
+    await waitFor(() => expect(restoreRoot).toHaveBeenCalledWith("job-a", "rev-002"));
+    expect(restored).toHaveBeenCalledWith("rev-003");
+  });
+
+  it("khi đang ở bản gốc (at_root=true), nút Về bản gốc chuyển thành Về bản gốc và bị disable, nhưng có mốc đã lưu thì Quay lại trạng thái đã lưu vẫn bấm được", async () => {
+    vi.mocked(getDemoState).mockResolvedValue(demo("rev-003", false, true, null, true));
+    vi.mocked(resetDemo).mockResolvedValue(demo("rev-004", true, true, null, false));
+    const restored = vi.fn();
+    render(<DemoControls jobId="job-a" revision="rev-003" sceneReady onRestored={restored} />);
+    expect(await screen.findByText("Có trạng thái đã lưu")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Về bản gốc" })).toBeDisabled();
+    const btnRestoreBaseline = screen.getByRole("button", { name: "Quay lại trạng thái đã lưu" });
+    expect(btnRestoreBaseline).not.toBeDisabled();
+    fireEvent.click(btnRestoreBaseline);
+    await waitFor(() => expect(resetDemo).toHaveBeenCalledWith("job-a", "rev-003"));
+    expect(restored).toHaveBeenCalledWith("rev-004");
   });
 
   it("scene chưa dựng xong thì không hỏi trạng thái demo", () => {
     render(<DemoControls jobId="job-a" revision={null} sceneReady={false} onRestored={vi.fn()} />);
     expect(getDemoState).not.toHaveBeenCalled();
+  });
+
+  it("Reviewer can replace a saved state while viewing the original", async () => {
+    auth.me = { auth_required: true, user: { user_id: "u1", display_name: "Reviewer", role: "reviewer" } };
+    vi.mocked(getDemoState).mockResolvedValue(demo("rev-003", false, true, null, true));
+    vi.mocked(markDemo).mockResolvedValue(demo("rev-003", true, true, null, true));
+    render(<DemoControls jobId="job-a" revision="rev-003" sceneReady onRestored={vi.fn()} />);
+    const save = await screen.findByRole("button", { name: "Lưu trạng thái" });
+    expect(save).not.toBeDisabled();
+    fireEvent.click(save);
+    await waitFor(() => expect(markDemo).toHaveBeenCalledWith("job-a"));
+    expect(screen.getByRole("button", { name: "Quay lại trạng thái đã lưu" })).toBeDisabled();
+    expect(restoreRoot).not.toHaveBeenCalled();
   });
 });
 
@@ -103,7 +145,8 @@ describe("DemoControls: Đặt làm bản demo = xuất vào thư viện mẫu",
     vi.mocked(getDemoState).mockResolvedValue(demo("rev-002", false, false));
     const first = render(<DemoControls jobId="job-a" revision="rev-002" sceneReady onRestored={vi.fn()} />);
     await waitFor(() => expect(getDemoState).toHaveBeenCalled());
-    expect(first.container).toBeEmptyDOMElement();
+    expect(await screen.findByRole("button", { name: "Về bản gốc" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Đặt làm bản demo" })).toBeNull();
     first.unmount();
 
     vi.mocked(getDemoState).mockResolvedValue(demo("rev-002", false, false, "kho-a-1234"));
@@ -116,7 +159,7 @@ describe("DemoControls: Đặt làm bản demo = xuất vào thư viện mẫu",
     auth.me = { auth_required: false, user: null };
     vi.mocked(getDemoState).mockResolvedValue(demo("rev-002", false, false));
     render(<DemoControls jobId="job-a" revision="rev-002" sceneReady onRestored={vi.fn()} />);
-    expect(await screen.findByRole("button", { name: "Đặt mốc gốc" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Lưu trạng thái" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Đặt làm bản demo" })).toBeNull();
   });
 

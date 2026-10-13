@@ -116,6 +116,8 @@ export interface DemoState {
   baseline: DemoBaseline | null;
   current_revision: string | null;
   at_baseline: boolean;
+  /** True khi nội dung scene hiện tại trùng với bản gốc ban đầu (rev-001). */
+  at_root?: boolean;
   /** ID mẫu trong thư viện mẫu đã được xuất từ job này; null/vắng = chưa xuất (API cũ không gửi). */
   published_sample_id?: string | null;
 }
@@ -132,6 +134,7 @@ export function parseDemoState(value: unknown): DemoState {
   if (!(value.current_revision === null || typeof value.current_revision === "string")) throw invalid();
   const baseline = value.baseline;
   if (baseline !== null && !(isRecord(baseline) && typeof baseline.scene_revision === "string" && typeof baseline.job_id === "string")) throw invalid();
+  if (value.at_root !== undefined && typeof value.at_root !== "boolean") throw invalid();
   if (value.published_sample_id !== undefined && !(value.published_sample_id === null || typeof value.published_sample_id === "string")) throw invalid();
   return value as unknown as DemoState;
 }

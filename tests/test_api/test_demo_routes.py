@@ -254,3 +254,73 @@ async def test_publish_maps_export_failures_to_clear_conflicts(
     assert list(library.iterdir()) == []
     missing = await client.post("/api/v1/jobs/job-nope/demo/publish", json={"confirm_public": True})
     assert missing.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_restore_root_and_reset_interaction(client, isolated_registry) -> None:
+    original = isolated_registry.scene.current("job-fixture-001")
+    original_path = isolated_registry.runtime_resolver.require(original.scene_reference)
+    original_bytes = original_path.read_bytes()
+    # 1. Ban đầu ở rev-001: at_root là True, at_baseline là False vì chưa đặt mốc.
+    initial = (await client.get(f"{_JOB}/demo")).json()
+    assert initial["current_revision"] == "rev-001"
+    assert initial["at_root"] is True
+    assert initial["at_baseline"] is False
+
+    # 2. Xoá pallet -> rev-002, rồi đặt mốc gốc tại rev-002.
+    deleted = await client.post(f"{_JOB}/scene/objects/{_PALLET}/delete", json={"expected_scene_revision": "rev-001"})
+    assert deleted.status_code == 201
+    marked = (await client.post(f"{_JOB}/demo/baseline")).json()
+    assert marked["baseline"]["scene_revision"] == "rev-002"
+    assert marked["at_baseline"] is True
+    assert marked["at_root"] is False
+
+    # 3. Bấm "Về bản gốc" -> quay về rev-001 gốc (tạo rev-003 mang nội dung rev-001).
+    restored_root = await client.post(f"{_JOB}/demo/restore-root", json={"expected_scene_revision": "rev-002"})
+    assert restored_root.status_code == 200
+    body_root = restored_root.json()
+    assert body_root["current_revision"] == "rev-003"
+    assert body_root["at_root"] is True
+    assert body_root["at_baseline"] is False  # Mốc đã đặt ở rev-002, hiện đang ở bản gốc nên at_baseline=False!
+
+    # Kiểm tra pallet đã active trở lại trong scene ở rev-003 (bản gốc)
+    scene_v3 = isolated_registry.scene.current("job-fixture-001").scene
+    pallet_v3 = next(item for item in scene_v3.objects if item.id == _PALLET)
+    assert pallet_v3.active is True
+
+    # Đang ở bản gốc mà bấm về bản gốc tiếp thì không tạo revision thừa.
+    again_root = (await client.post(f"{_JOB}/demo/restore-root", json={"expected_scene_revision": "rev-003"})).json()
+    assert again_root["current_revision"] == "rev-003"
+
+    # 4. Khi đang ở bản gốc nhưng đã có mốc đã lưu: bấm "Khôi phục mốc" -> quay lại rev-002 (tạo rev-004).
+    restored_baseline = await client.post(f"{_JOB}/demo/reset", json={"expected_scene_revision": "rev-003"})
+    assert restored_baseline.status_code == 200
+    body_baseline = restored_baseline.json()
+    assert body_baseline["current_revision"] == "rev-004"
+    assert body_baseline["at_baseline"] is True
+    assert body_baseline["at_root"] is False
+
+    # Pallet đã inactive (review=DELETED) theo đúng mốc đã lưu ở rev-002
+    scene_v4 = isolated_registry.scene.current("job-fixture-001").scene
+    pallet_v4 = next(item for item in scene_v4.objects if item.id == _PALLET)
+    assert pallet_v4.active is False and pallet_v4.provenance.get("review") == "DELETED"
+    assert body_baseline["baseline"]["scene_revision"] == "rev-002"
+
+    # Saving again replaces only the user snapshot; the original artifact stays byte-for-byte intact.
+    replaced = (await client.post(f"{_JOB}/demo/baseline")).json()
+    assert replaced["baseline"]["scene_revision"] == "rev-004"
+    root_again = await client.post(f"{_JOB}/demo/restore-root", json={"expected_scene_revision": "rev-004"})
+    assert root_again.status_code == 200
+    assert root_again.json()["at_root"] is True
+    assert root_again.json()["baseline"]["scene_revision"] == "rev-004"
+    saved_again = await client.post(f"{_JOB}/demo/reset", json={"expected_scene_revision": "rev-005"})
+    assert saved_again.status_code == 200 and saved_again.json()["at_baseline"] is True
+    assert original_path.read_bytes() == original_bytes
+
+
+@pytest.mark.asyncio
+async def test_restore_root_rejects_stale_revision_even_when_already_original(client) -> None:
+    response = await client.post(f"{_JOB}/demo/restore-root", json={"expected_scene_revision": "rev-099"})
+    assert response.status_code == 409
+    unchanged = (await client.get(f"{_JOB}/demo")).json()
+    assert unchanged["current_revision"] == "rev-001" and unchanged["at_root"] is True
