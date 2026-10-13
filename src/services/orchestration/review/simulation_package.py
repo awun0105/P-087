@@ -51,6 +51,7 @@ from src.models.contracts.scene import (
 )
 from src.models.contracts.validation import CandidatePackage, PreflightReport, RuleResult
 from src.services.orchestration.artifacts.errors import ArtifactStoreError
+from src.services.orchestration.processing.config import job_config_reference
 from src.services.orchestration.projects.registry import ProjectRegistry
 from src.services.reconstruction.adapters.lidar_collision import LidarCollisionBuildReport
 from src.services.reconstruction.lidar.collision_candidate_publisher import (
@@ -88,13 +89,15 @@ from src.services.simulation.usd.capabilities import (
     export_requirements,
     select_export_mode,
 )
+from src.services.simulation.usd.physics_config import physics_build_config
 from src.services.simulation.usd.usda import generate_mesh_layer_usda, generate_scene_usda
 
 logger = logging.getLogger(__name__)
 
 ENVIRONMENT_LAYER = "environment_collision.usda"
 BUILD_CONFIG = {
-    "builder": "real2sim-studio-simulation-package-v5-capability-gated",
+    **physics_build_config({}),
+    "builder": "real2sim-studio-simulation-package-v6-physics-config",
     "capability_contract": "usd-export-capabilities-v2",
     "requested_mode": "auto",
     "effective_mode": "legacy_box",
@@ -106,7 +109,8 @@ BUILD_CONFIG = {
     "object_collider": "exact_box_collider_dimensions_and_local_transform",
 }
 HYBRID_BUILD_CONFIG = {
-    "builder": "real2sim-studio-simulation-package-v5-capability-gated-hybrid",
+    **physics_build_config({}),
+    "builder": "real2sim-studio-simulation-package-v6-physics-config-hybrid",
     "capability_contract": "usd-export-capabilities-v2",
     "requested_mode": "auto",
     "effective_mode": "hybrid",
@@ -119,7 +123,7 @@ HYBRID_BUILD_CONFIG = {
     "object_visual": "per_object_gaussians_particlefield",
     "object_collider": "exact_aabb_obb_local_transform_or_validated_convex_parts",
     "object_asset": "checksum_sealed_usd_asset_relative_reference",
-    "object_physics": "authored_object_physics_without_export_defaults",
+    "object_physics": "authored_object_physics_with_global_material_fallback",
 }
 HYBRID_RUNNER = Path(__file__).resolve().parents[3] / "services/simulation/usd/hybrid_runner.py"
 
@@ -185,9 +189,29 @@ def _publish(registry: ProjectRegistry, reference: ProductArtifactRef, payload: 
     return registry.scene.store.publish(reference, payload)
 
 
-def current_package(registry: ProjectRegistry, job_id: str) -> SimulationPackage | None:
+def _job_simulation_config(registry: ProjectRegistry, job_id: str) -> dict[str, bool | float]:
+    """Read checksum-bound job controls; legacy jobs without an artifact retain defaults."""
+    job = registry.get_job(job_id)
+    reference = job_config_reference(job_id, job.config_checksum)
+    if registry.runtime_resolver.locate(reference.artifact_uri) is None:
+        return physics_build_config({})
+    payload = json.loads(registry.runtime_resolver.require(reference).read_bytes())
+    values = payload.get("simulation", {})
+    if not isinstance(values, dict):
+        raise ValueError("job simulation config must be an object")
+    return physics_build_config(values)
+
+
+def current_package(
+    registry: ProjectRegistry, job_id: str, *, simulation_config: dict[str, object] | None = None
+) -> SimulationPackage | None:
     """Gói của revision SceneIR hiện tại, nếu đã tạo."""
     scene = registry.scene.current(job_id).scene
+    controls = (
+        _job_simulation_config(registry, job_id)
+        if simulation_config is None
+        else physics_build_config(simulation_config)
+    )
     path = registry.runtime_resolver.locate(record_uri(job_id, scene.scene_revision))
     if path is None:
         return None
@@ -201,6 +225,7 @@ def current_package(registry: ProjectRegistry, job_id: str) -> SimulationPackage
         mode,
         background_identity,
         capability.runtime_version if mode == EffectiveExportMode.HYBRID else None,
+        controls,
     )
     return package if _cache_matches(package, scene, build_config, export_requirements(scene)) else None
 
@@ -422,9 +447,12 @@ def _selected_collision_source(registry: ProjectRegistry, scene: SceneIR) -> tup
         ) from error
 
 
-def _carved_environment(registry: ProjectRegistry, scene: SceneIR) -> CarvedBackground:
+def _carved_environment(
+    registry: ProjectRegistry, scene: SceneIR, *, margin_m: float = COLLISION_CARVE_MARGIN_M
+) -> CarvedBackground:
     """Resolve the selected collision source; edited object transforms never define carve regions."""
     source_ref, glb = _selected_collision_source(registry, scene)
+    margin_m = physics_build_config({"carve_margin_m": margin_m})["carve_margin_m"]
     source_checksum = f"sha256:{hashlib.sha256(glb).hexdigest()}"
     if source_checksum != source_ref.artifact_checksum:
         raise SourceCollisionOwnershipError("source collision bytes differ from selected geometry checksum")
@@ -493,7 +521,7 @@ def _carved_environment(registry: ProjectRegistry, scene: SceneIR) -> CarvedBack
         if dimensions is None:
             raise SourceCollisionOwnershipError(f"{owner.object_id}: source OBB dimensions are missing")
         box = CarveBox.from_transform(owner.source_transform, dimensions)
-        indices = np.flatnonzero(triangle_mask_in_box(centroids, box, BUILD_CONFIG["carve_margin_m"]))
+        indices = np.flatnonzero(triangle_mask_in_box(centroids, box, margin_m))
         regions.append((item, indices, False))
 
     carve_claim = np.zeros(triangle_count, dtype=bool)
@@ -521,7 +549,7 @@ def _carved_environment(registry: ProjectRegistry, scene: SceneIR) -> CarvedBack
             "algorithm": "source_geometry_checksum+removed_triangle_mask_v1",
             "source_geometry_checksum": source_checksum,
             "source_triangle_count": len(faces),
-            "carve_margin_m": BUILD_CONFIG["carve_margin_m"],
+            "carve_margin_m": margin_m,
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -558,6 +586,8 @@ def _hybrid_layers(
     output: Path,
     background: CarvedBackground,
     python: Path | None,
+    *,
+    simulation_config: dict[str, object] | None = None,
 ) -> dict[str, bytes] | None:
     """Dựng USD lai cho scene theo vật; None chỉ khi caller không chọn builder lai.
 
@@ -618,7 +648,7 @@ def _hybrid_layers(
         )
     request = {
         "output_dir": str(output / "hybrid"),
-        "ground_plane": True,
+        **physics_build_config(simulation_config or {}),
         "collision_background_identity": background.identity,
         "environment": {
             "gaussians_ply": (
@@ -761,11 +791,13 @@ def _package_build_config(
     mode: EffectiveExportMode,
     background_identity: str,
     runtime_version: str | None,
+    simulation_config: dict[str, object] | None = None,
 ) -> dict[str, Any]:
     """Bind package identity to mode, builder/runtime contract, and carved source mesh."""
     base = HYBRID_BUILD_CONFIG if mode == EffectiveExportMode.HYBRID else BUILD_CONFIG
     return {
         **base,
+        **physics_build_config(simulation_config or {}),
         "runtime_usd_version": runtime_version if mode == EffectiveExportMode.HYBRID else None,
         "collision_background_identity": background_identity,
     }
@@ -805,16 +837,23 @@ def _cache_matches(
     return manifest.build_config_checksum == _compute_config_checksum(build_config)
 
 
-def build_simulation_package(registry: ProjectRegistry, job_id: str) -> SimulationPackage:
+def build_simulation_package(
+    registry: ProjectRegistry, job_id: str, *, simulation_config: dict[str, object] | None = None
+) -> SimulationPackage:
     """Tạo (hoặc trả lại) gói mô phỏng của revision SceneIR hiện tại."""
     current = registry.scene.current(job_id)
     scene, recovered_ownership = _recover_legacy_source_ownership(registry, job_id, current.scene)
     job = registry.get_job(job_id)
-    background = _carved_environment(registry, scene)
+    controls = (
+        _job_simulation_config(registry, job_id)
+        if simulation_config is None
+        else physics_build_config(simulation_config)
+    )
+    background = _carved_environment(registry, scene, margin_m=controls["carve_margin_m"])
 
     # A cache hit is valid only for the exact requested mode, capability contract,
     # runtime version, source collision identity and current SceneIR requirements.
-    existing = current_package(registry, job_id)
+    existing = current_package(registry, job_id, simulation_config=controls)
     current_requirements = export_requirements(scene)
     current_mode = select_export_mode(current_requirements)
     cached_capability = existing.export_capability if existing is not None else None
@@ -823,7 +862,7 @@ def build_simulation_package(registry: ProjectRegistry, job_id: str) -> Simulati
         and cached_capability.runtime_qualification == RuntimeQualificationStatus.QUALIFIED
     )
     current_runtime_version = cached_capability.runtime_version if cached_capability is not None else None
-    current_build_config = _package_build_config(current_mode, background.identity, current_runtime_version)
+    current_build_config = _package_build_config(current_mode, background.identity, current_runtime_version, controls)
     current_capability = assess_export_capabilities(
         scene,
         runtime_qualified=current_runtime_ok,
@@ -846,7 +885,7 @@ def build_simulation_package(registry: ProjectRegistry, job_id: str) -> Simulati
     runtime_qualified, runtime_version = (
         _qualify_hybrid_runtime(hybrid_python) if mode == EffectiveExportMode.HYBRID else (False, None)
     )
-    build_config = _package_build_config(mode, background.identity, runtime_version)
+    build_config = _package_build_config(mode, background.identity, runtime_version, controls)
 
     enriched = enrich_scene_physics(
         scene,
@@ -934,14 +973,14 @@ def build_simulation_package(registry: ProjectRegistry, job_id: str) -> Simulati
         output = Path(directory)
         try:
             hybrid = (
-                _hybrid_layers(registry, enriched, output, background, hybrid_python)
+                _hybrid_layers(registry, enriched, output, background, hybrid_python, simulation_config=controls)
                 if mode == EffectiveExportMode.HYBRID
                 else None
             )
             if mode == EffectiveExportMode.HYBRID and hybrid is None:
                 raise ValueError("hybrid USD capability đã chọn nhưng runner không tạo entrypoint")
             if mode == EffectiveExportMode.LEGACY_BOX:
-                generate_scene_usda(enriched, ENVIRONMENT_LAYER)
+                generate_scene_usda(enriched, ENVIRONMENT_LAYER, build_config=controls)
         except (ArtifactStoreError, OSError, ValueError):
             logger.exception("USD package build failed before SceneIR revision publication for job %s", job_id)
             failed_capability = export_capability.model_copy(

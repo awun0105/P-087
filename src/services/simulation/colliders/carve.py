@@ -6,6 +6,7 @@ vật cản chồng nhau và vật không thể di chuyển/tháo ra được. C
 (nới thêm `margin_m`), không cắt tam giác — đủ cho collider thô, giữ nguyên toạ độ canonical.
 """
 
+import math
 from dataclasses import dataclass
 
 import numpy as np
@@ -44,8 +45,8 @@ def triangle_mask_in_box(
     centroids: np.ndarray, box: CarveBox, margin_m: float = COLLISION_CARVE_MARGIN_M
 ) -> np.ndarray:
     """Return source-mesh triangle centroids inside a box in the box's local frame."""
-    if margin_m < 0:
-        raise ValueError("carve margin must be non-negative")
+    if isinstance(margin_m, bool) or not math.isfinite(margin_m) or margin_m < 0:
+        raise ValueError("carve margin must be finite and non-negative")
     local = (centroids - np.asarray(box.center)) @ _rotation(box.rotation_xyzw)
     half = np.asarray(box.dimensions) / 2 + margin_m
     return np.all(np.abs(local) <= half, axis=1)
@@ -68,7 +69,7 @@ def carve_triangle_mask(
 
 
 def carve_boxes(
-    vertices: np.ndarray, faces: np.ndarray, boxes: list[CarveBox], margin_m: float = 0.05
+    vertices: np.ndarray, faces: np.ndarray, boxes: list[CarveBox], margin_m: float = COLLISION_CARVE_MARGIN_M
 ) -> tuple[np.ndarray, np.ndarray, int]:
     """Bỏ tam giác có tâm trong bất kỳ hộp nào; trả (đỉnh, mặt đã đánh lại chỉ số, số tam giác bỏ)."""
     if not boxes or not len(faces):

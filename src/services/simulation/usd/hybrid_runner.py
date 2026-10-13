@@ -34,6 +34,10 @@ from pxr import Gf, Usd, UsdGeom, UsdPhysics, UsdSemantics, UsdShade, UsdVol, Vt
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 from src.services.simulation.mesh_geometry import load_mesh_parts, validate_mesh_arrays
 
+# The standalone USD runtime does not install the application's Pydantic dependencies.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from physics_config import physics_build_config
+
 _PLY_TYPES = {"float": "f4", "float32": "f4", "double": "f8", "uchar": "u1", "int": "i4", "uint": "u4"}
 
 
@@ -394,6 +398,7 @@ def probe_runtime() -> dict:
 
 def build(request: dict) -> dict:
     """Dựng toàn bộ stage; trả tóm tắt số Gaussian/collider để app ghi vào provenance."""
+    config = physics_build_config(request)
     out = Path(request["output_dir"])
     (out / "objects").mkdir(parents=True, exist_ok=True)
     summary: dict = {"environment_gaussians": 0, "objects": [], "external_assets": []}
@@ -417,8 +422,14 @@ def build(request: dict) -> dict:
     UsdPhysics.SetStageKilogramsPerUnit(root, 1.0)
     world = UsdGeom.Xform.Define(root, "/World")
     root.SetDefaultPrim(world.GetPrim())
+    material = UsdShade.Material.Define(root, "/World/PhysicsMaterial")
+    material_api = UsdPhysics.MaterialAPI.Apply(material.GetPrim())
+    material_api.CreateStaticFrictionAttr().Set(config["static_friction"])
+    material_api.CreateDynamicFrictionAttr().Set(config["dynamic_friction"])
+    material_api.CreateRestitutionAttr().Set(config["restitution"])
+    UsdShade.MaterialBindingAPI.Apply(world.GetPrim()).Bind(material, UsdShade.Tokens.weakerThanDescendants, "physics")
     UsdPhysics.Scene.Define(root, "/World/PhysicsScene")
-    if request.get("ground_plane", True):
+    if config["ground_plane"]:
         write_box_collider(root, "/World/GroundPlane", [200.0, 200.0, 0.02], translation=(0.0, 0.0, -0.01))
     UsdGeom.Xform.Define(root, "/World/Environment").GetPrim().GetReferences().AddReference("./environment.usdc")
     UsdGeom.Scope.Define(root, "/World/Objects")

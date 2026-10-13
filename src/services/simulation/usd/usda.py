@@ -10,6 +10,7 @@ import numpy as np
 
 from src.models.contracts.scene import ColliderSpec, ColliderType, SceneIR, SceneObject, SceneObjectState
 from src.services.simulation.usd.capabilities import catalog_asset_provenance
+from src.services.simulation.usd.physics_config import physics_build_config
 
 
 def _format_prim_name(raw_id: str) -> str:
@@ -135,12 +136,15 @@ def generate_mesh_layer_usda(vertices: np.ndarray, faces: np.ndarray, prim_name:
     )
 
 
-def generate_scene_usda(scene: SceneIR, environment_layer: str | None = None) -> str:
+def generate_scene_usda(
+    scene: SceneIR, environment_layer: str | None = None, *, build_config: dict[str, object] | None = None
+) -> str:
     """Chuyển đổi SceneIR thành nội dung văn bản OpenUSD ASCII (.usda) hoàn chỉnh.
 
     `environment_layer` là đường dẫn tương đối (cùng gói) tới layer mesh collider môi trường;
     None giữ hành vi cũ (chỉ ground plane).
     """
+    config = physics_build_config(build_config or {})
     lines = [
         "#usda 1.0",
         "(",
@@ -155,7 +159,21 @@ def generate_scene_usda(scene: SceneIR, environment_layer: str | None = None) ->
         ")",
         "",
         'def Xform "World"',
+        *(['(prepend apiSchemas = ["MaterialBindingAPI"])'] if build_config is not None else []),
         "{",
+        *(
+            [
+                '    rel material:binding:physics = </World/PhysicsMaterial> (bindMaterialAs = "weakerThanDescendants")',
+                '    def Material "PhysicsMaterial" (prepend apiSchemas = ["PhysicsMaterialAPI"])',
+                "    {",
+                f"        float physics:staticFriction = {config['static_friction']}",
+                f"        float physics:dynamicFriction = {config['dynamic_friction']}",
+                f"        float physics:restitution = {config['restitution']}",
+                "    }",
+            ]
+            if build_config is not None
+            else []
+        ),
         '    def PhysicsScene "PhysicsScene"',
         "    {",
         "    }",
@@ -164,7 +182,7 @@ def generate_scene_usda(scene: SceneIR, environment_layer: str | None = None) ->
         "    {",
     ]
 
-    if scene.environment.collider_ref is not None:
+    if scene.environment.collider_ref is not None and config["ground_plane"]:
         lines.extend(_generate_ground_plane_usda())
     if environment_layer is not None:
         lines.extend(

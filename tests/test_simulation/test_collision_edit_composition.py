@@ -504,8 +504,21 @@ def test_exact_membership_sidecar_is_consumed_by_background_builder(tmp_path: Pa
     assert exact_kept.retained_shared_triangles == 0
 
 
+@pytest.mark.parametrize(
+    "controls",
+    [
+        {},
+        {
+            "ground_plane": False,
+            "static_friction": 0.8,
+            "dynamic_friction": 0.7,
+            "restitution": 0.2,
+            "carve_margin_m": 0.2,
+        },
+    ],
+)
 def test_both_package_builders_share_background_and_current_hybrid_object_pose(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, controls: dict[str, object]
 ) -> None:
     registry, job = _scene_job(tmp_path)
     scene = registry.scene.current(job.job_id).scene
@@ -561,7 +574,9 @@ def test_both_package_builders_share_background_and_current_hybrid_object_pose(
         return SimpleNamespace(returncode=0, stderr=b"")
 
     monkeypatch.setattr(simulation_package.subprocess, "run", fake_run)
-    _hybrid_layers(registry, enriched_scene, output, background, runtime_python)
+    _hybrid_layers(registry, enriched_scene, output, background, runtime_python, simulation_config=controls)
+    for key, value in controls.items():
+        assert captured[key] == value
 
     assert captured["collision_background_identity"] == background.identity
     assert captured["objects"][0]["translation"] == [4.0, 0.5, 0.3]

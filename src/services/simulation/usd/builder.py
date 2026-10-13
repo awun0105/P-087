@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from src.models.contracts.artifacts import Checksum, ProductArtifactRef
 from src.models.contracts.identity import (
@@ -33,6 +33,7 @@ from src.services.simulation.usd.capabilities import (
     export_requirements,
     validate_builder_mode,
 )
+from src.services.simulation.usd.physics_config import physics_build_config
 from src.services.simulation.usd.usda import generate_scene_usda
 
 
@@ -55,6 +56,11 @@ class CandidateBuildRequest(BaseModel):
     extra_assets: list[ProductArtifactRef] = Field(default_factory=list)
     export_mode: EffectiveExportMode = EffectiveExportMode.LEGACY_BOX
     export_capability: ExportCapabilityReport | None = None
+
+    @model_validator(mode="after")
+    def _validate_physics_config(self) -> "CandidateBuildRequest":
+        physics_build_config(self.build_config)
+        return self
 
 
 def _validate_preflight_gate(scene: SceneIR, report: PreflightReport) -> None:
@@ -151,7 +157,9 @@ def build_candidate_package(req: CandidateBuildRequest) -> CandidatePackage:
     if req.export_mode == EffectiveExportMode.LEGACY_BOX and req.entrypoint_bytes is not None:
         raise ValueError("legacy CandidatePackage cannot receive a hybrid USD entrypoint")
 
-    usda_bytes = req.entrypoint_bytes or generate_scene_usda(req.scene, req.environment_layer).encode("utf-8")
+    usda_bytes = req.entrypoint_bytes or generate_scene_usda(
+        req.scene, req.environment_layer, build_config=req.build_config
+    ).encode("utf-8")
     entrypoint_usd = _create_entrypoint_ref(req.job_id or req.scene.scene_id, usda_bytes)
 
     assets, geometry, colliders = _collect_scene_refs(req.scene)
