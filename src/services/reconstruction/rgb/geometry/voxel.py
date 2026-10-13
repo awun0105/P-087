@@ -56,10 +56,12 @@ class VoxelConfig(ContractModel):
     #: Giới hạn log-scale tối đa của Gaussian để tránh floaters khổng lồ làm phình lưới voxel.
     max_gaussian_scale_log: FiniteFloat | None = None
     external_fill_size_m: FiniteFloat | None = Field(default=None, gt=0)
+    collision_mesh: Literal["smooth", "faces"] = Field(default="smooth", exclude_if=lambda value: value == "smooth")
+    floor_fill_size_m: FiniteFloat | None = Field(default=None, gt=0, exclude_if=lambda value: value is None)
 
     @model_serializer(mode="wrap")
     def _versioned_payload(self, handler: SerializerFunctionWrapHandler) -> dict:
-        """Preserve legacy receipt bytes and hashes when reading schema 1.0/1.1."""
+        """Preserve legacy receipt bytes and hashes when reading schema 1.0/1.1/1.2."""
         payload = handler(self)
         if self.schema_version != "1.2":
             payload.pop("external_fill_size_m", None)
@@ -161,7 +163,7 @@ def collision_command(config: VoxelConfig) -> tuple[str, ...]:
         "--voxel-carve",
         f"{config.capsule_height_m},{config.capsule_radius_m}",
         "--collision-mesh",
-        "smooth",
+        config.collision_mesh,
         "geometry.voxel.json",
     )
 
@@ -187,7 +189,9 @@ def occupancy_command(config: VoxelConfig) -> tuple[str, ...]:
 
 
 def _fill_arguments(config: VoxelConfig) -> tuple[str, ...]:
-    return ("--voxel-external-fill", str(config.external_fill_size_m)) if config.external_fill_size_m else ()
+    external = ("--voxel-external-fill", str(config.external_fill_size_m)) if config.external_fill_size_m else ()
+    floor = ("--voxel-floor-fill", str(config.floor_fill_size_m)) if config.floor_fill_size_m else ()
+    return external + floor
 
 
 def require_voxel_capacity(lengths: Vector3, resolution_m: float, fill_size_m: float) -> None:

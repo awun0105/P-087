@@ -166,6 +166,9 @@ class SplatTransformVoxelAdapter:
         if config.external_fill_size_m is not None:
             if "--voxel-external-fill" not in (workspace / "help.log").read_text():
                 raise GeometryError("Geometry CLI lacks --voxel-external-fill")
+        if config.floor_fill_size_m is not None:
+            if "--voxel-floor-fill" not in (workspace / "help.log").read_text():
+                raise GeometryError("Geometry CLI lacks --voxel-floor-fill")
         script = Path(__file__).with_name("voxel_inspect.mjs").resolve()
         module = self.process.settings.module_path.resolve()
         self.process.run((str(script), str(module)), (workspace, "inspect"))
@@ -184,7 +187,7 @@ class SplatTransformVoxelAdapter:
             (str(script), str(module), "cluster.ply", "cluster-inspection.json"), (workspace, "inspect-cluster")
         )
         cluster_checksum = file_checksum(workspace / "cluster.ply")
-        if config.external_fill_size_m is not None:
+        if config.external_fill_size_m is not None or config.floor_fill_size_m is not None:
             _require_cluster_capacity(workspace, config)
         occupancy_log = self.process.cli(occupancy_command(config), (workspace, "occupancy"))
         if config.external_fill_size_m is not None:
@@ -254,9 +257,11 @@ class SplatTransformVoxelAdapter:
 
 def _require_cluster_capacity(workspace: Path, config: VoxelConfig) -> None:
     """Conservative bounds from upstream stats; rotations cannot exceed the scale-vector norm."""
-    fill_size = config.external_fill_size_m
-    if fill_size is None:
+    fill_sizes = [value for value in (config.external_fill_size_m, config.floor_fill_size_m) if value is not None]
+    if not fill_sizes:
         return
+    # Floor fill pads only X/Z. Bounding all axes by the larger radius is conservative.
+    fill_size = max(fill_sizes)
     try:
         lod = json.loads((workspace / "cluster-inspection.json").read_text())["stats"]["lods"][0]
         columns, data = lod["columns"], lod["data"]

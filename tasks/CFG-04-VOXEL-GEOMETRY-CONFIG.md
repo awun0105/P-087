@@ -1,5 +1,24 @@
 TASK: CFG-04-VOXEL-GEOMETRY-CONFIG
 
+STATUS: COMPLETED — dynamic mesh/fill configuration and padded-grid safety verified.
+
+## Executable checkpoint (2026-10-13)
+
+- Added dynamic `collision_mesh` and positive finite `floor_fill_size_m`. Both occupancy and collision commands receive configured fill flags.
+- Default values are omitted from serialization. Tests pin checksums captured from the pre-change implementation for schemas 1.0, 1.1 and 1.2; non-default overrides change the checksum.
+- `GeometryExecutionRequest.config` already accepts a caller-supplied `VoxelConfig`. The existing service passes it into `ProductVoxelRequest`; a fixture pipeline test verifies the override reaches the adapter and qualification receipt. No additional request override abstraction is needed.
+- Verification: 75 tests passed across the new override tests, original voxel tests, product pipeline, adapter, clearance and audit regressions. The original voxel suite has 15 passing cases. Ruff check and format check passed for geometry and the new test; `git diff --check` passed.
+- Additional required file: `src/services/reconstruction/adapters/voxel.py`, recorded under the user clarification that may-modify paths are examples. It qualifies floor-fill CLI support and applies padded-grid capacity checks to both fill modes. The larger radius bounds all axes conservatively; native floor fill pads only lateral axes. Regression tests reject an oversized floor-only grid. Log: `tasks/reports/CFG-04-VERIFICATION.log`.
+- Runtime evidence covers installed CLI source and fixture execution. No new GPU scene run or production geometry acceptance is claimed.
+
+Pre-flight (GUIDE.md Rule 13)
+- codegraph: VoxelConfig, collision_command, occupancy_command, _fill_arguments, GeometryExecutionRequest and voxel runtime read.
+- impact: voxel adapter, clearance/output/seed-search consumers, geometry service and finalize config builder; callers inspected.
+- understand: UNVERIFIED — understand-anything tool unavailable; metric confirmation → request config → adapter → checksum-bound publication traced directly.
+- minimal-code: rung 2 — reuse existing typed request and command helpers.
+- checks: ruff clean; 75 pytest passed; TypeScript checks not applicable.
+- DevTools: n/a — no UI change.
+
 ## Ý TƯỞNG & ĐỘNG LỰC THỰC HIỆN (WHY & WHAT)
 - **Tại sao cần task này (Why):** Trong `src/services/reconstruction/rgb/geometry/voxel.py` dòng 164, cờ tạo mesh va chạm đang bị gán cứng tuyệt đối: `"--collision-mesh", "smooth"`.
   - Tùy chọn `"smooth"` dùng thuật toán Marching Cubes tạo lưới tam giác lượn sóng bo tròn, rất thích hợp cho robot hay nhân vật di chuyển không bị vấp cạnh.

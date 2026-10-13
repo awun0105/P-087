@@ -1,5 +1,7 @@
 # Real2Sim Studio — Pipeline Configuration & Vocabulary Tree Upgrade
 
+Scope clarification (user instruction, 2026-10-13): `FILES YOU MAY MODIFY` lists examples, not an exhaustive boundary. Inspect and change all files necessary for the requested behavior, and record additional paths in each task. Preserve unrelated work.
+
 > **Mục tiêu:** Nâng cấp toàn diện hệ thống cấu hình pipeline Real2Sim Studio, giải phóng các tham số bị gán cứng (hardcode), hỗ trợ COLMAP Vocabulary Tree cho video quay 360°, mở rộng cấu hình Lưới va chạm Voxel, Tách vật thể CoACD, Mô phỏng OpenUSD, cung cấp bộ gợi ý Preset kịch bản tự động theo đặc thù dữ liệu đầu vào và nâng cấp Web Studio Scenario Wizard UI.
 
 ---
@@ -46,7 +48,7 @@ flowchart TD
 | **01** | [`CFG-01-TOOL-INSPECT.md`](file:///home/lqaq/PROJECT/AI20K/P-087/tasks/CFG-01-TOOL-INSPECT.md) | ✅ **DONE** | Audit & kiểm tra codebase 8 chặng, điền `CONFIG_CATALOG.md` | `docs/execution/CONFIG_CATALOG.md` |
 | **02** | [`CFG-02-VOCAB-TREE-ASSET.md`](file:///home/lqaq/PROJECT/AI20K/P-087/tasks/CFG-02-VOCAB-TREE-ASSET.md) | ✅ **DONE** | Script tải tự động `vocab_tree.bin` (~112 MB) & adapter helper | `scripts/assets/download_vocab_tree.py` |
 | **03** | [`CFG-03-COLMAP-MATCHING-MODES.md`](file:///home/lqaq/PROJECT/AI20K/P-087/tasks/CFG-03-COLMAP-MATCHING-MODES.md) | ✅ **DONE** | Mở rộng 3 matching modes (`sequential`, `vocab_tree`, `exhaustive`) | `src/services/reconstruction/rgb/pose/camera_pose.py`<br/>`colmap_runtime.py` |
-| **04** | [`CFG-04-VOXEL-GEOMETRY-CONFIG.md`](file:///home/lqaq/PROJECT/AI20K/P-087/tasks/CFG-04-VOXEL-GEOMETRY-CONFIG.md) | ⏳ Ready | Mở rộng Voxel mesh (`smooth` / `faces`) & cờ `--voxel-floor-fill` | `src/services/reconstruction/rgb/geometry/voxel.py` |
+| **04** | [`CFG-04-VOXEL-GEOMETRY-CONFIG.md`](file:///home/lqaq/PROJECT/AI20K/P-087/tasks/CFG-04-VOXEL-GEOMETRY-CONFIG.md) | ✅ **DONE** | Mở rộng Voxel mesh (`smooth` / `faces`) & cờ `--voxel-floor-fill` | `src/services/reconstruction/rgb/geometry/voxel.py` |
 | **05** | [`CFG-05-SCENE-OBJECTIFY-CONFIG.md`](file:///home/lqaq/PROJECT/AI20K/P-087/tasks/CFG-05-SCENE-OBJECTIFY-CONFIG.md) | ✅ **DONE** | Gỡ hardcode `_MAX_OBJECTS=60`, truyền config xuống CoACD/LaMa | `src/services/orchestration/scene/objectify.py` |
 | **06** | [`CFG-06-SIMULATION-PHYSICS-CONFIG.md`](file:///home/lqaq/PROJECT/AI20K/P-087/tasks/CFG-06-SIMULATION-PHYSICS-CONFIG.md) | ⏳ Ready | Cấu hình vật lý OpenUSD (`friction`, `restitution`, `ground_plane`) | `src/services/simulation/usd/builder.py` |
 | **07** | [`CFG-07-AUDIT-CORE-RUNNERS.md`](file:///home/lqaq/PROJECT/AI20K/P-087/tasks/CFG-07-AUDIT-CORE-RUNNERS.md) | 🛡️ **GATE 1** | **Audit trung gian Chặng 1**: Rà soát lệnh CLI & chạy 100% test hồi quy | `tasks/reports/AUDIT_01_CORE_RUNNERS_REPORT.md` |
