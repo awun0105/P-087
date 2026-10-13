@@ -419,7 +419,10 @@ export function PlayCanvasScene({
             },
             resetCamera: () => {
               if (disposed || !viewer.state.loaded) return false;
-              return gotoPose(settings.cameras[0].initial);
+              // Fly/Walk reset to their latest spawn. Orbit reset uses the scene's authored initial camera.
+              viewer.state.cameraMode = "orbit";
+              viewer.resetCamera();
+              return true;
             },
             gotoPose,
             playTrajectory: () => {

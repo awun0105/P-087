@@ -62,9 +62,13 @@ describe("PlayCanvas camera bridge", () => {
     expect(viewer.selectAnnotation).toHaveBeenCalledWith(0);
     expect(viewer.annotations[0].camera.initial).toEqual(pose);
     expect(controls!.resetCamera()).toBe(true);
-    expect(viewer.annotations[0].camera.initial).toEqual(original);
+    expect(viewer.state.cameraMode).toBe("orbit");
+    expect(viewer.resetCamera).toHaveBeenCalledOnce();
+    // Returning home uses the authored reset, not the bookmark navigation slot.
+    expect(viewer.selectAnnotation).toHaveBeenCalledTimes(1);
     // A fly button after animation must remain fly; no delayed orbit override.
     await act(async () => {
+      controls!.setCameraMode("fly");
       viewer.events.fire("cameraMode:changed", "fly", "anim");
     });
     expect(viewer.state.cameraMode).toBe("fly");
