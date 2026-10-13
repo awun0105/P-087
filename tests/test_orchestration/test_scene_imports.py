@@ -1,5 +1,8 @@
 """Gói 5 (ADR 0004 §3): scene import từ PLY 3DGS — chỉ xem/chỉnh sửa, không phải job."""
 
+import io
+import json
+import math
 import struct
 import zipfile
 from pathlib import Path
@@ -229,6 +232,29 @@ def test_generated_camera_starts_inside_the_scene_with_viewer_fov(tmp_path: Path
     assert camera.position == [-10.0, 2.0, 4.0]
     assert camera.target == [-8.0, 2.0, 4.0]
     assert camera.fov == 85.0
+
+
+def test_sog_camera_decodes_rgb_webp_instead_of_using_outlier_bounds(tmp_path: Path) -> None:
+    from PIL import Image
+
+    image = Image.new("RGB", (13, 1))
+    image.putdata([(0, 0, 0)] * 12 + [(255, 255, 255)])
+    webp = io.BytesIO()
+    image.save(webp, format="WEBP", lossless=True)
+    sog = tmp_path / "rgb-means.sog"
+    with zipfile.ZipFile(sog, "w") as bundle:
+        bundle.writestr(
+            "meta.json",
+            json.dumps({"count": 13, "means": {"mins": [0, 0, 0], "maxs": [math.log(101)] * 3}}),
+        )
+        bundle.writestr("means_l.webp", webp.getvalue())
+        bundle.writestr("means_u.webp", webp.getvalue())
+    camera = imports_module.compute_robust_camera_from_sog(sog)
+    assert camera is not None
+    # The lone remote splat must not put the eye at the metadata box center (50, 50, 50).
+    assert camera.position == [0, 0, 0]
+    assert camera.target == [2, 0, 0]
+    assert camera.fov == 85
 
 
 def test_legacy_initial_view_migrates_once_without_overwriting_bookmark(world, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: ANN001

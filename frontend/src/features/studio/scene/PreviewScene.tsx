@@ -144,6 +144,10 @@ export function PreviewScene({
                 <div
                   className="sse-buttonGroup pointer-events-auto flex items-center shrink-0 border border-line-dark"
                   onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    host.current?.focus({ preventScroll: true });
+                  }}
                 >
                   <button
                     type="button"

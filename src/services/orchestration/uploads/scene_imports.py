@@ -177,9 +177,9 @@ def compute_robust_camera_from_sog(sog_path: Path, fov: float = 85.0) -> CameraP
                 from PIL import Image
 
                 with Image.open(io.BytesIO(bundle.read("means_l.webp"))) as im_l:
-                    arr_l = np.array(im_l, dtype=np.float32).reshape(-1, 4)[:, :3]
+                    arr_l = np.array(im_l.convert("RGBA"), dtype=np.float32).reshape(-1, 4)[:, :3]
                 with Image.open(io.BytesIO(bundle.read("means_u.webp"))) as im_u:
-                    arr_u = np.array(im_u, dtype=np.float32).reshape(-1, 4)[:, :3]
+                    arr_u = np.array(im_u.convert("RGBA"), dtype=np.float32).reshape(-1, 4)[:, :3]
 
                 sample_size = min(count, 5000)
                 idx = np.linspace(0, count - 1, sample_size, dtype=int)
@@ -189,9 +189,8 @@ def compute_robust_camera_from_sog(sog_path: Path, fov: float = 85.0) -> CameraP
                 n = (arr_l / 255.0 + (arr_u / 255.0) * 256.0) / 257.0
                 v = mins + (maxs - mins) * n
                 centers = np.sign(v) * (np.exp(np.abs(v)) - 1.0)
-            except Exception:
-                # Nếu không có PIL hoặc không giải mã được webp trong môi trường test/headless,
-                # dùng trực tiếp bounding box từ metadata.
+            except (ImportError, OSError, KeyError, ValueError, IndexError) as error:
+                logger.warning("Không giải mã được tọa độ SOG, dùng bounding box: %s", type(error).__name__)
                 centers = None
 
         if centers is not None and len(centers) > 0:
