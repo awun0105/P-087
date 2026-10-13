@@ -136,9 +136,9 @@ class Settings(BaseSettings):
     artifact_s3_prefix: str = ""
     artifact_presign_seconds: int = Field(default=900, ge=60, le=86400)
 
-    # Auth bật riêng cho deployment. Public Guest signup chỉ mở sau khi resource guards đã triển khai.
+    # Khi bật đăng nhập, đăng ký không có mã mời tạo Guest; deployment có thể tắt rõ ràng.
     auth_required: bool = False
-    auth_guest_signup_enabled: bool = False
+    auth_guest_signup_enabled: bool = True
     auth_session_days: int = Field(default=7, ge=1, le=90)
     auth_invite_days: int = Field(default=7, ge=1, le=30)
     # None → tự bật cookie Secure ngoài development/test.

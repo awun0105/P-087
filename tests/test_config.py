@@ -33,12 +33,12 @@ def test_active_provider_api_key_is_required() -> None:
         Settings(_env_file=None, llm_provider="anthropic")
 
 
-def test_guest_signup_stays_disabled_by_default_and_can_be_explicitly_enabled() -> None:
+def test_guest_signup_is_enabled_by_default_and_can_be_explicitly_disabled() -> None:
     defaults = Settings(_env_file=None, openai_api_key="test-key")
-    enabled = Settings(_env_file=None, openai_api_key="test-key", auth_guest_signup_enabled=True)
+    disabled = Settings(_env_file=None, openai_api_key="test-key", auth_guest_signup_enabled=False)
 
-    assert defaults.auth_guest_signup_enabled is False
-    assert enabled.auth_guest_signup_enabled is True
+    assert defaults.auth_guest_signup_enabled is True
+    assert disabled.auth_guest_signup_enabled is False
 
 
 @pytest.mark.parametrize("app_env", ["staging", "production"])

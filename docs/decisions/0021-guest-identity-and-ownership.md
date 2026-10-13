@@ -45,8 +45,11 @@ verification bị hoãn. Visitor chưa đăng nhập vẫn chỉ dùng các mẫ
 mức ba job-create hoặc manual-Retry intents được chấp nhận mỗi ngày lịch
 Asia/Ho_Chi_Minh; objectify/tách vật, duplicate idempotent request và worker resume
 không tính. Editor/Reviewer tiếp tục can thiệp cross-user, còn purge và review/release
-giữ reviewer-only. `AUTH_GUEST_SIGNUP_ENABLED` mặc định `false` tới khi browser,
-shared-PostgreSQL và seed acceptance hoàn tất.
+giữ reviewer-only. Theo yêu cầu owner ngày 2026-10-13, form đăng ký chính chấp nhận
+mã mời không bắt buộc: bỏ trống tạo Guest, có mã hợp lệ cấp role theo lời mời.
+`AUTH_GUEST_SIGNUP_ENABLED` mặc định `true` khi bật đăng nhập; deployment có thể
+đặt `false` để chỉ cho đăng ký bằng lời mời. Đây là thay đổi chính sách đăng ký,
+không phải khẳng định các acceptance cloud/shared-PostgreSQL đã hoàn tất.
 
 `GET /scenes`, `/jobs/{job_id}/progress`, `/imports` và `/trash` trả typed,
 caller-specific `capabilities` để UI ẩn thao tác không phù hợp. Đây chỉ là gợi ý

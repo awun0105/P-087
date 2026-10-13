@@ -63,7 +63,7 @@ export async function logout(): Promise<void> {
 }
 
 export function register(input: {
-  invite_code: string;
+  invite_code?: string;
   email: string;
   display_name: string;
   password: string;

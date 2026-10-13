@@ -98,7 +98,7 @@ async def _login(client: AsyncClient, email: str) -> None:
 @pytest.mark.asyncio
 async def test_guest_sees_samples_but_not_team_data(client: AsyncClient, secured: AuthService) -> None:
     me = (await client.get("/api/v1/auth/me")).json()
-    assert me == {"auth_required": True, "guest_signup_enabled": False, "user": None, "quota": None}
+    assert me == {"auth_required": True, "guest_signup_enabled": True, "user": None, "quota": None}
     assert (await client.get("/api/v1/samples")).status_code == 200
     for method, path in [
         ("GET", "/api/v1/scenes"),
@@ -142,14 +142,51 @@ async def test_invite_flow_and_role_boundaries(client: AsyncClient, secured: Aut
 
 
 @pytest.mark.asyncio
-async def test_guest_signup_is_disabled_by_default(client: AsyncClient, secured: AuthService) -> None:
-    response = await client.post(
-        "/api/v1/auth/register/guest",
-        json={"email": "guest@example.com", "display_name": "Guest", "password": PASSWORD},
-    )
+async def test_guest_signup_can_be_explicitly_disabled(
+    client: AsyncClient, secured: AuthService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from src.api import auth
 
-    assert response.status_code == 404
+    disabled = auth.settings().model_copy(update={"auth_guest_signup_enabled": False})
+    monkeypatch.setattr(auth, "get_settings", lambda: disabled)
+    for path in ("/api/v1/auth/register/guest", "/api/v1/auth/register"):
+        response = await client.post(
+            path, json={"email": "guest@example.com", "display_name": "Guest", "password": PASSWORD}
+        )
+        assert response.status_code == 404
+
     assert (await client.get("/api/v1/auth/me")).json()["guest_signup_enabled"] is False
+    assert secured.list_users() == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invite", [{}, {"invite_code": None}, {"invite_code": ""}, {"invite_code": "   "}])
+async def test_register_without_invite_creates_guest_and_session(
+    client: AsyncClient, secured: AuthService, invite: dict[str, str | None]
+) -> None:
+    response = await client.post(
+        "/api/v1/auth/register",
+        json={"email": "visitor@example.com", "display_name": "Visitor", "password": PASSWORD, **invite},
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["role"] == "guest"
+    assert "httponly" in response.headers["set-cookie"].lower()
+    me = (await client.get("/api/v1/auth/me")).json()
+    assert me["guest_signup_enabled"] is True and me["user"]["role"] == "guest"
+    assert me["quota"]["limit"] == 3
+    assert (await client.post("/api/v1/auth/invites", json={"role": "reviewer"})).status_code == 403
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("extra", [{"invite_code": "invalid-code"}, {"invite_code": "x"}, {"role": "reviewer"}])
+async def test_register_rejects_invalid_invite_and_client_role_without_guest_fallback(
+    client: AsyncClient, secured: AuthService, extra: dict[str, str]
+) -> None:
+    response = await client.post(
+        "/api/v1/auth/register",
+        json={"email": "visitor@example.com", "display_name": "Visitor", "password": PASSWORD, **extra},
+    )
+    assert response.status_code in {401, 422}
     assert secured.list_users() == []
 
 

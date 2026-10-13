@@ -13,7 +13,7 @@ from datetime import UTC, datetime, timedelta
 from threading import Lock
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from src.config import Settings, get_settings
 from src.services.orchestration.auth import (
@@ -198,14 +198,22 @@ class LoginRequest(BaseModel):
 
 
 class RegisterRequest(BaseModel):
-    """Tạo tài khoản bằng mã mời."""
+    """Không có mã mời thì tạo Guest; mã hợp lệ cấp role của lời mời."""
 
     model_config = ConfigDict(extra="forbid")
 
-    invite_code: str = Field(min_length=4, max_length=100)
+    invite_code: str | None = Field(default=None, max_length=100)
     email: str = Field(min_length=3, max_length=254)
     display_name: str = Field(min_length=1, max_length=100)
     password: str = Field(min_length=1, max_length=200)
+
+    @field_validator("invite_code")
+    @classmethod
+    def _optional_invite(cls, value: str | None) -> str | None:
+        code = value.strip() if value is not None else ""
+        if code and len(code) < 4:
+            raise ValueError("Mã mời phải có ít nhất 4 ký tự")
+        return code or None
 
 
 class GuestRegisterRequest(BaseModel):
@@ -307,7 +315,13 @@ def logout(request: Request, response: Response) -> None:
 
 @router.post("/register", response_model=PublicUser, status_code=status.HTTP_201_CREATED)
 def register(request: RegisterRequest, raw: Request, response: Response) -> PublicUser:
-    """Tạo tài khoản bằng mã mời rồi đăng nhập luôn."""
+    """Tạo Guest khi không có mã mời, hoặc tài khoản theo lời mời, rồi đăng nhập."""
+    if request.invite_code is None:
+        return register_guest(
+            GuestRegisterRequest(email=request.email, display_name=request.display_name, password=request.password),
+            raw,
+            response,
+        )
     client_limiter.check(_client_key(raw))
     service = auth_service()
     try:
@@ -321,7 +335,7 @@ def register(request: RegisterRequest, raw: Request, response: Response) -> Publ
 
 @router.post("/register/guest", response_model=PublicUser, status_code=status.HTTP_201_CREATED)
 def register_guest(request: GuestRegisterRequest, raw: Request, response: Response) -> PublicUser:
-    """Public signup creates only a Guest and stays closed until explicitly enabled."""
+    """Public signup creates only a Guest and can be explicitly disabled."""
     current = settings()
     if not current.auth_required or not current.auth_guest_signup_enabled:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Đăng ký Guest hiện chưa được mở")

@@ -321,6 +321,7 @@ export function RegisterForm() {
   const params = useSearchParams();
   const { me, refresh } = useAuth();
   const guestMode = params.get("mode") === "guest";
+  const guestSignupEnabled = me?.guest_signup_enabled === true;
   const next = safeNext(params.get("next"));
   const gate = useEntryGate(next);
   const { fieldErrors, validate } = useFieldValidation();
@@ -339,14 +340,12 @@ export function RegisterForm() {
     setBusy(true);
     setError(null);
     try {
-      if (guestMode) {
-        await registerGuest({ email, display_name: name.trim(), password });
-      } else {
-        await register({ invite_code: code.trim(), email, display_name: name.trim(), password });
-      }
+      const user = guestMode
+        ? await registerGuest({ email, display_name: name.trim(), password })
+        : await register({ invite_code: code.trim() || undefined, email, display_name: name.trim(), password });
       gate.markNavigated();
       await refresh();
-      notifySuccess(guestMode ? "Đã tạo tài khoản Guest và đăng nhập." : "Đã tạo tài khoản và đăng nhập.");
+      notifySuccess(user.role === "guest" ? "Đã tạo tài khoản Guest và đăng nhập." : "Đã tạo tài khoản và đăng nhập.");
       router.replace(next);
     } catch (cause) {
       setError(authErrorMessage(cause, "Không tạo được tài khoản"));
@@ -379,7 +378,7 @@ export function RegisterForm() {
       lead={
         guestMode
           ? "Nhập email, tên hiển thị và mật khẩu. Email chưa được xác minh qua thư."
-          : "Nhập mã mời do Reviewer của nhóm gửi. Mã chỉ dùng được một lần."
+          : guestSignupEnabled ? "Không có mã mời, bạn sẽ được tạo tài khoản Khách (Guest). Có mã mời, quyền được cấp theo lời mời." : "Nhập mã mời do Reviewer của nhóm gửi. Mã chỉ dùng được một lần."
       }
       mode="register"
       next={next}
@@ -401,16 +400,17 @@ export function RegisterForm() {
           <input
             id={ids.code}
             name="code"
-            required
+            required={!guestSignupEnabled}
             value={code}
             onChange={(e) => setCode(e.target.value)}
             autoComplete="off"
             placeholder="inv_..."
             aria-invalid={!!fieldErrors[ids.code]}
-            aria-describedby={fieldErrors[ids.code] ? ids.code + "-error" : undefined}
+            aria-describedby={fieldErrors[ids.code] ? ids.code + "-error" : guestSignupEnabled ? ids.code + "-hint" : undefined}
             className="h-11 w-full rounded-xl border border-line-strong/60 bg-paper-raised/70 px-3.5 font-ui text-sm text-foreground shadow-xs outline-none transition-all placeholder:text-foreground/40 hover:border-line-strong focus:border-primary focus:bg-background focus:ring-3 focus:ring-primary/20"
           />
           <FieldError id={ids.code + "-error"} message={fieldErrors[ids.code] ?? null} />
+          {guestSignupEnabled && <p id={ids.code + "-hint"} className="text-xs text-muted-foreground">Mã mời không bắt buộc. Bỏ trống để đăng ký tài khoản Khách.</p>}
         </div>}
 
         <div className="space-y-1.5">
@@ -505,17 +505,6 @@ export function RegisterForm() {
           <span>{guestMode ? "Tạo tài khoản Guest" : "Tạo tài khoản"}</span>
         </button>
       </form>
-      {!guestMode && me?.guest_signup_enabled === true && (
-        <p className="mt-5 text-center text-sm text-muted-foreground">
-          Không có mã mời?{" "}
-          <Link
-            href={`/register?mode=guest&next=${encodeURIComponent(next)}`}
-            className="font-semibold text-foreground underline underline-offset-4"
-          >
-            Đăng ký Guest
-          </Link>
-        </p>
-      )}
       {guestMode && (
         <p className="mt-5 text-center text-sm text-muted-foreground">
           Có mã mời?{" "}

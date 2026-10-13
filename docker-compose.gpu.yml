@@ -50,7 +50,7 @@ services:
     environment:
       APP_ENV: development
       AUTH_REQUIRED: "true"
-      AUTH_GUEST_SIGNUP_ENABLED: "${AUTH_GUEST_SIGNUP_ENABLED:-false}"
+      AUTH_GUEST_SIGNUP_ENABLED: "${AUTH_GUEST_SIGNUP_ENABLED:-true}"
       DATABASE_URL: sqlite:////data/studio_local/runtime.db
       ARTIFACT_ROOT: /data/studio_local/artifacts
       PRODUCT_WORKER_ROOT: /data/studio_local/workers
@@ -96,7 +96,7 @@ services:
       APP_ENV: development
       REC17_LIDAR_ODOMETRY_PYTHON: /opt/real2sim/lidar_runtime/bin/python
       AUTH_REQUIRED: "true"
-      AUTH_GUEST_SIGNUP_ENABLED: "${AUTH_GUEST_SIGNUP_ENABLED:-false}"
+      AUTH_GUEST_SIGNUP_ENABLED: "${AUTH_GUEST_SIGNUP_ENABLED:-true}"
       AUTH_COOKIE_SECURE: "false"
       DATABASE_URL: sqlite:////data/studio_local/runtime.db
       ARTIFACT_ROOT: /data/studio_local/artifacts

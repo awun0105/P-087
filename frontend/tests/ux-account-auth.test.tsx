@@ -13,6 +13,21 @@ vi.mock("@/features/studio/AuthProvider", () => ({ useAuth: () => state }));
 vi.mock("@/lib/api/auth", async (original) => ({ ...(await original<typeof import("@/lib/api/auth")>()), login: vi.fn(), register: vi.fn(), registerGuest: vi.fn() }));
 beforeEach(() => { vi.clearAllMocks(); state.me = { auth_required: true, user: null }; state.search = "next=%2Fnew%3Fsource%3Dvideo%26step%3Dsetup"; state.pathname = "/overview"; state.refresh.mockResolvedValue(undefined); });
 describe("tài khoản và đích sau xác thực", () => {
+  it("standard registration leaves invitation optional and creates a Guest when it is blank", async () => {
+    state.me = { auth_required: true, user: null, guest_signup_enabled: true };
+    vi.mocked(register).mockResolvedValue({ user_id: "guest-1", email: "guest@example.com", display_name: "Guest", role: "guest", active: true, daily_job_quota: 10 });
+    render(<RegisterForm />);
+    expect(screen.getByLabelText("Mã mời")).not.toBeRequired();
+    expect(screen.getByText("Mã mời không bắt buộc. Bỏ trống để đăng ký tài khoản Khách.")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Tên hiển thị"), { target: { value: "Guest" } });
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "guest@example.com" } });
+    fireEvent.change(screen.getByLabelText(/Mật khẩu/), { target: { value: "fixture-password" } });
+    fireEvent.submit(screen.getByLabelText("Email").closest("form")!);
+    await waitFor(() => expect(register).toHaveBeenCalledWith({ invite_code: undefined, email: "guest@example.com", display_name: "Guest", password: "fixture-password" }));
+    expect(registerGuest).not.toHaveBeenCalled();
+    expect(state.refresh).toHaveBeenCalled();
+    expect(state.replace).toHaveBeenCalledWith("/new?source=video&step=setup");
+  });
   it("local không bịa profile; khách có link quay lại account", () => {
     state.me = { auth_required: false, user: null };
     const view = render(<AccountPage />);
