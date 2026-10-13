@@ -18,7 +18,8 @@ import {
   Undo2,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode, useSyncExternalStore } from "react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/shadcn/tabs";
 import { subscribeTheme, themeColor, themeKey } from "@/lib/theme";
 
 import { Badge, Button, Notice } from "@/components/studio/primitives";
@@ -235,11 +236,13 @@ export function ObjectReviewView({
   jobId,
   revision,
   onSaveState,
+  sceneStateControls,
 }: {
   jobId: string;
   /** Revision mới nhất nơi khác biết; khác revision đang giữ thì tải lại (tránh 409 khi thao tác). */
   revision?: string | null;
   onSaveState?: (state: SaveState) => void;
+  sceneStateControls?: ReactNode;
 }) {
   const [scene, setScene] = useState<SceneIR | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -271,6 +274,7 @@ export function ObjectReviewView({
   const [selectMode, setSelectMode] = useState(true);
   const [catalog, setCatalog] = useState<SceneCatalog | null>(null);
   const [leftCollapsed, setLeftCollapsed] = useState(false);
+  const [leftTab, setLeftTab] = useState("state");
   const [rightCollapsed, setRightCollapsed] = useState(false);
   /** Vật đang chờ đặt bằng chuột: kích thước hộp xem trước + lệnh ghi khi bấm sàn. */
   const [placing, setPlacing] = useState<{ label: string; dimensions: [number, number, number]; commit: (point: [number, number, number]) => void } | null>(null);
@@ -302,6 +306,7 @@ export function ObjectReviewView({
   /** Chọn bằng cách bấm hộp trong 3D: đánh dấu và cuộn danh sách tới vật đó. */
   const selectFromScene = (id: string) => {
     selectObject(id);
+    setLeftTab("objects");
     setRightCollapsed(false);
     document.getElementById(`object-${id}`)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   };
@@ -619,7 +624,8 @@ export function ObjectReviewView({
       <aside
         aria-label="Danh sách vật thể"
         className={cn(
-          "absolute top-3 left-3 z-20 flex flex-col pointer-events-auto transition-all duration-200",
+          "absolute top-3 left-3 flex flex-col pointer-events-auto transition-all duration-200",
+          sceneStateControls && leftTab === "state" ? "z-30" : "z-20",
           leftCollapsed
             ? "w-auto"
             : "w-72 md:w-80 max-w-[calc(100vw-1.5rem)] max-h-[calc(100%-4.5rem)] rounded-lg border border-line-dark bg-viewport-deep/90 shadow-2xl backdrop-blur-md overflow-hidden text-on-dark",
@@ -670,6 +676,19 @@ export function ObjectReviewView({
                   </button>
                 </div>
               </div>
+            </div>
+            <Tabs value={sceneStateControls ? leftTab : "objects"} onValueChange={setLeftTab} className="min-h-0 gap-0">
+              {sceneStateControls && <>
+                <TabsList aria-label="Nội dung panel scene" className="mx-3 my-2 w-auto shrink-0 border border-line-dark bg-viewport-deep/70">
+                  <TabsTrigger value="state" className="text-on-dark/70 data-active:bg-on-dark/15 data-active:text-on-dark">Trạng thái scene</TabsTrigger>
+                  <TabsTrigger value="objects" className="text-on-dark/70 data-active:bg-on-dark/15 data-active:text-on-dark">Vật thể</TabsTrigger>
+                </TabsList>
+                <TabsContent value="state" forceMount hidden={leftTab !== "state"} className="m-0 overflow-y-auto px-3 py-3 data-[state=inactive]:hidden">
+                  {sceneStateControls}
+                </TabsContent>
+              </>}
+              <TabsContent value="objects" forceMount hidden={Boolean(sceneStateControls) && leftTab !== "objects"} className="m-0 flex min-h-0 flex-col data-[state=inactive]:hidden">
+              <div className="space-y-2 border-b border-line-dark px-3 py-2.5">
               <p className="text-xs font-semibold text-on-dark">
                 {scene.objects.length} vật thể · {counts.pending} chờ xác nhận
               </p>
@@ -959,6 +978,8 @@ export function ObjectReviewView({
                 </li>
               ))}
             </ul>
+              </TabsContent>
+            </Tabs>
           </>
         )}
       </aside>

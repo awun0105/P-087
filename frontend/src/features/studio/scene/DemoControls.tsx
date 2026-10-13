@@ -28,6 +28,7 @@ export function DemoControls({
   revision,
   sceneReady,
   defaultTitle = "",
+  scope = "all",
   onRestored,
 }: {
   jobId: string;
@@ -35,6 +36,7 @@ export function DemoControls({
   sceneReady: boolean;
   /** Tên scene, điền sẵn làm tên mẫu khi xuất. */
   defaultTitle?: string;
+  scope?: "all" | "state" | "publication";
   /** Revision mới sau khi khôi phục; màn Studio dùng để tải lại scene. */
   onRestored: (revision: string) => void;
 }) {
@@ -53,7 +55,7 @@ export function DemoControls({
     const controller = new AbortController();
     getDemoState(jobId, controller.signal).then(
       (next) => { if (!controller.signal.aborted) setState(next); },
-      () => { /* Không đọc được trạng thái demo không chặn màn scene; chỉ ẩn điều khiển. */ },
+      (cause: unknown) => { if (!controller.signal.aborted) setError(errorMessage(cause, "Không tải được trạng thái scene.")); },
     );
     return () => controller.abort();
   }, [jobId, revision, sceneReady]);
@@ -74,9 +76,13 @@ export function DemoControls({
     }
   }, []);
 
-  if (!sceneReady || !state) return null;
+  if (!sceneReady) return null;
+  if (!state) return scope === "state" ? <p role={error ? "alert" : "status"} className="text-sm text-on-dark/70">{error ?? "Đang tải trạng thái scene…"}</p> : null;
   const baseline = state.baseline;
   const publishedId = state.published_sample_id ?? null;
+  const panel = scope === "state";
+  const stateButton = panel ? "w-full justify-center border-line-dark text-on-dark hover:bg-on-dark/10" : undefined;
+  if (scope === "publication" && !publishedId && !canPublish) return null;
   // Scene thường và người xem không phải Reviewer: không có gì về bản demo để hiện.
   if (!baseline && !publishedId && !editable) return null;
   async function restore() {
@@ -92,37 +98,49 @@ export function DemoControls({
     if (next?.current_revision) onRestored(next.current_revision);
   }
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      {baseline && <Badge tone="neutral" title={`Trạng thái đã lưu: ${baseline.scene_revision}`}>Có trạng thái đã lưu</Badge>}
-      {reviewer && (
-        <Button size="sm" variant="ghost" disabled={busy} onClick={() => void run(() => markDemo(jobId), "Đã lưu trạng thái scene hiện tại.")}
+    <div className={panel ? "space-y-5" : "flex flex-wrap items-center gap-2"}>
+      {panel && <div className="space-y-1"><h3 className="label-tech text-on-dark/60">Trạng thái hiện tại</h3><p className="text-sm text-on-dark">{state.at_root ? "Đang ở bản gốc" : state.at_baseline ? "Đang ở trạng thái đã lưu" : "Scene đã được chỉnh sửa"}</p></div>}
+      {scope !== "publication" && reviewer && (
+        <div className={panel ? "space-y-2" : "contents"}>
+        <Button size="sm" variant={panel ? "primary" : "ghost"} className={panel ? "w-full" : undefined} disabled={busy} onClick={() => void run(() => markDemo(jobId), "Đã lưu trạng thái scene hiện tại.")}
           title={baseline ? "Lưu scene hiện tại, thay thế trạng thái đã lưu trước đó." : "Lưu trạng thái hiện tại để quay lại về sau."}>
           <Bookmark aria-hidden />
           Lưu trạng thái
         </Button>
+        {panel && <p className="text-xs text-on-dark/60">{baseline ? "Lưu lại sẽ thay thế trạng thái đã lưu trước đó." : "Lưu scene hiện tại để quay lại sau."}</p>}
+        </div>
       )}
-      {editable && (
-        <Button size="sm" variant="ghost" disabled={busy || Boolean(state.at_root)} onClick={() => void restoreOriginal()}
-          title={state.at_root ? "Scene đang ở bản gốc ban đầu." : "Về bản gốc lúc scene được tạo xong; giữ nguyên trạng thái đã lưu."}>
-          <History aria-hidden />
-          Về bản gốc
-        </Button>
-      )}
-      {baseline && editable && (
-        <Button size="sm" variant="secondary" disabled={busy || state.at_baseline} onClick={() => void restore()}
+      {scope !== "publication" && <div className={panel ? "space-y-3" : "contents"}>
+      {panel ? <>
+        <h3 className="label-tech text-on-dark/60">Trạng thái đã lưu</h3>
+        {baseline ? <div className="space-y-1 text-xs text-on-dark/70"><p>Đã lưu lúc <time dateTime={baseline.marked_at}>{new Date(baseline.marked_at).toLocaleString("vi-VN")}</time></p>{baseline.marked_by && <p>Bởi {baseline.marked_by.display_name}</p>}</div> : <p className="text-sm text-on-dark/60">Chưa có trạng thái đã lưu.</p>}
+      </> : baseline && <Badge tone="neutral" title={`Trạng thái đã lưu: ${baseline.scene_revision}`}>Có trạng thái đã lưu</Badge>}
+      {(baseline || panel) && editable && (
+        <Button size="sm" variant="secondary" className={panel ? `${stateButton} bg-on-dark/10` : undefined} disabled={busy || !baseline || state.at_baseline} onClick={() => void restore()}
           title={state.at_baseline ? "Scene đang ở trạng thái đã lưu." : "Đưa scene về trạng thái bạn đã lưu."}>
           <RotateCcw aria-hidden />
           Quay lại trạng thái đã lưu
         </Button>
       )}
       {reviewer && baseline && (
-        <Button size="sm" variant="ghost" disabled={busy}
+        <Button size="sm" variant="ghost" className={panel ? "h-auto px-0 text-xs text-on-dark/60 hover:text-rust hover:bg-transparent" : undefined} disabled={busy}
           onClick={() => { if (window.confirm("Bỏ trạng thái đã lưu?")) void run(() => clearDemo(jobId), "Đã bỏ trạng thái đã lưu."); }}>
           <BookmarkX aria-hidden />
           Bỏ trạng thái đã lưu
         </Button>
       )}
-      {publishedId ? (
+      </div>}
+      {scope !== "publication" && editable && (
+        <div className={panel ? "space-y-3 border-t border-line-dark pt-4" : "contents"}>
+        {panel && <><h3 className="label-tech text-on-dark/60">Bản gốc</h3><p className="text-xs text-on-dark/60">Kết quả ban đầu của pipeline. Trạng thái đã lưu vẫn được giữ khi về bản gốc.</p></>}
+        <Button size="sm" variant="ghost" className={stateButton} disabled={busy || Boolean(state.at_root)} onClick={() => void restoreOriginal()}
+          title={state.at_root ? "Scene đang ở bản gốc ban đầu." : "Về bản gốc lúc scene được tạo xong; giữ nguyên trạng thái đã lưu."}>
+          <History aria-hidden />
+          Về bản gốc
+        </Button>
+        </div>
+      )}
+      {scope !== "state" && (publishedId ? (
         <Link href={`/new/try-demo?sample=${encodeURIComponent(publishedId)}`} className={buttonVariants({ size: "sm", variant: "secondary" })}>
           <Clapperboard aria-hidden />
           Đã có trong thư viện mẫu
@@ -133,9 +151,9 @@ export function DemoControls({
           <Clapperboard aria-hidden />
           Đặt làm bản demo
         </Button>
-      ) : null}
+      ) : null)}
       {error && <span role="alert" className="text-xs text-rust">{error}</span>}
-      {canPublish && (
+      {scope !== "state" && canPublish && (
         <PublishDialog
           open={publishing}
           onOpenChange={setPublishing}

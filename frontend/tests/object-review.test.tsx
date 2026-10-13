@@ -262,6 +262,25 @@ describe("ObjectReviewView", () => {
     global.fetch = vi.fn();
   });
 
+  it("orders scene-state before objects and preserves the viewer and selection across panel tabs", async () => {
+    routeFetch({ "/scene": [reply({ scene: scene("rev-001", "CANDIDATE") })] });
+    render(<ObjectReviewView jobId="job-a" sceneStateControls={<p>Thao tác trạng thái</p>} />);
+    const viewer = await screen.findByTestId("metric-scene");
+    const stateTab = screen.getByRole("tab", { name: "Trạng thái scene" });
+    const objectsTab = screen.getByRole("tab", { name: "Vật thể" });
+    expect(screen.getAllByRole("tab").map(tab => tab.textContent)).toEqual(["Trạng thái scene", "Vật thể"]);
+    expect(stateTab).toHaveAttribute("aria-selected", "true");
+    fireEvent.mouseDown(objectsTab, { button: 0, ctrlKey: false });
+    const object = await screen.findByRole("button", { name: "Chọn Vật thể 1" });
+    fireEvent.click(object);
+    expect(object).toHaveAttribute("aria-pressed", "true");
+    fireEvent.mouseDown(stateTab, { button: 0, ctrlKey: false });
+    expect(screen.getByTestId("metric-scene")).toBe(viewer);
+    fireEvent.mouseDown(objectsTab, { button: 0, ctrlKey: false });
+    expect(screen.getByRole("button", { name: "Chọn Vật thể 1" })).toHaveAttribute("aria-pressed", "true");
+    expect(calls("/scene").filter(([url]) => String(url).endsWith("/scene"))).toHaveLength(1);
+  });
+
   it("scene chưa có head (409) hiện lý do của backend; chỉ 404 mới là chưa tách vật thể", async () => {
     routeFetch({ "/scene": [reply({ detail: "Scene này chưa được chuẩn bị để xem. Nhờ quản trị chuẩn bị scene." }, 409)] });
     const view = render(<ObjectReviewView jobId="job-a" />);

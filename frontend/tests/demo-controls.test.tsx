@@ -26,6 +26,26 @@ beforeEach(() => {
 });
 
 describe("DemoControls: mốc gốc", () => {
+  it("keeps only publication controls on the header", async () => {
+    vi.mocked(getDemoState).mockResolvedValue(demo("rev-003", false, true, "room-sample"));
+    render(<DemoControls scope="publication" jobId="job-a" revision="rev-003" sceneReady onRestored={vi.fn()} />);
+    expect(await screen.findByRole("link", { name: "Đã có trong thư viện mẫu" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Về bản gốc" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Quay lại trạng thái đã lưu" })).toBeNull();
+  });
+
+  it("shows state information in the panel without publication controls", async () => {
+    auth.me = { auth_required: true, user: { user_id: "u1", display_name: "Reviewer", role: "reviewer" } };
+    vi.mocked(getDemoState).mockResolvedValue(demo("rev-003", false, true, "room-sample", true));
+    render(<DemoControls scope="state" jobId="job-a" revision="rev-003" sceneReady onRestored={vi.fn()} />);
+    expect(await screen.findByText("Đang ở bản gốc")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Lưu trạng thái" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Quay lại trạng thái đã lưu" })).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: "Về bản gốc" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Bỏ trạng thái đã lưu" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Đã có trong thư viện mẫu" })).toBeNull();
+    expect(screen.getByText(/Đã lưu lúc/)).toBeInTheDocument();
+  });
   it("Editor có thể về bản gốc ngay cả khi chưa lưu trạng thái", async () => {
     vi.mocked(getDemoState).mockResolvedValue(demo("rev-002", false, false));
     render(<DemoControls jobId="job-a" revision="rev-002" sceneReady onRestored={vi.fn()} />);

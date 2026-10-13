@@ -6,6 +6,7 @@ import { MetricConfirmView } from "@/features/studio/MetricConfirmView";
 import { ObjectReviewView, type SaveState } from "@/features/studio/ObjectReviewView";
 import type { Preview, StageState, StudioMode } from "@/features/studio/scene/state";
 import { PreviewScene } from "@/features/studio/scene/PreviewScene";
+import { DemoControls } from "@/features/studio/scene/DemoControls";
 import type { MetricDraft } from "@/features/studio/MetricConfirmView";
 
 export function StudioTab({
@@ -62,7 +63,9 @@ export function StudioTab({
       </div>
     );
   }
-  if (sceneReady) return <ObjectReviewView jobId={jobId} revision={revision} onSaveState={onSaveState} />;
+  if (sceneReady) return <ObjectReviewView jobId={jobId} revision={revision} onSaveState={onSaveState}
+    sceneStateControls={<DemoControls scope="state" jobId={jobId} revision={revision} sceneReady
+      onRestored={(next) => onSaveState({ status: "saved", revision: next })} />} />;
   return (
     <div className="flex h-full flex-col">
       <Notice tone={geometry === "failed" ? "rust" : "ochre"} className="m-3">
