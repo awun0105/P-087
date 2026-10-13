@@ -12,6 +12,8 @@ from src.services.orchestration.processing import (
     maximum_for_machine,
     preset_values,
 )
+from src.services.orchestration.processing.models import ParamValue, ScenarioPreferences
+from src.services.orchestration.processing.recommender import RecommendationUnavailableError, recommend_preset
 
 router = APIRouter()
 
@@ -41,9 +43,19 @@ class EvaluateRequest(BaseModel):
     params: dict[str, int | float | str]
 
 
+class ProcessingSuggestion(BaseModel):
+    """Scenario recommendation and its worker resource assessment."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    preset_name: str
+    params: dict[str, ParamValue]
+    evaluation: Evaluation
+
+
 @router.get("/processing/options", response_model=ProcessingOptions)
 def get_processing_options() -> ProcessingOptions:
-    """Thông số chỉnh được + preset tối thiểu/tối đa/tối đa cho máy worker hiện tại."""
+    """Full scenario catalog plus the current worker's resource-limited preset."""
     presets, _ = deps.presets()
     capability = deps.capability()
     settings = deps.settings()
@@ -59,8 +71,7 @@ def get_processing_options() -> ProcessingOptions:
         profile_id=presets.profile_id,
         parameters=presets.parameters,
         presets={
-            "minimum_quality": minimum,
-            "maximum": preset_values(presets, "maximum"),
+            **{name: preset_values(presets, name) for name in presets.presets},
             "machine_maximum": maximum_for_machine(presets, capability),
         },
         capability=capability,
@@ -88,3 +99,24 @@ def evaluate_processing(request: EvaluateRequest) -> Evaluation:
         return evaluate(presets, request.params, capability, observed=observed)
     except ValueError as error:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)) from error
+
+
+@router.post("/processing/suggest", response_model=ProcessingSuggestion)
+def suggest_processing(request: ScenarioPreferences) -> ProcessingSuggestion:
+    """Recommend valid scenario controls against the same worker used by evaluation."""
+    presets, _ = deps.presets()
+    capability = deps.capability()
+    try:
+        name, params = recommend_preset(request, capability, presets)
+    except RecommendationUnavailableError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+    settings = deps.settings()
+    observed = deps.observed_resource_budget(
+        deps.registry(),
+        params,
+        capability.gpu_name if capability is not None else None,
+        colmap_use_gpu=getattr(settings, "product_colmap_use_gpu", False),
+    )
+    return ProcessingSuggestion(
+        preset_name=name, params=params, evaluation=evaluate(presets, params, capability, observed=observed)
+    )

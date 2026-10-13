@@ -1,5 +1,29 @@
 TASK: CFG-10-API-OPTIONS-EVALUATION
 
+STATUS: DONE — complete catalog and scenario suggestion API verified through HTTP and durable job artifacts.
+
+## Implementation and verification (2026-10-13)
+
+- `GET /api/v1/processing/options` now returns all 8 catalog presets plus `machine_maximum`, with parameters from all 6 groups.
+- `POST /api/v1/processing/suggest` accepts the shared strict `ScenarioPreferences` model and returns typed `{preset_name, params, evaluation}`. It uses one capability snapshot, the existing recommender, the observed-resource budget and the same evaluation function as the existing evaluation endpoint. Inadequate worker capacity returns HTTP 409; invalid input returns 422; unknown capacity remains explicitly unknown.
+- Route correction from current source: Studio's backend is mounted under `/api/v1`, with scene creation at `/scenes/from-upload`. The task's `/api/studio` and `POST /scenes` spellings were descriptive, not existing backend routes. No redundant aliases were introduced.
+- Inspected `scenes.py` and `assemblies.py`: both already pass the complete `request.processing` dictionary to `build_job_config`, then seal/persist it. No production edit was necessary in these two files. HTTP tests now verify all new groups in both upload and assembly job artifacts, including assembly idempotency/replay and runtime revalidation.
+- Additional test path: `tests/test_api/test_studio_routes.py`, required to extend the existing real assembly fixture rather than duplicate its setup.
+- `.venv/bin/pytest tests/test_api/test_processing_options_api.py tests/test_api/test_scene_routes.py tests/test_api/test_studio_routes.py -v`: **131 passed**, no skips. Includes all 36 scenario combinations, unknown/inadequate workers, malformed choices, options catalog, upload persistence and assembly persistence. Log: `tasks/reports/CFG10-API-VERIFICATION.log`.
+- `ruff check src/api/studio/ tests/test_api/test_processing_options_api.py tests/test_api/test_studio_routes.py`: clean. Corresponding `ruff format --check`: **18 files already formatted**. Log: `tasks/reports/CFG10-STATIC-CHECKS.log`.
+- `git diff --check`: clean. `graphify update .`: AST graph refreshed.
+- Scope: HTTP calls run through the application ASGI transport with temporary durable databases/artifacts. No production worker, GPU scene run or browser acceptance is claimed. CFG-11 remains the backend audit gate before frontend work.
+
+### Pre-flight (GUIDE.md Rule 13)
+
+- codegraph: read processing route/models, resource evaluation, create_scene_from_upload and run_input_assembly; checked ProcessingOptions/get_processing_options callers.
+- impact: options consumers in Studio and landing, new suggestion endpoint, existing job creation contracts. Existing upload/assembly implementations reused.
+- understand: UNVERIFIED — understand-anything unavailable; traced current route mounting, persistence and resource-budget paths directly.
+- minimal-code: reused recommender, strict scenario schema, evaluation and existing HTTP/assembly fixtures. Added only the response model and route needed for suggestions.
+- checks: Python results above; TypeScript/eslint/vitest n/a for this API task.
+- DevTools: n/a — no rendered UI change; browser acceptance is CFG-14.
+
+
 ## Ý TƯỞNG & ĐỘNG LỰC THỰC HIỆN (WHY & WHAT)
 - **Tại sao cần task này (Why):** Hiện tại, endpoint `GET /api/studio/processing/options` chỉ trả về 2 preset tĩnh (`minimum_quality`, `maximum`) và chưa có endpoint nào phục vụ tính năng gợi ý thông minh từ xa cho frontend. Khi người dùng tick các ô lựa chọn cấp cao (indoor/outdoor, 360/walkthrough, object/room, min/max), giao diện Web Studio cần gọi một API endpoint chuyên trách `POST /api/studio/processing/suggest` để backend tính toán preset tối ưu nhất và trả về kèm bảng đánh giá rủi ro tài nguyên (RAM/VRAM/Disk) cho bộ máy hiện tại.
 - **Yêu cầu cốt lõi (What):**

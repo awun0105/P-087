@@ -370,12 +370,15 @@ async def test_input_assembly_run_is_durable_idempotent_and_worker_revalidates_r
     report = resolved.json()["report"]
     candidate_id = report["recommended_candidate_id"]
 
+    options = (await client.get("/api/v1/processing/options")).json()
+    chosen = options["presets"]["video_indoor_orbital_360"]
     body = {
         "revision": assembly["revision"],
         "resolution_checksum": report["report_checksum"],
         "candidate_id": candidate_id,
         "name": "Input assembly R1",
         "attestation": _ATTESTATION,
+        "processing": chosen,
     }
     first = await client.post(
         f"/api/v1/input-assemblies/{assembly['assembly_id']}/run",
@@ -398,6 +401,16 @@ async def test_input_assembly_run_is_durable_idempotent_and_worker_revalidates_r
     assert conflicting.status_code == 409
 
     job = studio.registry.get_job(first.json()["job"]["job_id"])
+    from src.services.orchestration.processing import job_config_reference
+
+    stored_config = json.loads(
+        studio.registry.runtime_resolver.require(job_config_reference(job.job_id, job.config_checksum)).read_bytes()
+    )
+    assert stored_config["params"] == chosen
+    assert stored_config["colmap"]["matching_mode"] == "sequential_vocab_tree"
+    assert stored_config["geometry"]["external_fill_size_m"] == 1.6
+    assert stored_config["scene"]["max_objects"] == 60
+    assert stored_config["simulation"]["ground_plane"] == "enabled"
     project = studio.registry.get_project(job.project_id)
     assert project.input_assembly_ref is not None and project.input_recipe_ref is not None
     manifest = InputManifest.model_validate_json(
