@@ -314,7 +314,11 @@ export function MetricSceneView({
   useEffect(() => {
     if (!overlay || !gizmoId) return;
     overlay.attachGizmo(gizmoId, gizmoMode, {
-      onStart: () => controls.current?.setInputEnabled(false),
+      onStart: () => {
+        // Stop Walk simulation before editing so physics cannot overwrite the dragged object pose.
+        controls.current?.setCameraMode("fly");
+        controls.current?.setInputEnabled(false);
+      },
       onEnd: (id, position, rotation) => {
         controls.current?.setInputEnabled(true);
         transformed.current?.(id, position, rotation);
