@@ -181,6 +181,7 @@ const ROI_FIELDS: { key: keyof ROIForm; label: string }[] = [
 ];
 
 function correctionUnavailableReason(scene: SceneIR, object: SceneObject): string | null {
+  if (scene.environment.object_aware_collision_ref) return "Hiệu chỉnh cần dựng lại ObjectGS; đường xử lý này chưa sẵn sàng.";
   const membership = scene.environment.membership;
   if (!membership) return "Scene này chưa lưu Gaussian membership.";
   if (!Object.values(membership.label_to_object_id).includes(object.id)) return "Vật không có trong membership hiện tại.";
@@ -672,6 +673,11 @@ export function ObjectReviewView({
             collision={scene.environment.collision_source_ref ?? scene.environment.geometry_ref}
             sceneRevision={scene.scene_revision}
             collisionPreview
+            collisionDiagnostics={{
+              source: scene.environment.object_aware_collision_ref ? "Object-aware" : "Legacy",
+              backgroundChecksum: (scene.environment.collider_ref ?? scene.environment.collision_source_ref ?? scene.environment.geometry_ref).artifact_checksum,
+              selectedParts: typeof current?.collider?.parameters.parts === "number" ? current.collider.parameters.parts : null,
+            }}
             surfacePlanes={(scene.provenance.collision_surface_planes ?? []) as CollisionSurfacePlane[]}
             onMarkSurface={(kind, points) => run(revision => editCollisionSurface(jobId, {
               expected_scene_revision: revision, source_checksum: (scene.environment.collision_source_ref ?? scene.environment.geometry_ref).artifact_checksum,

@@ -62,6 +62,11 @@ def merge_object_candidates(
     revision = editor.current(job_id)
     scene = revision.scene
     manifest = validate_object_membership_command(scene, command)
+    if scene.environment.object_aware_collision_ref is not None:
+        raise ObjectMembershipValidationError(
+            "OBJECTGS_RETRAIN_REQUIRED: membership merge requires rebuilt ObjectGS observations/surfaces; "
+            "the legacy Gaussian collider producer cannot update this scene"
+        )
     objects_by_id = {item.id: item for item in scene.objects}
     selected_ids = [command.primary_object_id, *command.secondary_object_ids]
     selected_objects = [objects_by_id[object_id] for object_id in selected_ids]
@@ -355,6 +360,11 @@ def reassign_object_membership(
     revision = editor.current(job_id)
     scene = revision.scene
     manifest = validate_object_membership_command(scene, command)
+    if scene.environment.object_aware_collision_ref is not None:
+        raise ObjectMembershipValidationError(
+            "OBJECTGS_RETRAIN_REQUIRED: membership reassignment requires regenerated masks and ObjectGS training; "
+            "existing checkpoints and geometry cannot be reused as corrected output"
+        )
     source_ply = editor.resolver.require(manifest.source_visual_ref).read_bytes()
     source_rows = gaussian_split.read_gaussian_ply(source_ply)
     if len(source_rows) != manifest.gaussian_count:

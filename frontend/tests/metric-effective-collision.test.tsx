@@ -116,3 +116,17 @@ it("uses preview URLs and sends a picked canonical triangle to surface annotatio
   fireEvent.click(screen.getByRole("button",{name:"Xóa mặt phẳng sàn 1"}));
   expect(onRemoveSurface).toHaveBeenCalledWith("plane-1");
 });
+
+it("reports the active collision source, revision, triangle count and selected convex parts", async () => {
+  loadCollision.mockResolvedValueOnce(123);
+  render(<MetricSceneView jobId="j" visual={visual} collision={collision} cameras={cameras} sceneRevision="rev-5"
+    collisionDiagnostics={{source: "Object-aware", backgroundChecksum: "sha256:active-background", selectedParts: 3}} />);
+  act(() => renderViewer.mock.lastCall![0].onApp({}, {setObjectCollision: vi.fn()}));
+  fireEvent.click(screen.getByLabelText("Collision mesh"));
+  await waitFor(() => expect(screen.getByLabelText("Thông tin collision")).toHaveTextContent("Tam giác môi trường: 123"));
+  const diagnostics = screen.getByLabelText("Thông tin collision");
+  expect(diagnostics).toHaveTextContent("Nguồn: Object-aware");
+  expect(diagnostics).toHaveTextContent("Revision: rev-5");
+  expect(diagnostics).toHaveTextContent("Khối lồi của vật đang chọn: 3");
+  expect(diagnostics).toHaveTextContent("sha256:active-background");
+});

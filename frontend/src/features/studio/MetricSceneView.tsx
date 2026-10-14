@@ -74,6 +74,7 @@ export function MetricSceneView({
   onMarkSurface,
   onRemoveSurface,
   onFillSurface,
+  collisionDiagnostics,
 }: {
   jobId: string;
   visual: Ref;
@@ -127,6 +128,7 @@ export function MetricSceneView({
   onMarkSurface?: (kind: "floor" | "wall", points: CollisionSurfacePlane["points"]) => void;
   onRemoveSurface?: (id: string) => void;
   onFillSurface?: (id: string) => void;
+  collisionDiagnostics?: { source: "Legacy" | "Object-aware"; backgroundChecksum: string; selectedParts: number | null };
 }) {
   const [capability, setCapability] = usePlayCanvasCapability();
   const fail = useCallback(() => setCapability("failed"), [setCapability]);
@@ -674,6 +676,12 @@ export function MetricSceneView({
           </span>)}
         </div>
         {collisionPreview && <div className="rounded-md bg-viewport-deep/90 px-3 py-1 text-xs text-on-dark">Walk kiểm tra bố trí hiện tại, gồm cả vật chưa xác nhận. Tam giác đã đánh dấu có viền màu.</div>}
+        {collisionDiagnostics && (layers.collision || walking) && <div aria-label="Thông tin collision" className="rounded-md bg-viewport-deep/90 px-3 py-1 text-xs text-on-dark">
+          Nguồn: {collisionDiagnostics.source} · Revision: {sceneRevision ?? "source-preview"} · Tam giác môi trường: {collisionState?.triangles ?? "chưa nạp"} · Collider vật thể: {physicsObjects.length}
+          {collisionDiagnostics.selectedParts !== null && <> · Khối lồi của vật đang chọn: {collisionDiagnostics.selectedParts}</>}
+          <span className="block">Artifact nền: {collisionDiagnostics.backgroundChecksum}</span>
+          {collisionState?.error && <span className="block">Collision chưa sẵn sàng: {collisionState.error}</span>}
+        </div>}
         {(surfaceTool || surfacePickError) && <div role="status" className="pointer-events-auto rounded-md bg-viewport-deep/90 px-3 py-2 text-xs text-on-dark">
           {surfacePickError ?? `Bấm một tam giác ${surfaceTool === "floor" ? "sàn" : "tường"} để lưu mặt phẳng dùng vá lỗ trong vùng vật thể.`}
           <button type="button" className="ml-3" onClick={() => {setSurfaceTool(null);setSurfacePickError(null);}}>Hủy đánh dấu</button>
