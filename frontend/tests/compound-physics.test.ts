@@ -135,4 +135,6 @@ it("rejecting invalid dynamic geometry also releases the partially constructed n
   expect(live.size).toBe(0);
   expect(()=>new ScenePhysics(tracked,null,[item({parts:[{positions:new Float32Array([0,0,0,1,0,0,0,1,0,1,1,0]),indices:new Uint32Array()}]})])).toThrow(/degenerate/);
   expect(live.size).toBe(0);
+  expect(()=>new ScenePhysics(tracked,null,[item({position:[NaN,0,0]})])).toThrow(/transform must be finite/);
+  expect(live.size).toBe(0);
 });

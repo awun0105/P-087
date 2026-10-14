@@ -260,6 +260,8 @@ export class ScenePhysics {
   }
 
   private addObject(item: PhysicsObjectSpec): void {
+    const transformError = physicsTransformBlocker(item);
+    if (transformError) throw new Error(transformError);
     const dynamic = item.dynamic !== false;
     if (dynamic && (!Number.isFinite(item.mass_kg) || item.mass_kg <= 0)) throw new Error(`${item.id}: dynamic body requires positive authored mass`);
     const type = item.colliderType ?? (item.parts?.length || item.hull ? "CONVEX_HULL" : "AABB");
@@ -387,4 +389,12 @@ export function validateConvexPart(part: ColliderMeshPart): void {
     if(low < -tolerance && high > tolerance)throw new Error("Declared convex part has a non-convex surface");
   }
   if([...edges.values()].some(count=>count!==2))throw new Error("Convex part surface is not closed/manifold");
+}
+
+
+export function physicsTransformBlocker(item: Pick<PhysicsObjectSpec, "id" | "position" | "rotation_xyzw" | "colliderLocalTransform">): string | null {
+  const poses = [{ position: item.position, rotation: item.rotation_xyzw }];
+  if (item.colliderLocalTransform) poses.push({ position: item.colliderLocalTransform.translation_xyz, rotation: item.colliderLocalTransform.rotation_quaternion_xyzw });
+  if (poses.some(pose => pose.position.length !== 3 || !pose.position.every(Number.isFinite) || pose.rotation.length !== 4 || !pose.rotation.every(Number.isFinite) || Math.abs(Math.hypot(...pose.rotation) - 1) > 1e-6)) return `${item.id}: collider/object transform must be finite with a normalized xyzw quaternion`;
+  return null;
 }

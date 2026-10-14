@@ -113,6 +113,7 @@ describe("physics mesh frames through the loading hook", () => {
 
   it.each([
     { colliderType: "SIMPLIFIED_MESH", mass_kg: 10 }, { colliderType: "CONVEX_HULL", mass_kg: null },
+    { colliderType: "CONVEX_HULL", mass_kg: 10, position: [NaN,0,0] as [number,number,number] },
   ])("blocks unsafe/missing dynamic input %j", async (flags) => {
     stubMeshes(colliderGlb());
     const { result } = start({ ...input, ...flags });

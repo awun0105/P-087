@@ -13,7 +13,7 @@ import type { AppBase, Entity } from "playcanvas";
 
 import { parseGlbCollider, parseGlbMesh, type ColliderMeshPart, type TriangleMesh } from "@/features/viewer/glb-mesh";
 import type { OverlayObject, SceneOverlay } from "@/features/viewer/scene-overlay";
-import { ScenePhysics, displayToCanonical, loadAmmo, validateConvexPart, validateTriangleMesh, type AmmoModule, type PhysicsObjectSpec } from "@/features/viewer/scene-physics";
+import { ScenePhysics, displayToCanonical, loadAmmo, physicsTransformBlocker, validateConvexPart, validateTriangleMesh, type AmmoModule, type PhysicsObjectSpec } from "@/features/viewer/scene-physics";
 import type { Vec3 } from "@/features/viewer/source-frame";
 import { ObjectCameraCollision } from "@/features/viewer/camera-collision";
 import type { CollisionQuery } from "@playcanvas/supersplat-viewer/viewer";
@@ -47,6 +47,8 @@ export type PhysicsStatus =
 
 export function browserPhysicsBlocker(objects: readonly PhysicsObjectInput[]): string | null {
   for (const item of objects) {
+    const transformError = physicsTransformBlocker(item);
+    if (transformError) return transformError;
     const type = item.colliderType ?? (item.colliderUrl ? "CONVEX_HULL" : "AABB");
     if (!["AABB", "OBB", "CONVEX_HULL", "CONVEX_DECOMPOSITION", "SIMPLIFIED_MESH"].includes(type)) return `${item.id}: unsupported collider type ${type}`;
     if (item.dynamic !== false && (item.mass_kg === null || !Number.isFinite(item.mass_kg) || item.mass_kg <= 0)) return `${item.id}: dynamic body requires positive authored mass`;
