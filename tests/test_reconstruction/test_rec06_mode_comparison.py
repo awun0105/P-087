@@ -1,4 +1,4 @@
-"""ADR 0004 §5: so sánh anchor người dùng với LiDAR; RGB only là mock không có số."""
+"""So sánh kết quả đã xác nhận với LiDAR; không điền số khi chưa có đề xuất."""
 
 import math
 
@@ -16,10 +16,10 @@ def _lidar(scale: float) -> object:
     return fit_similarity(source, [(scale * x, scale * y, scale * z + 0.35) for x, y, z in source])
 
 
-def test_rgb_only_is_mock_without_numbers_and_missing_modes_are_marked() -> None:
+def test_rgb_only_is_missing_without_numbers_and_missing_modes_are_marked() -> None:
     result = compare_modes("job-1", CAMERAS, None, None)
     rgb, user, lidar = result.modes
-    assert rgb.status == "mock" and rgb.scale_m_per_sfm_unit is None and rgb.steps
+    assert rgb.status == "missing" and rgb.scale_m_per_sfm_unit is None and rgb.steps
     assert user.status == "missing" and lidar.status == "missing" and result.difference is None
 
 

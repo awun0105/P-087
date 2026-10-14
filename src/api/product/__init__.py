@@ -8,10 +8,10 @@ loop.
 
 from fastapi import APIRouter
 
-from src.api.product import artifacts, jobs, projects, review, scene
+from src.api.product import artifacts, jobs, projects, registration, review, scene
 
 router = APIRouter(tags=["product"])
-for module in (projects, jobs, artifacts, scene, review):
+for module in (projects, jobs, artifacts, registration, scene, review):
     router.include_router(module.router)
 
 __all__ = ["router"]

@@ -30,6 +30,8 @@ fi
 
 # Chỉ đặt giá trị mặc định: mọi biến người vận hành đã cấp đều được giữ nguyên.
 export APP_ENV="${APP_ENV:-production}"
+# Production không được chạy mở: Settings từ chối khởi động nếu thiếu biến này (stack mode cần tài khoản Reviewer đầu tiên).
+export AUTH_REQUIRED="${AUTH_REQUIRED:-true}"
 export LLM_PROVIDER="${LLM_PROVIDER:-openai}"
 export OPENAI_API_KEY="${OPENAI_API_KEY:-not-used-by-studio}"
 export DATABASE_URL="${DATABASE_URL:-sqlite:///$STATE/runtime.db}"
@@ -57,7 +59,7 @@ export REC04_SPLAT_MODULE_PATH="${REC04_SPLAT_MODULE_PATH:-$SPLAT/dist/index.mjs
 export REC05_VOXEL_CLI="${REC05_VOXEL_CLI:-$SPLAT/bin/cli.mjs}"
 export REC05_VOXEL_MODULE_PATH="${REC05_VOXEL_MODULE_PATH:-$SPLAT/dist/index.mjs}"
 export REC05_VOXEL_TIMEOUT_SECONDS="${REC05_VOXEL_TIMEOUT_SECONDS:-1800}"
-export PRODUCT_GEOMETRY_CONFIG="${PRODUCT_GEOMETRY_CONFIG:-/opt/real2sim/app/configs/product/geometry_v1.json}"
+export PRODUCT_GEOMETRY_CONFIG="${PRODUCT_GEOMETRY_CONFIG:-/opt/real2sim/app/configs/product/geometry_indoor_v1.json}"
 export PRODUCT_SCENE_RUNTIME_PYTHON="${PRODUCT_SCENE_RUNTIME_PYTHON:-$SCENE/bin/python}"
 export PRODUCT_SAM2_CHECKPOINT="${PRODUCT_SAM2_CHECKPOINT:-$SCENE/checkpoints/sam2.1_hiera_tiny.pt}"
 export PRODUCT_LAMA_CHECKPOINT="${PRODUCT_LAMA_CHECKPOINT:-$SCENE/weights/big-lama.pt}"
@@ -70,7 +72,24 @@ fi
 export PRODUCT_SCENE_TIMEOUT_SECONDS="${PRODUCT_SCENE_TIMEOUT_SECONDS:-3600}"
 
 PY=.venv/bin/python
+# Bộ che khuôn mặt/biển số (AUD-18): người vận hành khai thư mục trọng số thì pod tự tải hai file từ kho file của
+# deployment và kiểm sha256 (đã có đủ thì không tải lại). Không lấy được thì dừng ngay, vì worker thiếu trọng số
+# sẽ làm hỏng mọi job có che.
+if [ -n "${PRODUCT_EGOBLUR_WEIGHTS:-}" ]; then
+  "$PY" -m scripts.gpu.egoblur_weights fetch --to "$PRODUCT_EGOBLUR_WEIGHTS"
+fi
 [ -f "$PRODUCT_RUNTIME_MANIFEST" ] || "$PY" -m scripts.gpu.make_runtime_manifest --out "$PRODUCT_RUNTIME_MANIFEST"
+
+# Registry năng lực của luồng nhập mới (AUD-24): sinh từ bản ghi kiểm định đã commit + identity runtime đo ngay trên
+# máy này (scripts.gpu.qualify_input_runtimes). Kết quả xác định, không mốc thời gian, nên API và worker dùng chung
+# một file mà không lệch chuỗi checksum. Sinh lỗi thì bỏ biến: luồng nhập báo "chưa có bộ xử lý phù hợp" thay vì
+# chạy với một registry hỏng. Không bao giờ dùng make_input_runtime_registry (lời khai dev-local) ở đây.
+export REC17_LIDAR_ODOMETRY_PYTHON="${REC17_LIDAR_ODOMETRY_PYTHON:-${R2S_LIDAR_RUNTIME:-/opt/real2sim/lidar_runtime}/bin/python}"
+export PRODUCT_INPUT_RUNTIME_REGISTRY="${PRODUCT_INPUT_RUNTIME_REGISTRY:-$STATE/input_runtime_registry.json}"
+if ! "$PY" -m scripts.gpu.qualify_input_runtimes --out "$PRODUCT_INPUT_RUNTIME_REGISTRY"; then
+  echo "[!] Không sinh được registry năng lực input; luồng nhập mới sẽ báo chưa có bộ xử lý phù hợp." >&2
+  unset PRODUCT_INPUT_RUNTIME_REGISTRY
+fi
 
 mode="${1:-worker}"
 [ "$#" -gt 0 ] && shift

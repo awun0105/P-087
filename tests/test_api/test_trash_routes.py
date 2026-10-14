@@ -11,12 +11,13 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from src.config import Settings
+from src.services.orchestration.auth.models import Actor
 from src.services.orchestration.auth.service import AuthService
 from src.services.orchestration.jobs.database import RuntimeDatabase
 from src.services.orchestration.jobs.profile import ExecutionProfile
 from src.services.orchestration.projects.registry import ProjectRegistry
 from src.services.orchestration.uploads import VideoUploadService
-from tests.test_orchestration.test_scene_deletion import _scene, _upload
+from tests.test_orchestration.test_scene_deletion import _input_run, _scene, _upload
 
 PASSWORD = "mat-khau-du-dai-123"
 
@@ -69,6 +70,27 @@ async def client():
 async def _scene_names(client: AsyncClient) -> list[str]:
     scenes = (await client.get("/api/v1/scenes")).json()["scenes"]
     return sorted(scene["project"]["name"] for scene in scenes)
+
+
+@pytest.mark.asyncio
+async def test_scene_created_from_assembly_can_be_trashed_and_restored(
+    client: AsyncClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    world = _world(tmp_path, monkeypatch, auth_required=False)
+    project_id, job_id = _scene(world, _upload(world), "Assembly scene")
+    _input_run(world, project_id, job_id, "accepted-run")
+    with world.database.transaction() as tx:
+        original = tx.execute("SELECT * FROM r2s_input_runs").fetchall()
+
+    response = await client.delete(f"/api/v1/scenes/{project_id}")
+    assert response.status_code == 200, response.text
+    entry_id = response.json()["entry_id"]
+    assert await _scene_names(client) == []
+    restored = await client.post("/api/v1/trash/restore", json={"entry_ids": [entry_id]})
+    assert restored.json() == {"done": [entry_id], "failed": []}
+    assert await _scene_names(client) == ["Assembly scene"]
+    with world.database.transaction() as tx:
+        assert tx.execute("SELECT * FROM r2s_input_runs").fetchall() == original
 
 
 @pytest.mark.asyncio
@@ -167,3 +189,76 @@ async def test_only_reviewer_may_purge_and_actions_are_attributed(
     assert purged.status_code == 200 and purged.json()["done"] == [entry_id]
     audit = {(row.action, row.user_id) for row in service.recent_audit()}
     assert {("scene.delete", editor.user_id), ("scene.purge", reviewer.user_id)} <= audit
+
+
+@pytest.mark.asyncio
+async def test_guest_scene_and_trash_capabilities_follow_resource_owner(
+    client: AsyncClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    world = _world(tmp_path, monkeypatch, auth_required=True)
+    service = AuthService(world.database)
+    guest = service.create_user("guest@example.com", "Khách", PASSWORD, "guest")
+    editor = service.create_user("editor@example.com", "Biên tập", PASSWORD, "editor")
+    reviewer = service.create_user("reviewer@example.com", "Duyệt", PASSWORD, "reviewer")
+    guest_actor = Actor(user_id=guest.user_id, display_name=guest.display_name, role=guest.role)
+    editor_actor = Actor(user_id=editor.user_id, display_name=editor.display_name, role=editor.role)
+
+    owned_project, _ = _scene(
+        world,
+        _upload(world, "guest.mp4", uploaded_by=guest_actor),
+        "Scene của Guest",
+        created_by=guest_actor,
+        owner_user_id=guest.user_id,
+    )
+    foreign_project, _ = _scene(
+        world,
+        _upload(world, "editor.mp4", uploaded_by=editor_actor),
+        "Scene của Editor",
+        created_by=editor_actor,
+        owner_user_id=editor.user_id,
+    )
+
+    assert (
+        await client.post("/api/v1/auth/login", json={"email": guest.email, "password": PASSWORD})
+    ).status_code == 200
+    guest_scenes = (await client.get("/api/v1/scenes")).json()["scenes"]
+    guest_caps = {item["project"]["name"]: item["capabilities"]["can_delete_project"] for item in guest_scenes}
+    assert guest_caps == {"Scene của Guest": True, "Scene của Editor": False}
+
+    await client.post("/api/v1/auth/logout")
+    assert (
+        await client.post("/api/v1/auth/login", json={"email": editor.email, "password": PASSWORD})
+    ).status_code == 200
+    editor_scenes = (await client.get("/api/v1/scenes")).json()["scenes"]
+    assert all(item["capabilities"]["can_delete_project"] for item in editor_scenes)
+    owned_entry = (await client.delete(f"/api/v1/scenes/{owned_project}")).json()
+    foreign_entry = (await client.delete(f"/api/v1/scenes/{foreign_project}")).json()
+
+    editor_trash = (await client.get("/api/v1/trash")).json()["entries"]
+    assert all(item["capabilities"] == {"can_restore": True, "can_purge": False} for item in editor_trash)
+    await client.post("/api/v1/auth/logout")
+
+    assert (
+        await client.post("/api/v1/auth/login", json={"email": guest.email, "password": PASSWORD})
+    ).status_code == 200
+    guest_trash = (await client.get("/api/v1/trash")).json()["entries"]
+    guest_trash_caps = {item["entry_id"]: item["capabilities"] for item in guest_trash}
+    assert guest_trash_caps[owned_entry["entry_id"]] == {"can_restore": True, "can_purge": False}
+    assert guest_trash_caps[foreign_entry["entry_id"]] == {"can_restore": False, "can_purge": False}
+    restore = await client.post(
+        "/api/v1/trash/restore", json={"entry_ids": [owned_entry["entry_id"], foreign_entry["entry_id"]]}
+    )
+    assert restore.json()["done"] == [owned_entry["entry_id"]]
+    assert [item["entry_id"] for item in restore.json()["failed"]] == [foreign_entry["entry_id"]]
+    assert (
+        await client.post("/api/v1/trash/purge", json={"entry_ids": [foreign_entry["entry_id"]]})
+    ).status_code == 403
+
+    await client.post("/api/v1/auth/logout")
+    assert (
+        await client.post("/api/v1/auth/login", json={"email": reviewer.email, "password": PASSWORD})
+    ).status_code == 200
+    reviewer_trash = (await client.get("/api/v1/trash")).json()["entries"]
+    assert len(reviewer_trash) == 1
+    assert reviewer_trash[0]["entry_id"] == foreign_entry["entry_id"]
+    assert reviewer_trash[0]["capabilities"] == {"can_restore": True, "can_purge": True}

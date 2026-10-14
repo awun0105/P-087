@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from src.models.contracts.identity import canonical_content_checksum, verify_content_checksum
 from src.models.contracts.manifests import InputManifest
 
 FIXTURE = Path(__file__).parents[2] / "fixtures/mock_job/input_manifest.json"
@@ -63,3 +64,31 @@ def test_rgb_depth_input_does_not_invent_input_depth_encoding_fields() -> None:
     payload = _input_payload()
     payload["input_configuration"]["depth_present"] = True
     assert InputManifest.model_validate(payload).input_configuration.depth_present is True
+
+
+def test_legacy_manifest_checksum_survives_absent_preparation_provenance() -> None:
+    """Adding video preparation metadata must not rewrite checksums of old inputs."""
+    current = InputManifest.model_validate(_input_payload())
+    legacy_payload = current.model_dump(mode="json")
+    legacy_payload.pop("preparation_provenance", None)
+    legacy_payload["input_manifest_checksum"] = canonical_content_checksum(legacy_payload, "input_manifest_checksum")
+
+    legacy = InputManifest.model_validate(legacy_payload)
+    verify_content_checksum(legacy, "input_manifest_checksum")
+
+    assert legacy.preparation_provenance is None
+    assert "preparation_provenance" not in legacy.model_dump(mode="json")
+
+
+def test_explicit_null_preparation_provenance_remains_part_of_identity() -> None:
+    """A producer that explicitly hashes null keeps the same serialized content."""
+    payload = InputManifest.model_validate(_input_payload()).model_dump(mode="json")
+    payload["preparation_provenance"] = None
+    payload["video_preparation"] = None
+    payload["input_manifest_checksum"] = canonical_content_checksum(payload, "input_manifest_checksum")
+
+    manifest = InputManifest.model_validate(payload)
+    verify_content_checksum(manifest, "input_manifest_checksum")
+
+    assert "preparation_provenance" in manifest.model_dump(mode="json")
+    assert "video_preparation" in manifest.model_dump(mode="json")

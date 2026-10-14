@@ -25,8 +25,8 @@ export function getJob(jobId: string): Promise<ApiResult<JobManifest>> {
   return fetchApi<JobManifest>(`${PRODUCT}/jobs/${encodeURIComponent(jobId)}`);
 }
 
-export function listJobArtifacts(jobId: string): Promise<ApiResult<ArtifactList>> {
-  return fetchApi<ArtifactList>(`${PRODUCT}/jobs/${encodeURIComponent(jobId)}/artifacts`);
+export function listJobArtifacts(jobId: string, signal?: AbortSignal): Promise<ApiResult<ArtifactList>> {
+  return fetchApi<ArtifactList>(`${PRODUCT}/jobs/${encodeURIComponent(jobId)}/artifacts`, { signal });
 }
 
 export function listJobAttempts(jobId: string): Promise<ApiResult<JobAttemptList>> {

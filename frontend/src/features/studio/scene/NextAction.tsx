@@ -5,7 +5,8 @@ import { ErrorFeedback } from "@/components/studio/feedback";
 import { getJobScene, getReviewState, getSimulationPackage, type ReviewStateView, type SimulationPackageView } from "@/lib/api/studio";
 import { usePolling } from "@/features/studio/usePolling";
 import { useAuth } from "@/features/studio/AuthProvider";
-import { isReviewer } from "@/lib/api/auth";
+import { GuestQuotaStatus } from "@/features/studio/auth/GuestQuotaStatus";
+import { isReviewer, resourceCapabilityAllowed } from "@/lib/api/auth";
 import { ApiError } from "@/lib/api/client";
 import { errorMessage } from "@/lib/ui-error";
 import type { SceneIR } from "@/lib/contracts/api";
@@ -14,7 +15,12 @@ import { isJobStale, useNow, type Tab, type StudioMode } from "@/features/studio
 import { cn } from "@/lib/cn";
 
 interface Detail { scene: SceneIR; pkg: SimulationPackageView | null; review: ReviewStateView | null }
-/** Bước tiếp theo đọc published state; không tạo lifecycle cạnh tranh với backend. */
+/**
+ * Bước tiếp theo đọc published state; không tạo lifecycle cạnh tranh với backend.
+ *
+ * Trang job dùng dạng `popover` (chuông ở header, chung cho mọi tab). Dạng `banner` chỉ còn để test đọc trực tiếp
+ * tiêu đề/nút mà không phải mở chuông.
+ */
 export function NextAction({
   jobId,
   progress,
@@ -26,6 +32,8 @@ export function NextAction({
   onOpen,
   onRetry,
   retryState,
+  canMutateJob: suppliedCanMutateJob,
+  canRetryJob: suppliedCanRetryJob,
   variant = "banner",
 }: {
   jobId: string;
@@ -38,9 +46,16 @@ export function NextAction({
   onOpen: (tab: Tab, mode?: StudioMode) => void;
   onRetry: () => void;
   retryState?: "submitting" | "accepted" | "rejected" | "uncertain" | null;
+  canMutateJob?: boolean;
+  canRetryJob?: boolean;
   variant?: "banner" | "popover";
 }) {
   const { me } = useAuth();
+  const isGuest = me?.user?.role === "guest";
+  const guestQuota = isGuest ? me.quota : null;
+  const guestQuotaExhausted = guestQuota?.remaining === 0;
+  const canMutateJob = suppliedCanMutateJob ?? resourceCapabilityAllowed(me, progress?.capabilities?.can_mutate);
+  const canRetryJob = suppliedCanRetryJob ?? resourceCapabilityAllowed(me, progress?.capabilities?.can_retry);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isOpen, setIsOpen] = useState(false);
@@ -88,6 +103,8 @@ export function NextAction({
   let description: string | null = null;
   let action: { label: string; tab: Tab; mode?: StudioMode } | null = null;
   let pendingCount: number | null = null;
+  // Đang đọc trạng thái chưa phải là thông báo cần người dùng chú ý: chuông không bật chấm cho nó.
+  let reading = false;
   if (retryState) {
     title = retryState === "submitting" ? "Đang gửi yêu cầu thử lại" : retryState === "rejected" ? "Đang kiểm tra phản hồi thử lại" : "Đang đồng bộ lần chạy mới";
     description = retryState === "uncertain"
@@ -111,7 +128,12 @@ export function NextAction({
   } else if (progress.waiting_for === "resources") {
     title = "Đang chờ tài nguyên";
     description = "Giữ nguyên cấu hình đã chọn. Máy xử lý kiểm tra lại và tự chạy tiếp khi đủ tài nguyên; có thể rời trang hoặc huỷ job.";
+  } else if (progress.waiting_for === "anonymization_review") {
+    title = "Cần bạn xem bản đã che";
+    description = "Khuôn mặt và biển số phát hiện được đã bị che. Xem lại rồi xác nhận để pipeline dựng 3D, hoặc huỷ job.";
+    action = { label: "Xem bản đã che", tab: "progress" };
   } else if (progress.waiting_for === "metric_confirmation") {
+    // Hiện trong chuông; nút tương ứng cũng nằm ngay ở bước đang chờ trong timeline Tiến trình.
     title = "Cần bạn xác nhận tỉ lệ mét";
     description = "Chọn điểm và nhập kích thước thật để pipeline tiếp tục.";
     action = { label: "Xác nhận tỉ lệ mét", tab: "studio", mode: "metric" };
@@ -121,7 +143,9 @@ export function NextAction({
   } else if (sceneReady) {
     title = "Đang đọc bước tiếp theo";
     description = "Đối chiếu vật thể, gói và trạng thái duyệt của revision hiện tại.";
+    reading = true;
     if (detail && (revision === null || detail.scene.scene_revision === revision)) {
+      reading = false;
       // Ứng viên do pipeline tạo có `active=false` cho tới khi được xác nhận, nên đếm theo trạng thái (cùng quy tắc
       // với bộ lọc "Chờ xác nhận" của Studio), không theo cờ `active`.
       const review_of = (object: SceneIR["objects"][number]) => object.provenance.review;
@@ -133,8 +157,8 @@ export function NextAction({
       if (awaitingChoice) {
         // Pipeline v2: tách theo vật lỗi hết số lần thử; scene chỉ có môi trường cho tới khi người dùng chọn.
         title = "Tách theo vật chưa thành công";
-        description = "Chọn chạy lại tách theo vật hoặc dùng hộp ứng viên trong Studio.";
-        action = { label: "Mở Studio để chọn", tab: "studio", mode: "scene" };
+        description = "Chạy lại tách theo vật hoặc dùng hộp ứng viên ngay tại bước “Tách vật thể”.";
+        action = { label: "Xem bước tách vật thể", tab: "progress" };
       } else if (pending) {
         title = "Cần xác nhận vật thể";
         description = String(pending) + " ứng viên chưa được xác nhận.";
@@ -151,17 +175,20 @@ export function NextAction({
       }
     }
   }
+  if (action?.tab === "studio" && !canMutateJob) action = null;
   const atTarget = action && current === action.tab && (!action.mode || mode === action.mode);
-  const showRetry = Boolean(!retryState && progress.status === "FAILED" && progress.error?.retryable);
-  if (!title && !showRetry && !(sceneReady && error)) return null;
+  const showRetry = Boolean(!retryState && canRetryJob && progress.status === "FAILED" && progress.error?.retryable);
+  const empty = !title && !showRetry && !(sceneReady && error);
+  // Chuông là nơi duy nhất hiện thông báo của trang job nên luôn có mặt; không có gì thì nói rõ là không có.
+  if (empty && variant !== "popover") return null;
 
   if (variant === "popover") {
-    const hasAlert = Boolean(title || showRetry || (sceneReady && error));
+    const hasAlert = Boolean((title && !reading) || showRetry || (sceneReady && error));
     return (
       <div className="relative" ref={popoverRef}>
         <button
           type="button"
-          aria-label="Thông báo bước tiếp theo"
+          aria-label="Thông báo của scene"
           aria-expanded={isOpen}
           onClick={() => setIsOpen((prev) => !prev)}
           className={cn(
@@ -182,13 +209,13 @@ export function NextAction({
         {isOpen && (
           <div
             role="dialog"
-            aria-label="Thông báo bước tiếp theo"
+            aria-label="Thông báo của scene"
             className="absolute right-0 top-full z-50 mt-2 w-80 rounded-lg border border-line-strong bg-paper p-4 shadow-xl sm:w-96"
           >
             <div className="mb-3 flex items-center justify-between border-b border-line pb-2">
               <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-ink-muted">
                 <Bell className="h-3.5 w-3.5" aria-hidden />
-                <span>Bước tiếp theo</span>
+                <span>Thông báo</span>
               </div>
               <button
                 type="button"
@@ -200,6 +227,7 @@ export function NextAction({
               </button>
             </div>
 
+            {empty && <p className="text-sm text-ink-muted">Không có thông báo nào.</p>}
             {title && (
               <div className="space-y-1">
                 <p className="text-sm font-bold text-ink">{title}</p>
@@ -210,9 +238,17 @@ export function NextAction({
             {(showRetry || (action && !atTarget)) && (
               <div className="mt-3.5 flex items-center justify-end gap-2 border-t border-line/60 pt-2">
                 {showRetry && (
-                  <Button size="sm" disabled={busy} onClick={() => { setIsOpen(false); onRetry(); }}>
-                    Thử lại
-                  </Button>
+                  <div className="space-y-2 text-right">
+                    {isGuest && (
+                      <>
+                        <p className="text-xs text-ink-muted">Retry thủ công dùng 1 lượt Guest khi máy chủ chấp nhận.</p>
+                        <GuestQuotaStatus quota={guestQuota} />
+                      </>
+                    )}
+                    <Button size="sm" disabled={busy || guestQuotaExhausted} onClick={onRetry}>
+                      Thử lại
+                    </Button>
+                  </div>
                 )}
                 {action && !atTarget && (
                   <Button size="sm" onClick={() => { setIsOpen(false); onOpen(action!.tab, action!.mode); }}>
@@ -240,7 +276,17 @@ export function NextAction({
     <section aria-label="Bước tiếp theo" className="border-b border-line bg-paper px-4 py-3 sm:px-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         {title && <div className="min-w-0"><p className="text-sm font-bold">{title}</p>{description && <p className="mt-0.5 text-sm text-ink-muted">{description}</p>}</div>}
-        {showRetry && <Button size="sm" disabled={busy} onClick={onRetry}>Thử lại</Button>}
+        {showRetry && (
+          <div className="space-y-2 text-right">
+            {isGuest && (
+              <>
+                <p className="text-xs text-ink-muted">Retry thủ công dùng 1 lượt Guest khi máy chủ chấp nhận.</p>
+                <GuestQuotaStatus quota={guestQuota} />
+              </>
+            )}
+            <Button size="sm" disabled={busy || guestQuotaExhausted} onClick={onRetry}>Thử lại</Button>
+          </div>
+        )}
         {action && !atTarget && <Button size="sm" onClick={() => onOpen(action!.tab, action!.mode)}>{action.label}</Button>}
       </div>
       {sceneReady && error && <ErrorFeedback message={error} className="mt-2" retryLabel="Tải lại dữ liệu" retry={() => void load(new AbortController().signal)} />}

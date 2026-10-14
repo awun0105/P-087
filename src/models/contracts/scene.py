@@ -14,6 +14,7 @@ from src.models.contracts.artifacts import (
     SchemaVersion,
 )
 from src.models.contracts.coordinates import CoordinateSystem, MetricScale, Transform
+from src.models.contracts.object_membership import ObjectMembershipArtifact
 
 PositiveDimension = Annotated[FiniteFloat, Field(gt=0)]
 
@@ -54,6 +55,56 @@ class MassSource(StrEnum):
 def _absent(value: object) -> bool:
     """Trường tuỳ chọn thêm sau (pipeline v2) không ghi khi rỗng, để checksum SceneIR cũ giữ nguyên."""
     return value is None
+
+
+class SourceCollisionMembership(ContractModel):
+    """Triangle indices trong đúng bytes collision mesh do `source_geometry_ref` chỉ tới.
+
+    An empty list is a valid audited ownership state after every source triangle moved elsewhere.
+    """
+
+    artifact_type: Literal["SourceCollisionMembership"] = "SourceCollisionMembership"
+    schema_version: Literal["1.0"] = "1.0"
+    object_id: Identifier
+    source_geometry_ref: ProductArtifactRef
+    extraction_revision: Identifier
+    triangle_indices: list[Annotated[int, Field(ge=0, strict=True)]]
+
+    @model_validator(mode="after")
+    def _require_unique_ordered_indices(self) -> Self:
+        if self.triangle_indices != sorted(set(self.triangle_indices)):
+            raise ValueError("triangle_indices must be unique and sorted")
+        return self
+
+
+class SourceCollisionRegion(ContractModel):
+    """Ownership của object trên mesh collision nguồn, bound vào pose extraction và scene revision."""
+
+    schema_version: Literal["1.0"] = "1.0"
+    object_id: Identifier
+    source_geometry_ref: ProductArtifactRef
+    extraction_revision: Identifier
+    source_transform: Transform
+    region_kind: Literal["triangle_indices", "source_obb"]
+    region_ref: ProductArtifactRef | None = Field(default=None, exclude_if=_absent)
+    source_obb_dimensions_xyz_m: tuple[PositiveDimension, PositiveDimension, PositiveDimension] | None = Field(
+        default=None, exclude_if=_absent
+    )
+
+    @model_validator(mode="after")
+    def _validate_region_representation(self) -> Self:
+        if self.source_transform.parent_frame != "world" or self.source_transform.local_frame != self.object_id:
+            raise ValueError("source_transform must bind world to the owned object frame")
+        if self.region_kind == "triangle_indices":
+            if self.region_ref is None or self.region_ref.artifact_type != "SourceCollisionMembership":
+                raise ValueError("triangle_indices region requires a SourceCollisionMembership region_ref")
+            if self.source_obb_dimensions_xyz_m is not None:
+                raise ValueError("triangle_indices region cannot also declare OBB dimensions")
+            if _artifact_job_id(self.region_ref) != _artifact_job_id(self.source_geometry_ref):
+                raise ValueError("source collision membership and geometry must belong to the same job")
+        elif self.region_ref is not None or self.source_obb_dimensions_xyz_m is None:
+            raise ValueError("source_obb region requires dimensions and cannot declare a membership ref")
+        return self
 
 
 class ObjectPhysics(ContractModel):
@@ -111,6 +162,7 @@ class SceneObject(ContractModel):
     tags: list[str] = Field(default_factory=list)
     provenance: JsonObject
     physics: ObjectPhysics | None = Field(default=None, exclude_if=_absent)
+    source_collision: SourceCollisionRegion | None = Field(default=None, exclude_if=_absent)
 
     @model_validator(mode="after")
     def _validate_representation_binding(self) -> Self:
@@ -118,6 +170,11 @@ class SceneObject(ContractModel):
             raise ValueError("SceneObject.local_frame must match transform.local_frame")
         if self.collider is not None and self.collider.local_transform.parent_frame != self.local_frame:
             raise ValueError("collider local offset must be parented to SceneObject.local_frame")
+        if self.source_collision is not None:
+            if self.source_collision.object_id != self.id:
+                raise ValueError("source collision ownership object_id must match SceneObject.id")
+            if self.origin == SceneObjectOrigin.USER_ADDED:
+                raise ValueError("user-added objects cannot own reconstructed source collision regions")
         if self.origin == SceneObjectOrigin.USER_ADDED:
             if self.asset_ref is None and self.primitive_dimensions_xyz_m is None:
                 raise ValueError("user_added object requires asset_ref or primitive_dimensions_xyz_m")
@@ -130,8 +187,38 @@ class SceneEnvironment(ContractModel):
     visual_ref: ProductArtifactRef | None = None
     geometry_ref: ProductArtifactRef
     collider_ref: ProductArtifactRef | None = None
+    # Exact source collision and selection identities; collider_ref may later refer to a carved result.
+    collision_source_ref: ProductArtifactRef | None = Field(default=None, exclude_if=_absent)
+    collision_selection_ref: ProductArtifactRef | None = Field(default=None, exclude_if=_absent)
     # Bản 3DGS gốc (PLY) của nền cho bộ xuất USD; `visual_ref` là bản nén cho trình duyệt (SOG).
     visual_master_ref: ProductArtifactRef | None = Field(default=None, exclude_if=_absent)
+    # Row ownership is optional for legacy scenes and embedded so each SceneIR revision binds its exact map.
+    membership: ObjectMembershipArtifact | None = Field(default=None, exclude_if=_absent)
+
+    @model_validator(mode="after")
+    def _validate_collision_selection_binding(self) -> Self:
+        source_ref = self.collision_source_ref
+        selection_ref = self.collision_selection_ref
+        if source_ref is None and selection_ref is None:
+            return self
+        if source_ref is None or selection_ref is None:
+            raise ValueError("collision_source_ref and collision_selection_ref must be set together")
+        if self.collider_ref is None:
+            raise ValueError("a selected collision source requires an effective collider_ref")
+        if selection_ref.artifact_type != "CollisionSourceSelection":
+            raise ValueError("collision_selection_ref must reference a CollisionSourceSelection artifact")
+        scene_job_id = _artifact_job_id(self.geometry_ref)
+        if _artifact_job_id(source_ref) != scene_job_id or _artifact_job_id(selection_ref) != scene_job_id:
+            raise ValueError("collision source and selection must belong to the SceneIR job")
+        return self
+
+
+def _artifact_job_id(reference: ProductArtifactRef) -> str:
+    """Use the logical URI as the job scope and reject contradictory optional metadata."""
+    uri_job_id = reference.artifact_uri.removeprefix("artifact://jobs/").partition("/")[0]
+    if reference.job_id is not None and reference.job_id != uri_job_id:
+        raise ValueError("artifact job_id must match its logical URI")
+    return uri_job_id
 
 
 class SceneIR(ContractModel):
@@ -155,4 +242,28 @@ class SceneIR(ContractModel):
             if item.id in seen:
                 raise ValueError(f"duplicate SceneObject.id in SceneIR: {item.id}")
             seen.add(item.id)
+            if item.source_collision is not None:
+                owner_source = item.source_collision.source_geometry_ref
+                if (
+                    owner_source != self.environment.geometry_ref
+                    and owner_source != self.environment.collision_source_ref
+                ):
+                    raise ValueError(
+                        "source collision ownership must reference the SceneIR environment geometry or selected collision source"
+                    )
+                if (
+                    self.environment.collision_source_ref is not None
+                    and owner_source != self.environment.collision_source_ref
+                ):
+                    raise ValueError("selected collision source ownership cannot reuse another mesh's regions")
+            if self.environment.collision_source_ref is not None and (
+                item.origin == SceneObjectOrigin.RECONSTRUCTED
+                and item.provenance.get("duplicated_from") is None
+                and (
+                    item.source_collision is None
+                    or item.source_collision.source_geometry_ref != self.environment.collision_source_ref
+                    or item.source_collision.region_kind != "triangle_indices"
+                )
+            ):
+                raise ValueError("selected collision source requires exact source-bound ownership for every object")
         return self

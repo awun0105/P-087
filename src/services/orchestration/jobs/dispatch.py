@@ -1,7 +1,7 @@
 """Prepared RGB dispatch policy, dùng chung cho CLI và basic queue consumer."""
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from src.models.contracts.artifacts import ProductArtifactRef
@@ -14,6 +14,22 @@ from src.services.orchestration.processing import (
     is_presets_file,
     job_config_reference,
     load_presets,
+)
+
+_LEGACY_PARAMETER_KEYS = frozenset(
+    {
+        "sampling.sample_fps",
+        "sampling.max_frames",
+        "colmap.camera_model",
+        "colmap.max_image_size",
+        "colmap.max_num_features",
+        "colmap.sequential_overlap",
+        "brush.total_train_iters",
+        "brush.max_resolution",
+        "brush.max_splats",
+        "brush.sh_degree",
+        "brush.sog_iterations",
+    }
 )
 
 
@@ -75,6 +91,11 @@ class ResolvedProcessing:
     brush: dict
     sample_fps: float
     max_frames: int
+    #: Job chọn che khuôn mặt/biển số trước khi dựng 3D (AUD-18).
+    anonymize: bool = False
+    geometry: dict = field(default_factory=dict)
+    scene: dict = field(default_factory=dict)
+    simulation: dict = field(default_factory=dict)
 
 
 def resolve_job_processing(
@@ -102,10 +123,19 @@ def resolve_job_processing(
     if not is_presets_file(config_path):
         raise RuntimeStateConflictError("Worker chưa cấu hình file thông số chung cho job Studio")
     presets, _ = load_presets(config_path)
-    presets.validate_params(config.params)
+    # Sealed pre-CFG-09 artifacts keep their original native defaults and bytes.
+    # Only the complete historical key set qualifies; incomplete new configs still fail.
+    values = config.params
+    if set(values) == _LEGACY_PARAMETER_KEYS:
+        values = presets.presets["minimum_quality"] | values
+    presets.validate_params(values)
     return ResolvedProcessing(
         dict(config.colmap),
         dict(config.brush),
         float(config.sampling["sample_fps"]),
         int(config.sampling["max_frames"]),
+        config.anonymize,
+        geometry=dict(config.geometry),
+        scene=dict(config.scene),
+        simulation=dict(config.simulation),
     )

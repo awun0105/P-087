@@ -250,7 +250,7 @@ class UserMetricPort:
         confirmation: ProductArtifactRef | None,
         support: ProductArtifactRef | None,
     ) -> ModeComparison:
-        """So sánh RGB only (mock) / anchor người dùng / LiDAR trên cùng camera (chỉ hiển thị).
+        """Hiển thị đề xuất tự động / kết quả đã xác nhận / LiDAR trên cùng camera.
 
         Bản xác nhận được đọc từ bytes đã kiểm checksum để hiển thị; authority đã được kiểm
         khi xác nhận và sẽ kiểm lại ở mọi bước dùng nó để sinh artifact.
@@ -268,16 +268,48 @@ class UserMetricPort:
             check = (declaration.input.check_a, declaration.input.check_b)
         lidar = self._lidar_context(job_id, source_visual, support).fit if support is not None else None
         result = compare_modes(job_id, cameras, user, lidar, check)
-        if confirmation is not None and declaration.input.distance_source == "lidar_demo":
-            # Điểm/số đo tự chọn từ LiDAR: độ lệch với cột LiDAR gần 0 là đương nhiên, không phải
-            # độ chính xác của người click. Click tay mới lộ sai số thật.
-            modes = [
-                mode.model_copy(update={"note": mode.note + " Số đo A–B, C–D lấy từ LiDAR (dataset mẫu)."})
-                if mode.mode == "user_anchor"
-                else mode
-                for mode in result.modes
-            ]
-            result = result.model_copy(update={"modes": modes})
+        proposal = self.auto_proposal(job_id, source_visual)
+        if proposal is not None:
+            index = 0 if proposal.method == "moge2_sparse_depth_scale_only" else 2
+            if index == 0 or result.modes[index].status == "missing":
+                result.modes[index] = result.modes[index].model_copy(
+                    update={
+                        "status": "estimated",
+                        "note": (
+                            "Tỉ lệ được MoGe-2 ước lượng từ ảnh. Đây là đề xuất, chưa phải số đo ngoài đời."
+                            if index == 0
+                            else "Tỉ lệ được suy ra từ quỹ đạo trong gói LiDAR của job."
+                        ),
+                        "scale_m_per_sfm_unit": proposal.scale_m_per_sfm_unit,
+                        "relative_uncertainty": proposal.relative_uncertainty,
+                        "frames_used": proposal.frames_used,
+                    }
+                )
+            if index == 2:
+                result.modes[0] = result.modes[0].model_copy(
+                    update={"note": "Job này lấy tỉ lệ từ gói LiDAR, không dùng đề xuất MoGe-2."}
+                )
+        if confirmation is not None:
+            source = declaration.input.distance_source
+            if source in {"ai_estimated", "lidar_trajectory"}:
+                estimate = declaration.estimate
+                result.modes[1] = result.modes[1].model_copy(
+                    update={
+                        "note": (
+                            "Người dùng đã chấp nhận ước lượng MoGe-2. Kết quả vẫn là ước lượng, không phải số đo độc lập."
+                            if source == "ai_estimated"
+                            else "Người dùng đã xác nhận tỉ lệ và mặt sàn lấy từ gói LiDAR."
+                        ),
+                        "relative_uncertainty": estimate.relative_uncertainty if estimate is not None else None,
+                        "frames_used": estimate.frames_used if estimate is not None else None,
+                    }
+                )
+            elif source == "lidar_demo":
+                result.modes[1] = result.modes[1].model_copy(
+                    update={
+                        "note": "Người dùng đã xác nhận khoảng cách từ LiDAR của dataset mẫu. So với cùng LiDAR không phải kiểm chứng độc lập."
+                    }
+                )
         return result
 
     def _evidence(

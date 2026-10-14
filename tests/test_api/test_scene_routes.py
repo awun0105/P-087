@@ -391,3 +391,53 @@ async def test_walk_collision_respects_the_job_allow_list(client) -> None:
     name = reference["artifact_uri"].rsplit("/", 1)[-1]
     r = await client.get(f"{_JOB}/walk-collision/{name}", params=reference)
     assert r.status_code == 404
+
+
+# ── scene có artifact nhưng chưa có head (scene cũ trước AUD-10) ───────────────
+
+_HEADLESS_PATHS = ["scene", "scene/objectify", "simulation-package", "review-state"]
+
+
+async def _make_headless(client, registry, tmp_path, monkeypatch) -> None:
+    from src.api.studio import deps as studio_deps
+    from src.services.orchestration.jobs.database import RuntimeDatabase
+    from src.services.orchestration.scene.heads import SceneHeadRepository
+
+    monkeypatch.setattr(studio_deps, "get_project_registry", lambda: registry)
+    await _scene(client)  # publish rev-001 khi chưa có head repository, như một scene cũ
+    registry.scene.head_repository = SceneHeadRepository(RuntimeDatabase(f"sqlite:///{tmp_path / 'heads.db'}"))
+
+
+@pytest.mark.asyncio
+# `scene/objectify` đọc thêm hàng đợi objectify (cần DB runtime) nên chỉ kiểm ở ca bị chặn bên dưới.
+@pytest.mark.parametrize("path", [path for path in _HEADLESS_PATHS if path != "scene/objectify"])
+async def test_legacy_scene_without_head_opens_on_first_request(
+    client, isolated_registry, tmp_path, monkeypatch, path
+) -> None:
+    await _make_headless(client, isolated_registry, tmp_path, monkeypatch)
+
+    response = await client.get(f"{_JOB}/{path}")
+
+    # Scene cũ tự nhận head sau khi kiểm xong; không còn bắt người vận hành chạy script tay.
+    assert response.status_code == 200, response.text
+    head = isolated_registry.scene.head_repository.get("job-fixture-001")
+    assert head is not None and head.scene_revision == "rev-001"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", _HEADLESS_PATHS)
+async def test_legacy_scene_with_invalid_artifacts_is_a_conflict_with_a_user_message(
+    client, isolated_registry, tmp_path, monkeypatch, path
+) -> None:
+    await _make_headless(client, isolated_registry, tmp_path, monkeypatch)
+    resolver = isolated_registry.runtime_resolver
+    uri = resolver.list_uris("artifact://jobs/job-fixture-001/scene/")[0]
+    artifact = resolver.resolve(uri)
+    artifact.write_bytes(artifact.read_bytes().replace(b"scene-fixture-001", b"scene-fixture-999"))
+
+    response = await client.get(f"{_JOB}/{path}")
+
+    # Dữ liệu hỏng vẫn bị chặn: 409 kèm câu cho người dùng, không lộ chi tiết vận hành.
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Dữ liệu scene này không qua được bước kiểm tra. Nhờ quản trị kiểm tra scene."
+    assert "scene_head" not in response.text

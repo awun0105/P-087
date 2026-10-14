@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Self
 
-from pydantic import Field, model_validator
+from pydantic import Field, SerializerFunctionWrapHandler, model_serializer, model_validator
 
 from src.models.contracts.artifacts import (
     ArtifactUri,
@@ -15,6 +15,7 @@ from src.models.contracts.artifacts import (
     ProductDataClass,
     SchemaVersion,
 )
+from src.models.contracts.video_preparation import ServerVideoPreparationVerification
 
 
 class SourceType(StrEnum):
@@ -74,6 +75,7 @@ class InputManifest(ContractModel):
     source_rights_attestation: JsonObject
     dataset_manifest_checksum: Checksum | None = None
     preparation_provenance: JsonObject | None = None
+    video_preparation: ServerVideoPreparationVerification | None = None
     input_manifest_checksum: Checksum
 
     @model_validator(mode="after")
@@ -82,7 +84,27 @@ class InputManifest(ContractModel):
             raise ValueError("registered LiDAR input requires lidar_metadata")
         if not self.input_configuration.registered_lidar_present and self.lidar_metadata is not None:
             raise ValueError("lidar_metadata requires registered_lidar_present")
+        if self.video_preparation is not None:
+            videos = [item for item in self.files if item.media_type in {"video/mp4", "video/quicktime"}]
+            if len(videos) != 1:
+                raise ValueError("video preparation requires exactly one RGB video input")
+            video = videos[0]
+            if (
+                video.checksum != self.video_preparation.uploaded_checksum
+                or video.size_bytes != self.video_preparation.uploaded_size_bytes
+            ):
+                raise ValueError("video preparation verification does not bind the InputManifest video bytes")
         return self
+
+    @model_serializer(mode="wrap")
+    def _preserve_legacy_optional_provenance(self, handler: SerializerFunctionWrapHandler) -> dict[str, object]:
+        """Keep omitted preparation provenance absent so old logical checksums remain valid."""
+        data = handler(self)
+        if "preparation_provenance" not in self.model_fields_set:
+            data.pop("preparation_provenance", None)
+        if "video_preparation" not in self.model_fields_set:
+            data.pop("video_preparation", None)
+        return data
 
 
 class PrivacyInspectionScope(StrEnum):
@@ -124,6 +146,8 @@ class StageId(StrEnum):
     VISUAL_RECON = "ST-VISUAL-RECON"
     RGB_GEOMETRY = "ST-RGB-GEOMETRY"
     LIDAR_INGEST = "ST-LIDAR-INGEST"
+    LIDAR_ODOMETRY = "ST-LIDAR-ODOMETRY"
+    LIDAR_CALIBRATION_QA = "ST-LIDAR-CALIBRATION-QA"
     RGB_LIDAR_ALIGN = "ST-RGB-LIDAR-ALIGN"
     METRIC_CANONICALIZE = "ST-METRIC-CANONICALIZE"
     OBJECT_EXTRACT = "ST-OBJECT-EXTRACT"

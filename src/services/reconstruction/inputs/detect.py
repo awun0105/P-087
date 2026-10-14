@@ -5,6 +5,7 @@ bằng chứng để PRODUCT lưu cùng upload và worker chọn luồng. File k
 nào bị từ chối với lý do hiển thị được cho người dùng, không đoán.
 """
 
+import json
 import math
 import struct
 import zipfile
@@ -13,9 +14,13 @@ from typing import BinaryIO, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.models.contracts.input_assembly import InputAssetFormat
+from src.services.reconstruction.inputs import calibration_formats
 from src.services.reconstruction.lidar.cloud_header import read_header
 
-InputKind = Literal["rgb_video", "gaussian_ply", "gaussian_ply_colmap", "registered_lidar", "lidar_scan_sequence"]
+InputKind = Literal[
+    "rgb_video", "gaussian_ply", "gaussian_ply_colmap", "gaussian_sog", "registered_lidar", "lidar_scan_sequence"
+]
 
 #: Thuộc tính bắt buộc của một Gaussian (vị trí, màu SH bậc 0, opacity, scale, rotation).
 GAUSSIAN_FIELDS = ("x", "y", "z", "f_dc_0", "f_dc_1", "f_dc_2", "opacity", "scale_0", "scale_1", "scale_2") + tuple(
@@ -26,6 +31,17 @@ _SH_REST = {0: 0, 9: 1, 24: 2, 45: 3}
 _QUICKTIME_ATOMS = {b"ftyp", b"moov", b"mdat", b"wide", b"free", b"skip"}
 _COLMAP_FILES = ("cameras", "images", "points3D")
 _MAX_ZIP_ENTRIES = 20000
+_MAX_SOG_TEXTURE_PIXELS = 64 * 1024 * 1024
+_MAX_SOG_TEXTURE_BYTES = 256 * 1024 * 1024
+# Only bundled SOG v2 is accepted. Limits are applied before reading texture contents.
+SOG_FORMAT_REGISTRY = {
+    2: {
+        "models": (None, "antialiased", "2dgs"),
+        "max_gaussians": 25_000_000,
+        "max_meta_bytes": 64 * 1024,
+        "max_members": 16,
+    }
+}
 #: File quỹ đạo là văn bản nhỏ (một dòng mỗi pose); lớn hơn mức này không phải quỹ đạo.
 _MAX_TRAJECTORY_BYTES = 16 * 1024 * 1024
 _TRAJECTORY_SUFFIXES = {".txt", ".tum", ".csv"}
@@ -61,6 +77,17 @@ class GaussianPlyEvidence(BaseModel):
     encoding: str
 
 
+class GaussianSogEvidence(BaseModel):
+    """Bounded metadata evidence for a bundled PlayCanvas SOG source."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    format_version: Literal[2]
+    gaussian_count: int = Field(gt=0, le=25_000_000)
+    sh_degree: int = Field(ge=0, le=3)
+    model: Literal["antialiased", "2dgs"] | None = None
+
+
 class LidarEvidence(BaseModel):
     """Bằng chứng gói LiDAR đã kiểm ở mức danh mục (ADR 0009); `ST-LIDAR-INGEST` mới đọc toàn bộ điểm.
 
@@ -91,6 +118,7 @@ class InputDetection(BaseModel):
 
     kind: InputKind
     gaussian: GaussianPlyEvidence | None = None
+    sog: GaussianSogEvidence | None = None
     ply_member: str | None = None
     colmap_dir: str | None = None
     colmap_format: Literal["bin", "txt"] | None = None
@@ -161,10 +189,17 @@ def _calibration_format(text: str) -> Literal["torwic_txt", "json"] | None:
     """Calibration camera ↔ LiDAR: `calibrations.txt` kiểu TorWIC, hoặc JSON có khoá `lidar_from_camera`."""
     if all(key in text for key in _TORWIC_EXTRINSIC_KEYS):
         return "torwic_txt"
-    stripped = text.lstrip()
+    stripped = calibration_formats.strip_bom(text).lstrip()
     if stripped.startswith("{") and '"lidar_from_camera"' in stripped:
         return "json"
     return None
+
+
+def _json_needs_normalization(text: str) -> bool:
+    try:
+        return calibration_formats.canonical_lidar_camera_json(text, lidar_frame_id=None) is not None
+    except calibration_formats.CalibrationParseError:
+        return False  # file hỏng: giữ hành vi cũ, lỗi hiện ra ở bộ đọc gói như trước
 
 
 def _exactly_one(found: list[str], what: str, missing: str) -> str:
@@ -191,6 +226,10 @@ def _detect_lidar_package(archive: zipfile.ZipFile, names: list[str], clouds: li
         except UnicodeDecodeError:
             continue
         calibration = _calibration_format(text)
+        if calibration == "json" and _json_needs_normalization(text):
+            # JSON hợp lệ nhưng bộ đọc gói cũ không đọc được nguyên văn (ma trận, hoặc ngược chiều): để gói bị
+            # từ chối ở đây rồi được server đóng lại, thay vì báo sẵn sàng rồi hỏng khi worker đọc.
+            continue
         if calibration is not None:
             calibrations[name] = calibration
         elif (poses := _pose_count(text)) is not None:
@@ -339,10 +378,147 @@ def _colmap_model(names: list[str]) -> tuple[str, Literal["bin", "txt"]]:
     return directory, fmt  # type: ignore[return-value]
 
 
+def _sog_files(meta: dict[str, object], key: str, count: int) -> list[str]:
+    """Return safe, root-level filenames from one SOG-v2 property descriptor."""
+    descriptor = meta.get(key)
+    if not isinstance(descriptor, dict):
+        raise InputRejectedError(f"SOG thiếu metadata {key}")
+    files = descriptor.get("files")
+    if not isinstance(files, list) or len(files) != count:
+        raise InputRejectedError(f"Metadata SOG {key}.files không hợp lệ")
+    result: list[str] = []
+    for filename in files:
+        if (
+            not isinstance(filename, str)
+            or not filename
+            or PurePosixPath(filename).name != filename
+            or "\\" in filename
+            or filename in {".", ".."}
+        ):
+            raise InputRejectedError(f"Tên texture SOG không an toàn: {filename!r}")
+        result.append(filename)
+    if len(result) != len(set(result)):
+        raise InputRejectedError(f"Metadata SOG {key}.files bị lặp")
+    return result
+
+
+def _sog_codebook(meta: dict[str, object], key: str) -> None:
+    descriptor = meta.get(key)
+    if not isinstance(descriptor, dict):
+        raise InputRejectedError(f"SOG thiếu metadata {key}")
+    values = descriptor.get("codebook")
+    if (
+        not isinstance(values, list)
+        or len(values) != 256
+        or any(
+            isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)
+            for value in values
+        )
+    ):
+        raise InputRejectedError(f"Metadata SOG {key}.codebook cần 256 số hữu hạn")
+
+
+def _detect_sog(archive: zipfile.ZipFile, max_uncompressed: int) -> InputDetection:
+    """Validate SOG identity/metadata without decoding large WebP images."""
+    registry = SOG_FORMAT_REGISTRY[2]
+    infos = archive.infolist()
+    if len(infos) > registry["max_members"]:
+        raise InputRejectedError("SOG có quá nhiều thành viên")
+    archive_names = [info.filename for info in infos if not info.is_dir()]
+    if len(archive_names) != len(set(archive_names)):
+        raise InputRejectedError("SOG có tên thành viên bị lặp")
+    if "meta.json" not in archive_names:
+        raise InputRejectedError("SOG thiếu meta.json ở thư mục gốc")
+    meta_info = next(info for info in infos if info.filename == "meta.json")
+    if meta_info.file_size <= 0 or meta_info.file_size > registry["max_meta_bytes"]:
+        raise InputRejectedError("meta.json của SOG rỗng hoặc vượt 64 KiB")
+    try:
+        meta = json.loads(archive.read(meta_info))
+    except (UnicodeDecodeError, json.JSONDecodeError, zipfile.BadZipFile) as error:
+        raise InputRejectedError("meta.json của SOG không đọc được") from error
+    if not isinstance(meta, dict):
+        raise InputRejectedError("meta.json của SOG phải là object")
+    version = meta.get("version")
+    if isinstance(version, bool) or not isinstance(version, int) or version not in SOG_FORMAT_REGISTRY:
+        raise InputRejectedError(f"Phiên bản SOG không được hỗ trợ: {version!r}; hiện hỗ trợ version 2")
+    model = meta.get("model")
+    if model not in registry["models"]:
+        raise InputRejectedError(f"Model SOG không được hỗ trợ: {model!r}")
+    count = meta.get("count")
+    if isinstance(count, bool) or not isinstance(count, int) or not 0 < count <= registry["max_gaussians"]:
+        raise InputRejectedError(f"Số Gaussian trong SOG phải nằm trong 1..{registry['max_gaussians']:,}")
+
+    means = meta.get("means")
+    if not isinstance(means, dict):
+        raise InputRejectedError("SOG thiếu metadata means")
+    for axis in ("mins", "maxs"):
+        values = means.get(axis)
+        if (
+            not isinstance(values, list)
+            or len(values) != 3
+            or any(
+                isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)
+                for value in values
+            )
+        ):
+            raise InputRejectedError(f"Metadata SOG means.{axis} cần ba số hữu hạn")
+    minimums = means["mins"]
+    maximums = means["maxs"]
+    if any(minimum > maximum for minimum, maximum in zip(minimums, maximums, strict=True)):
+        raise InputRejectedError("Metadata SOG means.mins không được vượt means.maxs")
+
+    files = _sog_files(meta, "means", 2)
+    for key in ("scales", "quats", "sh0"):
+        files.extend(_sog_files(meta, key, 1))
+    _sog_codebook(meta, "scales")
+    _sog_codebook(meta, "sh0")
+    shn = meta.get("shN")
+    if shn is None:
+        sh_degree = 0
+    else:
+        if not isinstance(shn, dict):
+            raise InputRejectedError("Metadata SOG shN không hợp lệ")
+        bands = shn.get("bands")
+        sh_count = shn.get("count")
+        if isinstance(bands, bool) or not isinstance(bands, int) or bands not in {1, 2, 3}:
+            raise InputRejectedError("Metadata SOG shN.bands phải nằm trong 1..3")
+        if isinstance(sh_count, bool) or not isinstance(sh_count, int) or not 1 <= sh_count <= 65536:
+            raise InputRejectedError("Metadata SOG shN.count phải nằm trong 1..65536")
+        _sog_codebook(meta, "shN")
+        files.extend(_sog_files(meta, "shN", 2))
+        sh_degree = bands
+
+    expected = {"meta.json", *files}
+    if len(expected) != len(files) + 1 or set(archive_names) != expected:
+        raise InputRejectedError(
+            "Gói SOG phải chứa đúng meta.json và texture được khai báo; không hỗ trợ file ngoài gói"
+        )
+    by_name = {info.filename: info for info in infos if not info.is_dir()}
+    for filename in files:
+        info = by_name.get(filename)
+        if info is None or info.file_size <= 12:
+            raise InputRejectedError(f"SOG thiếu texture hợp lệ: {filename}")
+        try:
+            with archive.open(info) as texture:
+                signature = texture.read(12)
+        except (OSError, zipfile.BadZipFile, RuntimeError) as error:
+            raise InputRejectedError(f"Texture SOG không đọc được: {filename}") from error
+        if len(signature) < 12 or signature[:4] != b"RIFF" or signature[8:12] != b"WEBP":
+            raise InputRejectedError(f"Texture SOG không phải WebP: {filename}")
+    if sum(info.file_size for info in infos) > max_uncompressed:
+        raise InputRejectedError("SOG giải nén vượt dung lượng cho phép")
+    return InputDetection(
+        kind=InputAssetFormat.GAUSSIAN_SOG.value,
+        sog=GaussianSogEvidence(format_version=2, gaussian_count=count, sh_degree=sh_degree, model=model),
+    )
+
+
 def _detect_zip(stream: BinaryIO, max_uncompressed: int) -> InputDetection:
     try:
         with zipfile.ZipFile(stream) as archive:
             names = _safe_names(archive, max_uncompressed)
+            if "meta.json" in names:
+                return _detect_sog(archive, max_uncompressed)
             plies = [name for name in names if PurePosixPath(name).suffix.lower() == ".ply"]
             clouds = [name for name in names if PurePosixPath(name).suffix.lower() == ".pcd"]
             has_colmap = any(PurePosixPath(name).stem in _COLMAP_FILES for name in names)
@@ -390,7 +566,7 @@ def detect_stream(stream: BinaryIO, size_bytes: int, max_uncompressed_bytes: int
     if _is_video(head):
         return InputDetection(kind="rgb_video")
     raise InputRejectedError(
-        "Không nhận diện được file. Hỗ trợ: video .mp4/.mov; scene 3DGS .ply hoặc .zip (PLY 3DGS + model COLMAP); "
+        "Không nhận diện được file. Hỗ trợ: video .mp4/.mov; scene 3DGS .ply, .sog hoặc .zip (PLY 3DGS + model COLMAP); "
         "gói LiDAR .zip (scan .pcd hoặc đám mây đã đăng ký, kèm quỹ đạo + calibration + thời điểm frame)"
     )
 
@@ -399,3 +575,86 @@ def detect_input(path: Path, max_uncompressed_bytes: int) -> InputDetection:
     """Nhận diện file cục bộ theo bytes: video, PLY 3DGS, ZIP (3DGS + COLMAP), hoặc gói LiDAR .zip."""
     with path.open("rb") as stream:
         return detect_stream(stream, path.stat().st_size, max_uncompressed_bytes)
+
+
+def validate_sog_bundle(path: Path, max_uncompressed_bytes: int) -> InputDetection:
+    """Decode every bounded SOG WebP texture before a worker publishes the bundle."""
+    detection = detect_input(path, max_uncompressed_bytes)
+    if detection.kind != "gaussian_sog" or detection.sog is None:
+        raise InputRejectedError("File nguồn không phải SOG v2 được hỗ trợ")
+    try:
+        with zipfile.ZipFile(path) as archive:
+            meta = json.loads(archive.read("meta.json"))
+            if not isinstance(meta, dict):
+                raise InputRejectedError("Metadata SOG không hợp lệ")
+            files: list[str] = []
+            for key, count in (("means", 2), ("scales", 1), ("quats", 1), ("sh0", 1)):
+                files.extend(_sog_files(meta, key, count))
+            if meta.get("shN") is not None:
+                files.extend(_sog_files(meta, "shN", 2))
+            pixel_budget = min(
+                _MAX_SOG_TEXTURE_PIXELS,
+                max(1_000_000, detection.sog.gaussian_count * 12),
+            )
+            decoded_pixels = 0
+            for filename in files:
+                info = archive.getinfo(filename)
+                if info.file_size > _MAX_SOG_TEXTURE_BYTES:
+                    raise InputRejectedError(f"Texture SOG vượt giới hạn bytes: {filename}")
+                encoded = archive.read(info)
+                width, height, channels = _webp_dimensions_and_channels(encoded)
+                pixels = width * height
+                if (
+                    width > 16_384
+                    or height > 16_384
+                    or pixels > pixel_budget
+                    or decoded_pixels + pixels > pixel_budget
+                    or channels not in {3, 4}
+                ):
+                    raise InputRejectedError(f"Kích thước hoặc số kênh texture SOG không hợp lệ: {filename}")
+                decoded_pixels += pixels
+    except (OSError, zipfile.BadZipFile, KeyError, json.JSONDecodeError) as error:
+        raise InputRejectedError("Gói SOG không giải mã được") from error
+    return detection
+
+
+def _webp_dimensions_and_channels(payload: bytes) -> tuple[int, int, int]:
+    """Read bounded WebP container dimensions/channels; the pinned runtime decodes pixels."""
+    if len(payload) < 26 or payload[:4] != b"RIFF" or payload[8:12] != b"WEBP":
+        raise InputRejectedError("Texture SOG không phải WebP hoàn chỉnh")
+    if int.from_bytes(payload[4:8], "little") + 8 != len(payload):
+        raise InputRejectedError("Kích thước RIFF/WebP không khớp bytes texture")
+    offset = 12
+    dimensions: tuple[int, int] | None = None
+    channels: int | None = None
+    while offset + 8 <= len(payload):
+        chunk = payload[offset : offset + 4]
+        size = int.from_bytes(payload[offset + 4 : offset + 8], "little")
+        start = offset + 8
+        end = start + size
+        if end > len(payload):
+            raise InputRejectedError("Chunk WebP vượt kích thước texture")
+        data = payload[start:end]
+        if chunk == b"VP8X" and size >= 10:
+            dimensions = (
+                1 + int.from_bytes(data[4:7], "little"),
+                1 + int.from_bytes(data[7:10], "little"),
+            )
+            channels = 4 if data[0] & 0x10 else 3
+        elif chunk == b"VP8 " and size >= 10 and data[3:6] == b"\x9d\x01\x2a":
+            dimensions = (
+                int.from_bytes(data[6:8], "little") & 0x3FFF,
+                int.from_bytes(data[8:10], "little") & 0x3FFF,
+            )
+            channels = 3
+        elif chunk == b"VP8L" and size >= 5 and data[0] == 0x2F:
+            bits = int.from_bytes(data[1:5], "little")
+            dimensions = (1 + (bits & 0x3FFF), 1 + ((bits >> 14) & 0x3FFF))
+            channels = 4 if (bits >> 28) & 0x1 else 3
+        offset = end + (size & 1)
+    if offset != len(payload) or dimensions is None or channels is None:
+        raise InputRejectedError("Texture SOG thiếu chunk WebP có kích thước giải mã")
+    width, height = dimensions
+    if width < 1 or height < 1:
+        raise InputRejectedError("Texture SOG có kích thước rỗng")
+    return width, height, channels

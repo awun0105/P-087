@@ -1,5 +1,6 @@
 """Durable queue fixture proof: chờ/tiếp tục/cancel giữ config và provenance."""
 
+import json
 import sqlite3
 import subprocess
 import sys
@@ -9,6 +10,7 @@ from unittest.mock import Mock
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 
 from src.config import Settings
 from src.models.contracts.manifests import JobManifest, JobStatus, StageId
@@ -509,6 +511,19 @@ def test_legacy_job_without_estimate_still_marks_machine_busy(tmp_path: Path, mo
     assert gate(legacy)  # chưa có mô hình ước lượng: không bịa yêu cầu, không chờ
     reservation = _reservations(gate)[gate.worker_id]
     assert reservation.job_id == legacy.job_id and reservation.required_gb is None
+    with gate.database.transaction() as tx:
+        payload = tx.execute(
+            "SELECT payload FROM r2s_resource_reservations WHERE worker_id=?", (gate.worker_id,)
+        ).fetchone()[0]
+    assert not {
+        "gpu_required",
+        "operation_kind",
+        "operation_id",
+        "parent_kind",
+        "parent_id",
+        "input_checksum",
+        "config_checksum",
+    } & set(json.loads(payload))
 
 
 def test_job_reservation_and_touch_job_reservation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -530,3 +545,311 @@ def test_job_reservation_and_touch_job_reservation(tmp_path: Path, monkeypatch: 
 
     # Job không tồn tại trả None
     assert admission.job_reservation(gate.database, "non-existent-job") is None
+
+
+def _operation_request(
+    *,
+    operation_kind: admission.OperationKind = "reobjectify",
+    operation_id: str = "operation-objectify-001",
+    parent_id: str = "job-fixture-001",
+    required_gb: dict[str, float | None] | None = None,
+    gpu_required: bool = True,
+    measured: bool = True,
+    requested_gpu_uuid: str | None = None,
+    input_checksum: str = "sha256:" + "a" * 64,
+    config_checksum: str = "sha256:" + "b" * 64,
+) -> admission.OperationAdmissionRequest:
+    return admission.OperationAdmissionRequest(
+        operation_kind=operation_kind,
+        operation_id=operation_id,
+        parent_kind="job",
+        parent_id=parent_id,
+        input_checksum=input_checksum,
+        config_checksum=config_checksum,
+        resources=admission.OperationResourceProfile(
+            required_gb=required_gb or {"vram": 1.0, "ram": 2.0, "disk": 2.0},
+            danger_ratio=0.9,
+            measured=measured,
+            gpu_required=gpu_required,
+        ),
+        requested_gpu_uuid=requested_gpu_uuid,
+    )
+
+
+def test_operation_and_job_share_one_admission_reservation_without_fake_job(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, job, gate = _queued(tmp_path)
+    _machine(monkeypatch)
+    operation_worker = _second_worker(gate, "same-host:operation-worker")
+    request = _operation_request(requested_gpu_uuid=GPU.uuid, parent_id=job.job_id)
+
+    admitted = operation_worker.admit_operation(request)
+    assert admitted.status == "admitted"
+    assert admitted.request == request and admitted.waiting_on == []
+    reservation = _reservations(gate)[operation_worker.worker_id]
+    assert reservation.job_id is None
+    assert reservation.operation_id == request.operation_id
+    assert reservation.input_checksum == request.input_checksum
+    assert reservation.config_checksum == request.config_checksum
+
+    # The legacy job adapter cannot replace an operation's reservation in the same worker.
+    assert not operation_worker(job)
+    assert _reservations(gate)[operation_worker.worker_id] == reservation
+    # A second worker sees the same GPU reservation and keeps the job/config queued.
+    assert not gate(job)
+    wait = resource_wait(gate.database, job)
+    assert wait is not None and wait.waiting_on == ["vram"] and wait.reasons == {"vram": "busy"}
+    assert operation_worker.release_operation(request)
+    assert gate(job)
+
+
+def test_duplicate_operation_admission_is_fenced_and_release_is_idempotent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, _, gate = _queued(tmp_path)
+    _machine(monkeypatch)
+    request = _operation_request()
+    assert gate.admit_operation(request).status == "admitted"
+    assert gate.admit_operation(request).status == "worker_busy"
+    other_worker = _second_worker(gate, "same-host:duplicate-operation-worker")
+    assert other_worker.admit_operation(request).status == "worker_busy"
+    changed_input = _operation_request(input_checksum="sha256:" + "c" * 64)
+    assert gate.admit_operation(changed_input).status == "identity_conflict"
+    assert not gate.release_operation(changed_input)
+    assert gate.release_operation(request)
+    assert gate.release_operation(request)
+    assert _reservations(gate) == {}
+
+
+def test_import_profile_scales_with_gaussian_count_and_marks_heuristic(tmp_path: Path) -> None:
+    _, _, gate = _queued(tmp_path)
+
+    gpu_profile = gate.operation_profile_for_import(
+        gaussian_count=1_000_000,
+        source_size_bytes=1_000_000_000,
+        gpu_required=True,
+    )
+    # Cập nhật kỳ vọng theo hệ số đã hiệu chuẩn (vram_base_gb 1.25, ram_base_gb 0.9, AUD-26.S1)
+    assert gpu_profile.required_gb == {"vram": 2.35, "ram": 2.15, "disk": 2.0}
+    assert gpu_profile.danger_ratio == 0.92 and gpu_profile.measured is False and gpu_profile.gpu_required
+
+    cpu_profile = gate.operation_profile_for_import(
+        gaussian_count=1_000_000,
+        source_size_bytes=1_000_000_000,
+        gpu_required=False,
+    )
+    assert cpu_profile.required_gb["vram"] == 0.0 and not cpu_profile.gpu_required
+
+
+def test_expired_operation_lease_cannot_touch_or_release_new_generation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, _, gate = _queued(tmp_path)
+    _machine(monkeypatch)
+    old = _operation_request().model_copy(update={"lease_token": "old-lease", "lease_generation": 1})
+    current = _operation_request().model_copy(update={"lease_token": "new-lease", "lease_generation": 2})
+
+    assert gate.admit_operation(old).status == "admitted"
+    assert gate.release_operation(old)
+    assert gate.admit_operation(current).status == "admitted"
+    assert not gate.touch_operation(old)
+    assert not gate.release_operation(old)
+    reservations = _reservations(gate)
+    assert len(reservations) == 1
+    assert next(iter(reservations.values())).lease_token == "new-lease"
+    assert gate.release_operation(current)
+
+
+def test_operation_waits_when_requested_gpu_affinity_does_not_match_worker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, _, gate = _queued(tmp_path)
+    _machine(monkeypatch)
+    request = _operation_request(requested_gpu_uuid="GPU-requested")
+    result = gate.admit_operation(request)
+    assert result.status == "waiting_gpu_affinity"
+    assert result.bound_gpu_uuid == GPU.uuid
+    assert result.request.requested_gpu_uuid == "GPU-requested"
+    assert _reservations(gate) == {}
+
+
+def test_operation_kind_requires_matching_parent_identity() -> None:
+    payload = _operation_request().model_dump()
+    payload.update(operation_kind="import_package", parent_kind="job")
+    with pytest.raises(ValidationError, match="must bind an import parent"):
+        admission.OperationAdmissionRequest.model_validate(payload)
+
+    payload = _operation_request(operation_kind="rgb_lidar_register").model_dump()
+    payload.update(parent_kind="import")
+    with pytest.raises(ValidationError, match="must bind a job parent"):
+        admission.OperationAdmissionRequest.model_validate(payload)
+
+
+def test_rgb_lidar_registration_uses_shared_cpu_operation_admission(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, job, gate = _queued(tmp_path)
+    _machine(monkeypatch)
+    worker = _second_worker(gate, "same-host:registration-worker")
+    request = _operation_request(
+        operation_kind="rgb_lidar_register",
+        parent_id=job.job_id,
+        required_gb={"vram": 0.0, "ram": 1.0, "disk": 1.0},
+        gpu_required=False,
+        input_checksum="sha256:" + "d" * 64,
+        config_checksum="sha256:" + "e" * 64,
+    )
+
+    admitted = worker.admit_operation(request)
+
+    assert admitted.status == "admitted"
+    assert admitted.request == request
+    reservation = _reservations(gate)[worker.worker_id]
+    assert reservation.operation_id == request.operation_id
+    assert reservation.job_id is None
+    assert reservation.input_checksum == request.input_checksum
+    assert reservation.config_checksum == request.config_checksum
+    assert worker.release_operation(request)
+
+
+@pytest.mark.parametrize(
+    ("resource", "need", "free", "capacity", "reason"),
+    [
+        ("vram", None, 3.8, 4.0, "unmeasured"),
+        ("ram", None, 60.0, 64.0, "unmeasured"),
+        ("disk", None, 400.0, 500.0, "unmeasured"),
+        ("vram", 4.0, 3.8, 4.0, "exceeds_machine"),
+        ("ram", 65.0, 60.0, 64.0, "exceeds_machine"),
+        ("disk", 501.0, 400.0, 500.0, "exceeds_machine"),
+    ],
+)
+def test_operation_unknown_or_impossible_resource_never_admits(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    resource: str,
+    need: float | None,
+    free: float | None,
+    capacity: float | None,
+    reason: str,
+) -> None:
+    _, _, gate = _queued(tmp_path)
+    headroom_field = {"vram": "vram_free_gb", "ram": "ram_available_gb", "disk": "disk_free_gb"}[resource]
+    live = {**LIVE, headroom_field: free}
+    totals = {**CAPACITY, resource: capacity}
+    _machine(monkeypatch, live, totals)
+    values: dict[str, float | None] = {"vram": 1.0, "ram": 2.0, "disk": 2.0}
+    values[resource] = need
+    request = _operation_request(required_gb=values)
+
+    result = gate.admit_operation(request)
+    assert result.status == "waiting_resources"
+    assert result.waiting_on == [resource]
+    assert result.reasons == {resource: reason}
+    assert result.request.input_checksum == request.input_checksum
+    assert result.request.config_checksum == request.config_checksum
+    assert _reservations(gate) == {}
+
+
+@pytest.mark.parametrize(
+    ("resource", "free"),
+    [("vram", None), ("ram", None), ("disk", None)],
+)
+def test_operation_waits_when_live_headroom_is_unmeasured(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    resource: str,
+    free: float | None,
+) -> None:
+    _, _, gate = _queued(tmp_path)
+    headroom_field = {"vram": "vram_free_gb", "ram": "ram_available_gb", "disk": "disk_free_gb"}[resource]
+    _machine(monkeypatch, {**LIVE, headroom_field: free})
+    result = gate.admit_operation(_operation_request())
+    assert result.status == "waiting_resources"
+    assert result.waiting_on == [resource]
+    assert result.reasons == {resource: "unmeasured"}
+    assert _reservations(gate) == {}
+
+
+def test_cpu_only_operation_does_not_require_or_reserve_gpu(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _, job, gate = _queued(tmp_path)
+    cpu_worker = _second_worker(gate, "same-host:cpu-operation-worker")
+    _machine(monkeypatch, {"vram_free_gb": None, "ram_available_gb": 60.0, "disk_free_gb": 400.0})
+    monkeypatch.setattr(admission, "bound_gpu", lambda: None)
+    request = _operation_request(
+        required_gb={"vram": None, "ram": 2.0, "disk": 2.0},
+        gpu_required=False,
+    )
+    assert cpu_worker.admit_operation(request).status == "admitted"
+    reservation = _reservations(gate)[cpu_worker.worker_id]
+    assert not reservation.gpu_required and reservation.gpu_uuid is None
+
+    # CPU work consumes RAM/disk, but it does not block a GPU-only job on VRAM.
+    monkeypatch.setattr(admission, "bound_gpu", lambda: GPU)
+    assert gate(job)
+    assert {item.worker_id for item in _reservations(gate).values()} == {gate.worker_id, cpu_worker.worker_id}
+
+
+def test_disk_reclaim_protects_job_owned_by_an_operation_reservation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from src.services.orchestration.jobs.workspace import CleanupResult
+    from src.services.orchestration.projects import deletion
+
+    _, job, gate = _queued(tmp_path)
+    _machine(monkeypatch)
+    operation_worker = _second_worker(gate, "same-host:operation-worker")
+    request = _operation_request(parent_id=job.job_id)
+    assert operation_worker.admit_operation(request).status == "admitted"
+    captured: list[set[str]] = []
+
+    def capture_reclaim(*, worker_root: Path, artifact_root: Path, protected_jobs: set[str]) -> CleanupResult:
+        captured.append(set(protected_jobs))
+        return CleanupResult(files_removed=0, bytes_removed=0)
+
+    monkeypatch.setattr(admission, "reclaim_worker_scratch", capture_reclaim)
+    monkeypatch.setattr(deletion, "purge_expired", lambda context: [])
+    monkeypatch.setattr(deletion, "context_from_settings", lambda settings: "context")
+    assert gate._reclaim_disk(job)
+    assert captured == [{job.job_id}]
+
+
+def test_old_job_reservation_payload_remains_readable_without_schema_migration() -> None:
+    now = datetime.now(UTC)
+    old_payload = {
+        "worker_id": "old-worker",
+        "host": "worker-host",
+        "pid": 123,
+        "gpu_uuid": "GPU-old",
+        "job_id": "job-old",
+        "required_gb": {"vram": 1.0, "ram": 2.0, "disk": 3.0},
+        "exclusive": False,
+        "phase": "preview",
+        "reserved_at": now.isoformat(),
+        "heartbeat_at": now.isoformat(),
+    }
+    reservation = admission.Reservation.model_validate_json(json.dumps(old_payload))
+    assert reservation.job_id == "job-old"
+    assert reservation.operation_id is None and reservation.gpu_required
+
+
+def test_restarted_worker_with_same_identity_discards_its_leftover_operation_reservation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Container restarts reuse host:pid; a killed objectify must not block the new process forever."""
+    _, job, crashed = _queued(tmp_path)
+    _machine(monkeypatch)
+    assert crashed.admit_operation(_operation_request(operation_id="operation-before-crash")).status == "admitted"
+    other = _second_worker(crashed, "same-host:other-live-worker")
+    small = _operation_request(operation_id="operation-other", required_gb={"vram": 0.1, "ram": 1.0, "disk": 1.0})
+    assert other.admit_operation(small).status == "admitted"
+
+    restarted = _second_worker(crashed, crashed.worker_id)
+    retry = _operation_request(operation_id="operation-after-restart")
+    assert restarted.admit_operation(retry).status == "worker_busy"
+    assert not restarted(job)
+
+    assert restarted.discard_leftover_reservation()
+    assert not restarted.discard_leftover_reservation()
+    assert set(_reservations(crashed)) == {other.worker_id}
+    assert restarted.admit_operation(retry).status == "admitted"

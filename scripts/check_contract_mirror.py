@@ -23,13 +23,14 @@ from pydantic import BaseModel  # noqa: E402
 
 from src.models.contracts.artifacts import ArtifactDataClass  # noqa: E402
 from src.models.contracts.coordinates import Transform  # noqa: E402
+from src.models.contracts.floor_model import FloorFitEvidence  # noqa: E402
 from src.models.contracts.manifests import (  # noqa: E402
     JobStatus,
     PrivacyResult,
     StageId,
     StageStatus,
 )
-from src.models.contracts.scene import ColliderSpec, SceneEnvironment, SceneObject  # noqa: E402
+from src.models.contracts.scene import ColliderSpec, SceneEnvironment, SceneObject, SourceCollisionRegion  # noqa: E402
 from src.services.orchestration.jobs.transitions import ALLOWED_TRANSITIONS  # noqa: E402
 
 # TS constant -> giá trị backend tương ứng
@@ -43,7 +44,9 @@ ENUM_MIRRORS: dict[str, list[str]] = {
 
 # TS interface -> Pydantic model
 MODEL_MIRRORS: list[tuple[str, type[BaseModel]]] = [
+    ("FloorFitEvidence", FloorFitEvidence),
     ("SceneObject", SceneObject),
+    ("SourceCollisionRegion", SourceCollisionRegion),
     ("SceneEnvironment", SceneEnvironment),
     ("ColliderSpec", ColliderSpec),
     ("Transform", Transform),

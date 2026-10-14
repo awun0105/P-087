@@ -2,8 +2,8 @@
 
 Bản gốc: `prompt_filter` (IoU/ổn định + NMS + tỉ lệ frame đồng ý), `perform_3dsegmentation`
 (điểm 3D được mask bỏ phiếu qua nhiều frame), `prompt_consolidation` (DBSCAN dọn nhiễu, gộp
-prompt cùng vật), sàn tách bằng RANSAC. Khác bản gốc: DBSCAN bằng đồ thị bán kính của
-`scipy.spatial.cKDTree`; sàn = z = 0 đã xác nhận ở REC-06 thay RANSAC; không cần CUDA ext.
+prompt cùng vật). Floor mask dùng FloorModel bị ràng buộc bởi prior REC-06; DBSCAN
+được thay bằng đồ thị bán kính `scipy.spatial.cKDTree`; không cần CUDA ext.
 """
 
 from dataclasses import dataclass, field
@@ -12,6 +12,9 @@ import numpy as np
 from scipy.sparse.csgraph import connected_components
 from scipy.spatial import cKDTree
 
+from src.models.contracts.floor_model import FloorModel
+from src.services.scene.floor_model import above_floor_mask
+
 
 @dataclass(frozen=True)
 class Sampro3dConfig:
@@ -19,7 +22,6 @@ class Sampro3dConfig:
 
     prompt_voxel_m: float = 0.2
     max_prompts: int = 400
-    floor_band_m: float = 0.08
     pred_iou_thres: float = 0.7
     mask_nms_thres: float = 0.8
     keep_thres: float = 0.4
@@ -68,9 +70,11 @@ def farthest_point_sampling(points: np.ndarray, count: int, seed: int = 0) -> np
     return chosen
 
 
-def select_prompts(points: np.ndarray, config: Sampro3dConfig = Sampro3dConfig()) -> np.ndarray:
-    """Số prompt = số voxel `prompt_voxel_m` có điểm (như SAMPro3D), bỏ sàn, chặn trên `max_prompts`."""
-    above = np.nonzero(points[:, 2] > config.floor_band_m)[0]
+def select_prompts(
+    points: np.ndarray, floor_model: FloorModel, config: Sampro3dConfig = Sampro3dConfig()
+) -> np.ndarray:
+    """Số prompt = số voxel có điểm phía trên fitted floor, chặn trên `max_prompts`."""
+    above = np.nonzero(above_floor_mask(points, floor_model))[0]
     if not len(above):
         return above
     voxels = np.unique(np.floor(points[above] / config.prompt_voxel_m).astype(np.int64), axis=0)
@@ -105,7 +109,12 @@ def _surviving_records(proposal: Proposal, config: Sampro3dConfig) -> list[int]:
     return kept
 
 
-def segment(proposal: Proposal, points: np.ndarray, config: Sampro3dConfig = Sampro3dConfig()) -> list[np.ndarray]:
+def segment(
+    proposal: Proposal,
+    points: np.ndarray,
+    floor_model: FloorModel,
+    config: Sampro3dConfig = Sampro3dConfig(),
+) -> list[np.ndarray]:
     """Trả danh sách instance (chỉ số điểm), đã dọn nhiễu và bỏ sàn."""
     kept = _surviving_records(proposal, config)
     prompts = np.unique(proposal.prompt)
@@ -154,7 +163,7 @@ def segment(proposal: Proposal, points: np.ndarray, config: Sampro3dConfig = Sam
     instances = []
     for parts in groups.values():
         members = np.unique(np.concatenate(parts))
-        members = members[points[members, 2] > config.floor_band_m]
+        members = members[above_floor_mask(points[members], floor_model)]
         cleaned = _largest_cluster(points, members, config)
         if len(cleaned) >= config.min_instance_points:
             instances.append(cleaned)

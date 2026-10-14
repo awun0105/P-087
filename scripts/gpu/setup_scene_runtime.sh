@@ -25,6 +25,11 @@ MOGE_COMMIT="b942f00bdc2a2a23ebb474fbe034d487e6dcceec"
 UTILS3D_COMMIT="3fab839f0be9931dac7c8488eb0e1600c236e183"
 MOGE_URL="https://huggingface.co/Ruicheng/moge-2-vitb-normal/resolve/main/model.pt"
 MOGE_SHA="16b8110e86d5dc5a849db120ca96ef3a223fd30b0c9146d1d81db504073da5f6"
+# EgoBlur Gen2 (che khuôn mặt/biển số, AUD-18; Apache-2.0). Trọng số chỉ tải được từ
+# https://www.projectaria.com/tools/egoblur/ sau khi nhập email và đồng ý giấy phép, nên script không tự tải:
+# đặt R2S_EGOBLUR_WEIGHTS trỏ tới thư mục chứa hai file .jit đã tải. Không đặt thì bước ẩn danh không dùng được.
+EGOBLUR_FACE_SHA="2ba183ff74a66752f6457846efb4379b351727d1c9eaef461ed4be8db18cc2e8"
+EGOBLUR_LP_SHA="1d6b3fc37fce4158d3b7d4a364290cfeeccc86a9cd84a376c443d560f11497f4"
 
 need() { command -v "$1" >/dev/null || { echo "[!] Thiếu lệnh: $1" >&2; exit 1; }; }
 need uv; need git; need curl
@@ -54,12 +59,25 @@ uv pip install --python "$PY" --no-deps \
   "moge @ git+https://github.com/microsoft/MoGe.git@${MOGE_COMMIT}" \
   "utils3d @ git+https://github.com/EasternJournalist/utils3d.git@${UTILS3D_COMMIT}"
 uv pip install --python "$PY" huggingface_hub click
+# Gói egoblur ghim torch 2.9.1 và kéo moviepy/av/vrs; chỉ cần phần detector nên cài --no-deps. Hai model đã
+# chạy trên torch 2.7.1 của runtime này (kiểm 2026-10-09).
+uv pip install --python "$PY" --no-deps egoblur==2.0.1
 
 mkdir -p "$RUNTIME/checkpoints" "$RUNTIME/weights"
 fetch "$SAM2_CHECKPOINT_URL" "$RUNTIME/checkpoints/sam2.1_hiera_tiny.pt" "$SAM2_CHECKPOINT_SHA"
 fetch "$LAMA_URL" "$RUNTIME/weights/big-lama.pt" "$LAMA_SHA"
 fetch "$MOGE_URL" "$RUNTIME/weights/moge-2-vitb-normal.pt" "$MOGE_SHA"
 "$PY" -c "from moge.model.v2 import MoGeModel"
+if [ -n "${R2S_EGOBLUR_WEIGHTS:-}" ]; then
+  for pair in "ego_blur_face_gen2.jit:$EGOBLUR_FACE_SHA" "ego_blur_lp_gen2.jit:$EGOBLUR_LP_SHA"; do
+    name="${pair%%:*}"
+    [ -f "$RUNTIME/weights/$name" ] || cp "$R2S_EGOBLUR_WEIGHTS/$name" "$RUNTIME/weights/$name"
+    [ "$(sha256sum "$RUNTIME/weights/$name" | cut -d' ' -f1)" = "${pair##*:}" ] \
+      || { echo "[!] Sai checksum: $RUNTIME/weights/$name" >&2; exit 1; }
+  done
+else
+  echo "[bỏ qua] EgoBlur: chưa đặt R2S_EGOBLUR_WEIGHTS, bước ẩn danh khuôn mặt/biển số sẽ không dùng được."
+fi
 
 if [ "${R2S_SKIP_GPU_CHECK:-0}" = "1" ]; then
   # Lúc build image Docker không có GPU: chỉ kiểm import và biên dịch sẵn kernel gsplat (cần nvcc, không cần GPU).

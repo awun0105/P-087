@@ -5,17 +5,23 @@ vào API/worker; giao tiếp bằng file request JSON + kết quả npz trong wo
 """
 
 import json
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Event
 
 import numpy as np
 
+from src.models.contracts.floor_model import FloorModel
+from src.services.process_control import ProcessTimeoutError, run_cancellable_process
 from src.services.scene.geometric import Candidate, GeometricConfig, box_from_points
 from src.services.scene.sampro3d.consolidate import Proposal, Sampro3dConfig, segment, select_prompts
 
 RUNNER = Path(__file__).with_name("sam2_runner.py")
 METHOD = "sampro3d_sam2_v1"
+
+
+class Sampro3dInputError(ValueError):
+    """Invalid scene input cannot recover by repeating the same SAM2 request."""
 
 
 @dataclass(frozen=True)
@@ -40,12 +46,31 @@ class CameraFrame:
     image_path: Path
 
 
-def run_sam2(points: np.ndarray, frames: list[CameraFrame], runtime: Sam2Runtime, workspace: Path) -> Proposal:
+def run_sam2(
+    points: np.ndarray,
+    frames: list[CameraFrame],
+    runtime: Sam2Runtime,
+    workspace: Path,
+    *,
+    floor_model: FloorModel,
+    cancel_event: Event | None = None,
+) -> Proposal:
     """Gọi runtime SAM2 trên toàn bộ frame; lỗi/timeout → ValueError có ngữ cảnh."""
     workspace.mkdir(parents=True, exist_ok=True)
-    prompts = select_prompts(points)
+    if floor_model.status == "uncertain":
+        reason = floor_model.fallback_reason
+        detail = f"mặt sàn chưa đủ tin cậy ({reason})"
+        if reason == "excessive_noise" and floor_model.robust_noise_sigma_m is not None:
+            detail += (
+                f": độ nhiễu {floor_model.robust_noise_sigma_m * 100:.2f} cm"
+                f" vượt ngưỡng {floor_model.profile.max_noise_sigma_m * 100:.2f} cm"
+            )
+        raise Sampro3dInputError(f"{detail}; cần kiểm tra dữ liệu, tỉ lệ và mốc sàn trước khi chạy lại")
+    if not len(points):
+        raise Sampro3dInputError("vùng tách vật không có điểm đủ điều kiện; cần kiểm tra vùng quan sát và độ đục")
+    prompts = select_prompts(points, floor_model)
     if not len(prompts):
-        raise ValueError("không có điểm nào trên sàn để đặt prompt")
+        raise Sampro3dInputError("không có điểm phía trên dải bảo vệ sàn để đặt prompt")
     np.savez(workspace / "points.npz", points=points.astype(np.float32), prompts=prompts)
     request = {
         "points_npz": str(workspace / "points.npz"),
@@ -60,7 +85,7 @@ def run_sam2(points: np.ndarray, frames: list[CameraFrame], runtime: Sam2Runtime
     output = workspace / "result.npz"
     with (workspace / "sam2.log").open("w") as log:
         try:
-            completed = subprocess.run(
+            returncode = run_cancellable_process(
                 [
                     str(runtime.python),
                     str(RUNNER),
@@ -69,15 +94,15 @@ def run_sam2(points: np.ndarray, frames: list[CameraFrame], runtime: Sam2Runtime
                     "--output",
                     str(output),
                 ],
-                stdout=log,
-                stderr=subprocess.STDOUT,
-                timeout=runtime.timeout_seconds,
-                check=False,
+                cwd=workspace,
+                timeout_seconds=runtime.timeout_seconds,
+                output=log,
+                cancel_event=cancel_event,
             )
-        except subprocess.TimeoutExpired as error:
+        except ProcessTimeoutError as error:
             raise ValueError("SAM2 quá thời gian cho phép") from error
-    if completed.returncode != 0 or not output.is_file():
-        raise ValueError(f"SAM2 runtime lỗi (exit {completed.returncode}); xem sam2.log")
+    if returncode != 0 or not output.is_file():
+        raise ValueError(f"SAM2 runtime lỗi (exit {returncode}); xem sam2.log")
     return Proposal.load(str(output))
 
 
@@ -97,7 +122,15 @@ def candidates_from_instances(
     return kept[: limits.max_candidates]
 
 
-def extract(points: np.ndarray, frames: list[CameraFrame], runtime: Sam2Runtime, workspace: Path) -> list[Candidate]:
+def extract(
+    points: np.ndarray,
+    frames: list[CameraFrame],
+    runtime: Sam2Runtime,
+    workspace: Path,
+    *,
+    floor_model: FloorModel,
+    cancel_event: Event | None = None,
+) -> list[Candidate]:
     """Toàn bộ SAMPro3D: prompt → SAM2 → lọc/bỏ phiếu/gộp → hộp ứng viên."""
-    proposal = run_sam2(points, frames, runtime, workspace)
-    return candidates_from_instances(points, segment(proposal, points, Sampro3dConfig()))
+    proposal = run_sam2(points, frames, runtime, workspace, floor_model=floor_model, cancel_event=cancel_event)
+    return candidates_from_instances(points, segment(proposal, points, floor_model, Sampro3dConfig()))

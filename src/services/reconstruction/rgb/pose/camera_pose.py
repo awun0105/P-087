@@ -38,6 +38,13 @@ class ColmapConfig(ContractModel):
     min_registered_frames: int = Field(ge=2)
     min_registered_ratio: float = Field(gt=0, le=1, allow_inf_nan=False)
     vocab_tree: ProductArtifactRef | None = None
+    # Omit unchanged defaults to keep existing schema-1.0 artifacts/checksums readable.
+    matching_mode: Literal["sequential", "sequential_vocab_tree", "exhaustive"] = Field(
+        default="sequential", exclude_if=lambda value: value == "sequential"
+    )
+    loop_detection_period: int = Field(default=10, ge=1, exclude_if=lambda value: value == 10)
+    loop_detection_num_images: int = Field(default=50, ge=1, exclude_if=lambda value: value == 50)
+    loop_detection_min_index_distance: int = Field(default=50, ge=0, exclude_if=lambda value: value == 50)
 
     def checksum(self) -> str:
         """Hash đầy đủ config, không thêm self-checksum field vào schema."""

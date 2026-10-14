@@ -112,3 +112,22 @@ def test_project_dispatch_blocks_without_valid_self_attestation(
     assert not project_dispatch_allowed(project)
     with pytest.raises(PrivacyGateBlockedError):
         require_project_dispatch(project)
+
+
+def test_qa_verified_admits_only_studio_video_uploads_which_the_worker_masks() -> None:
+    """Video upload ở `qa_verified` vào hàng đợi (worker che + chờ chấp nhận); loại project khác vẫn cần VERIFIED."""
+    from src.services.orchestration.projects.models import InputVideoSummary
+    from src.services.orchestration.projects.privacy import project_block_reason, project_dispatch_allowed
+
+    other = _project(PrivacyResult.PRELIMINARY_SCREENED, "qa_verified")
+    video = other.model_copy(
+        update={"input_video": InputVideoSummary(original_name="a.mp4", media_type="video/mp4", size_bytes=1)}
+    )
+    assert not project_dispatch_allowed(other) and project_dispatch_allowed(video)
+    unattested = _project(PrivacyResult.PRELIMINARY_SCREENED, "qa_verified", anonymization_confirmed=False)
+    unattested = unattested.model_copy(update={"input_video": video.input_video})
+    assert project_block_reason(unattested) is not None
+    quarantined = _project(PrivacyResult.QUARANTINED, "qa_verified").model_copy(
+        update={"input_video": video.input_video}
+    )
+    assert not project_dispatch_allowed(quarantined)

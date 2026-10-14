@@ -1,10 +1,14 @@
 """Gói mô phỏng cho Isaac (EX-SIM SIM-02…05 nối vào Studio): tạo, xem trạng thái, tải về."""
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
 
+from src.api.auth import require_contributor
+from src.api.ownership import authorize_job_mutation
+from src.api.product.deps import scene_unavailable
 from src.api.studio import deps
 from src.services.orchestration.artifacts import ArtifactStoreError
+from src.services.orchestration.auth import UserRecord
 from src.services.orchestration.projects import JobNotFoundError
 from src.services.orchestration.review.simulation_package import (
     SimulationPackage,
@@ -31,17 +35,18 @@ def get_simulation_package(job_id: str) -> SimulationPackage | None:
     try:
         return current_package(deps.registry(), job_id)
     except SceneNotAvailableError as error:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+        raise scene_unavailable(error) from error
 
 
 @router.post("/jobs/{job_id}/simulation-package", response_model=SimulationPackage)
-def create_simulation_package(job_id: str) -> SimulationPackage:
-    """Khoét môi trường, gắn collider, preflight; PASS thì đóng gói. FAIL trả báo cáo, không đổi scene."""
+def create_simulation_package(job_id: str, user: UserRecord | None = Depends(require_contributor)) -> SimulationPackage:
+    """Khoét nền, gắn collider và kiểm tra riêng preflight/capability trước khi đóng gói."""
+    authorize_job_mutation(user, deps.registry(), job_id, operation="tạo gói mô phỏng cho")
     _guard(job_id)
     try:
         return build_simulation_package(deps.registry(), job_id)
     except SceneNotAvailableError as error:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+        raise scene_unavailable(error) from error
     except (ArtifactStoreError, SceneError) as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     except ValueError as error:

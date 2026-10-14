@@ -11,14 +11,17 @@ khoản, nạp tiền, nhập secret). Không secret nào được ghi vào repo
 | **B. Chạy lô rồi lấy gói job** (`batch`) | Chỉ cần artifact, tắt máy ngay | 1 instance + Hugging Face | Lệnh đã chạy trên máy local |
 | **C. Worker nối vào DB + kho file chung** (`worker`) | Web chạy thường trực, GPU tự bật khi có việc | Railway + Supabase + R2 + vast.ai | Code có sẵn (kể cả tự bật/tắt GPU), chưa triển khai thật |
 
-Kaggle: xem `scripts/kaggle/README.md` (phụ thuộc Vulkan, phải thử trước).
+Kaggle và Colab không còn được hỗ trợ; dùng image GPU (`Dockerfile.gpu`) trên máy thuê.
+
+Image GPU mặc định `APP_ENV=production` và `AUTH_REQUIRED=true` (đổi được bằng `-e`; production không chạy được khi tắt đăng nhập).
+Chế độ `stack` dùng hai tài khoản seed có sẵn trong dữ liệu Studio (`reviewer@real2sim.dev`, `editor@real2sim.dev`); nạp dữ liệu Studio rồi đăng nhập, không cần tạo tài khoản. Chỉ khi chạy với DB trống mới phải tạo Reviewer bằng CLI (xem README, mục Xác thực và phân quyền).
 
 ## 2. Đã có trong repo
 
 - `Dockerfile.gpu` + `scripts/gpu/docker_entrypoint.sh`: image GPU đủ COLMAP, Brush, splat-transform, runtime tách
   theo vật; chế độ `worker` / `stack` / `batch` / `preflight`.
 - `scripts/gpu/gpu_plan.py`, `run_workers.py`: dò GPU, chia worker theo VRAM từng GPU, ghim job vào GPU.
-- `scripts/kaggle/preflight.py`, `probe_vulkan.sh`: kiểm máy trước khi tốn giờ GPU.
+- `scripts/kaggle/preflight.py`: kiểm máy trước khi tốn giờ GPU (tên thư mục là lịch sử, vẫn được image GPU dùng).
 - `scripts/kaggle/job_bundle.py`, `run_job.py`: chạy lô và chuyển gói job qua Hugging Face.
 - `Dockerfile` (API cho Railway), `scripts/cloud/configure_bucket.py` (CORS + dọn multipart cho R2), đăng nhập hai role.
 - Checkpoint/resume train 3DGS; thử lại tách theo vật.
@@ -68,7 +71,7 @@ vast.ai; chạy trên máy nhiều GPU; `sync` artifact giữa worker và R2 ở
 
    Video và `attestation.json` chép lên bằng `scp` (hoặc `hf download` từ repo dataset của bạn).
 5. **Trên máy có Studio**: `job_bundle pull` + `import`, chọn điểm đo hệ mét, rồi hoặc xác nhận tại chỗ (cần GPU
-   local) hoặc ghi `metric.json` và chạy lượt 2 trên instance (xem `scripts/kaggle/README.md`).
+   local) hoặc ghi `metric.json` và chạy lượt 2 trên instance.
 6. **Tắt (destroy) instance** khi xong để không bị tính tiền.
 
 ## 4. Việc của bạn — cách C (web thường trực)

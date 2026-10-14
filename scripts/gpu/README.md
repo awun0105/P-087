@@ -112,8 +112,6 @@ Trong lúc train 3DGS, Brush xuất checkpoint định kỳ vào `PRODUCT_WORKER
 thì bấm **Thử lại** (hoặc `POST /api/v1/jobs/<job_id>/retry`): attempt mới dùng lại kết quả COLMAP và train tiếp
 từ checkpoint mới nhất. Kho này chỉ nằm trên máy worker; đổi máy thì chạy lại từ đầu.
 
-Không có Docker (Kaggle, GPU thuê dạng container): xem `scripts/kaggle/README.md`.
-
 ## 5. Xử lý Aisle_CW và export demo
 
 ```bash
@@ -143,6 +141,9 @@ set -a; source scripts/gpu/studio.env; set +a
   --note "GPU <model>, Brush 30k bước" job --job-id <job_id>
 tar -C /opt/real2sim/state/demo/library -czf aisle_cw_demo.tgz aisle-cw
 ```
+
+Nếu máy Studio chạy job cũng là máy phục vụ thư viện mẫu (cùng `PRODUCT_DEMO_DIR`), Reviewer có thể bỏ bước nén và
+bấm **Đặt làm bản demo** trên scene để xuất thẳng vào thư viện. `--stage-assets assets.json` ghép thêm ảnh/số đo theo bước (xem `docs/DEMO_SCENES.md`).
 
 Mang `aisle_cw_demo.tgz` về máy demo, giải nén vào thư mục thư viện
 (`PRODUCT_DEMO_DIR`, mặc định `data/demo/library`). Mỗi thư mục con là một video

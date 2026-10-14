@@ -2,12 +2,14 @@
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
 
 from src.models.contracts.manifests import InputManifest, JobManifest, RuntimeManifest
 from src.models.contracts.reconstruction import (
+    EstimatedTrajectoryArtifact,
     LiDARGeometryArtifact,
     ReconstructionBundle,
     VisualArtifact,
@@ -157,6 +159,100 @@ def test_gt_assisted_lidar_requires_explicit_provenance() -> None:
         LiDARGeometryArtifact.model_validate(payload)
     lineage["ground_truth_assisted"] = True
     assert LiDARGeometryArtifact.model_validate(payload).preprocessing_provenance.ground_truth_assisted
+
+
+def _estimated_trajectory_payload() -> dict[str, Any]:
+    checksum = "sha256:" + "7" * 64
+    return {
+        "artifact_type": "EstimatedTrajectoryArtifact",
+        "schema_version": "1.0",
+        "artifact_uri": "artifact://jobs/job-1/reconstruction/estimated-trajectory.json",
+        "artifact_checksum": checksum,
+        "job_id": "job-1",
+        "assembly_id": "assembly-1",
+        "assembly_revision": 2,
+        "assembly_checksum": checksum,
+        "recipe_checksum": checksum,
+        "provider_id": "kiss-icp-python",
+        "provider_version": "1.3.0",
+        "adapter_protocol_version": "1",
+        "runtime_qualification_checksum": checksum,
+        "config_checksum": checksum,
+        "timestamp_file_checksum": checksum,
+        "coordinate_unit": "meter",
+        "sensor_frame_id": "lidar",
+        "odometry_map_frame_id": "odom-map",
+        "trajectory_origin": "estimated",
+        "poses": [
+            {
+                "scan_index": index,
+                "source_scan_file_id": f"scan-{index}",
+                "source_scan_checksum": checksum,
+                "timestamp_seconds": index * 0.1,
+                "map_from_sensor": {
+                    "parent_frame": "odom-map",
+                    "local_frame": "lidar",
+                    "translation_xyz": [float(index), 0.0, 0.0],
+                    "rotation_quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
+                },
+            }
+            for index in range(2)
+        ],
+        "diagnostics": {
+            "scan_count": 2,
+            "valid_pose_count": 2,
+            "coverage_ratio": 1.0,
+            "timestamp_gap_threshold_seconds": 0.2,
+            "timestamp_gap_count": 0,
+            "maximum_timestamp_gap_seconds": 0.1,
+            "absolute_drift_status": "not_measured",
+        },
+    }
+
+
+def test_estimated_trajectory_binds_ordered_poses_to_scan_identity_and_timestamp() -> None:
+    artifact = EstimatedTrajectoryArtifact.model_validate(_estimated_trajectory_payload())
+
+    roundtrip = EstimatedTrajectoryArtifact.model_validate_json(artifact.model_dump_json())
+    assert [pose.source_scan_file_id for pose in roundtrip.poses] == ["scan-0", "scan-1"]
+    assert [pose.timestamp_seconds for pose in roundtrip.poses] == [0.0, 0.1]
+    assert roundtrip.trajectory_origin == "estimated"
+    assert roundtrip.diagnostics.absolute_drift_status == "not_measured"
+
+
+@pytest.mark.parametrize(
+    ("failure", "message"),
+    [
+        ("duplicate_scan", "must be unique"),
+        ("non_monotonic_time", "increase strictly"),
+        ("wrong_frame", "declared frames"),
+        ("non_finite_translation", "translation must be finite"),
+        ("non_finite_world_translation", "translation must be finite"),
+        ("ground_truth_origin", "estimated"),
+    ],
+)
+def test_estimated_trajectory_rejects_stale_or_misrepresented_pose_lineage(failure: str, message: str) -> None:
+    payload = _estimated_trajectory_payload()
+    if failure == "duplicate_scan":
+        payload["poses"][1]["source_scan_file_id"] = "scan-0"
+    elif failure == "non_monotonic_time":
+        payload["poses"][1]["timestamp_seconds"] = 0.0
+    elif failure == "wrong_frame":
+        payload["poses"][1]["map_from_sensor"]["parent_frame"] = "world"
+    elif failure == "non_finite_translation":
+        payload["poses"][1]["map_from_sensor"]["translation_xyz"][0] = float("inf")
+    elif failure == "non_finite_world_translation":
+        payload["world_from_map"] = {
+            "parent_frame": "world",
+            "local_frame": "odom-map",
+            "translation_xyz": [float("nan"), 0.0, 0.0],
+            "rotation_quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
+        }
+    else:
+        payload["trajectory_origin"] = "ground_truth"
+
+    with pytest.raises(ValidationError, match=message):
+        EstimatedTrajectoryArtifact.model_validate(payload)
 
 
 def test_mock_job_and_runtime_manifests_are_valid() -> None:

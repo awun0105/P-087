@@ -1,0 +1,48 @@
+{
+  "schema_version": "1.0",
+  "note": "Điểm held-out của các scene đã chạy. Chỉ dùng để hiển thị khoảng tham chiếu, không phải ngưỡng đạt.",
+  "scenes": [
+    {
+      "job_id": "job-cb8815e2a770",
+      "source": "eval/protocols/recon_visual_quality.md",
+      "psnr": 25.35,
+      "ssim": 0.888,
+      "lpips": 0.308
+    },
+    {
+      "job_id": "job-9b9aa3dac9f1",
+      "source": "artifact trong data/studio_local",
+      "psnr": 25.49,
+      "ssim": 0.889,
+      "lpips": 0.344
+    },
+    {
+      "job_id": "job-6bc02e5de4ed",
+      "source": "artifact trong data/studio_local",
+      "psnr": 26.36,
+      "ssim": 0.899,
+      "lpips": 0.277
+    },
+    {
+      "job_id": "job-a713242a38be",
+      "source": "artifact trong data/studio_local",
+      "psnr": 28.45,
+      "ssim": 0.922,
+      "lpips": 0.277
+    },
+    {
+      "job_id": "job-13a0fda27f9f",
+      "source": "eval/protocols/recon_visual_quality.md",
+      "psnr": 28.80,
+      "ssim": 0.927,
+      "lpips": 0.268
+    },
+    {
+      "job_id": "job-ed9cf7739a70",
+      "source": "artifact trong data/studio_local",
+      "psnr": 30.00,
+      "ssim": 0.939,
+      "lpips": null
+    }
+  ]
+}

@@ -20,6 +20,8 @@ export const STAGE_IDS = [
   "ST-VISUAL-RECON",
   "ST-RGB-GEOMETRY",
   "ST-LIDAR-INGEST",
+  "ST-LIDAR-ODOMETRY",
+  "ST-LIDAR-CALIBRATION-QA",
   "ST-RGB-LIDAR-ALIGN",
   "ST-METRIC-CANONICALIZE",
   "ST-OBJECT-EXTRACT",
@@ -99,6 +101,55 @@ export interface ArtifactRef {
 /** `src/models/contracts/artifacts.py` ProductArtifactRef. */
 export interface ProductArtifactRef extends ArtifactRef {
   data_class: ProductDataClass;
+}
+
+/** `src/models/contracts/floor_model.py` FloorFitEvidence. */
+export interface FloorFitEvidence {
+  schema_version: "1.0";
+  artifact_type: "FloorFitEvidence";
+  job_id: string;
+  source_artifact_ref: ProductArtifactRef;
+  point_cloud_checksum: string;
+  floor_model: Record<string, unknown>;
+}
+
+/** `src/models/contracts/object_membership.py` ObjectMembershipArtifact. */
+export interface ObjectMembershipArtifact {
+  artifact_type: "ObjectMembershipArtifact";
+  schema_version: "1.0";
+  source_visual_ref: ProductArtifactRef;
+  source_geometry_ref: ProductArtifactRef;
+  extraction_revision: string;
+  coordinate_system: CoordinateSystemInfo;
+  gaussian_count: number;
+  labels_ref: ProductArtifactRef;
+  labels_encoding: "little-endian-int32";
+  background_label: -1;
+  label_to_object_id: Record<string, string>;
+}
+
+/** Command contracts are version- and membership-bound before later API wiring. */
+export interface ObjectMembershipMergeCommand {
+  expected_scene_revision: string;
+  membership_checksum: string;
+  primary_object_id: string;
+  secondary_object_ids: string[];
+  semantic_class_source_object_id?: string | null;
+}
+
+export interface SourceGaussianROI {
+  min_xyz_m: [number, number, number];
+  max_xyz_m: [number, number, number];
+}
+
+export interface ObjectMembershipReassignCommand {
+  expected_scene_revision: string;
+  membership_checksum: string;
+  region: SourceGaussianROI;
+  /** `null` means background. */
+  source_object_id: string | null;
+  /** `null` means background. */
+  target_object_id: string | null;
 }
 
 /** `src/models/contracts/coordinates.py` Transform. */
@@ -225,6 +276,11 @@ export interface JobAttemptRecord {
   recorded_at: string;
   job_manifest_uri: string | null;
   job_manifest_checksum: string | null;
+  actual_frame_count: number | null;
+  stage_started_at: string | null;
+  preview_verified_at: string | null;
+  /** Actor snapshot for the manual run/retry; absent on legacy events or worker-only updates. */
+  requested_by?: { user_id: string; display_name: string; role?: "guest" | "editor" | "reviewer" | null } | null;
 }
 
 export interface JobAttemptListResponse {
@@ -269,6 +325,20 @@ export interface SceneObject {
   provenance: Record<string, unknown>;
   /** Pipeline v2 (ADR 0007); backend không ghi field khi rỗng nên có thể vắng mặt. */
   physics?: ObjectPhysics | null;
+  /** Quyền sở hữu collision trên geometry nguồn tại revision này; vắng mặt ở SceneIR legacy. */
+  source_collision?: SourceCollisionRegion | null;
+}
+
+/** Source pose/region gốc dùng để rebuild collision sau các thao tác edit. */
+export interface SourceCollisionRegion {
+  schema_version: "1.0";
+  object_id: string;
+  source_geometry_ref: ProductArtifactRef;
+  extraction_revision: string;
+  source_transform: Transform;
+  region_kind: "triangle_indices" | "source_obb";
+  region_ref?: ProductArtifactRef | null;
+  source_obb_dimensions_xyz_m?: [number, number, number] | null;
 }
 
 /** `src/models/contracts/scene.py` MassSource — số khối lượng đến từ đâu. */
@@ -291,8 +361,14 @@ export interface SceneEnvironment {
   visual_ref: ArtifactRef | null;
   geometry_ref: ArtifactRef;
   collider_ref: ArtifactRef | null;
+  /** Exact selected collision candidate, retained when collider_ref is a carved derivative. */
+  collision_source_ref?: ArtifactRef | null;
+  /** Immutable CollisionSourceSelection record for the current environment revision. */
+  collision_selection_ref?: ArtifactRef | null;
   /** Bản 3DGS gốc (PLY) cho bộ xuất USD; vắng mặt ở SceneIR cũ. */
   visual_master_ref?: ArtifactRef | null;
+  /** Membership is absent in legacy scenes; present only when objectify persisted the row map. */
+  membership?: ObjectMembershipArtifact | null;
 }
 
 export interface SceneIR {
@@ -345,6 +421,15 @@ export interface SceneEditCommand {
   edits: SceneObjectCommand[];
 }
 
+/** `src/services/orchestration/scene/models.py` ColliderEditCommand. */
+export interface ColliderEditCommand {
+  expected_scene_revision: string;
+  object_id: string;
+  dimensions_xyz_m?: [number, number, number] | null;
+  local_translation_xyz_m?: [number, number, number] | null;
+  local_rotation_quaternion_xyzw?: [number, number, number, number] | null;
+}
+
 export interface SceneEditResponse {
   job_id: string;
   previous_scene_revision: string;
@@ -352,7 +437,6 @@ export interface SceneEditResponse {
   scene_uri: string;
   scene_checksum: string;
   scene: SceneIR;
-  visual: VisualBinding;
 }
 
 /** `src/models/contracts/validation.py` ValidationCheck / PathResult. */
@@ -368,6 +452,34 @@ export interface PathResult {
   result: ObservedPathResult;
   message: string | null;
   evidence_refs: ArtifactRef[];
+}
+
+export type CollisionObservationState =
+  | "observed_static"
+  | "unobserved"
+  | "inferred"
+  | "motion_suspected";
+
+/** `src/models/contracts/validation.py` CollisionPathCoverageDiagnostic. */
+export interface CollisionPathCoverageDiagnostic {
+  artifact_type: "CollisionPathCoverageDiagnostic";
+  schema_version: "1.0";
+  job_id: string;
+  candidate_checksum: string;
+  effective_collision_ref: ProductArtifactRef;
+  collision_quality_ref: ProductArtifactRef;
+  pair_id: string;
+  state: CollisionObservationState;
+  observation_ids: string[];
+  coverage_fraction: number;
+}
+
+export interface CollisionPathSupportEvidence {
+  pair_id: string;
+  state: CollisionObservationState;
+  observation_ids: string[];
+  coverage_fraction: number;
+  diagnostic_ref: ArtifactRef | null;
 }
 
 /** `src/models/contracts/release.py` ApprovalRecord. */
@@ -391,8 +503,47 @@ export interface ValidationReport {
   overall_result: RuleResult;
   checks: ValidationCheck[];
   path_results: PathResult[];
+  collision_quality_ref?: ArtifactRef | null;
+  collision_path_support?: CollisionPathSupportEvidence[];
   environment_versions: Record<string, string>;
   report_checksum: string;
+}
+
+/** `src/models/contracts/validation_run.py` ValidationRunStatus. */
+export const VALIDATION_RUN_STATUSES = ["QUEUED", "RUNNING", "COMPLETED", "FAILED", "CANCELLED"] as const;
+export type ValidationRunStatus = (typeof VALIDATION_RUN_STATUSES)[number];
+
+/** `src/services/orchestration/review/validation_queue.py` ValidationOperationStatus. */
+export const VALIDATION_OPERATION_STATUSES = [
+  "QUEUED",
+  "WAITING_RESOURCES",
+  "CLAIMED",
+  "RUNNING",
+  "CANCEL_REQUESTED",
+  "COMPLETED",
+  "FAILED",
+  "CANCELLED",
+] as const;
+export type ValidationOperationStatus = (typeof VALIDATION_OPERATION_STATUSES)[number];
+
+/** `src/services/orchestration/review/validation_queue.py` ValidationRunView safe API projection. */
+export interface ValidationRunView {
+  schema_version: "1.0";
+  job_id: string;
+  run_id: string;
+  attempt: number;
+  scene_revision: string;
+  candidate_checksum: string;
+  validation_config_checksum: string;
+  run_status: ValidationRunStatus;
+  status: ValidationOperationStatus;
+  requested_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  report_checksum: string | null;
+  selected: boolean;
+  retryable: boolean;
+  error_code: string | null;
 }
 
 /**

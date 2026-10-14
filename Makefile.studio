@@ -37,6 +37,10 @@ DEMO_DIR      ?= $(ROOT)/data/demo/library
 BRUSH  := $(ROOT)/data/rec04_runtime/brush/brush-app-x86_64-unknown-linux-gnu/brush_app
 SPLAT  := $(ROOT)/data/rec04_runtime/node_modules/@playcanvas/splat-transform/dist/index.mjs
 COLMAP := $(ROOT)/data/rec04_runtime/colmap-launcher.sh
+LIDAR_PY      := $(ROOT)/data/lidar_runtime/bin/python
+ODOM_LOCK     := $(ROOT)/requirements-lidar-odometry.lock.txt
+REGISTRY      := $(ROOT)/data/studio_local/input_runtime_registry.dev.json
+FORCE_REGISTRY ?= 0
 
 # Hàm dùng chung cho các target (make mở rộng $ → $$).
 define PORT_HELPERS
@@ -72,7 +76,7 @@ kill_port() {
 }
 endef
 
-.PHONY: help up down status env data-pack data-verify data-unpack docker docker-down
+.PHONY: help up down status env lidar-runtime registry data-pack data-verify data-unpack docker docker-down
 
 help:
 	@echo "Studio MVP — lệnh có sẵn:"
@@ -80,6 +84,8 @@ help:
 	@echo "  make -f Makefile.studio down     # kill tiến trình đang giữ port của stack"
 	@echo "  make -f Makefile.studio status   # in port/pid hiện tại"
 	@echo "  make -f Makefile.studio env      # sinh lại scripts/gpu/studio.env (FORCE_ENV=1 để ghi đè)"
+	@echo "  make -f Makefile.studio lidar-runtime  # tạo runtime KISS-ICP cô lập (data/lidar_runtime) nếu chưa có"
+	@echo "  make -f Makefile.studio registry       # sinh registry năng lực input dev-local (FORCE_REGISTRY=1 để sinh lại)"
 	@echo "  make -f Makefile.studio data-pack KEEP_SEED_ACCOUNTS=1 OUT=/duong/dan/r2s-studio-data.zip"
 	@echo "  make -f Makefile.studio data-verify DATA=/duong/dan/r2s-studio-data.zip"
 	@echo "  make -f Makefile.studio data-unpack DATA=/duong/dan/r2s-studio-data.zip"
@@ -119,12 +125,43 @@ env:
 	REC04_BRUSH_TIMEOUT_SECONDS=3600
 	REC04_SPLAT_MODULE_PATH='$(SPLAT)'
 	REC04_SPLAT_DEVICE=gpu
+	# Luồng nhập mới: năng lực xử lý input của máy dev (sinh bằng `make -f Makefile.studio registry`).
+	PRODUCT_INPUT_RUNTIME_REGISTRY='$(REGISTRY)'
+	REC17_LIDAR_ODOMETRY_PYTHON='$(LIDAR_PY)'
+	REC17_LIDAR_ODOMETRY_WORK_ROOT='$(ROOT)/data/studio_local/lidar_odometry'
 	# LLM_PROVIDER/OPENAI_API_KEY lấy từ .env ở root repo (Settings đọc .env); không ghi key vào đây.
 	EOF
 	fi
 
+## lidar-runtime: interpreter cô lập cho KISS-ICP (R5/R6). Cài đúng bản khoá có hash; có rồi thì bỏ qua.
+## Thất bại (ví dụ không có mạng) không chặn `up`: R5/R6 sẽ tự thành "unavailable" trong registry.
+lidar-runtime:
+	@if [ -x "$(LIDAR_PY)" ] && "$(LIDAR_PY)" -c 'import kiss_icp' 2>/dev/null; then
+	  echo "[lidar] đã có runtime KISS-ICP: $(LIDAR_PY)"; exit 0
+	fi
+	echo "[lidar] tạo runtime KISS-ICP cô lập tại $(ROOT)/data/lidar_runtime"
+	if python3 -m venv "$(ROOT)/data/lidar_runtime" \
+	   && "$(LIDAR_PY)" -m pip install --quiet --require-hashes -r "$(ODOM_LOCK)"; then
+	  echo "[lidar] xong."
+	else
+	  echo "[!] Không cài được KISS-ICP; các hướng LiDAR R5/R6 sẽ không khả dụng (video vẫn chạy)." >&2
+	fi
+
+## registry: registry năng lực input DEV-LOCAL (lời khai, không phải kiểm định; production không dùng file này).
+## Chỉ sinh khi chưa có để không đổi checksum giữa các lần `up` (đổi thì mọi recipe chờ chạy bị coi là cũ).
+registry: env lidar-runtime
+	@ensure() { grep -qE "^$$1=" "$(ENV_FILE)" || printf '%s=%s\n' "$$1" "$$2" >> "$(ENV_FILE)"; }
+	ensure PRODUCT_INPUT_RUNTIME_REGISTRY "'$(REGISTRY)'"
+	ensure REC17_LIDAR_ODOMETRY_PYTHON "'$(LIDAR_PY)'"
+	ensure REC17_LIDAR_ODOMETRY_WORK_ROOT "'$(ROOT)/data/studio_local/lidar_odometry'"
+	mkdir -p "$(ROOT)/data/studio_local/lidar_odometry"
+	if [ -f "$(REGISTRY)" ] && [ "$(FORCE_REGISTRY)" != "1" ]; then
+	  echo "[registry] giữ nguyên $(REGISTRY) (FORCE_REGISTRY=1 để sinh lại)."; exit 0
+	fi
+	"$(VENV_PY)" -m scripts.gpu.make_input_runtime_registry --env-file "$(ENV_FILE)" --out "$(REGISTRY)" --force
+
 ## up: chạy API + worker + web; Ctrl+C dọn cả ba và giải phóng port.
-up: env
+up: env lidar-runtime registry
 	@$(PORT_HELPERS)
 	@for path in "$(VENV_PY)" "$(STACK)" "$(BRUSH)" "$(SPLAT)" "$(COLMAP)"; do \
 	  [ -e "$$path" ] || { echo "[!] Thiếu: $$path (xem scripts/gpu/README.md §2)"; exit 1; }; \

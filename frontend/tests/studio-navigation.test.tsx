@@ -15,7 +15,8 @@ describe("ngữ cảnh điều hướng", () => {
     expect(isActive("/", "/overview")).toBe(false); // `/` là landing, không phải Tổng quan
     expect(isActive("/scenes", "/scenes")).toBe(true);
     expect(isActive("/scenes/job-a", "/scenes")).toBe(true);
-    expect(isActive("/imports/import-a", "/scenes")).toBe(true);
+    expect(isActive("/imports/import-a", "/imports")).toBe(true);
+    expect(isActive("/imports/import-a", "/scenes")).toBe(false);
     expect(isActive("/new", "/new")).toBe(true);
     expect(isActive("/new/import-video", "/new")).toBe(true);
     expect(isActive("/new", "/scenes")).toBe(false);
@@ -30,8 +31,7 @@ describe("ngữ cảnh điều hướng", () => {
     expect(crumbsFor("/overview")).toEqual([{ label: "Tổng quan" }]);
     expect(crumbsFor("/trang-la")).toEqual([{ label: "Tổng quan", href: "/overview" }]);
     expect(crumbsFor("/scenes/job-a", "Kho A")).toEqual([
-      { label: "Scenes", href: "/scenes" },
-      { label: "Scene dựng từ video", href: "/scenes" },
+      { label: "Scenes từ video", href: "/scenes" },
       { label: "Kho A" },
     ]);
     expect(crumbsFor("/new")).toEqual([{ label: "Tạo scene mới" }]);
@@ -39,10 +39,9 @@ describe("ngữ cảnh điều hướng", () => {
       { label: "Tạo scene mới", href: "/new" },
       { label: "Dựng từ video" },
     ]);
-    expect(crumbsFor("/imports/import-a")[0].href).toBe("/scenes");
+    expect(crumbsFor("/imports/import-a")[0].href).toBe("/imports");
     expect(crumbsFor("/imports/import-a", "Scene Nhập 1")).toEqual([
-      { label: "Scenes", href: "/scenes" },
-      { label: "Scene import", href: "/scenes" },
+      { label: "Scenes đã import", href: "/imports" },
       { label: "Scene Nhập 1" },
     ]);
   });
@@ -50,12 +49,12 @@ describe("ngữ cảnh điều hướng", () => {
   it("nút Quay lại trỏ về cấp cha; trang cấp cao nhất không có nút", () => {
     expect(backHref("/scenes/job-a")).toBe("/scenes");
     expect(backHref("/new/import-video")).toBe("/new");
-    expect(backHref("/imports/import-a")).toBe("/scenes");
+    expect(backHref("/imports/import-a")).toBe("/imports");
     expect(backHref("/samples/mau-1")).toBe("/scenes");
     expect(backHref("/scenes/job-a/stages/frames")).toBe(crumbsFor("/scenes/job-a/stages/frames")[1].href);
     expect(backHref("/scenes/job-a/stages/frames")).not.toBe("/scenes");
     expect(backHref("/account")).toBe("/overview");
-    for (const top of ["/overview", "/scenes", "/new", "/trash", "/team"]) expect(backHref(top)).toBeNull();
+    for (const top of ["/overview", "/scenes", "/imports", "/new", "/trash", "/team"]) expect(backHref(top)).toBeNull();
   });
 
   it("khách chưa đăng nhập: breadcrumb và nút Quay lại không lộ /new hay /scenes", () => {
@@ -125,5 +124,15 @@ describe("scene tabs", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Chưa có bản xem");
     fireEvent.keyDown(document.activeElement!, { key: "End" });
     expect(screen.getByRole("tab", { name: "Kết quả" })).toHaveFocus();
+  });
+});
+
+describe("tên ba trang bắt đầu dùng chung một nguồn", () => {
+  it("breadcrumb của /new/* trùng tiêu đề trang trong SOURCE_TITLES", async () => {
+    const { SOURCE_ROUTES, SOURCE_TITLES } = await import("@/features/studio/newSceneSources");
+    for (const source of ["video", "gaussian", "sample"] as const) {
+      const crumbs = crumbsFor(SOURCE_ROUTES[source], null, true);
+      expect(crumbs.at(-1)?.label).toBe(SOURCE_TITLES[source].title);
+    }
   });
 });

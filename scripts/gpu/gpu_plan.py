@@ -181,6 +181,10 @@ def plan_for_machine(jobs: int, processing: dict | None = None) -> tuple[list[Gp
     from src.config import get_settings
     from src.services.orchestration.processing import load_presets
     from src.services.orchestration.processing.config import preset_values
+    from src.services.orchestration.processing.container_limits import (
+        effective_cpu_count,
+        memory_limit_gb,
+    )
     from src.services.orchestration.processing.resources import estimate_gb
 
     gpus = detect()
@@ -189,14 +193,16 @@ def plan_for_machine(jobs: int, processing: dict | None = None) -> tuple[list[Gp
     if config is not None:
         presets, _ = load_presets(config)
         need = estimate_gb(presets.resource_model, {**preset_values(presets, "minimum_quality"), **(processing or {})})
-    ram_gb = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 1e9
+    physical_ram = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 1e9
+    cgroup_ram = memory_limit_gb()
+    ram_gb = min(physical_ram, cgroup_ram) if cgroup_ram is not None else physical_ram
     return gpus, plan(
         gpus,
         need["vram"],
         jobs=jobs,
         ram_gb=ram_gb,
         job_ram_gb=need["ram"],
-        cores=len(os.sched_getaffinity(0)),
+        cores=effective_cpu_count(),
         base_brush_environment=os.environ.get("REC04_BRUSH_ENVIRONMENT"),
     )
 

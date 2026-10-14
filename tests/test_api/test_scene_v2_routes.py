@@ -32,6 +32,184 @@ def _object(body: dict, object_id: str) -> dict:
 
 
 @pytest.mark.asyncio
+async def test_membership_correction_routes_fail_closed_for_legacy_scene(client) -> None:
+    merge = await client.post(
+        f"{_JOB}/scene/corrections/merge",
+        json={
+            "expected_scene_revision": "rev-001",
+            "membership_checksum": "sha256:" + "a" * 64,
+            "primary_object_id": _PALLET,
+            "secondary_object_ids": ["object-second"],
+        },
+    )
+    reassign = await client.post(
+        f"{_JOB}/scene/corrections/reassign",
+        json={
+            "expected_scene_revision": "rev-001",
+            "membership_checksum": "sha256:" + "a" * 64,
+            "region": {"min_xyz_m": [0, 0, 0], "max_xyz_m": [1, 1, 1]},
+            "source_object_id": None,
+            "target_object_id": _PALLET,
+        },
+    )
+
+    assert merge.status_code == 422
+    assert "no persisted Gaussian membership" in merge.json()["detail"]
+    assert reassign.status_code == 422
+    assert "no persisted Gaussian membership" in reassign.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_membership_correction_rejects_stale_revision_before_dispatch(client) -> None:
+    response = await client.post(
+        f"{_JOB}/scene/corrections/merge",
+        json={
+            "expected_scene_revision": "rev-stale",
+            "membership_checksum": "sha256:" + "a" * 64,
+            "primary_object_id": _PALLET,
+            "secondary_object_ids": ["object-second"],
+        },
+    )
+
+    assert response.status_code == 409
+    assert "current SceneIR is rev-001" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_lidar_collision_selection_rejects_candidate_not_published_for_job(client, monkeypatch) -> None:
+    from src.api.product import scene as scene_api
+
+    def selection_must_not_run(*_args, **_kwargs):
+        raise AssertionError("unlisted candidate must be rejected before domain selection")
+
+    monkeypatch.setattr(scene_api, "select_lidar_collision_candidate", selection_must_not_run)
+    response = await client.post(
+        f"{_JOB}/scene/collision-source/lidar",
+        json={
+            "expected_scene_revision": "rev-001",
+            "candidate_manifest_ref": {
+                "artifact_type": "LidarCollisionCandidateManifest",
+                "schema_version": "1.0",
+                "artifact_uri": f"artifact://jobs/job-fixture-001/collider/lidar-candidates/{'a' * 64}/manifest.json",
+                "artifact_checksum": "sha256:" + "a" * 64,
+                "data_class": "derived",
+                "producer_stage": "ST-COLLIDER",
+                "job_id": "job-fixture-001",
+            },
+        },
+    )
+
+    assert response.status_code == 404
+    assert "allow-list" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_merge_route_publishes_and_returns_canonical_scene_revision(
+    client, isolated_registry, monkeypatch, tmp_path
+) -> None:
+    from src.api.product import scene as scene_api
+    from src.config import Settings
+
+    runtime_python = tmp_path / "runtime-python"
+    runtime_python.touch()
+    monkeypatch.setattr(
+        scene_api.deps,
+        "settings",
+        lambda: Settings(
+            openai_api_key="test-only", product_scene_runtime_python=runtime_python, product_worker_root=tmp_path
+        ),
+    )
+    monkeypatch.setattr(scene_api, "validate_object_membership_command", lambda _scene, _command: object())
+    calls: list[dict[str, object]] = []
+
+    def publish_correction(editor, job_id, command, **kwargs):  # noqa: ANN001, ANN202
+        calls.append(kwargs)
+        current = editor.current(job_id).scene
+        updated = current.model_copy(
+            update={"provenance": {**current.provenance, "membership_correction_test": command.primary_object_id}},
+            deep=True,
+        )
+        return editor.publish_next(job_id, command.expected_scene_revision, updated, "membership_correction_test")
+
+    monkeypatch.setattr(scene_api, "merge_object_candidates", publish_correction)
+
+    response = await client.post(
+        f"{_JOB}/scene/corrections/merge",
+        json={
+            "expected_scene_revision": "rev-001",
+            "membership_checksum": "sha256:" + "a" * 64,
+            "primary_object_id": _PALLET,
+            "secondary_object_ids": ["object-second"],
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["scene_revision"] == "rev-002"
+    assert response.json()["scene"]["provenance"]["membership_correction_test"] == _PALLET
+    assert (await client.get(f"{_JOB}/scene")).json()["scene_revision"] == "rev-002"
+    assert calls[0]["actor_id"] == "local"
+    assert calls[0]["runtime_python"] == runtime_python.resolve()
+
+
+@pytest.mark.asyncio
+async def test_collider_route_publishes_box_dimensions_and_local_pose(client, isolated_registry) -> None:
+    original = isolated_registry.scene.current("job-fixture-001").scene
+    original_object = next(item for item in original.objects if item.id == _PALLET)
+    response = await client.post(
+        f"{_JOB}/scene/collider",
+        json={
+            "expected_scene_revision": "rev-001",
+            "object_id": _PALLET,
+            "dimensions_xyz_m": [1.4, 0.8, 0.6],
+            "local_translation_xyz_m": [0.2, -0.1, 0.3],
+            "local_rotation_quaternion_xyzw": [0.0, 0.0, 0.7071067811865475, 0.7071067811865475],
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert (body["previous_scene_revision"], body["scene_revision"]) == ("rev-001", "rev-002")
+    edited = _object(body, _PALLET)
+    assert edited["collider"]["dimensions_xyz_m"] == pytest.approx([1.4, 0.8, 0.6])
+    assert edited["collider"]["local_transform"]["translation_xyz"] == pytest.approx([0.2, -0.1, 0.3])
+    assert edited["collider"]["local_transform"]["rotation_quaternion_xyzw"] == pytest.approx(
+        [0.0, 0.0, 0.7071067811865475, 0.7071067811865475]
+    )
+    assert edited["collider"]["provenance"]["manual_override"]["operation"] == "collider_edit"
+    assert body["scene"]["provenance"]["last_scene_operation"] == "edit_collider"
+    assert body["scene"]["provenance"]["invalidates_validation"] is True
+    assert edited["transform"] == original_object.transform.model_dump(mode="json")
+    assert edited["geometry_ref"] == original_object.geometry_ref.model_dump(mode="json")
+    assert edited["primitive_dimensions_xyz_m"] == original_object.primitive_dimensions_xyz_m
+    if original_object.physics is not None:
+        assert edited["physics"] == original_object.physics.model_dump(mode="json")
+    else:
+        assert "physics" not in edited
+    assert isolated_registry.scene.current("job-fixture-001").scene.scene_revision == "rev-002"
+    assert isolated_registry.scene.revision("job-fixture-001", "rev-001").scene == original
+
+
+@pytest.mark.asyncio
+async def test_collider_route_rejects_stale_and_empty_commands(client, isolated_registry) -> None:
+    stale = await client.post(
+        f"{_JOB}/scene/collider",
+        json={
+            "expected_scene_revision": "rev-009",
+            "object_id": _PALLET,
+            "dimensions_xyz_m": [1.2, 1.0, 0.8],
+        },
+    )
+    empty = await client.post(
+        f"{_JOB}/scene/collider",
+        json={"expected_scene_revision": "rev-001", "object_id": _PALLET},
+    )
+
+    assert stale.status_code == 409
+    assert empty.status_code == 422
+    assert isolated_registry.scene.current("job-fixture-001").scene.scene_revision == "rev-001"
+
+
+@pytest.mark.asyncio
 async def test_catalog_lists_classes_and_placeable_assets(client) -> None:
     body = (await client.get("/api/v1/scene/catalog")).json()
 
@@ -147,12 +325,35 @@ async def test_objectify_state_and_request_without_reconstruction_bundle(client,
     state = await client.get(f"{_JOB}/scene/objectify")
     assert state.status_code == 200
     assert state.json()["status"] == "idle" and state.json()["object_centric"] is False
+    # Client dùng revision này làm `expected_scene_revision` mà không phải tải cả scene.
+    assert state.json()["scene_revision"] == "rev-001"
 
     # Job fixture không có ReconstructionBundle hệ mét → không xếp hàng, trả 409 có lý do.
     refused = await client.post(f"{_JOB}/scene/objectify", json={"expected_scene_revision": "rev-001", "mode": "boxes"})
     assert refused.status_code == 409 and "hệ mét" in refused.json()["detail"]
     stale = await client.post(f"{_JOB}/scene/objectify", json={"expected_scene_revision": "rev-009"})
     assert stale.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_cancel_objectify_returns_the_worker_cancellation_state(client, monkeypatch) -> None:
+    from src.api.product import scene as scene_routes
+    from src.services.orchestration.scene.objectify_queue import ObjectifyState
+
+    state = ObjectifyState(status="running", mode="boxes", cancellation_requested=True)
+    calls: list[tuple[str, str]] = []
+
+    def cancel(registry, settings, job_id):  # noqa: ANN001, ANN202
+        calls.append((job_id, settings.database_url))
+        return state
+
+    monkeypatch.setattr(scene_routes.objectify_queue, "cancel", cancel)
+    response = await client.post(f"{_JOB}/scene/objectify/cancel")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "running"
+    assert response.json()["cancellation_requested"] is True
+    assert calls and calls[0][0] == "job-fixture-001"
 
 
 @pytest.mark.asyncio
@@ -205,6 +406,7 @@ async def test_isaac_previews_are_off_in_production_unless_enabled(
     (tmp_path / "SM_PaletteA.glb").write_bytes(b"glTF-fake")
     settings = Settings(
         app_env=app_env,
+        auth_required=True,
         artifact_root=tmp_path / "artifacts",
         product_asset_preview_dir=tmp_path,
         product_catalog_preview_dir=tmp_path / "no-cc0",
@@ -277,7 +479,12 @@ async def test_cc0_previews_cover_every_placeable_family_even_in_production(clie
     from src.api.product import deps as product_deps
     from src.config import Settings
 
-    settings = Settings(app_env="production", artifact_root=tmp_path / "artifacts", product_asset_preview_dir=tmp_path)
+    settings = Settings(
+        app_env="production",
+        auth_required=True,
+        artifact_root=tmp_path / "artifacts",
+        product_asset_preview_dir=tmp_path,
+    )
     monkeypatch.setattr(product_deps, "get_settings", lambda: settings)
 
     entries = (await client.get("/api/v1/scene/catalog")).json()["entries"]

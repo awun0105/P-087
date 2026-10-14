@@ -7,9 +7,6 @@ thay vì dựng model song song.
 
 Request model nằm ở tầng service (`orchestration.projects.models`) vì đó là input
 của domain, không phải của HTTP — route import thẳng từ đó, không re-export ở đây.
-
-Khác `src/models/schemas.py`: file đó chỉ chứa schema của endpoint chat mẫu trong template
-ban tổ chức, không thuộc API của Real2Sim.
 """
 
 from datetime import datetime
@@ -95,7 +92,7 @@ class ProjectResponse(ApiModel):
     input_video: InputVideoSummary | None = None
     created_at: datetime | None = None
     created_by: Actor | None = None
-    #: Mốc bản demo nếu scene được đánh dấu là bản demo (nút Khôi phục bản demo đưa scene về mốc này).
+    #: Mốc bản demo nếu scene được đánh dấu là bản demo (nút Khôi phục về mốc gốc đưa scene về mốc này).
     demo_baseline: DemoBaseline | None = None
 
 
@@ -154,6 +151,13 @@ class SceneEditResponse(ApiModel):
     scene_uri: str
     scene_checksum: Checksum
     scene: SceneIR
+
+
+class LidarCollisionSourceSelectionRequest(ApiModel):
+    """Select one exact, job-published LiDAR candidate against the current scene revision."""
+
+    expected_scene_revision: Identifier
+    candidate_manifest_ref: ProductArtifactRef
 
 
 class ValidationStateResponse(ApiModel):

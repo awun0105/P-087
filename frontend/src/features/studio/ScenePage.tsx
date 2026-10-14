@@ -1,10 +1,11 @@
 "use client";
 
 import { ApiError } from "@/lib/api/client";
+import { isGuestQuotaExceededError, resourceCapabilityAllowed } from "@/lib/api/auth";
 import { errorMessage } from "@/lib/ui-error";
 
 import dynamic from "next/dynamic";
-import { Box, Package, Pencil, ShieldCheck, Workflow } from "lucide-react";
+import { ArrowLeft, Box, Package, Pencil, ShieldCheck, Workflow } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Badge } from "@/components/studio/primitives";
@@ -13,7 +14,9 @@ import type { SaveState } from "@/features/studio/ObjectReviewView";
 import { GeometryBadge, MetricBadge, ModeButton, SaveStatus } from "@/features/studio/scene/badges";
 import { DemoControls } from "@/features/studio/scene/DemoControls";
 import { SceneTabs, type SceneTabItem } from "@/features/studio/scene/SceneTabs";
-import { metricState, stageState, type Preview, type SceneInfo, type StudioMode, type Tab } from "@/features/studio/scene/state";
+import { GAUSSIAN_EDIT_ENABLED, metricState, stageState, type Preview, type SceneInfo, type StudioMode, type Tab } from "@/features/studio/scene/state";
+import { ObjectifyContext } from "@/features/studio/scene/objectifyContext";
+import { useObjectifyState } from "@/features/studio/scene/useObjectify";
 import { progressSceneStatus } from "@/features/studio/sceneStatus";
 import { usePolling } from "@/features/studio/usePolling";
 import { getJob, getPreview, getProject, jobArtifactContentUrl } from "@/lib/api/endpoints";
@@ -21,6 +24,7 @@ import { cancelJob, getJobProgress, retryJob } from "@/lib/api/studio";
 import { cn } from "@/lib/cn";
 import { useUrlState } from "@/features/studio/useUrlState";
 import { useNavigationGuard } from "@/features/shell/NavigationGuard";
+import { useAuth } from "@/features/studio/AuthProvider";
 import { NextAction } from "@/features/studio/scene/NextAction";
 import { ErrorFeedback, notifySuccess } from "@/components/studio/feedback";
 import type { MetricDraft } from "@/features/studio/MetricConfirmView";
@@ -73,8 +77,16 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
   const [tab, setTab] = useState<Tab | null>(initialTab ?? null);
   const { params, update } = useUrlState();
   const { navigate } = useNavigationGuard();
+  const { me, refresh } = useAuth();
+  const isGuest = me?.user?.role === "guest";
+  const guestQuotaExhausted = isGuest && me?.quota?.remaining === 0;
+  const canMutateJob = resourceCapabilityAllowed(me, progress?.capabilities?.can_mutate);
+  const canRetryJob = resourceCapabilityAllowed(me, progress?.capabilities?.can_retry);
+  const canCancelJob = resourceCapabilityAllowed(me, progress?.capabilities?.can_cancel)
+    && (progress?.status === "RUNNING" || progress?.status === "QUEUED")
+    && progress.waiting_for !== "metric_confirmation";
   const requestedMode = params.get("mode");
-  const mode: StudioMode = requestedMode === "metric" || requestedMode === "gaussian" ? requestedMode : "scene";
+  const mode: StudioMode = requestedMode === "metric" || (requestedMode === "gaussian" && GAUSSIAN_EDIT_ENABLED) ? requestedMode : "scene";
   const [save, setSave] = useState<SaveState | null>(null);
   const metricScope = jobId + ":" + progress?.attempt + ":" + preview?.url;
   const [measurement, setMeasurement] = useState<{ scope: string; draft: MetricDraft } | null>(null);
@@ -157,8 +169,8 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
       setProgress(result.data);
       if (acknowledgedAttempt !== null) notifySuccess(`Máy chủ đã ghi nhận lần chạy ${acknowledgedAttempt}.`);
       if (retryNotice !== null) setError(retryNotice);
-      // Chỉ chọn mặc định trên lần đọc đầu; preview xuất hiện sau đó không đẩy người đang xem tiến trình sang Studio.
-      setTab((selected) => selected ?? (result.data.preview_ready ? "studio" : "progress"));
+      // Mặc định luôn là Tiến trình (trạng thái, lỗi, bước tiếp theo); chỉ áp trên lần đọc đầu, không giật tab người đang xem.
+      setTab((selected) => selected ?? "progress");
       if (result.data.preview_ready && loadedPreview?.attempt !== result.data.attempt) {
         const loaded = await getPreview(jobId);
         if (loaded.ok) {
@@ -196,7 +208,7 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
   }
 
   async function requestRetry() {
-    if (busy || retryInFlight.current || retryPending) return;
+    if (!canRetryJob || busy || retryInFlight.current || retryPending) return;
     const failed = progress;
     if (!failed || failed.job_id !== jobId || failed.status !== "FAILED" || !failed.error?.retryable) {
       await poll(new AbortController().signal);
@@ -213,9 +225,15 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
     let message: string | undefined;
     try {
       await retryJob(jobId);
+      if (isGuest) void refresh();
     } catch (cause) {
       retryStatus = cause instanceof ApiError && cause.isClientError ? "rejected" : "uncertain";
-      message = errorMessage(cause, "Chưa xác nhận được yêu cầu thử lại.");
+      if (isGuest && isGuestQuotaExceededError(cause)) {
+        await refresh();
+        message = "Máy chủ báo đã hết lượt Guest ở thời điểm gửi. Hạn mức hiện tại đã được tải lại.";
+      } else {
+        message = errorMessage(cause, "Chưa xác nhận được yêu cầu thử lại.");
+      }
     }
 
     const afterPollId = pollSequence.current + 1;
@@ -240,7 +258,13 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
   // Tab mặc định theo tình huống; người dùng đổi tab thì giữ lựa chọn đó (stage mới không cưỡng ép đổi màn).
   const requestedTab = params.get("tab");
   const selected: Tab = requestedTab === "progress" || requestedTab === "studio" || requestedTab === "review" || requestedTab === "results" ? requestedTab : tab ?? "progress";
-  const status = progress ? progressSceneStatus(progress) : null;
+  // Một trạng thái tách vật thể cho cả trang: hàng bước ở Tiến trình, thông báo trong Studio, chuông và huy hiệu đầu trang.
+  const objectify = useObjectifyState({
+    jobId,
+    enabled: sceneReady,
+    onRevision: (revision) => { setSave({ status: "saved", revision }); setPollingKey((k) => k + 1); },
+  });
+  const status = progress ? progressSceneStatus(progress, objectify.state?.awaiting_choice === true && !objectify.pending) : null;
   const studioMode: StudioMode = mode === "metric" && !waitingMetric ? "scene" : mode;
 
   const tabs: SceneTabItem[] = [
@@ -266,8 +290,13 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
   }, [current]);
 
   return (
-    <main className="flex h-[calc(100dvh-3rem)] flex-col">
+    <ObjectifyContext.Provider value={objectify}>
+    <main aria-label={current === "studio" ? "Studio toàn màn hình" : undefined} className={cn("flex flex-col", current === "studio" ? "fixed inset-0 z-40 h-dvh bg-paper" : "h-[calc(100dvh-3rem)]")}>
       <div className="relative z-20 flex flex-wrap items-center gap-2 border-b border-line bg-paper-raised px-4 py-3 sm:px-6">
+        {current === "studio" && <button type="button" aria-label="Thoát Studio, về Tiến trình" title="Về Tiến trình" onClick={() => openTab("progress")}
+          className="flex size-9 shrink-0 items-center justify-center rounded-lg text-ink-muted hover:bg-paper-sunken hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ember">
+          <ArrowLeft className="size-5" aria-hidden />
+        </button>}
         <div className="mr-2 min-w-0">
           <h1 className="truncate text-base font-bold">{info?.name ?? "Đang tải scene…"}</h1>
         </div>
@@ -277,62 +306,52 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
         <GeometryBadge state={geometry} />
         {save && <SaveStatus state={save} />}
         <div className="ml-auto flex items-center gap-2">
-          {current === "studio" && (
-            <NextAction
-              jobId={jobId}
-              progress={progress}
-              current={current}
-              mode={studioMode}
-              sceneReady={sceneReady}
-              revision={save?.revision ?? null}
-              busy={busy}
-              onOpen={openTab}
-              onRetry={startRetry}
-              retryState={retryPending ? retrySync?.status ?? null : null}
-              variant="popover"
-            />
-          )}
-          <DemoControls jobId={jobId} revision={save?.revision ?? null} sceneReady={sceneReady}
-            onRestored={(revision) => setSave({ status: "saved", revision })} />
+          {/* Chuông thông báo dùng chung cho mọi tab của trang job; không còn khung thông báo riêng dưới thanh tab. */}
+          <NextAction
+            jobId={jobId}
+            progress={progress}
+            current={current}
+            mode={studioMode}
+            sceneReady={sceneReady}
+            revision={save?.revision ?? null}
+            busy={busy}
+            onOpen={openTab}
+            onRetry={startRetry}
+            retryState={retryPending ? retrySync?.status ?? null : null}
+            canMutateJob={canMutateJob}
+            canRetryJob={canRetryJob}
+            variant="popover"
+          />
+          {canMutateJob && <DemoControls scope="publication" jobId={jobId} revision={save?.revision ?? null} sceneReady={sceneReady} defaultTitle={info?.name ?? ""}
+            onRestored={(revision) => setSave({ status: "saved", revision })} />}
         </div>
       </div>
-      <SceneTabs tabs={tabs} current={current} onChange={(next) => openTab(next)} />
+      {current !== "studio" && <SceneTabs tabs={tabs} current={current} onChange={(next) => openTab(next)} />}
       {locked && <p role="status" className="px-4 py-2 text-sm text-ink-muted">{locked}. Đang hiển thị Tiến trình.</p>}
       {requestedTab && !["progress", "studio", "review", "results"].includes(requestedTab) && <p role="status" className="px-4 py-2 text-sm text-ink-muted">Tab không hợp lệ; đã mở vùng mặc định.</p>}
-      {current !== "studio" && (
-        <NextAction
-          jobId={jobId}
-          progress={progress}
-          current={current}
-          mode={studioMode}
-          sceneReady={sceneReady}
-          revision={save?.revision ?? null}
-          busy={busy}
-          onOpen={openTab}
-          onRetry={startRetry}
-          retryState={retryPending ? retrySync?.status ?? null : null}
-          variant="banner"
-        />
-      )}
-      {current === "studio" && preview && (
+      {current === "studio" && preview && (waitingMetric || GAUSSIAN_EDIT_ENABLED) && (
         <div className="flex items-center justify-end gap-2 border-b border-line bg-paper-raised px-4 py-1.5 sm:px-6">
-          <div className="flex shrink-0 items-center gap-1" role="group" aria-label="Chế độ Studio">
-            <ModeButton active={studioMode === "scene"} onClick={() => setMode("scene")}>
-              {sceneReady ? "Vật thể" : "Scene 3D"}
-            </ModeButton>
-            {waitingMetric && (
-              <ModeButton active={studioMode === "metric"} onClick={() => setMode("metric")}>
-                Tỉ lệ mét
+          {canMutateJob ? (
+            <div className="flex shrink-0 items-center gap-1" role="group" aria-label="Chế độ Studio">
+              <ModeButton active={studioMode === "scene"} onClick={() => setMode("scene")}>
+                {sceneReady ? "Vật thể" : "Scene 3D"}
               </ModeButton>
-            )}
-            <ModeButton active={studioMode === "gaussian"} onClick={() => setMode("gaussian")}>
-              <Pencil aria-hidden /> Chỉnh Gaussian
-            </ModeButton>
-          </div>
+              {waitingMetric && (
+                <ModeButton active={studioMode === "metric"} onClick={() => setMode("metric")}>
+                  Tỉ lệ mét
+                </ModeButton>
+              )}
+              {GAUSSIAN_EDIT_ENABLED && (
+                <ModeButton active={studioMode === "gaussian"} onClick={() => setMode("gaussian")}>
+                  <Pencil aria-hidden /> Chỉnh Gaussian
+                </ModeButton>
+              )}
+            </div>
+          ) : <p className="text-xs text-ink-muted">Quyền chỉ xem</p>}
         </div>
       )}
       {error && <ErrorFeedback message={error} className="m-3" retryLabel="Tải lại trạng thái" retry={() => void poll(new AbortController().signal)} />}
-      <div id={`scene-panel-${current}`} role="tabpanel" aria-labelledby={`scene-tab-${current}`} className="relative min-h-0 flex-1 overflow-y-auto">
+      <div id={`scene-panel-${current}`} role={current === "studio" ? "region" : "tabpanel"} aria-label={current === "studio" ? "Nội dung Studio" : undefined} aria-labelledby={current === "studio" ? undefined : `scene-tab-${current}`} className="relative min-h-0 flex-1 overflow-y-auto">
         {current === "studio" && !preview && <TabLoading />}
         {current === "progress" && (
           <ProgressTab
@@ -340,6 +359,13 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
             progress={progress}
             info={info}
             busy={busy}
+            canCancel={canCancelJob}
+            canAccept={canMutateJob}
+            onConfirmMetric={canMutateJob && preview ? () => openTab("studio", "metric") : undefined}
+            onRetry={canRetryJob && !retryPending ? startRetry : undefined}
+            retryDisabled={busy || guestQuotaExhausted}
+            retryHint={guestQuotaExhausted ? "Đã hết lượt Guest hôm nay; lượt được đặt lại lúc 00:00." : undefined}
+            onChanged={() => setPollingKey((k) => k + 1)}
             onCancel={() => {
               if (window.confirm("Huỷ xử lý scene này? Tiến trình trên GPU sẽ dừng.")) void act(() => cancelJob(jobId), "Đã gửi yêu cầu huỷ. Trạng thái được cập nhật từ máy chủ.");
             }}
@@ -354,6 +380,7 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
             key={metricScope}
             jobId={jobId}
             title={info?.name ?? "Scene"}
+            canMutate={canMutateJob}
             preview={preview}
             mode={studioMode}
             geometry={geometry}
@@ -370,12 +397,13 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
           />
           </div>
         )}
-        {current === "review" && <ReviewTab jobId={jobId} onSaveState={setSave} />}
+        {current === "review" && <ReviewTab jobId={jobId} canMutateJob={canMutateJob} onSaveState={setSave} />}
         {current === "results" && preview && <ResultsTab jobId={jobId} preview={preview} revision={save?.revision ?? null}
-          onOpenGaussian={() => openTab("studio", "gaussian")}
+          onOpenGaussian={GAUSSIAN_EDIT_ENABLED && canMutateJob ? () => openTab("studio", "gaussian") : undefined}
           onOpenReview={sceneReady ? () => openTab("review") : undefined}
         />}
       </div>
     </main>
+    </ObjectifyContext.Provider>
   );
 }

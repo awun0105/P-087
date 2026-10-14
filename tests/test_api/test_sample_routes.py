@@ -13,7 +13,14 @@ from httpx import ASGITransport, AsyncClient
 from scripts.demo.export_demo_bundle import stage_durations
 from src.models.contracts.manifests import JobManifest, JobStatus, StageArtifact, StageId
 from src.services.orchestration.jobs.models import JobAttemptRecord
-from src.services.orchestration.samples import DemoFile, DemoManifest, DemoSource, DemoStage
+from src.services.orchestration.samples import (
+    DemoFact,
+    DemoFile,
+    DemoManifest,
+    DemoSource,
+    DemoStage,
+    DemoStageAsset,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -187,3 +194,71 @@ def test_sample_manifest_carries_cameras_trajectory() -> None:
     assert len(reloaded.cameras) == 1
     assert reloaded.cameras[0].frame_id == 1
     assert reloaded.cameras[0].center == (1.0, 2.0, 3.0)
+
+
+def _manifest(stages: list[DemoStage]) -> DemoManifest:
+    return DemoManifest(
+        demo_id="asset_demo",
+        title="Demo có asset",
+        origin="pipeline_job",
+        source=DemoSource(dataset="TorWIC-SLAM", sequence="Aisle_CW"),
+        produced_at=datetime(2026, 10, 10, tzinfo=UTC),
+        stages=stages,
+        splat=DemoFile(
+            name="scene.sog", media_type="application/octet-stream", size_bytes=100, checksum="sha256:" + "0" * 64
+        ),
+    )
+
+
+def test_lidar_stages_are_kept_after_frame_extract_in_pipeline_order() -> None:
+    manifest = _manifest(
+        [
+            DemoStage(stage_id=StageId.LIDAR_CALIBRATION_QA),
+            DemoStage(stage_id=StageId.LIDAR_INGEST),
+            DemoStage(stage_id=StageId.FRAME_EXTRACT),
+        ]
+    )
+    order = [stage.stage_id for stage in manifest.stages]
+    assert order[:5] == [
+        StageId.INPUT_VALIDATE,
+        StageId.PRIVACY_GATE,
+        StageId.FRAME_EXTRACT,
+        StageId.LIDAR_INGEST,
+        StageId.LIDAR_CALIBRATION_QA,
+    ]
+    assert StageId.LIDAR_ODOMETRY not in order
+    # Bundle không LiDAR giữ nguyên pipeline Studio.
+    assert all("LIDAR" not in stage.stage_id.value for stage in _manifest([]).stages)
+    assert len(_manifest([]).stages) == 8
+
+
+def test_stage_assets_are_served_through_the_allow_list_and_validated() -> None:
+    image = DemoFile(name="metric.png", media_type="image/png", size_bytes=10, checksum="sha256:" + "1" * 64)
+    manifest = _manifest(
+        [
+            DemoStage(
+                stage_id=StageId.METRIC_CANONICALIZE,
+                assets=[
+                    DemoStageAsset(kind="image", title="Điểm đo", file=image),
+                    DemoStageAsset(kind="facts", facts=[DemoFact(label="Khoảng cách A–B", value="1.20 m")]),
+                ],
+            )
+        ]
+    )
+    assert image in manifest.files()
+    reloaded = DemoManifest.model_validate_json(manifest.model_dump_json())
+    metric = next(s for s in reloaded.stages if s.stage_id == StageId.METRIC_CANONICALIZE)
+    assert [asset.kind for asset in metric.assets] == ["image", "facts"]
+    with pytest.raises(ValueError):
+        DemoStageAsset(kind="image")  # thiếu file
+    with pytest.raises(ValueError):
+        DemoStageAsset(kind="facts", facts=[])  # thiếu số đo
+    with pytest.raises(ValueError):
+        DemoStageAsset(kind="facts", facts=[DemoFact(label="a", value="b")], file=image)
+    with pytest.raises(ValueError):
+        _manifest(
+            [
+                DemoStage(stage_id=StageId.METRIC_CANONICALIZE, assets=[DemoStageAsset(kind="image", file=image)]),
+                DemoStage(stage_id=StageId.RGB_GEOMETRY, assets=[DemoStageAsset(kind="image", file=image)]),
+            ]
+        )  # trùng tên file

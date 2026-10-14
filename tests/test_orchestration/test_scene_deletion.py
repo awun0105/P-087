@@ -10,8 +10,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.models.contracts.manifests import JobStatus, StageId
+from src.models.contracts.identity import canonical_content_checksum
+from src.models.contracts.manifests import ExecutionError, JobStatus, StageId
 from src.services.orchestration.artifacts import ArtifactRemote
+from src.services.orchestration.artifacts.checksum import sha256_bytes
+from src.services.orchestration.auth.models import Actor
 from src.services.orchestration.auth.service import AuthService
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
 from src.services.orchestration.jobs.models import TransitionRequest
@@ -22,6 +25,7 @@ from src.services.orchestration.projects.deletion import (
     DeletionContext,
     DeletionRefusedError,
     DeletionRequest,
+    GuestOwnershipError,
     apply_deletion,
     get_trash_entry,
     import_legacy_entry,
@@ -38,21 +42,33 @@ from src.services.orchestration.projects.models import (
     UploadProjectInput,
 )
 from src.services.orchestration.projects.registry import ProjectRegistry
+from src.services.orchestration.scene.heads import (
+    SceneHeadBackfillItem,
+    SceneHeadRepairRecord,
+    SceneHeadRepository,
+)
 from src.services.orchestration.uploads import UploadRecord, VideoUploadService
 from src.services.orchestration.uploads import scene_imports as imports_module
 from src.services.orchestration.uploads.scene_imports import ImportService
 from tests.test_orchestration.memory_object_store import MemoryObjectStore
+from tests.test_reconstruction.support.sog_fixtures import sog_archive
 from tests.test_reconstruction.test_input_detection import _gaussian
 
 MP4 = b"\x00\x00\x00\x18ftypmp42"
 _TABLES = (
     "r2s_projects",
     "r2s_jobs",
+    "r2s_input_runs",
     "r2s_job_events",
     "r2s_scene_requests",
+    "r2s_scene_heads",
+    "r2s_scene_head_repairs",
+    "r2s_scene_head_backfill_items",
+    "r2s_scene_publications",
     "r2s_uploads",
     "r2s_upload_sessions",
     "r2s_imports",
+    "r2s_import_operations",
 )
 
 
@@ -68,12 +84,13 @@ def world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     database = RuntimeDatabase(f"sqlite:///{tmp_path / 'runtime.db'}")
     registry = ProjectRegistry(runtime_root=tmp_path / "artifacts", database=database, execution_profile=profile)
 
-    def fake_package(source: Path, workspace: Path, gpu_index: int | None) -> Path:
+    def fake_package(source: Path, workspace: Path, gpu_index: int | None, **_: object) -> Path:
         workspace.mkdir(parents=True)
-        (workspace / "scene.sog").write_bytes(b"sog:" + source.read_bytes()[:16])
+        (workspace / "scene.sog").write_bytes(sog_archive(sh_bands=3, count=4))
         return workspace / "scene.sog"
 
     monkeypatch.setattr(imports_module, "package_splat", fake_package)
+    monkeypatch.setattr(imports_module, "validate_sog_runtime", lambda *args, **kwargs: None)
     return SimpleNamespace(
         root=tmp_path,
         database=database,
@@ -87,13 +104,26 @@ def world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     )
 
 
-def _upload(world: SimpleNamespace, name: str = "walk.mp4", payload: bytes = MP4 + b"video") -> UploadRecord:
+def _upload(
+    world: SimpleNamespace,
+    name: str = "walk.mp4",
+    payload: bytes = MP4 + b"video",
+    uploaded_by: Actor | None = None,
+) -> UploadRecord:
     pending = world.uploads.begin(name)
     pending.publication.write(payload)
-    return world.uploads.finish(pending)
+    return world.uploads.finish(pending, uploaded_by)
 
 
-def _scene(world: SimpleNamespace, upload: UploadRecord, name: str, *, stopped: bool = True) -> tuple[str, str]:
+def _scene(
+    world: SimpleNamespace,
+    upload: UploadRecord,
+    name: str,
+    *,
+    stopped: bool = True,
+    created_by: Actor | None = None,
+    owner_user_id: str | None = None,
+) -> tuple[str, str]:
     """Scene tạo như API `/scenes/from-upload`; `stopped` huỷ job để scene ở trạng thái gỡ được."""
     attestation = SourceRightsAttestation(
         data_origin=DataOrigin.SELF_COLLECTED_NO_PII,
@@ -104,9 +134,13 @@ def _scene(world: SimpleNamespace, upload: UploadRecord, name: str, *, stopped: 
         retention_acknowledged=True,
     )
     request = UploadProjectInput(upload_id=upload.upload_id, name=name, attestation=attestation)
-    project = world.registry.create_project_from_upload(upload, request, "self_attested")
+    project = world.registry.create_project_from_upload(upload, request, "self_attested", created_by=created_by)
     world.uploads.link_project(upload.upload_id, project.project_id)
-    job = world.registry.create_job(JobCreateInput(project_id=project.project_id))
+    job = world.registry.create_job(
+        JobCreateInput(project_id=project.project_id),
+        requested_by=created_by if owner_user_id is not None else None,
+        owner_user_id=owner_user_id,
+    )
     if stopped:
         world.registry.transition_job(job.job_id, TransitionRequest(target_status=JobStatus.CANCELLED))
     workspace = world.root / "workers" / job.job_id / "attempt-1"
@@ -117,14 +151,93 @@ def _scene(world: SimpleNamespace, upload: UploadRecord, name: str, *, stopped: 
     return project.project_id, job.job_id
 
 
+class _FakeImportAdmission:
+    def operation_profile_for_import(self, **kwargs: object):
+        from src.services.orchestration.jobs.admission import OperationResourceProfile
+
+        gpu_required = bool(kwargs["gpu_required"])
+        return OperationResourceProfile(
+            required_gb={"vram": 1.0 if gpu_required else 0.0, "ram": 2.0, "disk": 1.0},
+            danger_ratio=0.9,
+            measured=False,
+            gpu_required=gpu_required,
+        )
+
+    def admit_operation(self, request):  # noqa: ANN001
+        return SimpleNamespace(status="admitted")
+
+    def touch_operation(self, request):  # noqa: ANN001
+        return True
+
+    def release_operation(self, request):  # noqa: ANN001
+        return True
+
+
 def _import(world: SimpleNamespace, upload: UploadRecord, name: str) -> str:
     record = world.imports.create(upload, name, None)
-    return world.imports.package(record.import_id, upload, None).import_id
+    assert world.imports.process_next(admission=_FakeImportAdmission(), worker_id="deletion-test-worker")
+    return record.import_id
 
 
 def _rows(world: SimpleNamespace) -> dict[str, list[tuple]]:
     with world.database.transaction() as tx:
         return {table: sorted(tx.execute(f"SELECT * FROM {table}").fetchall()) for table in _TABLES}
+
+
+def _input_run(world: SimpleNamespace, project_id: str, job_id: str, key: str) -> None:
+    """Persist the accepted-run foreign keys used by the create-scene input flow."""
+    with world.database.transaction(write=True) as tx:
+        tx.execute(
+            "INSERT INTO r2s_input_assemblies(assembly_id, revision, owner_id, payload) "
+            "VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING",
+            ("shared-assembly", 1, "creator", "{}"),
+        )
+        tx.execute(
+            "INSERT INTO r2s_input_resolutions(report_checksum, assembly_id, revision, owner_id, payload) "
+            "VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
+            ("shared-report", "shared-assembly", 1, "creator", "{}"),
+        )
+        tx.execute(
+            "INSERT INTO r2s_input_runs(requester_id, idempotency_key, request_fingerprint, job_id, "
+            "project_id, assembly_id, revision, report_checksum, recipe_checksum, recipe_ref, payload) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "creator",
+                key,
+                "fingerprint",
+                job_id,
+                project_id,
+                "shared-assembly",
+                1,
+                "shared-report",
+                "recipe",
+                "{}",
+                "{}",
+            ),
+        )
+
+
+def test_input_run_survives_trash_restore_without_removing_shared_assembly(world: SimpleNamespace) -> None:
+    project_id, job_id = _scene(world, _upload(world), "From assembly")
+    other_project, other_job = _scene(world, _upload(world, "other.mp4"), "Shared assembly")
+    _input_run(world, project_id, job_id, "first-run")
+    _input_run(world, other_project, other_job, "second-run")
+    before = _rows(world)
+
+    entry = _delete(world, project_ids=[project_id])
+    with world.database.transaction() as tx:
+        assert tx.execute("SELECT job_id FROM r2s_input_runs").fetchall() == [(other_job,)]
+        assert tx.execute("SELECT COUNT(*) FROM r2s_input_assemblies").fetchone()[0] == 1
+        assert tx.execute("SELECT COUNT(*) FROM r2s_input_resolutions").fetchone()[0] == 1
+    record = get_trash_entry(world.database, entry)
+    assert [row.values["job_id"] for row in record.plan.rows if row.table == "r2s_input_runs"] == [job_id]
+
+    restore_deletion(world.context, entry)
+    assert _rows(world) == before
+
+    # Permanent deletion must also work, leaving the other scene's assembly binding intact.
+    purge_deletion(world.context, _delete(world, project_ids=[project_id]))
+    assert world.registry.get_job(other_job).job_id == other_job
 
 
 def _files(world: SimpleNamespace) -> dict[str, str]:
@@ -172,6 +285,103 @@ def test_plan_lists_what_would_go_and_changes_nothing(world: SimpleNamespace) ->
     }
     assert plan.size_bytes > 0
     assert (_rows(world), _files(world)) == (rows, files)
+
+
+def test_job_owner_survives_operator_attempt_update_and_trash_restore(world: SimpleNamespace) -> None:
+    guest = Actor(user_id="guest-1", display_name="Guest One", role="guest")
+    editor = Actor(user_id="editor-1", display_name="Editor One", role="editor")
+    upload = _upload(world, uploaded_by=guest)
+    project_id, job_id = _scene(
+        world, upload, "Owned scene", stopped=False, created_by=guest, owner_user_id=guest.user_id
+    )
+
+    assert world.registry.get_job_owner_user_id(job_id) == guest.user_id
+    world.registry.transition_job(job_id, TransitionRequest(target_status=JobStatus.RUNNING))
+    world.registry.transition_job(
+        job_id,
+        TransitionRequest(
+            target_status=JobStatus.FAILED,
+            error=ExecutionError(
+                stage_id=StageId.INPUT_VALIDATE,
+                error_code="PREVIEW_RUNNER_FAILED",
+                human_message="Fixture failure",
+                retryable=True,
+                details={"exception_type": "TimeoutError"},
+            ),
+        ),
+    )
+    world.registry.transition_job(
+        job_id,
+        TransitionRequest(target_status=JobStatus.QUEUED),
+        requested_by=editor,
+    )
+    world.registry.transition_job(job_id, TransitionRequest(target_status=JobStatus.CANCELLED))
+    assert world.registry.get_job_owner_user_id(job_id) == guest.user_id
+
+    entry = apply_deletion(
+        world.context,
+        DeletionRequest(project_ids=[project_id]),
+        guest_owner_user_id=guest.user_id,
+    ).entry_id
+    restore_deletion(world.context, entry, guest_owner_user_id=guest.user_id)
+
+    assert world.registry.get_project(project_id).created_by == guest
+    assert world.registry.get_job_owner_user_id(job_id) == guest.user_id
+
+
+def test_guest_cannot_delete_owned_project_with_foreign_upload_without_side_effects(world: SimpleNamespace) -> None:
+    guest = Actor(user_id="guest-1", display_name="Guest One", role="guest")
+    editor = Actor(user_id="editor-1", display_name="Editor One", role="editor")
+    upload = _upload(world, uploaded_by=editor)
+    project_id, _ = _scene(world, upload, "Guest project", created_by=guest, owner_user_id=guest.user_id)
+    before_rows, before_files = _rows(world), _files(world)
+
+    with pytest.raises(GuestOwnershipError, match="owner không khớp"):
+        apply_deletion(
+            world.context,
+            DeletionRequest(project_ids=[project_id]),
+            guest_owner_user_id=guest.user_id,
+        )
+
+    assert (_rows(world), _files(world)) == (before_rows, before_files)
+    assert _in_trash(world) == []
+
+
+def test_project_owner_cannot_change_during_persistence_cas(world: SimpleNamespace) -> None:
+    guest = Actor(user_id="guest-1", display_name="Guest One", role="guest")
+    editor = Actor(user_id="editor-1", display_name="Editor One", role="editor")
+    upload = _upload(world, uploaded_by=guest)
+    project_id, _ = _scene(world, upload, "Guest project", created_by=guest, owner_user_id=guest.user_id)
+    project = world.registry.get_project(project_id)
+    changed_owner = project.model_copy(update={"created_by": editor})
+    assert world.registry.persistence is not None
+
+    with pytest.raises(ValueError, match="creator"):
+        world.registry.persistence.save_project(changed_owner, expected=project)
+
+    assert world.registry.get_project(project_id).created_by == guest
+
+
+def test_guest_cannot_delete_foreign_job_in_their_project(world: SimpleNamespace) -> None:
+    guest = Actor(user_id="guest-1", display_name="Guest One", role="guest")
+    upload = _upload(world, uploaded_by=guest)
+    project_id, _ = _scene(world, upload, "Guest project", created_by=guest, owner_user_id=guest.user_id)
+    editor = Actor(user_id="editor-1", display_name="Editor One", role="editor")
+    foreign_job = world.registry.create_job(
+        JobCreateInput(project_id=project_id), requested_by=editor, owner_user_id=editor.user_id
+    )
+    world.registry.transition_job(foreign_job.job_id, TransitionRequest(target_status=JobStatus.CANCELLED))
+    before_rows, before_files = _rows(world), _files(world)
+
+    with pytest.raises(GuestOwnershipError, match="owner không khớp"):
+        apply_deletion(
+            world.context,
+            DeletionRequest(project_ids=[project_id]),
+            guest_owner_user_id=guest.user_id,
+        )
+
+    assert (_rows(world), _files(world)) == (before_rows, before_files)
+    assert _in_trash(world) == []
 
 
 def test_delete_removes_the_scene_everywhere_and_leaves_other_scenes_alone(world: SimpleNamespace) -> None:
@@ -241,6 +451,95 @@ def test_restore_brings_back_exactly_what_was_removed(world: SimpleNamespace) ->
     }
     with pytest.raises(DeletionRefusedError, match="không có trong thùng rác"):
         restore_deletion(world.context, entry)
+
+
+def test_scene_head_and_repair_rows_roundtrip_through_trash(world: SimpleNamespace) -> None:
+    project_id, job_id = _scene(world, _upload(world), "Head restore")
+    revision = world.registry.scene.publish_initial(job_id, world.registry.scene._fixture_scene())
+    repository = SceneHeadRepository(world.database)
+    head = repository.get(job_id)
+    assert head is not None and head.scene_revision == "rev-001"
+    item = SceneHeadBackfillItem.from_revision(revision)
+    repair = SceneHeadRepairRecord.start(job_id, sha256_bytes(revision.scene_reference.artifact_uri.encode()), 1)
+    repair_draft = repair.model_copy(
+        update={
+            "status": "COMPLETE",
+            "phase": "RECHECK",
+            "verified_count": 1,
+            "rechecked_count": 1,
+            "repair_checksum": "sha256:" + "0" * 64,
+        }
+    )
+    completed_repair = repair_draft.model_copy(
+        update={"repair_checksum": canonical_content_checksum(repair_draft, "repair_checksum")}
+    )
+    with world.database.transaction(write=True) as tx:
+        tx.execute(
+            "INSERT INTO r2s_scene_head_repairs(job_id,status,generation,repair_checksum,payload) VALUES (?,?,?,?,?)",
+            (
+                job_id,
+                completed_repair.status,
+                completed_repair.generation,
+                completed_repair.repair_checksum,
+                completed_repair.model_dump_json(),
+            ),
+        )
+        tx.execute(
+            "INSERT INTO r2s_scene_head_backfill_items(job_id,scene_revision,item_checksum,payload) VALUES (?,?,?,?)",
+            (job_id, item.scene_revision, item.item_checksum, item.model_dump_json()),
+        )
+    before = _rows(world)
+    artifacts_before = _files(world)
+
+    entry = _delete(world, project_ids=[project_id])
+    assert _rows(world) != before
+    restore_deletion(world.context, entry, "user-1")
+
+    assert _rows(world) == before
+    assert _files(world) == artifacts_before
+    restored = repository.get(job_id)
+    assert restored == head
+    assert repository.get_repair(job_id) == completed_repair
+
+
+def test_scene_deletion_refuses_in_progress_backfill_and_pending_publication(world: SimpleNamespace) -> None:
+    project_id, job_id = _scene(world, _upload(world), "Active head operation")
+    with world.database.transaction(write=True) as tx:
+        tx.execute(
+            "INSERT INTO r2s_scene_head_repairs(job_id,status,generation,repair_checksum,payload) VALUES (?,?,?,?,?)",
+            (job_id, "IN_PROGRESS", 1, "sha256:" + "a" * 64, "{}"),
+        )
+
+    with pytest.raises(DeletionRefusedError, match="backfill"):
+        _delete(world, project_ids=[project_id])
+
+    with world.database.transaction(write=True) as tx:
+        tx.execute("DELETE FROM r2s_scene_head_repairs WHERE job_id=?", (job_id,))
+        tx.execute(
+            "INSERT INTO r2s_scene_publications(job_id,expected_generation,target_revision,lease_expires_at,payload) "
+            "VALUES (?,?,?,?,?)",
+            (job_id, 1, "rev-002", "2026-10-08T00:00:00+00:00", "{}"),
+        )
+
+    with pytest.raises(DeletionRefusedError, match="publication"):
+        _delete(world, project_ids=[project_id])
+
+
+def test_aborted_scene_publication_is_retained_but_does_not_block_trash_restore(world: SimpleNamespace) -> None:
+    project_id, job_id = _scene(world, _upload(world), "Aborted publication")
+    repository = SceneHeadRepository(world.database)
+    reservation = repository.reserve_publication(job_id, None, "publish_initial", writer_id="failed-writer")
+    assert repository.abort_publication(reservation)
+    before = _rows(world)
+
+    entry = _delete(world, project_ids=[project_id])
+    with world.database.transaction() as tx:
+        assert tx.execute("SELECT COUNT(*) FROM r2s_scene_publications WHERE job_id=?", (job_id,)).fetchone() == (0,)
+
+    restore_deletion(world.context, entry, "user-1")
+    assert _rows(world) == before
+    restored = repository.get_publication(job_id)
+    assert restored is not None and restored.status == "ABORTED"
 
 
 def test_restore_keeps_scenes_linked_to_the_upload_after_the_deletion(world: SimpleNamespace) -> None:
@@ -360,10 +659,44 @@ def test_imports_are_removed_and_share_uploads_like_scenes(world: SimpleNamespac
     assert world.imports.list() == [] and world.uploads.list() == []
 
 
+def test_import_operation_survives_trash_and_restore(world: SimpleNamespace) -> None:
+    upload = _upload(world, "scene.ply", _gaussian(count=4))
+    import_id = _import(world, upload, "Bản nhập khôi phục")
+    before_rows = _rows(world)
+    before_files = _files(world)
+
+    entry = _delete(world, import_ids=[import_id])
+    with world.database.transaction() as tx:
+        assert tx.execute("SELECT COUNT(*) FROM r2s_import_operations WHERE import_id=?", (import_id,)).fetchone() == (
+            0,
+        )
+
+    restore_deletion(world.context, entry)
+
+    assert _rows(world) == before_rows
+    assert _files(world) == before_files
+    restored = world.imports.get(import_id)
+    assert restored.status == "READY"
+    assert restored.operation is not None and restored.operation.status == "SUCCEEDED"
+
+
 def test_import_being_packaged_is_refused(world: SimpleNamespace) -> None:
     upload = _upload(world, "scene.ply", _gaussian(count=4))
     record = world.imports.create(upload, "Đang đóng gói", None)
     _refused(world, "đang được đóng gói", import_ids=[record.import_id])
+
+
+def test_queued_import_is_refused_from_trash(world: SimpleNamespace) -> None:
+    upload = _upload(world, "scene.ply", _gaussian(count=4))
+    record = world.imports.create(upload, "Đang chờ", None)
+
+    with world.database.transaction(write=True) as tx:
+        tx.execute(
+            "UPDATE r2s_imports SET payload=? WHERE import_id=?",
+            (record.model_copy(update={"status": "FAILED"}).model_dump_json(), record.import_id),
+        )
+
+    _refused(world, "chờ worker", import_ids=[record.import_id])
 
 
 def test_remote_file_store_objects_survive_delete_and_go_on_purge(world: SimpleNamespace) -> None:

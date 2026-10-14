@@ -18,6 +18,7 @@ import {
 import { EMPTY_INSPECTION, type InspectionState } from "@/features/viewer/inspection-history";
 import { LidarMetricConfirm } from "@/features/studio/LidarMetricConfirm";
 import { PlayCanvasScene, usePlayCanvasCapability } from "@/features/viewer/PlayCanvasScene";
+import { useJobCameras } from "@/features/studio/scene/useJobCameras";
 import type { SplatInspection } from "@/features/viewer/splat-inspection";
 import { confirmMetric, getDemoPoints, getMetricAssist, getMetricProposal, measureOnLidar, previewMetric } from "@/lib/api/studio";
 import type { LidarMeasurements, MetricInput, MetricPreview, MetricProposal } from "@/lib/contracts/studio";
@@ -64,6 +65,8 @@ export function MetricConfirmView({
   const [useEstimate, setUseEstimate] = useState(false);
   const timers = useRef<number[]>([]);
   const fail = useCallback(() => setCapability("failed"), [setCapability]);
+  // Mở đầu bên trong scene (camera quay đầu tiên) thay vì camera mặc định ngoài scene; viewer dựng sau khi có camera.
+  const jobCameras = useJobCameras(jobId);
   useEffect(() => () => timers.current.forEach((timer) => window.clearTimeout(timer)), []);
   const onReady = useCallback((next: SplatInspection | null) => {
     setController(next);
@@ -211,7 +214,20 @@ export function MetricConfirmView({
                 : "Không thể tải mô hình 3DGS (lỗi tải file). Bạn vẫn xác nhận được tỉ lệ ở bên cạnh."}
             </p>
           ) : (
-            <PlayCanvasScene contentUrl={contentUrl} contentFilename={filename} renderer="webgl" mode="VISUAL" capability={capability} onFailed={fail} />
+            jobCameras.settled ? (
+              <PlayCanvasScene
+                contentUrl={contentUrl}
+                contentFilename={filename}
+                renderer="webgl"
+                mode="VISUAL"
+                capability={capability}
+                onFailed={fail}
+                initialCamera={jobCameras.initialCamera}
+                initialCameraMode="orbit"
+              />
+            ) : (
+              <p role="status" className="p-3 text-sm text-on-dark/80">Đang tải bản xem 3DGS…</p>
+            )
           )}
         </div>
         <aside className="space-y-4 overflow-y-auto border-l border-line bg-paper-raised p-4" aria-label="Xác nhận tỉ lệ mét">
@@ -240,18 +256,24 @@ export function MetricConfirmView({
               : "Không thể tải mô hình 3DGS để chọn điểm (lỗi tải file hoặc dữ liệu không hợp lệ)."}
           </p>
         ) : (
-          <PlayCanvasScene
-            contentUrl={contentUrl}
-            contentFilename={filename}
-            renderer="webgl"
-            mode="VISUAL"
-            capability={capability}
-            onFailed={fail}
-            enableInspection
-            inspectionMaxPoints={METRIC_POINT_COUNT}
-            onInspectionReady={onReady}
-            onInspectionState={setInspection}
-          />
+          jobCameras.settled ? (
+            <PlayCanvasScene
+              contentUrl={contentUrl}
+              contentFilename={filename}
+              renderer="webgl"
+              mode="VISUAL"
+              capability={capability}
+              onFailed={fail}
+              initialCamera={jobCameras.initialCamera}
+              initialCameraMode="orbit"
+              enableInspection
+              inspectionMaxPoints={METRIC_POINT_COUNT}
+              onInspectionReady={onReady}
+              onInspectionState={setInspection}
+            />
+          ) : (
+            <p role="status" className="p-3 text-sm text-on-dark/80">Đang tải bản xem 3DGS…</p>
+          )
         )}
       </div>
       <aside

@@ -70,5 +70,6 @@ function GaussianWorkspace({ jobId, title }: { jobId: string; title: string }) {
   }, [jobId, reload]);
   if (error) return <Notice tone="rust" className="m-4">Không mở được bản 3DGS: {error} <Button size="sm" variant="secondary" onClick={() => setReload((value) => value + 1)}>Thử lại</Button></Notice>;
   if (!preview) return <p role="status" className="p-6 text-sm text-ink-muted">Đang tải bản 3DGS…</p>;
-  return <PreviewScene contentUrl={jobArtifactContentUrl(jobId, preview.delivery_ref)} filename={preview.delivery_ref.artifact_uri.split("/").pop() ?? "scene.sog"} title={`5. 3DGS: ${title}`} />;
+  // `jobId` để viewer lấy quỹ đạo camera của job: mở đầu bên trong scene và có replay theo quỹ đạo quay.
+  return <PreviewScene jobId={jobId} contentUrl={jobArtifactContentUrl(jobId, preview.delivery_ref)} filename={preview.delivery_ref.artifact_uri.split("/").pop() ?? "scene.sog"} title={`5. 3DGS: ${title}`} />;
 }

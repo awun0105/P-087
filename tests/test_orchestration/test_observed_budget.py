@@ -16,6 +16,8 @@ from src.services.orchestration.processing.observed import (
     load_usages,
     numeric_params,
     observed_budget,
+    observed_for_config,
+    resource_observation_params,
 )
 from src.services.orchestration.processing.telemetry import ResourceUsage
 from src.services.orchestration.projects.models import JobCreateInput
@@ -179,3 +181,76 @@ def test_processing_seconds_counts_machine_time_only() -> None:
         _usage("preview", 1.0, 1.0, duration_seconds=5.0, job_id="job-c", outcome="failed", exit_code=1),
     ]
     assert processing_seconds(usages) == {"job-a": 60.0 + 300.0 + 90.0, "job-b": 10.0}
+
+
+def test_observed_for_config_returns_none_when_a_required_tool_is_unmeasured() -> None:
+    from src.services.orchestration.processing.observed import observed_for_config
+
+    preview = _usage("preview", 1.5, 2.0)
+    # Chỉ có preview (thiếu finalize và scene_extract) -> None
+    assert (
+        observed_for_config(
+            [preview],
+            params=JOB,
+            gpu_name="T4",
+            runtime_manifest_checksum="runtime-1",
+        )
+        is None
+    )
+
+
+def test_observed_for_config_uses_resource_maxima_across_phases() -> None:
+    preview = _usage("preview", 1.5, 2.0)
+    finalize = _usage("finalize", 0.5, 1.0)
+    extract = _usage("scene_extract", 2.2, 4.5)
+    # Đủ cả preview, finalize, scene_extract -> max(preview, finalize/extract)
+    # vram: max(1.5, 2.2) = 2.2
+    # ram: max(2.0, 4.5) = 4.5
+    assert observed_for_config(
+        [preview, finalize, extract],
+        params=JOB,
+        gpu_name="T4",
+        runtime_manifest_checksum="runtime-1",
+    ) == {"vram": 2.2, "ram": 4.5}
+
+
+def test_observed_for_config_separates_colmap_cpu_and_gpu_measurements() -> None:
+    cpu_usages = [
+        _usage("preview", 1.5, 2.0),
+        _usage("finalize", 0.5, 1.0),
+        _usage("scene_extract", 2.2, 4.5),
+    ]
+    gpu_params = resource_observation_params(JOB, colmap_use_gpu=True)
+    gpu_usages = [
+        _usage("preview", 2.5, 3.0, params=gpu_params),
+        _usage("finalize", 0.5, 1.0, params=gpu_params),
+        _usage("scene_extract", 2.2, 4.5, params=gpu_params),
+    ]
+
+    assert resource_observation_params(JOB, colmap_use_gpu=False) == JOB
+    assert gpu_params == {**JOB, "colmap.use_gpu": 1.0}
+    combined_usages = [*cpu_usages, *gpu_usages]
+    assert observed_for_config(
+        combined_usages,
+        params=JOB,
+        gpu_name="T4",
+        runtime_manifest_checksum="runtime-1",
+    ) == {"vram": 2.2, "ram": 4.5}
+    # CPU history cannot stand in for the GPU-enabled COLMAP path.
+    assert (
+        observed_for_config(
+            cpu_usages,
+            params=JOB,
+            gpu_name="T4",
+            runtime_manifest_checksum="runtime-1",
+            colmap_use_gpu=True,
+        )
+        is None
+    )
+    assert observed_for_config(
+        combined_usages,
+        params=JOB,
+        gpu_name="T4",
+        runtime_manifest_checksum="runtime-1",
+        colmap_use_gpu=True,
+    ) == {"vram": 2.5, "ram": 4.5}

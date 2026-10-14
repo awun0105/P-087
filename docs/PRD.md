@@ -31,9 +31,11 @@
 | v1.12 | 23/09/2026 | Product decision: khôi phục direct browser rendering của real 3DGS `VisualArtifact` thành yêu cầu P0; mesh, point cloud và collider là các view kỹ thuật ngang hàng, không phải fallback. Giữ Next.js + Three.js/WebGL2 baseline; renderer cụ thể phải qualification bằng output producer thật. |
 | v1.13 | 24/09/2026 | Làm rõ hai điểm HITL, Save Draft/Submit for Validation, candidate bất biến và validation evidence (report, replay, screenshots, logs) trước final review. Lỗi capture replay không đổi kết quả validation; Primary Demo vẫn phải có replay để đạt acceptance. |
 | v1.14 | 25/09/2026 | Đồng bộ viewer P0 với PlayCanvas Engine 2.22.4 + supersplat-viewer 1.35.2; WebGL2 baseline, WebGPU ưu tiên khi khả dụng. Giữ nguyên real Brush/browser proof và AC-11; không coi thay đổi thư viện là runtime acceptance. |
-| v1.15 | 29/09/2026 | Khách (không đăng nhập) chỉ dùng video mẫu, không tốn GPU; upload/chạy job cần tài khoản Editor; tài khoản qua mã mời. Không thêm role — vẫn Editor/Reviewer (ADR 0003). |
+| v1.15 | 29/09/2026 | Historical policy: khách chưa đăng nhập chỉ dùng video mẫu; upload/chạy job cần Editor; invite-only; hai roles. Superseded by v1.18 owner decision. |
 | v1.16 | 30/09/2026 | Owner chốt pipeline v2 ([ADR 0007](./decisions/0007-object-centric-hybrid-usd-pipeline.md)): scene theo vật chỉnh sửa được, xuất USD lai (Gaussian để hiển thị, collider để va chạm) cho Isaac Sim. Kéo vào phạm vi hiện tại: xoá vật kèm vá nền, gợi ý nhãn, thay vật bằng asset (mục 4.3.1). FR-11 bổ sung yêu cầu USD lai, khối lượng, vật liệu vật lý, nhãn ngữ nghĩa. Acceptance định lượng của các mục mới khoá sau pha chạy thử. |
 | v1.17 | 02/10/2026 | LiDAR của người dùng đi kèm video (ADR 0009): nhận gói đám mây đã đăng ký hoặc scan thô, bắt buộc kèm quỹ đạo + calibration + thời điểm frame; ghép scan theo quỹ đạo và căn chỉnh RGB ↔ LiDAR vào phạm vi làm. LiDAR odometry/SLAM và job chỉ-LiDAR giữ nguyên ngoài phạm vi |
+| v1.18 | 08/10/2026 | Owner adds Guest as the third fixed role: public invite-free account creation with email/name/password (email verification deferred), shared reads, Editor workflows on owned resources, 3 accepted job runs/day reset at 00:00 Asia/Ho_Chi_Minh; objectify excluded. Editor/Reviewer retain cross-user intervention; Reviewer remains highest. Public signup stays feature-flagged until ownership, quota, browser and database acceptance. See [ADR 0021](./decisions/0021-guest-identity-and-ownership.md) and [AUD-21/AUD-22](./plans/active/2026-10-07-codegraph-audit/README.md). |
+| v1.19 | 08/10/2026 | Owner chốt chuẩn bị/nén video ngay trên thiết bị trước upload để giảm băng thông: mặc định720p, tùy chọn1080p/720p/480p, nhận video dọc/ngang và giữ nguyên display aspect/orientation. FPS cap30 và bitrate là candidate cần qualify; không force30CFR. Raw local file không được coi là server-verified source. Chi tiết ở [ADR 0023](./decisions/0023-client-video-normalization.md) và AUD-23; chưa có browser encode/quality acceptance. |
 
 ### 0.2 Chủ sở hữu và người phê duyệt (Owners and Approvers)
 
@@ -228,17 +230,34 @@ MVP không nhằm:
 
 ### 3.4 Quyền tối thiểu (Minimum Permissions)
 
-| Hành động | Editor | Reviewer |
-|---|---:|---:|
-| Tạo job và xem artifact | Có | Có |
-| Chỉnh object, transform và collider | Có | Có, nhưng thay đổi phải tạo revision mới |
-| Gửi yêu cầu duyệt | Có | Có, đối với revision mới sau khi validation lại |
-| Duyệt hoặc từ chối bản phát hành | Không | Có |
-| Chỉnh scene đã duyệt | Có, nhưng phải tạo version mới | Có, nhưng phải tạo version mới |
+Role hierarchy là Reviewer > Editor > Guest; ownership là giới hạn riêng, không
+thay thế role. Người chưa đăng nhập là Visitor, không phải role Guest.
 
-Nếu Reviewer chỉnh sửa scene, thay đổi đó phải tạo một revision mới ở trạng thái `DRAFT`; revision phải được validation lại và quay về `READY_FOR_REVIEW` trước khi có thể approve. Một người có thể giữ nhiều vai trò trong bản demo nội bộ, nhưng hệ thống vẫn phải ghi lại hành động chỉnh sửa và hành động phê duyệt riêng biệt. Việc có Reviewer độc lập được khuyến nghị cho evaluation và release, nhưng cơ chế bắt buộc hai tài khoản khác nhau không phải yêu cầu của MVP.
+| Hành động | Guest | Editor | Reviewer |
+|---|---|---|---|
+| Tạo upload, project/scene và job | Có; tài nguyên mới thuộc Guest và job bị quota | Có, theo quyền hiện tại | Có |
+| Xem scene, job, artifact và thùng rác của nhóm | Có | Có | Có |
+| Chỉnh/cancel/retry/xóa/khôi phục resource | Chỉ resource mình sở hữu; manual Retry chịu quota | Can thiệp cross-user như hiện tại | Can thiệp cross-user như hiện tại |
+| Tạo simulation package hoặc objectify | Trên job mình sở hữu; objectify không trừ Guest daily quota | Cross-user như hiện tại; quota hiện tại giữ nguyên | Cross-user như hiện tại |
+| Xóa hẳn từ thùng rác | Không | Không | Có |
+| Gửi yêu cầu duyệt | Theo Editor, trên resource mình sở hữu | Có | Có, trên revision sau validation |
+| Duyệt hoặc từ chối bản phát hành | Không | Không | Có |
+| Chỉnh scene đã duyệt | Chỉ resource mình sở hữu, tạo revision mới | Cross-user như hiện tại, tạo revision mới | Cross-user như hiện tại, tạo revision mới |
 
-Người chưa đăng nhập (khách, kể cả kỹ sư thực địa chỉ muốn dùng thử) chỉ xem và thử video mẫu đã xử lý sẵn; upload video và chạy job cần tài khoản Editor. Tài khoản được tạo qua mã mời do Reviewer phát, mỗi mã gắn một role. Reviewer tự duyệt revision của chính mình được phép nhưng phải được gắn nhãn “tự duyệt” (ADR 0003).
+Guest tạo tài khoản bằng email, tên hiển thị và mật khẩu, không cần mã mời; xác
+thực email được hoãn. Hạn mức Guest là ba lần tạo job hoặc manual Retry được máy
+chủ chấp nhận trong ngày lịch Việt Nam, đặt lại lúc 00:00 Asia/Ho_Chi_Minh.
+Duplicate idempotent request, worker resume và objectify không tiêu lượt.
+Đăng ký Guest mặc định vẫn đóng bằng feature flag đến khi ownership, quota,
+browser và database acceptance hoàn tất. Visitor chưa đăng nhập chỉ xem/thử mẫu.
+
+Editor và Reviewer giữ quyền cross-user hiện tại, gồm can thiệp job của Guest;
+Reviewer giữ quyền quản lý tài khoản, review/release và purge. Nếu Reviewer chỉnh
+sửa scene, thay đổi tạo revision mới ở trạng thái `DRAFT`; revision phải được
+validation lại và quay về `READY_FOR_REVIEW` trước khi approve. Một người có thể
+giữ nhiều vai trò trong bản demo nội bộ, nhưng hệ thống vẫn ghi riêng hành động
+chỉnh sửa và phê duyệt. Reviewer tự duyệt được phép nhưng phải gắn nhãn “tự duyệt”
+(ADR 0003).
 
 ### 3.5 User Stories
 
@@ -397,6 +416,19 @@ Ví dụ nguồn phù hợp:
 - vùng cần tái dựng xuất hiện trong dữ liệu.
 
 Camera giám sát cố định không được coi là input hợp lệ để tái dựng toàn bộ scene.
+
+Video được chuẩn bị cục bộ trước upload theo preset user chọn: mặc định720p,
+có thể chọn1080p hoặc480p. Portrait, landscape, 4:3, 1:1 và ultrawide không bị
+ép thành16:9; giữ display aspect, áp dụng rotation đúng một lần, không crop hoặc
+upscale. Candidate v1 giới hạn tối đa30FPS bằng source presentation timeline;
+giữ nguyên media time và mapping frame nguồn, không tạo CFR bằng cách lặp frame.
+Bitrate hiện là giá trị khởi đầu để đo, không là bảo đảm chất lượng hoặc tiết kiệm
+dung lượng. Browser phải xác nhận codec, Worker, MP4 muxer và storage thực tế.
+HDR chưa thuộc profile chuẩn hóa v1; audio tương thích được giữ, còn trường hợp
+không tương thích cần remediation hoặc user chủ động bỏ audio. Nếu không hỗ trợ,
+hệ thống phải báo rõ và không tự upload raw input. File gốc vẫn ở thiết bị user;
+server chỉ xác minh bytes đã được upload. AUD-23 đang triển khai; đây là product
+target, chưa phải browser/quality acceptance.
 
 ### 5.2 Luồng RGB kết hợp LiDAR (RGB + LiDAR Path)
 
@@ -570,9 +602,13 @@ Hệ thống bắt buộc:
 - tạo được project và reconstruction job;
 - ghi loại input, tên tệp, kích thước, checksum và thời điểm tiếp nhận;
 - giải mã video và đọc metadata cơ bản;
+- chuẩn bị video cục bộ trước upload theo preset 1080p/720p/480p và lưu media
+  đã nhận làm source-of-record; client khai báo hash của file gốc không là proof
+  server đã nhận hoặc xác minh file đó;
 - đọc point cloud PLY/PCD không rỗng;
 - từ chối định dạng không hỗ trợ với thông báo rõ ràng;
-- không làm mất input gốc khi job xử lý thất bại.
+- không làm mất bytes đã nhận khi job xử lý thất bại; nếu cần chạy lại với preset
+  cao hơn, user có thể phải chọn lại file gốc đang giữ trên thiết bị.
 
 ### FR-02 — Kiểm tra trước xử lý (Pre-flight Validation)
 

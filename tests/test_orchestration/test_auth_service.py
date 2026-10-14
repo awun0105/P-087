@@ -1,6 +1,8 @@
-"""Đăng nhập hai role, mã mời một lần, phiên, nhật ký (ADR 0003 §3) trên SQLite + PostgreSQL."""
+"""Đăng nhập ba role, mã mời một lần, phiên, nhật ký trên SQLite + PostgreSQL."""
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from threading import Barrier
 
 import pytest
 
@@ -46,12 +48,40 @@ def test_reviewer_invites_editor_who_logs_in(auth: AuthService) -> None:
 
 
 def test_roles_are_hierarchical(auth: AuthService) -> None:
+    guest = auth.create_user("g@example.com", "G", PASSWORD, "guest")
     editor = auth.create_user("e@example.com", "E", PASSWORD, "editor")
     reviewer = auth.create_user("r@example.com", "R", PASSWORD, "reviewer")
+    assert has_role(guest, "guest") and not has_role(guest, "editor")
     assert has_role(reviewer, "editor") and has_role(reviewer, "reviewer")
     assert has_role(editor, "editor") and not has_role(editor, "reviewer")
     with pytest.raises(AuthError):
+        auth.create_invite(guest, "editor")
+    with pytest.raises(AuthError):
         auth.create_invite(editor, "editor")
+    with pytest.raises(AuthError):
+        auth.update_user(guest, guest.user_id, role="editor")
+
+
+def test_guest_signup_and_reviewer_role_lifecycle(auth: AuthService) -> None:
+    guest = auth.register_guest(" Guest@Example.com ", "  Guest User  ", PASSWORD)
+    reviewer = auth.create_user("lead@example.com", "Reviewer", PASSWORD, "reviewer")
+    token, _ = auth.login(guest.email, PASSWORD)
+
+    assert guest.email == "guest@example.com"
+    assert guest.display_name == "Guest User"
+    assert guest.role == "guest" and guest.active
+    assert auth.session_user(token).role == "guest"
+    signup = next(
+        entry for entry in auth.recent_audit() if entry.action == "user.create" and entry.target == guest.user_id
+    )
+    assert signup.details == {"role": "guest", "via": "public_signup"}
+
+    editor = auth.update_user(reviewer, guest.user_id, role="editor")
+    assert editor.role == "editor" and auth.session_user(token).role == "editor"
+    demoted = auth.update_user(reviewer, guest.user_id, role="guest")
+    assert demoted.role == "guest" and auth.session_user(token).role == "guest"
+    with pytest.raises(AuthError):
+        auth.update_user(reviewer, reviewer.user_id, role="guest")
 
 
 def test_login_failures_are_uniform(auth: AuthService) -> None:
@@ -90,6 +120,28 @@ def test_deactivating_user_ends_sessions_and_self_lockout_is_refused(auth: AuthS
         auth.login("e@example.com", PASSWORD)
     with pytest.raises(AuthError):
         auth.update_user(reviewer, reviewer.user_id, role="editor")
+
+
+def test_concurrent_guest_signup_normalizes_email_and_creates_one_account(auth: AuthService) -> None:
+    barrier = Barrier(2)
+
+    def register(email: str):
+        service = AuthService(auth.database)
+        barrier.wait(timeout=10)
+        try:
+            return service.register_guest(email, "Guest", PASSWORD)
+        except RuntimeStateConflictError:
+            return None
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [
+            executor.submit(register, "Guest@Example.com "),
+            executor.submit(register, "guest@example.com"),
+        ]
+        users = [future.result(timeout=30) for future in futures]
+
+    assert sum(user is not None for user in users) == 1
+    assert [user.email for user in auth.list_users()] == ["guest@example.com"]
 
 
 def test_expired_session_is_rejected(auth: AuthService) -> None:

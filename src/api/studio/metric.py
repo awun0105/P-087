@@ -4,16 +4,15 @@
 nhận lấy từ phiên đăng nhập, không nhận từ body.
 """
 
-from typing import Literal
-
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, FiniteFloat
 
 from src.api import schemas
-from src.api.auth import require_editor
+from src.api.auth import require_contributor
+from src.api.ownership import authorize_job_mutation
 from src.api.studio import deps
 from src.models.contracts.artifacts import ProductArtifactRef
-from src.services.orchestration.auth import UserRecord
+from src.services.orchestration.auth import Role, UserRecord
 from src.services.orchestration.jobs.database import RuntimeStateConflictError
 from src.services.orchestration.jobs.metric import (
     MetricConfirmationError,
@@ -98,7 +97,7 @@ def measure_on_lidar(job_id: str, request: LidarMeasureRequest) -> LidarMeasurem
 
 @router.get("/jobs/{job_id}/metric/comparison", response_model=ModeComparison, responses=_ERRORS)
 def metric_comparison(job_id: str) -> ModeComparison:
-    """Demo 3 hướng: RGB only (mô phỏng) / anchor người dùng / LiDAR trên cùng scene."""
+    """Số đo và nguồn tỉ lệ: đề xuất MoGe-2 / kết quả đã xác nhận / LiDAR."""
     try:
         return _service(job_id).comparison(job_id)
     except MetricConfirmationError as error:
@@ -137,12 +136,18 @@ def preview_metric(job_id: str, request: UserMetricInput) -> MetricPreviewView:
 
 @router.post("/jobs/{job_id}/metric/confirm", response_model=MetricConfirmResponse, responses=_ERRORS)
 def confirm_metric(
-    job_id: str, request: MetricConfirmRequest, user: UserRecord | None = Depends(require_editor)
+    job_id: str, request: MetricConfirmRequest, user: UserRecord | None = Depends(require_contributor)
 ) -> MetricConfirmResponse:
     """Xác nhận đúng bản xem trước; job tiếp tục sang dựng hình học ở worker."""
-    role: Literal["editor", "reviewer"] | None = user.role if user is not None else None
+    registry = deps.registry()
+    authorize_job_mutation(user, registry, job_id, operation="xác nhận hệ mét của")
     try:
-        reference = _service(job_id).confirm(
+        registry.get_job(job_id)
+    except JobNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+    role: Role | None = user.role if user is not None else None
+    try:
+        reference = MetricConfirmationService(registry).confirm(
             job_id,
             request.input,
             request.preview_checksum,

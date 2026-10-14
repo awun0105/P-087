@@ -9,10 +9,10 @@ import type { JobManifest, StageId } from "@/lib/contracts/api";
 
 export type VideoMediaType = "video/mp4" | "video/quicktime";
 
-export type UploadMediaType = VideoMediaType | "application/x-ply" | "application/x-pcd" | "application/zip";
+export type UploadMediaType = VideoMediaType | "application/x-ply" | "application/x-sog" | "application/x-pcd" | "application/zip";
 
 /** Loại đầu vào máy chủ nhận diện theo nội dung (ADR 0004; LiDAR theo ADR 0009). */
-export type InputKind = "rgb_video" | "gaussian_ply" | "gaussian_ply_colmap" | "registered_lidar" | "lidar_scan_sequence";
+export type InputKind = "rgb_video" | "gaussian_ply" | "gaussian_ply_colmap" | "gaussian_sog" | "registered_lidar" | "lidar_scan_sequence";
 
 /**
  * Bằng chứng gói LiDAR (ADR 0009). Gói luôn có quỹ đạo, calibration và thời điểm frame; đám mây đã đăng ký có
@@ -41,6 +41,7 @@ export interface LidarAttachment {
 export interface InputDetection {
   kind: InputKind;
   gaussian: { gaussian_count: number; sh_degree: number; encoding: string } | null;
+  sog?: { format_version: 2; gaussian_count: number; sh_degree: number; model: "antialiased" | "2dgs" | null } | null;
   ply_member: string | null;
   colmap_dir: string | null;
   colmap_format: "bin" | "txt" | null;
@@ -51,6 +52,8 @@ export interface InputDetection {
 export interface Actor {
   user_id: string;
   display_name: string;
+  /** Role lúc snapshot được tạo; không suy ra từ role hiện tại của user. */
+  role?: "guest" | "editor" | "reviewer" | null;
 }
 
 export interface UploadRecord {
@@ -65,6 +68,8 @@ export interface UploadRecord {
   input_kind?: InputKind;
   detection?: InputDetection | null;
   uploaded_by?: Actor | null;
+  /** Safe status only; preparation source fingerprint and verification evidence stay private. */
+  video_preparation_status?: "pending" | "verified" | null;
 }
 
 export type DataOrigin = "public_or_synthetic" | "self_collected_no_pii" | "anonymized";
@@ -111,6 +116,15 @@ export interface DemoState {
   baseline: DemoBaseline | null;
   current_revision: string | null;
   at_baseline: boolean;
+  /** True khi nội dung scene hiện tại trùng với bản gốc ban đầu (rev-001). */
+  at_root?: boolean;
+  /** ID mẫu trong thư viện mẫu đã được xuất từ job này; null/vắng = chưa xuất (API cũ không gửi). */
+  published_sample_id?: string | null;
+}
+
+export interface DemoPublishResult {
+  sample_id: string;
+  title: string;
 }
 
 /** Kiểm trạng thái bản demo ở biên API: thiếu field là lỗi, không đoán. */
@@ -120,13 +134,28 @@ export function parseDemoState(value: unknown): DemoState {
   if (!(value.current_revision === null || typeof value.current_revision === "string")) throw invalid();
   const baseline = value.baseline;
   if (baseline !== null && !(isRecord(baseline) && typeof baseline.scene_revision === "string" && typeof baseline.job_id === "string")) throw invalid();
+  if (value.at_root !== undefined && typeof value.at_root !== "boolean") throw invalid();
+  if (value.published_sample_id !== undefined && !(value.published_sample_id === null || typeof value.published_sample_id === "string")) throw invalid();
   return value as unknown as DemoState;
+}
+
+export function parseDemoPublishResult(value: unknown): DemoPublishResult {
+  if (!isRecord(value) || typeof value.sample_id !== "string" || typeof value.title !== "string") {
+    throw new Error("Kết quả xuất bản demo không hợp lệ");
+  }
+  return value as unknown as DemoPublishResult;
 }
 
 export interface SceneSummary {
   project: StudioProject;
   latest_job: JobManifest | null;
   preview_ready: boolean;
+  /** Job mới nhất đang chờ người upload xem bản đã che mặt; API cũ không gửi trường này. */
+  awaiting_anonymization_review?: boolean;
+  /** Job xong nhưng tách theo vật lỗi hết số lần thử, chờ người dùng chọn; API cũ không gửi trường này. */
+  awaiting_object_choice?: boolean;
+  /** Caller-specific ownership decision; absent on older APIs is treated as denied. */
+  capabilities?: { can_delete_project: boolean };
   /** Thời gian máy đã xử lý (tổng các bước đã chạy xong), không gồm lúc xếp hàng và lúc chờ người dùng; null = chưa đo. */
   processing_seconds?: number | null;
   /** Người bấm chạy job mới nhất (tạo scene hoặc thử lại). */
@@ -145,6 +174,7 @@ export interface ExecutionErrorView {
   stage_id: StageId;
   human_message: string;
   retryable: boolean;
+  details?: Record<string, unknown> | null;
 }
 
 export interface StageProgress {
@@ -198,11 +228,13 @@ export interface JobProgress {
   stages: StageProgress[];
   preview_ready: boolean;
   /** Pipeline đang chờ người dùng làm gì (vd xác nhận tỉ lệ mét sau preview). */
-  waiting_for?: "metric_confirmation" | "resources" | null;
+  waiting_for?: "metric_confirmation" | "resources" | "anonymization_review" | null;
   resource_wait?: ResourceWaitView | null;
   /** Vị trí trong hàng đợi khi job đang chờ máy xử lý; null khi đang chạy, đã xong hoặc chờ người dùng. */
   queue?: QueuePositionView | null;
   error: ExecutionErrorView | null;
+  /** Per-job permissions supplied by the server; quota remains a separate policy. */
+  capabilities?: { can_mutate: boolean; can_cancel: boolean; can_retry: boolean };
 }
 
 /** Nguồn số đo: người dùng đo ngoài đời, hoặc LiDAR của dataset mẫu (ADR 0004 §6). */
@@ -303,19 +335,35 @@ export interface DemoFile {
   checksum: string;
 }
 
+export interface DemoFact {
+  label: string;
+  value: string;
+}
+
+/** Một thẻ kết quả của bước; thêm kiểu mới ở đây và ở `showcase/registry.tsx`. */
+export interface DemoStageAsset {
+  kind: "image" | "video" | "facts";
+  title?: string;
+  caption?: string;
+  file?: DemoFile | null;
+  facts?: DemoFact[];
+}
+
 export interface DemoStage {
   stage_id: StageId;
   /** Bundle cũ chỉ liệt kê stage đã chạy; API mới thêm pending cho các bước thiếu. */
   state?: "succeeded" | "pending" | "failed";
   duration_seconds: number | null;
   summary: string;
+  /** Kết quả hiển thị của bước (ảnh, video, số đo thật); bundle cũ không có. */
+  assets?: DemoStageAsset[];
 }
 
 export type ParamValue = number | string;
 
 export interface ParameterSpec {
   key: string;
-  group: "sampling" | "colmap" | "brush";
+  group: "sampling" | "colmap" | "brush" | "geometry" | "scene" | "simulation";
   label: string;
   description: string;
   kind: "number" | "integer" | "choice";
@@ -366,10 +414,58 @@ export interface ProcessingEvaluation {
 export interface ProcessingOptions {
   profile_id: string;
   parameters: ParameterSpec[];
-  presets: { minimum_quality: Record<string, ParamValue>; maximum: Record<string, ParamValue>; machine_maximum: Record<string, ParamValue> };
+  presets: Record<string, Record<string, ParamValue>>;
   capability: MachineCapability | null;
   default_evaluation: ProcessingEvaluation;
   resource_note: string;
+  /** Deployment có bộ che khuôn mặt/biển số: mới hiện lựa chọn tự động che. Server cũ không gửi trường này. */
+  anonymize_available?: boolean;
+  /** Deployment bắt buộc che cho mọi job: lựa chọn hiện ở trạng thái bật và không tắt được. */
+  anonymize_enforced?: boolean;
+}
+
+export interface ScenarioPreferences {
+  input_type: "video_continuous" | "video_loop_360" | "photo_set";
+  environment: "indoor" | "outdoor";
+  subject_scope: "single_object" | "full_room";
+  target_capacity: "minimum_quality" | "balanced" | "machine_maximum";
+}
+
+export interface SuggestResponse {
+  preset_name: string;
+  params: Record<string, ParamValue>;
+  evaluation: ProcessingEvaluation;
+}
+
+/** Reject malformed suggestions before applying them to the configuration form. */
+export function parseSuggestResponse(value: unknown): SuggestResponse {
+  const validStatus = (status: unknown) => ["ok", "warn", "danger", "unknown"].includes(String(status));
+  if (!isRecord(value) || typeof value.preset_name !== "string" || !value.preset_name.trim() ||
+      !isRecord(value.params) || Object.keys(value.params).length === 0 ||
+      !Object.values(value.params).every((item) => typeof item === "string" || isFiniteNumber(item))) {
+    throw new Error("Gợi ý cấu hình từ backend không hợp lệ");
+  }
+  const evaluation = value.evaluation;
+  if (!isRecord(evaluation) || typeof evaluation.blocking !== "boolean" || typeof evaluation.note !== "string" ||
+      !Array.isArray(evaluation.resources) || evaluation.resources.length !== 3 ||
+      !Array.isArray(evaluation.parameters) || evaluation.parameters.length === 0) {
+    throw new Error("Đánh giá tài nguyên của gợi ý không hợp lệ");
+  }
+  const resources = new Set<string>();
+  for (const item of evaluation.resources) {
+    if (!isRecord(item) || !["vram", "ram", "disk"].includes(String(item.resource)) ||
+        !isFiniteNumber(item.required_gb) || item.required_gb < 0 ||
+        !(item.available_gb === null || (isFiniteNumber(item.available_gb) && item.available_gb >= 0)) ||
+        !validStatus(item.status) || typeof item.message !== "string") {
+      throw new Error("Số liệu tài nguyên của gợi ý không hợp lệ");
+    }
+    resources.add(String(item.resource));
+  }
+  if (resources.size !== 3 || !evaluation.parameters.every((item) =>
+    isRecord(item) && typeof item.key === "string" && Object.hasOwn(value.params as object, item.key) &&
+    validStatus(item.status) && (item.message === null || typeof item.message === "string")
+  )) throw new Error("Thông số đánh giá của gợi ý không hợp lệ");
+  return value as unknown as SuggestResponse;
 }
 
 export interface SampleSummary {
@@ -424,7 +520,7 @@ export function parseJobProgress(value: unknown): JobProgress {
       throw new Error("Stage trong tiến trình không hợp lệ");
     }
   }
-  if (value.waiting_for !== undefined && value.waiting_for !== null && value.waiting_for !== "metric_confirmation" && value.waiting_for !== "resources") {
+  if (value.waiting_for !== undefined && value.waiting_for !== null && value.waiting_for !== "metric_confirmation" && value.waiting_for !== "resources" && value.waiting_for !== "anonymization_review") {
     throw new Error("Lý do chờ của job không hợp lệ");
   }
   if (value.resource_wait !== undefined && value.resource_wait !== null) {
@@ -456,7 +552,25 @@ export function parseJobProgress(value: unknown): JobProgress {
       throw new Error("Vị trí hàng đợi từ backend không hợp lệ");
     }
   }
+  if (value.capabilities !== undefined && value.capabilities !== null) {
+    const capabilities = value.capabilities;
+    if (!isRecord(capabilities) || !["can_mutate", "can_cancel", "can_retry"].every((key) => typeof capabilities[key] === "boolean")) {
+      throw new Error("Quyền thao tác job từ backend không hợp lệ");
+    }
+  }
   return value as unknown as JobProgress;
+}
+
+/** Loại thẻ frontend biết vẽ; loại lạ (backend mới hơn) bị bỏ qua từng thẻ chứ không làm hỏng cả mẫu. */
+const ASSET_KINDS = ["image", "video", "facts"];
+
+function isDemoAsset(asset: unknown): boolean {
+  if (!isRecord(asset) || !ASSET_KINDS.includes(String(asset.kind))) return false;
+  if (asset.kind === "facts") {
+    return Array.isArray(asset.facts) && asset.facts.length > 0 && !asset.file &&
+      asset.facts.every((fact) => isRecord(fact) && typeof fact.label === "string" && typeof fact.value === "string");
+  }
+  return isRecord(asset.file) && typeof asset.file.name === "string" && SAFE_NAME.test(asset.file.name);
 }
 
 /** Tên file demo phải phẳng (không path) vì được ghép vào URL. */
@@ -466,7 +580,14 @@ export function parseDemoManifest(value: unknown): DemoManifest {
       (value.origin !== "pipeline_job" && value.origin !== "smoke_run")) {
     throw new Error("Demo bundle không hợp lệ");
   }
-  const files = [value.splat, ...(value.video ? [value.video] : []), ...value.frames];
+  for (const stage of value.stages) {
+    if (isRecord(stage) && Array.isArray(stage.assets)) {
+      stage.assets = stage.assets.filter((asset) => isRecord(asset) && ASSET_KINDS.includes(String(asset.kind)));
+    }
+  }
+  const assetFiles = value.stages.flatMap((stage) =>
+    isRecord(stage) && Array.isArray(stage.assets) ? stage.assets.flatMap((asset) => (isRecord(asset) && asset.file ? [asset.file] : [])) : []);
+  const files = [value.splat, ...(value.video ? [value.video] : []), ...value.frames, ...assetFiles];
   if (!files.every((file) => isRecord(file) && typeof file.name === "string" && SAFE_NAME.test(file.name))) {
     throw new Error("Tên file demo không hợp lệ");
   }
@@ -478,6 +599,9 @@ export function parseDemoManifest(value: unknown): DemoManifest {
       throw new Error("Stage demo từ backend không hợp lệ");
     }
     ids.add(stage.stage_id);
+    if (stage.assets !== undefined && !(Array.isArray(stage.assets) && stage.assets.every(isDemoAsset))) {
+      throw new Error("Thẻ kết quả của bước demo không hợp lệ");
+    }
   }
   if (value.cameras !== undefined && value.cameras !== null) {
     if (!Array.isArray(value.cameras) || !value.cameras.every((camera) => isRecord(camera) && Array.isArray(camera.center) && camera.center.every(isFiniteNumber))) {
@@ -587,10 +711,12 @@ export function parseStageViews(value: unknown): StageView[] {
 export interface ModeResult {
   mode: "rgb_only" | "user_anchor" | "lidar";
   title: string;
-  status: "mock" | "measured" | "missing";
+  status: "mock" | "estimated" | "confirmed" | "measured" | "missing";
   note: string;
   steps: string[];
   scale_m_per_sfm_unit: number | null;
+  relative_uncertainty?: number | null;
+  frames_used?: number | null;
   camera_height_mean_m: number | null;
   camera_height_range_m: [number, number] | null;
 }
@@ -609,17 +735,20 @@ export interface ModeComparison {
   lidar_ground_truth_assisted: boolean;
 }
 
-/** Cột "mock" không bao giờ được mang số (không hiển thị số giả). */
+/** Chỉ trạng thái có kết quả thật mới được mang tỉ lệ; `mock` còn nhận từ API cũ. */
 export function parseModeComparison(value: unknown): ModeComparison {
   if (!isRecord(value) || !Array.isArray(value.modes) || value.modes.length !== 3) {
     throw new Error("So sánh 3 hướng từ backend không hợp lệ");
   }
   for (const mode of value.modes) {
-    if (!isRecord(mode) || typeof mode.title !== "string" || !["mock", "measured", "missing"].includes(String(mode.status))) {
+    if (!isRecord(mode) || typeof mode.title !== "string" || !["mock", "estimated", "confirmed", "measured", "missing"].includes(String(mode.status))) {
       throw new Error("Một hướng so sánh không hợp lệ");
     }
-    if (mode.status !== "measured" && mode.scale_m_per_sfm_unit != null) throw new Error("Hướng chưa đo không được có số tỉ lệ");
-    if (mode.status === "measured" && !isFiniteNumber(mode.scale_m_per_sfm_unit)) throw new Error("Thiếu tỉ lệ đo được");
+    const available = ["estimated", "confirmed", "measured"].includes(String(mode.status));
+    if (!available && mode.scale_m_per_sfm_unit != null) throw new Error("Hướng chưa có kết quả không được có số tỉ lệ");
+    if (available && (!isFiniteNumber(mode.scale_m_per_sfm_unit) || mode.scale_m_per_sfm_unit <= 0)) throw new Error("Thiếu tỉ lệ hợp lệ");
+    if (mode.relative_uncertainty != null && (!isFiniteNumber(mode.relative_uncertainty) || mode.relative_uncertainty < 0)) throw new Error("Độ bất định không hợp lệ");
+    if (mode.frames_used != null && (!Number.isInteger(mode.frames_used) || Number(mode.frames_used) < 1)) throw new Error("Số ảnh không hợp lệ");
   }
   return value as unknown as ModeComparison;
 }
@@ -629,10 +758,62 @@ export interface ImportedScene {
   import_id: string;
   upload_id: string;
   name: string;
-  input_kind: "gaussian_ply" | "gaussian_ply_colmap";
-  status: "PACKAGING" | "READY" | "FAILED";
+  input_kind: "gaussian_ply" | "gaussian_ply_colmap" | "gaussian_sog";
+  status: "PACKAGING" | "READY" | "FAILED" | "CANCELLED";
+  operation?: {
+    operation_id: string;
+    status: "QUEUED" | "WAITING" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
+    attempt: number;
+    attempt_history?: {
+      attempt: number;
+      status: "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED" | "INTERRUPTED";
+      started_at: string;
+      finished_at?: string | null;
+      failure_code?:
+        | "invalid_source"
+        | "source_unavailable"
+        | "runtime_failure"
+        | "publication_failure"
+        | "packaging_failure"
+        | "resource_conflict"
+        | "resource_wait"
+        | "worker_interrupted"
+        | null;
+      retryable?: boolean | null;
+      error?: string | null;
+    }[];
+    error: string | null;
+    failure_code?:
+      | "invalid_source"
+      | "source_unavailable"
+      | "runtime_failure"
+      | "publication_failure"
+      | "packaging_failure"
+      | "resource_conflict"
+      | "resource_wait"
+      | "worker_interrupted"
+      | null;
+    retryable?: boolean | null;
+    cancel_requested?: boolean;
+    cancel_requested_at?: string | null;
+    created_at: string;
+    updated_at: string;
+  } | null;
   delivery_ref: { artifact_uri: string; artifact_checksum: string } | null;
+  initial_camera?: {
+    position: [number, number, number];
+    target: [number, number, number];
+    fov?: number;
+  } | null;
+  default_camera?: {
+    position: [number, number, number];
+    target: [number, number, number];
+    fov?: number;
+  } | null;
   error: string | null;
   created_at: string;
   created_by_name?: string | null;
+  created_by_role?: "guest" | "editor" | "reviewer" | null;
+  /** Missing capability data from an older API falls back to role; Guests fail closed. */
+  capabilities?: { can_delete: boolean; can_retry?: boolean; can_cancel?: boolean };
 }

@@ -25,9 +25,10 @@ RUN uv pip sync --system requirements.lock.txt \
     && uv pip check
 
 # API-side USD export is intentionally kept separate from the core lockfile.
+COPY requirements-usd.lock.txt ./
 RUN uv venv /opt/usd_runtime --python /usr/local/bin/python \
-    && uv pip install --python /opt/usd_runtime/bin/python \
-       usd-core==26.8 numpy trimesh==5.1.0
+    && uv pip sync --python /opt/usd_runtime/bin/python requirements-usd.lock.txt \
+    && uv pip check --python /opt/usd_runtime/bin/python
 
 FROM python:3.12.14-slim-bookworm
 

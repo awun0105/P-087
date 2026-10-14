@@ -51,7 +51,18 @@ class Settings(BaseSettings):
     database_url: str = Field(default="sqlite:///./data/app.db", repr=False)
     product_fixture_mode: bool = False
     product_processing_config: Path | None = None
+    product_colmap_use_gpu: bool = False
+    #: Từ điển COLMAP chuẩn, tải bằng scripts/assets/download_vocab_tree.py; None dùng vị trí chuẩn trong repo.
+    product_colmap_vocab_tree: Path | None = None
     product_runtime_manifest: Path | None = None
+    #: Runtime qualification registry for grouped input recipes; absent means no new recipe dispatch is enabled.
+    product_input_runtime_registry: Path | None = None
+    #: Server-owned policy/profile for durable Isaac validation; not accepted from request payloads.
+    product_isaac_validation_config: Path | None = None
+    product_isaac_validation_profile: Path | None = None
+    #: Worker-only Isaac launcher and resource profile used by AUD-07 admission.
+    product_isaac_validation_launcher: Path | None = None
+    product_isaac_validation_resources: Path | None = None
     product_seed: int | None = None
     product_worker_root: Path = Path("./data/product_workers")
     #: Giữ scratch để chẩn đoán; mặc định chỉ dọn attempt đã publish và commit thành công.
@@ -59,11 +70,19 @@ class Settings(BaseSettings):
     product_preview_timeout_seconds: float = Field(default=21600, gt=0, allow_inf_nan=False)
     #: Thông số REC-05 (voxel/capsule) cho bước hoàn tất sau xác nhận tỉ lệ (owner chốt 2026-09-29).
     product_geometry_config: Path = Path("configs/product/geometry_v1.json")
+    product_evaluation_reference: Path = Path("configs/product/evaluation_reference_v1.json")
     product_finalize_timeout_seconds: float = Field(default=7200, gt=0, allow_inf_nan=False)
     #: GPU adapter cho splat-transform, theo từng máy (`--list-gpus`); None = dùng giá trị trong profile.
     product_geometry_gpu_index: int | None = Field(default=None, ge=0)
     #: Runtime SAM2 cho tách vật thể (ADR 0006); thiếu thì dùng fallback hình học.
     product_scene_runtime_python: Path | None = None
+    #: Che khuôn mặt/biển số trên frame trước khi dựng 3D (AUD-18). Cần `product_scene_runtime_python` và
+    #: `product_egoblur_weights`; bật mà thiếu thì job lỗi ở bước tách frame, không chạy trên frame gốc.
+    product_anonymize_input: bool = False
+    #: Thư mục chứa `ego_blur_face_gen2.jit` và `ego_blur_lp_gen2.jit`.
+    product_egoblur_weights: Path | None = None
+    #: Đặt trên API khi bộ che chạy ở worker máy khác (API không có scene runtime hay trọng số để tự kiểm).
+    product_anonymize_remote_worker: bool = False
     product_sam2_checkpoint: Path | None = None
     product_scene_timeout_seconds: float = Field(default=1800, gt=0, allow_inf_nan=False)
     #: Pipeline v2 (ADR 0007): trọng số LaMa TorchScript cho vá nền; thiếu thì dùng cv2.inpaint.
@@ -95,7 +114,7 @@ class Settings(BaseSettings):
     # không có khuôn mặt/biển số; mặc định giữ cổng QA `VERIFIED_ANONYMIZED`.
     product_privacy_mode: Literal["qa_verified", "self_attested"] = "qa_verified"
     product_upload_max_bytes: int = Field(default=2 * 1024**3, ge=1024)
-    product_upload_quality_profile: Path = Path("./configs/product/upload_quality_v1.json")
+    product_upload_quality_profile: Path = Path("./configs/product/upload_quality_v2.json")
     product_target_frame_count: int = Field(default=240, ge=2, le=5000)
     product_prepare_timeout_seconds: float = Field(default=3600, gt=0, allow_inf_nan=False)
     # Thư viện video mẫu đã xử lý sẵn: mỗi thư mục con là một bundle export từ job
@@ -117,8 +136,9 @@ class Settings(BaseSettings):
     artifact_s3_prefix: str = ""
     artifact_presign_seconds: int = Field(default=900, ge=60, le=86400)
 
-    # Đăng nhập hai role (ADR 0003 §3). Tắt cho local dev/test; bật trên deployment cloud.
+    # Khi bật đăng nhập, đăng ký không có mã mời tạo Guest; deployment có thể tắt rõ ràng.
     auth_required: bool = False
+    auth_guest_signup_enabled: bool = True
     auth_session_days: int = Field(default=7, ge=1, le=90)
     auth_invite_days: int = Field(default=7, ge=1, le=30)
     # None → tự bật cookie Secure ngoài development/test.
@@ -154,8 +174,14 @@ class Settings(BaseSettings):
             raise ValueError("ARTIFACT_ROOT must be absolute outside development/test")
         if (self.product_processing_config is None) != (self.product_runtime_manifest is None):
             raise ValueError("PRODUCT_PROCESSING_CONFIG và PRODUCT_RUNTIME_MANIFEST phải khai báo cùng nhau")
+        if (self.product_isaac_validation_config is None) != (self.product_isaac_validation_profile is None):
+            raise ValueError(
+                "PRODUCT_ISAAC_VALIDATION_CONFIG và PRODUCT_ISAAC_VALIDATION_PROFILE phải khai báo cùng nhau"
+            )
         if self.artifact_s3_bucket and not (self.artifact_s3_access_key_id and self.artifact_s3_secret_access_key):
             raise ValueError("ARTIFACT_S3_BUCKET cần ARTIFACT_S3_ACCESS_KEY_ID và ARTIFACT_S3_SECRET_ACCESS_KEY")
+        if self.app_env in {"staging", "production"} and not self.auth_required:
+            raise ValueError("AUTH_REQUIRED phải bật ở staging/production")
         if self.product_fixture_mode and self.app_env in {"staging", "production"}:
             raise ValueError("PRODUCT_FIXTURE_MODE chỉ dùng cho development/test")
         return self

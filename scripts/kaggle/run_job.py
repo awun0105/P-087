@@ -59,17 +59,21 @@ class Api:
         )
         return self._send(request, timeout)
 
-    def upload(self, video: Path) -> dict:
-        """Gửi bytes video theo luồng (không nạp cả file vào RAM)."""
-        query = urllib.parse.urlencode({"filename": video.name})
-        with video.open("rb") as stream:
+    def upload_file(self, path: Path, content_type: str = "application/octet-stream") -> dict:
+        """Gửi bytes file theo luồng (không nạp cả file vào RAM)."""
+        query = urllib.parse.urlencode({"filename": path.name})
+        with path.open("rb") as stream:
             request = urllib.request.Request(
                 f"{self.base}/api/v1/uploads?{query}",
                 data=stream,
                 method="POST",
-                headers={"content-type": "video/mp4", "content-length": str(video.stat().st_size)},
+                headers={"content-type": content_type, "content-length": str(path.stat().st_size)},
             )
             return self._send(request, 3600.0)
+
+    def upload(self, video: Path) -> dict:
+        """Gửi bytes video theo luồng (không nạp cả file vào RAM)."""
+        return self.upload_file(video, "video/mp4")
 
     @staticmethod
     def _send(request: urllib.request.Request, timeout: float) -> dict:
@@ -93,7 +97,7 @@ class Stack:
 
     def __enter__(self) -> "Stack":
         self.log_dir.mkdir(parents=True, exist_ok=True)
-        environment = {**os.environ, "APP_PORT": str(self.port)}
+        environment = {**os.environ, "APP_PORT": str(self.port), "AUTH_REQUIRED": "false"}
         api = [sys.executable, "-m", "uvicorn", "src.main:app", "--host", "127.0.0.1", "--port", str(self.port)]
         self._start("api", api, environment)
         # Nhiều worker cùng đọc một hàng đợi: mỗi job chỉ một worker nhận được (claim bằng CAS trong DB).
@@ -170,10 +174,186 @@ def confirm_metric(api: Api, job_id: str, metric_input: dict) -> None:
     )
 
 
-def create_job(api: Api, video: Path, name: str, attestation: dict, processing: dict | None) -> str:
-    """Upload video và tạo scene; trả job_id của lần chạy đầu."""
+_PRESET_BOUNDS = {
+    "1080p": (1920, 1080),
+    "720p": (1280, 720),
+    "480p": (854, 480),
+}
+
+
+def fit_video_dimensions(display_w: int, display_h: int, preset: str = "1080p") -> tuple[int, int]:
+    """Tính kích thước vừa preset mà không upscale và đảm bảo số chẵn (giống Web Studio)."""
+    if preset not in _PRESET_BOUNDS:
+        raise ValueError(f"Preset không hợp lệ: {preset}. Chọn một trong: {list(_PRESET_BOUNDS.keys())}")
+    max_long, max_short = _PRESET_BOUNDS[preset]
+    long_edge = max(display_w, display_h)
+    short_edge = min(display_w, display_h)
+    scale = min(1.0, max_long / long_edge, max_short / short_edge)
+    width = int(display_w * scale) // 2 * 2
+    height = int(display_h * scale) // 2 * 2
+    return max(2, width), max(2, height)
+
+
+def normalize_video(
+    video: Path,
+    output: Path | None = None,
+    preset: str = "1080p",
+    max_fps: float = 30.0,
+    force: bool = False,
+    ffmpeg: str = "ffmpeg",
+    ffprobe: str = "ffprobe",
+) -> Path:
+    """Chuẩn hóa video đầu vào theo quy chuẩn Video Normalization Profile v1 của Web Studio.
+
+    - Giảm độ phân giải về preset (1080p/720p/480p) mà không phóng to (no upscale).
+    - Giới hạn tốc độ khung hình trần tối đa 30 FPS.
+    - Xoay pixel về 0 độ (bake displaymatrix/rotation vào pixel).
+    - Loại bỏ track audio.
+    - Xuất video MP4 mới (H.264 yuv420p).
+    """
+    if not video.is_file():
+        raise RunError(f"Video không tồn tại: {video}")
+
+    if output is None:
+        if video.stem.endswith("_normalized") and not force:
+            return video
+        output = video.with_name(f"{video.stem}_normalized.mp4")
+
+    if not force and output.is_file() and output.stat().st_mtime >= video.stat().st_mtime and output.stat().st_size > 0:
+        print(f"Sử dụng video đã chuẩn hóa sẵn có: {output.name} ({output.stat().st_size / (1024 * 1024):.1f} MB)")
+        return output
+
+    probe_cmd = [
+        ffprobe,
+        "-v",
+        "error",
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "stream=width,height,r_frame_rate,avg_frame_rate",
+        "-show_entries",
+        "stream_tags=rotate",
+        "-show_entries",
+        "stream_side_data=rotation",
+        "-of",
+        "json",
+        str(video),
+    ]
+    try:
+        proc = subprocess.run(probe_cmd, check=True, capture_output=True, text=True)
+        info = json.loads(proc.stdout)
+        streams = info.get("streams", [])
+        if not streams:
+            raise RunError(f"File không chứa stream video: {video}")
+        stream = streams[0]
+    except (subprocess.SubprocessError, json.JSONDecodeError, OSError) as err:
+        raise RunError(f"Lỗi khi probe video {video}: {err}") from err
+
+    raw_w = int(stream["width"])
+    raw_h = int(stream["height"])
+
+    rotation = 0
+    for side in stream.get("side_data_list", []):
+        if "rotation" in side:
+            try:
+                rotation = int(float(side["rotation"]))
+            except (ValueError, TypeError):
+                pass
+    if rotation == 0:
+        rotate_tag = stream.get("tags", {}).get("rotate")
+        if rotate_tag:
+            try:
+                rotation = int(float(rotate_tag))
+            except (ValueError, TypeError):
+                pass
+
+    if abs(rotation) in (90, 270):
+        disp_w, disp_h = raw_h, raw_w
+    else:
+        disp_w, disp_h = raw_w, raw_h
+
+    target_w, target_h = fit_video_dimensions(disp_w, disp_h, preset)
+
+    src_fps = 30.0
+    for key in ("avg_frame_rate", "r_frame_rate"):
+        val = stream.get(key, "")
+        if "/" in val:
+            num, den = val.split("/", 1)
+            try:
+                n, d = float(num), float(den)
+                if d > 0:
+                    src_fps = n / d
+                    break
+            except (ValueError, ZeroDivisionError):
+                pass
+        elif val:
+            try:
+                src_fps = float(val)
+                break
+            except ValueError:
+                pass
+
+    target_fps = min(max_fps, src_fps)
+    target_fps_str = "30" if abs(target_fps - 30.0) < 0.05 else f"{target_fps:.2f}"
+
+    print(
+        f"Chuẩn hóa video: {video.name} ({disp_w}x{disp_h} @ {src_fps:.1f} fps, rot={rotation}°) "
+        f"→ {output.name} ({target_w}x{target_h} @ {target_fps_str} fps, preset={preset})..."
+    )
+
+    temp_output = output.with_name(f"{output.name}.tmp.{os.getpid()}.mp4")
+    encode_cmd = [
+        ffmpeg,
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        str(video),
+        "-vf",
+        f"scale={target_w}:{target_h},fps={target_fps_str}",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "fast",
+        "-crf",
+        "20",
+        "-pix_fmt",
+        "yuv420p",
+        "-metadata:s:v:0",
+        "rotate=0",
+        "-an",
+        str(temp_output),
+    ]
+    try:
+        subprocess.run(encode_cmd, check=True)
+        temp_output.replace(output)
+    except Exception as err:
+        temp_output.unlink(missing_ok=True)
+        raise RunError(f"Lỗi khi mã hóa chuẩn hóa video bằng ffmpeg: {err}") from err
+
+    print(f"Đã tạo video chuẩn hóa: {output.name} ({output.stat().st_size / (1024 * 1024):.1f} MB)")
+    return output
+
+
+def create_job(
+    api: Api,
+    video: Path,
+    name: str,
+    attestation: dict,
+    processing: dict | None,
+    lidar: Path | None = None,
+) -> str:
+    """Upload video (và lidar nếu có) và tạo scene; trả job_id của lần chạy đầu."""
     upload = api.upload(video)
     body = {"upload_id": upload["upload_id"], "name": name, "attestation": attestation}
+    if lidar is not None:
+        lidar_upload = api.upload_file(lidar, "application/zip")
+        body["lidar"] = {
+            "upload_id": lidar_upload["upload_id"],
+            "trajectory_origin": "ground_truth",
+            "same_scene_confirmed": True,
+        }
     if processing is not None:
         body["processing"] = processing
     return str(api.call("POST", "/api/v1/scenes/from-upload", body)["job"]["job_id"])
@@ -211,13 +391,38 @@ def run(args: argparse.Namespace) -> int:
         api = stack.api
         job_ids = list(args.job_id or [])
         if args.video:
+            if getattr(args, "lidar", None) and not args.video:
+                raise RunError("--lidar chỉ áp dụng khi tạo job mới từ --video")
             attestation = _json_file(args.attestation)
             if attestation is None:
                 raise RunError("Tạo job mới cần --attestation (lời khai nguồn dữ liệu)")
+            prepared_videos: list[Path] = []
             for video in args.video:
-                name = args.name if count == 1 else f"{args.name} · {video.stem}"
-                job_ids.append(create_job(api, video, name, attestation, processing))
-                print(f"job: {job_ids[-1]} ← {video.name}")
+                if getattr(args, "no_normalize", False):
+                    prepared_videos.append(video)
+                else:
+                    norm = normalize_video(
+                        video,
+                        preset=getattr(args, "video_preset", "1080p"),
+                        force=getattr(args, "force_normalize", False),
+                    )
+                    prepared_videos.append(norm)
+
+            lidars: list[Path | None] = (
+                list(args.lidar) if getattr(args, "lidar", None) else [None] * len(prepared_videos)
+            )
+            if len(lidars) != len(prepared_videos):
+                raise RunError("Số lượng file --lidar phải bằng số lượng video, hoặc bỏ trống hoàn toàn")
+
+            for orig_video, video, lidar_path in zip(args.video, prepared_videos, lidars, strict=True):
+                stem = orig_video.stem if count > 1 else args.name
+                name = args.name if count == 1 else f"{args.name} · {stem}"
+                job_ids.append(create_job(api, video, name, attestation, processing, lidar=lidar_path))
+                lidar_info = f" + lidar: {lidar_path.name}" if lidar_path else ""
+                if video != orig_video:
+                    print(f"job: {job_ids[-1]} ← {video.name} (gốc: {orig_video.name}){lidar_info}")
+                else:
+                    print(f"job: {job_ids[-1]} ← {video.name}{lidar_info}")
         paused = wait_for_pause(stack, job_ids)
         if metrics:
             confirmed = []
@@ -293,6 +498,13 @@ def main(argv: list[str] | None = None) -> int:
     source.add_argument("--job-id", nargs="+", help="job đã có trên máy này (vd. vừa nạp từ gói) để chạy tiếp")
     parser.add_argument("--name", default="Scene từ Kaggle")
     parser.add_argument("--attestation", type=Path, help="JSON SourceRightsAttestation (bắt buộc khi tạo job)")
+    parser.add_argument(
+        "--lidar",
+        type=Path,
+        nargs="*",
+        default=[],
+        help="Gói ZIP LiDAR (.zip gồm đám mây hoặc scan, quỹ đạo, calibration, thời điểm frame)",
+    )
     parser.add_argument("--processing", type=Path, help="JSON thông số xử lý; bỏ trống = preset mặc định")
     parser.add_argument(
         "--metric-input",
@@ -305,6 +517,22 @@ def main(argv: list[str] | None = None) -> int:
         "--auto-confirm-proposal",
         action="store_true",
         help="Tự động xác nhận đề xuất hệ mét (AI Auto-Scale MoGe hoặc LiDAR) khi có",
+    )
+    parser.add_argument(
+        "--video-preset",
+        choices=["1080p", "720p", "480p"],
+        default="1080p",
+        help="Độ phân giải chuẩn hóa video tương tự Web Studio (mặc định 1080p)",
+    )
+    parser.add_argument(
+        "--no-normalize",
+        action="store_true",
+        help="Bỏ qua bước chuẩn hóa video, giữ nguyên file gốc (không khuyến nghị cho video 4K/60fps)",
+    )
+    parser.add_argument(
+        "--force-normalize",
+        action="store_true",
+        help="Bắt buộc chuẩn hóa lại video kể cả khi file normalized đã tồn tại",
     )
     parser.add_argument("--workers", default="auto", help="tổng số worker, hoặc `auto` theo VRAM trống từng GPU")
     parser.add_argument("--out", type=Path, required=True, help="thư mục chứa gói xuất ra và log")

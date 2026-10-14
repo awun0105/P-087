@@ -60,6 +60,13 @@ function file(size: number): File {
 }
 
 describe("directUpload", () => {
+  it("registers the temporary upload ID before any multipart bytes are sent", async () => {
+    const server = fakeServer({ size: 10 });
+    const started = vi.fn(() => expect(server.putPart).not.toHaveBeenCalled());
+    await directUpload(file(10), { temporary: true, onStarted: started, onProgress: vi.fn(), signal: new AbortController().signal }, server.deps);
+    expect(started).toHaveBeenCalledWith("upload-1");
+    expect(JSON.parse(String(server.api.mock.calls[0][1]?.body))).toMatchObject({ temporary: true });
+  });
   it("upload đủ phần, báo tiến độ tới 100%, chờ server kiểm tra rồi xóa id nối lại", async () => {
     const server = fakeServer({ size: 10 });
     const progress: number[] = [];
@@ -86,6 +93,57 @@ describe("directUpload", () => {
     expect(server.calls).not.toContain("POST /api/v1/uploads/direct");
     expect(server.putPart.mock.calls.map((call) => call[0] as string).some((url) => url.includes("part-1"))).toBe(false);
     expect(progress[0]).toBeCloseTo(0.4); // phần 1 đã có sẵn trước khi gửi tiếp
+  });
+
+  it("video đã chuẩn hóa giữ phiên READY để retry bước gắn receipt bằng đúng identity nội dung", async () => {
+    const server = fakeServer({ size: 10 });
+    const resumeIdentity = "user-7:sha256:prepared:sha256:manifest";
+    const key = `r2s-upload:v2:${encodeURIComponent(resumeIdentity)}`;
+    const options = {
+      onProgress: () => {},
+      signal: new AbortController().signal,
+      resumeIdentity,
+      keepResumeKey: true,
+    };
+
+    await directUpload(file(10), options, server.deps);
+    expect(server.memory.get(key)).toBe("upload-1");
+    const uploadedParts = server.putPart.mock.calls.length;
+
+    const resumed = await directUpload(file(10), options, server.deps);
+    expect(resumed.status).toBe("READY");
+    expect(server.putPart).toHaveBeenCalledTimes(uploadedParts);
+    expect(server.memory.get(key)).toBe("upload-1");
+    expect(server.memory.has("r2s-upload:kho.mp4:10:1")).toBe(false);
+  });
+
+  it("tách phiên và khóa resume cho input assembly khỏi upload product cùng file", async () => {
+    const server = fakeServer({ size: 10 });
+    const resumeIdentity = "user-7:sha256:sidecar";
+    const productKey = `r2s-upload:v2:${encodeURIComponent(resumeIdentity)}`;
+    const assemblyKey = `r2s-upload:v2:input-assembly:${encodeURIComponent(resumeIdentity)}`;
+    server.memory.set(productKey, "product-session");
+
+    await directUpload(
+      file(10),
+      {
+        onProgress: () => {},
+        signal: new AbortController().signal,
+        resumeIdentity,
+        purpose: "input_assembly",
+        keepResumeKey: true,
+      },
+      server.deps,
+    );
+
+    const openSession = server.api.mock.calls.find(([path, init]) => path === "/api/v1/uploads/direct" && init?.method === "POST");
+    expect(JSON.parse(String(openSession?.[1]?.body))).toEqual({
+      filename: "kho.mp4",
+      size_bytes: 10,
+      purpose: "input_assembly",
+    });
+    expect(server.memory.get(productKey)).toBe("product-session");
+    expect(server.memory.get(assemblyKey)).toBe("upload-1");
   });
 
   it("thử lại phần lỗi với link mới", async () => {

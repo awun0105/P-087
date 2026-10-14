@@ -7,6 +7,13 @@ import { Badge, Notice } from "@/components/studio/primitives";
 import { TraceList } from "@/features/studio/TraceList";
 import type { EvidenceRefView, ReviewStateView } from "@/lib/api/studio";
 
+const collisionStateLabels = {
+  observed_static: "đã quan sát tĩnh",
+  unobserved: "chưa quan sát",
+  inferred: "suy luận",
+  motion_suspected: "nghi có chuyển động",
+} as const;
+
 const RESULT: Record<string, { label: string; tone: "sage" | "rust" }> = {
   PASS: { label: "Đạt", tone: "sage" },
   FAIL: { label: "Không đạt", tone: "rust" },
@@ -25,14 +32,14 @@ function ResultBadge({ value }: { value: string }) {
  * Báo cáo validation của đúng gói thuộc revision hiện tại (STUDIO_UX_SPEC.md S10): từng check, từng cặp Start–Goal,
  * bằng chứng đi kèm và "Nguồn kết quả" để đối chiếu checksum. Chỉ đọc; quyết định duyệt nằm ở `ReviewPanel`.
  *
- * Báo cáo không có bằng chứng chạy Isaac Sim thật (cờ do backend suy từ `environment_versions`) phải mang cảnh báo:
- * một kết quả PASS của fixture hay của validator chạy không có simulator rất dễ bị đọc thành kết luận mô phỏng (D-05).
- * Cờ vắng mặt cũng coi như chưa có bằng chứng.
+ * Cờ proof chỉ do backend đặt khi selected worker run, report và RuntimeManifest đã xác minh khớp.
+ * Environment version chỉ để hiển thị; không thể tự cấp trust. Cờ vắng mặt cũng fail closed.
  */
 export function ValidationReportCard({ state }: { state: ReviewStateView }) {
   const report = state.validation;
   if (!report) return null;
   const environment = Object.entries(report.environment_versions);
+  const collisionSupport = new Map((report.collision_path_support ?? []).map((item) => [item.pair_id, item]));
   const otherCandidate = Boolean(report.candidate_checksum && state.record.candidate_checksum && report.candidate_checksum !== state.record.candidate_checksum);
   return (
     <section className="space-y-4 p-5 text-sm" aria-label="Báo cáo validation">
@@ -67,9 +74,31 @@ export function ValidationReportCard({ state }: { state: ReviewStateView }) {
           <p className="mt-2 text-ink-muted">Báo cáo không có cặp Start–Goal nào.</p>
         ) : (
           <ul className="mt-2 divide-y divide-line rounded-lg border border-line">
-            {report.path_results.map((path) => (
-              <ResultRow key={path.pair_id} id={path.pair_id} result={path.result} message={path.message} evidence={path.evidence_refs} needsAcceptance={false} />
-            ))}
+            {report.path_results.map((path) => {
+              const support = collisionSupport.get(path.pair_id);
+              const coverage = !report.collision_quality_ref
+                ? "Chưa có CollisionQualityReport; CLEAR chỉ là kết quả quan sát của candidate."
+                : support
+                  ? `Coverage collider ${(support.coverage_fraction * 100).toFixed(1)}% · ${collisionStateLabels[support.state]}`
+                  : "CollisionQualityReport chưa ghi coverage cho cặp này; không xác nhận CLEAR an toàn.";
+              const message = [path.message, coverage].filter(Boolean).join(" · ");
+              return (
+                <ResultRow
+                  key={path.pair_id}
+                  id={path.pair_id}
+                  result={path.result}
+                  message={message}
+                  evidence={[
+                    ...path.evidence_refs,
+                    ...(support?.diagnostic_ref ? [support.diagnostic_ref] : []),
+                  ]}
+                  needsAcceptance={
+                    state.warning_ids.includes(`path:${path.pair_id}`) ||
+                    state.warning_ids.includes(`collision-support:${path.pair_id}`)
+                  }
+                />
+              );
+            })}
           </ul>
         )}
       </div>
@@ -82,6 +111,7 @@ export function ValidationReportCard({ state }: { state: ReviewStateView }) {
               { label: "Revision scene", value: state.record.scene_revision },
               { label: "Checksum gói (candidate)", value: report.candidate_checksum },
               { label: "Checksum báo cáo", value: report.report_checksum },
+              { label: "CollisionQualityReport", value: report.collision_quality_ref?.artifact_uri ?? "chưa có" },
               { label: "Validator", value: report.validator_version },
               ...environment.map(([key, version]) => ({ label: `Môi trường · ${key}`, value: version })),
             ]}

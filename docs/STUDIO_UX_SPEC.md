@@ -6,13 +6,15 @@
 
 **Cập nhật 30/09/2026 — chuyển sang đặc tả triển khai.** Tech Lead (Quân) giao audit tài liệu, chốt các câu hỏi mở và **implement** UX này trong `frontend/` dùng dashboard donor làm nền. Các quyết định mới gắn nhãn **DECISION (Tech Lead uỷ quyền, 30/09/2026)**; phần hiện trạng mới ở §2.2a; câu hỏi mở đã chốt ở §11; kế hoạch triển khai ở §13. Những gì trước đây là "prototype minh họa" nay áp dụng quy tắc của app thật (§11.2 D-05): không hiển thị dữ liệu minh họa như kết quả.
 
+**Cập nhật 08/10/2026 — role và ownership:** Các mô tả dưới đây từ 30/09–02/10 về hai role và invite-only signup đã lỗi thời. Theo owner decision, role hiện tại gồm Guest/Editor/Reviewer; Guest có shared read và quyền sửa resource mình sở hữu, còn Editor/Reviewer giữ cross-user intervention. Public Guest signup vẫn đóng cho tới khi rollout acceptance xong. PRD v1.18, [ADR 0021](decisions/0021-guest-identity-and-ownership.md) và [AUD-21](plans/active/2026-10-07-codegraph-audit/tasks/AUD-21-guest-signup-and-ownership.md) là cập nhật hiện hành.
+
 Quy ước đọc:
 
 - **REQUIREMENT:** ràng buộc trong PRD/contract hoặc chỉ dẫn trực tiếp của người dùng.
 - **VERIFIED — source / image:** quan sát trực tiếp từ source hoặc ảnh; không đồng nghĩa chức năng đã được kiểm thử trên browser.
 - **PROPOSAL:** quyết định UX đề xuất cho prototype này; không tự thay đổi product policy.
 - **UNKNOWN:** thiếu evidence hoặc cần owner quyết định. Không điền giá trị giả để khép kín flow.
-- **DECISION:** quyết định đã chốt khi audit 30/09/2026, có lý do và phạm vi; không sửa PRD/contract.
+- **DECISION:** quyết định product/UX đã chốt và có ngày; khi owner đổi policy cũ thì cập nhật PRD/spec/contract liên quan thay vì giữ mô tả lỗi thời.
 
 ## 1. Purpose
 
@@ -26,11 +28,12 @@ Vấn đề UX chính là khoảng cách giữa Studio hiện tại và quy trì
 
 | Người dùng | Công việc trong hành trình | Ràng buộc |
 | --- | --- | --- |
-| Khách | Xem/thử video mẫu và scene đã xử lý | Không upload/chạy GPU; chỉnh mẫu không lưu thành scene của nhóm |
-| Editor | Tạo scene, theo dõi job, xác nhận tỉ lệ, chỉnh scene, gửi validation | Không phê duyệt phát hành |
-| Reviewer | Xem bằng chứng, duyệt/từ chối, phát hành; quản lý tài khoản nhóm | Sửa scene cũng tạo revision mới và phải validation lại; tự duyệt phải có nhãn |
+| Visitor chưa đăng nhập | Xem/thử video mẫu và scene đã xử lý | Không upload/chạy job; mẫu không lưu thành scene của nhóm |
+| Guest | Dùng workflow Editor trên resource mình tạo; xem workspace chung | Signup không cần invite, nhập email/tên/mật khẩu; 3 job create/manual Retry được chấp nhận mỗi ngày Việt Nam; objectify không trừ quota |
+| Editor | Tạo scene, theo dõi job, xác nhận tỉ lệ, chỉnh scene, gửi validation | Giữ quyền can thiệp cross-user; không phê duyệt phát hành |
+| Reviewer | Xem bằng chứng, duyệt/từ chối, phát hành; quản lý tài khoản nhóm | Role cao nhất; can thiệp cross-user, purge; sửa scene tạo revision và validation lại |
 
-**REQUIREMENT:** chỉ hai role Editor/Reviewer; tài khoản được tạo bằng mã mời gắn role. “Engineer” trong ảnh mô tả nghề nghiệp, không tạo role thứ ba. Nguồn: [PRD §3.4][prd], [ADR 0003 §3][adr3].
+**REQUIREMENT hiện hành:** account roles cố định là Guest < Editor < Reviewer; Visitor chưa đăng nhập không phải role. Public Guest signup không cần invite nhưng đang sau rollout flag; email verification được hoãn. Invite vẫn cấp Editor/Reviewer và không cho payload tự chọn role. “Engineer” trong ảnh mô tả nghề nghiệp, không tạo role tùy biến. Nguồn: [PRD v1.18 §3.4][prd], [ADR 0021](decisions/0021-guest-identity-and-ownership.md).
 
 | Thuật ngữ | Nghĩa người dùng cần hiểu |
 | --- | --- |
@@ -50,19 +53,19 @@ Vấn đề UX chính là khoảng cách giữa Studio hiện tại và quy trì
 
 | Surface hiện có | Entry / nội dung / hành vi quan sát được | Giới hạn cần giữ rõ |
 | --- | --- | --- |
-| `/` — Scenes | Video mẫu, scene của nhóm, trạng thái, CTA “Scene mới” | Không có dashboard KPI vận hành hay cây project nhiều tầng |
+| `/` — Scenes | Video mẫu, scene của nhóm, creator/role, trạng thái, CTA “Scene mới”; Guest chỉ thấy mutation control khi server capability cho phép | Không có dashboard KPI vận hành hay cây project nhiều tầng; capability UI không thay API ownership guard |
 | `/new` | Trang chọn cách bắt đầu, dẫn tới ba trang riêng (**owner yêu cầu 02/10/2026**; link cũ `/new?source=…` tự chuyển) | Không có form ở trang này |
 | `/new/import-video` | Upload hoặc dùng video đã tải; đặt tên scene; khai báo quyền/dữ liệu; thông số xử lý. **Ô LiDAR tuỳ chọn** (ADR 0009): trang giải thích ba luồng và dữ liệu từng luồng cần — (A) chỉ video: tỉ lệ mét là ước lượng hoặc số đo tay; (B) video + gói LiDAR đã đăng ký; (C) video + gói scan thô. Gói B/C bắt buộc có quỹ đạo, calibration camera ↔ LiDAR và thời điểm frame; thiếu thì từ chối kèm hướng dẫn. Có bộ mẫu TorWIC cho cả B và C, ghi rõ quỹ đạo mẫu là quỹ đạo chuẩn của dataset. Sau khi tải lên hiện loại nhận diện được (số điểm, hoặc số scan + số pose) và luồng sẽ chạy | Video tạo project + job reconstruction; luồng B/C thêm bước nhận LiDAR và căn chỉnh. Ở luồng B/C bước tỉ lệ mét **không chọn điểm**: hiện tỉ lệ, sai số căn chỉnh, số frame khớp và một nút xác nhận |
-| `/new/import-scene` | Upload hoặc dùng file PLY/ZIP 3DGS đã tải; đặt tên | Tạo scene import, không chạy job GPU |
-| `/imports/[importId]` | Theo dõi nén PLY/ZIP thành bản xem SOG; READY mở workspace, FAILED hiện lỗi | Chỉ xem/chỉnh Gaussian, chưa xác nhận tỉ lệ/collision. ZIP được nhận diện có COLMAP cũng chưa đi tiếp đường metric trong UI import này |
+| `/new/import-scene` | Upload hoặc dùng file PLY/SOG/ZIP 3DGS đã tải; đặt tên | Tạo durable scene import, worker chuẩn bị bản xem; không chạy reconstruction job |
+| `/imports/[importId]` | Theo dõi operation đang chờ worker, xử lý, hoàn tất hoặc lỗi; PLY/ZIP được đóng gói thành SOG, SOG hợp lệ được giữ nguyên bytes | Chỉ xem/chỉnh Gaussian, chưa xác nhận tỉ lệ/collision. ZIP được nhận diện có COLMAP cũng chưa đi tiếp đường metric trong UI import này |
 | `/scenes/[jobId]` | Timeline, chờ worker, thời gian chạy, hủy/thử lại; mở workspace khi preview xuất hiện | Có preview không chứng minh toàn bộ pipeline đã hoàn thành |
 | Xác nhận tỉ lệ | Chọn A/B, C/D và ba điểm sàn; xem trước rồi xác nhận | C/D kiểm độc lập; đổi điểm/số đo làm preview cũ mất hiệu lực |
 | Workspace 3DGS | Editor nhúng; chỉ dẫn File → Export PLY/SOG; fallback chỉ xem | Edit Gaussian cục bộ chưa tương đương lưu SceneObject revision |
 | `/new/try-demo`, `/new/try-demo?sample=…`, `/samples/[sampleId]/scene` | Cấu hình mẫu chỉ đọc; phát lại tiến trình đã ghi; có bỏ qua để mở scene | Không phải job GPU mới, không dùng thời gian replay làm ETA |
-| `/login`, `/register`, `/team` | Đăng nhập, mã mời; Reviewer quản lý nhóm | Không có đăng nhập bằng cách chọn role tùy ý |
+| `/login`, `/register`, `/team` | Đăng nhập; Guest signup bằng email/tên/mật khẩu sau feature flag; invite cấp Editor/Reviewer; Reviewer quản lý nhóm | Email verification deferred; không có form tự chọn role hoặc SSO; signup flag mặc định đóng |
 | `/projects/…`, `/jobs/…/{viewer,validation,review,release}` | UI legacy có project/job, viewer và báo cáo — **đã xoá 02/10/2026** (D-10) | URL cũ chuyển hướng về `/overview`; phần validation/duyệt/phát hành nằm ở tab `Kiểm tra & duyệt` và `Kết quả` của scene |
 
-Nguồn: [ScenesHome][r-home], [NewSceneFlow][r-new], [inputKinds][r-input], [ImportScenePage][r-import], [ScenePage][r-scene], [MetricConfirmView][r-metric], [SampleFlow][r-sample], [EditorFrame][r-editor], [StudioHeader][r-header], [route visibility][r-routes].
+Nguồn: [ScenesHome][r-home], [NewSceneFlow][r-new], [inputKinds][r-input], [ImportScenePage][r-import], [ScenePage][r-scene], [MetricConfirmView][r-metric], [SampleFlow][r-sample], [EditorFrame][r-editor], [route visibility][r-routes].
 
 Current-state flow:
 
@@ -71,7 +74,8 @@ Scenes → Scene mới → upload/chọn file → khai báo + cấu hình → t�
        → chờ/xử lý → preview 3DGS → xác nhận tỉ lệ khi được yêu cầu
        → xem/chỉnh Gaussian trong editor → export file PLY/SOG
 
-Khách → chọn video mẫu → xem cấu hình chỉ đọc → replay hoặc bỏ qua → scene mẫu
+Visitor → chọn video mẫu → xem cấu hình chỉ đọc → replay hoặc bỏ qua → scene mẫu
+Guest account → upload/chạy job → chỉ sửa resource sở hữu; có thể đọc workspace chung
 
 File 3DGS đã upload → Mở scene 3DGS → nén bản xem → workspace chỉ xem/chỉnh
                    → export bản làm việc; chưa có đường metric/collision/release
@@ -98,7 +102,7 @@ Các capability dưới đây đã có trên `feat/studio-integration` (chưa me
 
 1. Có hai điểm HITL: xác nhận/chỉnh scene trước validation; Reviewer duyệt sau validation. `Save Draft`, `Submit for Validation`, `Approve`, `Release` có ý nghĩa khác nhau. [PRD §6, FR-10/11][prd].
 2. Job `SUCCEEDED` không đồng nghĩa scene `APPROVED` hoặc `RELEASED`. Edit sau validation tạo draft mới; kết quả/approval cũ không áp dụng cho revision mới. [Contract §9][contract].
-3. Video camera di chuyển là đường chính tới release. Import PLY/ZIP có quyết định riêng; PLY trần không được vẽ thành đường đầy đủ tới SceneObject/Isaac khi thiếu dữ liệu cần thiết. LiDAR đi kèm video theo [ADR 0009](decisions/0009-user-lidar-input-and-routing.md) (owner 02/10/2026, thay câu cũ "không suy thành tính năng upload LiDAR phổ quát"): người dùng nộp một gói LiDAR gồm quỹ đạo, calibration, thời điểm frame và hoặc đám mây đã đăng ký, hoặc scan thô; không có job chỉ-LiDAR. [ADR 0004][adr4].
+3. Video camera di chuyển là đường chính tới release. Import PLY/SOG/ZIP có quyết định riêng; file import không được vẽ thành đường đầy đủ tới SceneObject/Isaac khi thiếu dữ liệu cần thiết. LiDAR đi kèm video theo [ADR 0009](decisions/0009-user-lidar-input-and-routing.md) (owner 02/10/2026, thay câu cũ "không suy thành tính năng upload LiDAR phổ quát"): người dùng nộp một gói LiDAR gồm quỹ đạo, calibration, thời điểm frame và hoặc đám mây đã đăng ký, hoặc scan thô; không có job chỉ-LiDAR. [ADR 0004][adr4].
 4. 3DGS Visual, Geometry mesh, Point Cloud và Collider là các view có nghĩa khác nhau. Thiếu Visual phải có thông báo; mesh/point cloud không được gắn nhãn 3DGS. [PRD FR-00][prd].
 5. Báo cáo kiểm tra là cơ sở kết luận; video replay hỗ trợ quan sát. Lỗi capture media phải hiển thị riêng, không đổi kết quả physics đã quan sát. Primary Demo vẫn cần evidence thật theo acceptance. [PRD FR-11][prd].
 6. Quyền sử dụng dữ liệu không thay thế ẩn danh. Cơ chế tự khai trong [ADR 0002][adr2] còn **Proposed**; prototype không biến checkbox thành nhãn “QA đã xác minh”. [PRD NFR-05][prd].
@@ -131,7 +135,8 @@ Người dùng mở ứng dụng để tiếp tục một scene hoặc tạo sce
 quyết định bên dưới):** landing là **trang đầu tiên khi mở domain**, ở `/`, ngoài
 AppShell. Trang chính của ứng dụng là **Tổng quan** ở `/overview`. Các CTA
 `Open Studio` của landing dẫn vào app **qua màn đăng nhập** (`/login?next=/overview`;
-màn đăng nhập có lối sang đăng ký bằng mã mời và lối thử video mẫu cho khách).
+màn đăng nhập có lối đăng ký Guest, đăng ký Editor/Reviewer bằng mã mời và thử
+video mẫu cho Visitor).
 Người đã đăng nhập bấm CTA thì được chuyển thẳng tới Tổng quan; deployment không
 bật đăng nhập (chế độ local, không có tài khoản) cũng được chuyển thẳng. Sau đăng
 nhập/đăng ký không có đích cụ thể thì về `/overview`, không về landing. `/landing`
@@ -152,10 +157,15 @@ pricing/billing/analytics.
 chính của app là **Tổng quan** (ban đầu ở `/`, nay ở `/overview`): giới thiệu Studio,
 tóm tắt hành trình, loại đầu vào và tổng hợp công việc từ API hiện có. Thư viện
 scene có route riêng `/scenes`. Global sidebar: `Tổng quan` · `Scenes` · `Jobs` ·
-`Nhóm` (Reviewer). Nút `Scene mới` nằm trong trang `/scenes`, không lặp ở sidebar
-hoặc global header. Video mẫu vẫn là khu vực trong Scenes/Scene mới. Hồ sơ và
+`Nhóm` (Reviewer). Mục `Tạo scene mới` (`/new`) nằm ở sidebar, và có nút cùng tên ở Tổng quan. Video mẫu vẫn là khu vực trong Scenes/Scene mới. Hồ sơ và
 đăng xuất ở footer/sidebar account menu. Tổng quan không hiển thị số liệu giả,
 không tạo API/state backend mới và không biến preview thành kết quả validation.
+
+*Cập nhật 10/10/2026 (rút gọn Tổng quan):* Tổng quan chỉ còn tiêu đề, nút chính “Tạo scene mới” (khách chưa đăng nhập: “Thử với mẫu”) cùng “Tất cả scene”, rồi tổng hợp công việc (số liệu và danh sách “Cần bạn xử lý”). Khối giới thiệu hành trình và loại đầu vào đã bỏ vì trùng với `/new`, nơi chia “Dựng từ video” và “Không dựng mới” (3DGS có sẵn, Thử mẫu). Job đang chờ người xem bản đã che mặt được tính là “cần xử lý” trong danh sách Scenes và Tổng quan (trường `awaiting_anonymization_review` của `GET /scenes`), thay vì hiện là “Đang chạy”. Nút tạo scene vì vậy xuất hiện ở Tổng quan, bên cạnh mục “Tạo scene mới” của sidebar.
+
+*Cập nhật 10/10/2026 (nhập dữ liệu dựng scene):* `/new` và `/new/import-video` là một khung tải lên duy nhất cho video, LiDAR, calibration, quỹ đạo, thời điểm frame, PLY/SOG và ZIP; người dùng chỉ tải file rồi bấm tạo scene, **không chọn luồng**. Máy chủ đọc nội dung, tự phân loại vai trò file và tự chọn cách xử lý có ràng buộc hình học mạnh nhất trong các cách chạy được (chính sách ưu tiên ghi ở [ADR 0024](decisions/0024-unified-upload-and-input-resolution.md); đó là chính sách, chưa phải số đo). Thay đổi đối với đặc tả cũ ở dòng `/new/import-video`: (1) **không còn ô LiDAR riêng và không còn bắt đóng ZIP** — scan, quỹ đạo, calibration và thời điểm frame nộp rời đều chạy được; (2) file không có chỗ dùng bị chặn từ trình duyệt theo đuôi, và file máy chủ không nhận ra vai trò hiện "Không dùng được" kèm lý do thay vì "Đã xác minh"; (3) file thừa trong luồng được chọn tự bị bỏ qua và liệt kê, không còn chặn; (4) hệ thống tự suy đơn vị timestamp theo tần số lấy mẫu và vai trò file timestamp theo số dòng khớp số scan/pose, ghi nhận ở dạng `estimated`, và hỏi khi không suy được duy nhất; (5) calibration nhận TorWIC, JSON (hai chiều, quaternion hoặc ma trận 4×4) và ROS tf YAML (cần khai tên frame LiDAR), file Kalibr được nhận ra và giải thích nhưng chưa dùng làm calibration LiDAR; (6) nút tạo scene bị tắt luôn kèm danh sách còn thiếu gì, và giao diện không hiện mã nhóm R1–R6 hay thuật ngữ nội bộ (chi tiết kỹ thuật nằm trong mục đóng sẵn). Không suy được và vẫn do người dùng xác nhận: cùng một cảnh, quan hệ đồng hồ camera ↔ LiDAR, chiều quỹ đạo, đơn vị toạ độ, tên frame LiDAR và (với file ROS) tên frame camera. Suy đơn vị timestamp chỉ chắc khi tần số trên 1 Hz tính theo giây; dữ liệu thưa hoặc ở đơn vị nhỏ hơn được hỏi lại.
+
+*Cập nhật 10/10/2026 (phát lại mẫu):* Phát lại ở Thử mẫu dùng cùng khung “Tiến trình xử lý” và cùng danh sách bước với tab Tiến trình của scene thật (kể cả bước LiDAR nếu mẫu có), vẫn giữ 2 cột với khung xem trước kết quả ở bên trái. Wizard mẫu còn 3 bước (Chọn mẫu, Xem thông tin, Xem tiến trình). Khung xem trước chỉ vẽ file và số đo có trong bundle; bước chưa ghi kết quả nói thẳng là chưa có. Thêm cảnh demo và thẻ kết quả mới: `docs/DEMO_SCENES.md`.
 
 **Trong một scene:** breadcrumb `Scenes › <Tên scene>` và các vùng `Tiến trình` · `Studio` · `Validation & Review` · `Kết quả`. Chưa có dữ liệu cho vùng nào thì giải thích điều kiện mở vùng đó, không dẫn tới trang trắng. “Objects” là panel của Studio; “Simulation Replay” thuộc báo cáo; dữ liệu nguồn thuộc scene. Không tạo các trang toàn cục Scene Editor, Objects, Simulation, Datasets hoặc Releases chỉ vì chúng xuất hiện trong U2.
 
@@ -194,8 +204,8 @@ không bịa profile. Backend profile/password không thuộc đợt frontend n�
 | Tasks | **ADAPT** | Thành Jobs: tên scene, stage, trạng thái, lần chạy, cập nhật gần nhất; lọc theo trạng thái. Không cho kéo đổi job status hay tạo task công việc |
 | Infrastructure | **ADAPT có chọn lọc** | Lấy phân nhóm trạng thái và thông tin chi tiết cho trang Tiến trình. Không tạo trang quản trị GPU/server, deploy hoặc billing |
 | Users | **ADAPT** | Thành Nhóm: thành viên, role, hoạt động, hạn mức và mã mời theo khả năng Real2Sim hiện có |
-| Roles | **REJECT trang riêng** | Chỉ hai role đã khóa; giải thích quyền trong Nhóm. Không có role builder hay permission matrix tùy biến |
-| Auth v2 login/register | **ADAPT** | Một layout đăng nhập/mã mời có form rõ và hình hỗ trợ nhỏ. Bỏ Google/SSO, đăng ký tự do, chọn role, promise “remember 30 days” và toast dữ liệu form |
+| Roles | **REJECT trang riêng** | Ba role cố định Guest/Editor/Reviewer; giải thích quyền trong Nhóm. Không có role builder hay permission matrix tùy biến |
+| Auth v2 login/register | **ADAPT** | Một layout đăng nhập và Guest signup không invite (feature flag), cùng invite signup Editor/Reviewer. Bỏ Google/SSO, chọn role tùy ý, promise “remember 30 days” và toast dữ liệu form |
 | Auth v1 | **REJECT bản song song** | Không để người dùng lựa chọn hai phiên bản giao diện cùng chức năng |
 | Profile | **REJECT trang đầy đủ** | Chỉ giữ thông tin tài khoản và đăng xuất trong menu; không thêm social profile, activity feed hay sửa hồ sơ chưa được yêu cầu |
 | Unauthorized / not-found | **ADAPT** | Màn không đủ quyền/không tìm thấy có đường về Scenes hoặc đăng nhập, giữ ngữ cảnh phù hợp |
@@ -264,9 +274,9 @@ Hai nhánh tải kết quả khác nhau:
 
 **Trigger:** mở Scenes hoặc đường dẫn một scene.
 
-**Steps:** (1) Hiện scene liên quan theo quyền và khu vực video mẫu. (2) Khách chọn mẫu, xem thông tin nguồn/cấu hình chỉ đọc. (3) Xem replay hoặc bỏ qua để mở kết quả. (4) Muốn dùng dữ liệu riêng thì đăng nhập/tạo tài khoản bằng mã mời và trở lại bước tạo scene.
+**Steps:** (1) Hiện scene liên quan theo quyền và khu vực video mẫu. (2) Visitor chọn mẫu, xem thông tin nguồn/cấu hình chỉ đọc. (3) Xem replay hoặc bỏ qua để mở kết quả. (4) Dùng dữ liệu riêng thì đăng nhập hoặc tạo Guest account không cần invite; invited signup vẫn cấp Editor/Reviewer. Guest chỉ thao tác resource sở hữu, còn scene khác giữ shared-read.
 
-**Decision points:** khách/thành viên; dùng mẫu/dữ liệu riêng; scene cần hành động/scene chỉ xem.
+**Decision points:** Visitor/Guest/Editor/Reviewer; dùng mẫu/dữ liệu riêng; scene cần hành động/scene chỉ xem theo server capability.
 
 **Exit conditions:** workspace mẫu, scene đang làm hoặc form tạo scene. **Failure / recovery:** không tìm thấy mẫu/scene có lời giải thích và về danh sách; đăng nhập lỗi giữ email, không đổi role; hết phiên yêu cầu đăng nhập lại trước thao tác có quyền. **Basis:** REQUIREMENT về quyền; PROPOSAL về bố trí entry. [PRD §3.4][prd], [SampleFlow][r-sample].
 
@@ -342,15 +352,15 @@ Hai nhánh tải kết quả khác nhau:
 
 **Exit conditions:** file tải về hoặc release đã được tạo. **Failure / recovery:** sealing lỗi giữ “đã duyệt, chưa phát hành”; Reviewer có thể `Thử lại phát hành` nếu trạng thái còn hợp lệ, không tạo approval mới. Tải lỗi không hủy approval/release; cho xin lại thao tác tải. Sửa sau release tạo draft mới. Không gom nút download PLY với thao tác release. **Basis:** [PRD FR-10/11/13][prd], [ReleasePanel][r-release]; presentation của từng bước và retry là PROPOSAL, không thay lifecycle.
 
-### Flow F9 — Mã mời và quyền nhóm
+### Flow F9 — Guest signup, mã mời và quyền nhóm
 
-**Trigger:** Reviewer mở `Nhóm`; người được mời mở đăng ký.
+**Trigger:** Reviewer mở `Nhóm`; người có invite mở đăng ký Editor/Reviewer; người dùng mới chọn đăng ký Guest.
 
-**Steps:** (1) Reviewer chọn một trong hai role và tạo mã mời. (2) Người nhận nhập mã cùng thông tin tài khoản. (3) Role hiển thị theo mã, không tự chọn. (4) Reviewer quản lý trạng thái/hạn mức trong danh sách thành viên.
+**Steps:** (1) Guest nhập email, tên hiển thị và password; không cần invite. Xác thực email được hoãn. (2) Invite flow vẫn gắn role Editor/Reviewer cho mã, người nhận không tự chọn role. (3) Reviewer quản lý trạng thái, role và hạn mức trong danh sách thành viên. (4) Guest xem quota 3/3 và reset 00:00 giờ Việt Nam; chỉ job create và manual Retry được chấp nhận mới tính lượt; objectify không trừ quota.
 
-**Decision points:** mã hợp lệ; quyền Reviewer; thay đổi có được phép với chính tài khoản đang dùng không.
+**Decision points:** signup flag có mở không; email/password hợp lệ; mã mời hợp lệ nếu đăng ký Editor/Reviewer; quyền Reviewer; thay đổi có được phép với chính tài khoản đang dùng không.
 
-**Exit conditions:** tạo tài khoản hoặc cập nhật thành viên thành công. **Failure / recovery:** mã sai/hết hiệu lực có hướng dẫn xin mã mới; 403 giữ thông báo và đường về Scenes; không tự tăng quyền. Tài liệu không mở rộng sang quản trị nhiều tổ chức. **Basis:** [ADR 0003][adr3], [AuthForms][r-auth], [TeamPage][r-team].
+**Exit conditions:** tạo Guest account, tạo account qua invite, hoặc cập nhật thành viên thành công. **Failure / recovery:** signup Guest khi flag đóng hiện hướng dẫn liên hệ nhóm; mã invite sai/hết hiệu lực có hướng dẫn xin mã mới; 403 giữ thông báo và đường về Scenes; không tự tăng quyền. Tài liệu không mở rộng sang quản trị nhiều tổ chức. **Basis:** [ADR 0021](decisions/0021-guest-identity-and-ownership.md), [AuthForms][r-auth], [TeamPage][r-team].
 
 ### Flow F10 — Mở file 3DGS đã có
 
@@ -378,22 +388,24 @@ S01–S14 là mã **màn hình UX**, không phải task ID. Một số là tab/p
 ### S02 — Đăng nhập / nhận mã mời
 
 - **Purpose / entry:** mở luồng có quyền hoặc link mời; dùng một visual layout nhất quán.
-- **Required information:** email, mật khẩu; màn đăng ký thêm tên và mã mời; giải thích khách vẫn thử mẫu được.
-- **Primary action:** `Đăng nhập` hoặc `Tạo tài khoản bằng mã mời`.
-- **Secondary actions:** chuyển giữa hai màn, quay lại video mẫu; không có role toggle hoặc SSO.
+- **Required information:** email, mật khẩu; đăng ký Guest thêm tên hiển thị, không cần invite; đăng ký Editor/Reviewer thêm mã mời; giải thích Visitor vẫn thử mẫu được.
+- **Primary action:** `Đăng nhập`, `Tạo tài khoản Guest` hoặc `Tạo tài khoản bằng mã mời`.
+- **Secondary actions:** chuyển giữa login và hai signup mode, quay lại video mẫu; không có role tùy chọn hoặc SSO.
 - **States:** nhập, validation field, đang gửi, sai thông tin/mã mời, tài khoản không hoạt động, thành công; không hiển thị mật khẩu trong phản hồi.
 - **Exit / transition:** trở lại entry hợp lệ đã yêu cầu, mặc định là Tổng quan `/overview` (§3.1); người đã có phiên — hoặc deployment không bật đăng nhập — không thấy form mà được chuyển thẳng tới đích. Illustration phụ không đẩy form/feedback xuống dưới màn hình.
 
 ### S03 — Scene mới: nguồn và thiết lập
 
 - **Purpose / entry:** `Scene mới`; gom tạo project/scene và input thành một flow.
-- **Required information:** bước `Nguồn dữ liệu` rồi `Thiết lập & bắt đầu`; input nhận diện, tên scene, khai báo, cấu hình, giới hạn và cảnh báo.
-- **Primary action:** bước đầu `Dùng file này`; bước sau `Bắt đầu xử lý`.
+- **Required information:** luồng video tại `/new` gồm `Chọn dữ liệu` → `Cấu hình xử lý` → `Xác nhận và tạo scene`; input nhận diện, tên scene, khai báo, cấu hình, giới hạn và cảnh báo.
+- **Primary action:** `Tiếp tục` ở hai bước đầu; `Tạo scene` tại bước xác nhận. `Quay lại` giữ file, cấu hình và khai báo đã nhập.
 - **Secondary actions:** tải/chọn file khác, dùng file đã tải, thử mẫu, mở cấu hình chi tiết, trở lại bước trước.
 - **States:** empty/dropzone, uploading có %, verifying, file hợp lệ, không hỗ trợ/sai nội dung, video sẵn sàng tạo job, 3DGS chỉ mở import, attestation thiếu, resource blocking, submit/import pending/error. Sample dùng cấu hình read-only.
 - **Exit / transition:** S05 khi đã tạo project và job; S14 cho import; sample replay rồi S06; hủy tạo về S01. Không mất tên/khai báo khi mở/đóng thông số nâng cao.
 
 **Biến thể mẫu:** thay form khai báo bằng nguồn mẫu, video và cấu hình chỉ đọc; CTA `Xem quá trình dựng mẫu`. Khi sample không tải được, thử lại hoặc chọn mẫu khác; không hiển thị form upload lỗi. Sau xác nhận chuyển sang biến thể replay tại S05.
+
+**DECISION (user, 13/10/2026):** chia luồng tạo scene từ video thành ba bước để giảm kéo trang. Chuyển bước trong cùng trang, không upload/resolve lại khi đầu vào không đổi. Chỉ rời luồng hoặc bỏ file mới dọn upload chưa dùng; đổi input phải kiểm tra lại trước khi tiếp tục. Cấu hình phải được xác nhận trước khi tới bước cuối; tạo job vẫn giữ các gate hiện có.
 
 **DECISION (user, 02/10/2026):** preset `Maximum` dùng phần tài nguyên còn trống
 ở snapshot worker gần nhất, kèm thời điểm đo; đây là ước lượng, không giữ chỗ tài
@@ -426,7 +438,7 @@ lực. Tổng năng lực bị chặn gồm cả tổng dung lượng ổ của 
 - **States:** queued, running, waiting-for-user, succeeded, failed, cancelled; pending cancel/retry; mất kết nối; stage chưa có artifact/artifact không đọc được.
 - **Exit / transition:** S07/S08/S06; job mới hoặc retry vẫn giữ được lịch sử. Preview xuất hiện bằng thông báo/CTA, không thay toàn bộ màn hình bất ngờ.
 
-**Biến thể replay mẫu:** giữ nhãn `Kết quả đã xử lý sẵn — đang phát lại`; có trạng thái loading, replay đang chạy, đã tới cuối, thiếu dữ liệu/lỗi. CTA `Bỏ qua và mở scene` trong lúc replay, `Mở scene mẫu` khi xong. Không có cancel/retry GPU; thiếu scene mẫu thì khóa mở và giải thích. Thời gian trong replay được ghi là thời lượng đã ghi của mẫu.
+**Biến thể replay mẫu:** giữ dòng nhắc “Đây là bản phát lại, không phải job đang chạy”; có trạng thái loading, replay đang chạy, đã tới cuối, thiếu dữ liệu/lỗi. CTA `Bỏ qua` trong lúc replay, `Mở scene 3D` khi xong (dẫn thẳng sang scene mẫu). Không có cancel/retry GPU; thiếu scene mẫu thì khóa mở và giải thích. Thời gian trong replay được ghi là thời lượng đã ghi của mẫu.
 
 **DECISION (user, 02/10/2026):** khi thiếu tài nguyên lúc dispatch, job giữ nguyên
 cấu hình/checksum, chờ trong durable queue và tự chạy tiếp khi worker đo đủ tài
@@ -512,7 +524,7 @@ thể từ việc bundle đã có bản xem 3DGS.
 ### S13 — Nhóm
 
 - **Purpose / entry:** mục Nhóm của Reviewer; hỗ trợ việc cấp quyền cho hành trình chính.
-- **Required information:** tên/email, hai role, trạng thái tài khoản, hạn mức khi áp dụng, mã mời vừa tạo và điều kiện của mã.
+- **Required information:** tên/email, ba role cố định, trạng thái tài khoản, hạn mức Guest khi áp dụng, mã mời vừa tạo và điều kiện của mã.
 - **Primary action:** `Tạo mã mời`.
 - **Secondary actions:** đổi role, chỉnh hạn mức/trạng thái trong phạm vi thao tác hiện có; copy mã vừa tạo.
 - **States:** loading, chỉ có thành viên đầu tiên, không đủ quyền, tạo/cập nhật pending, lỗi, thành công; tự thay đổi không được phép thì khóa và giải thích.
@@ -596,7 +608,7 @@ Research ở đây là **đọc source + phân tích ảnh được cung cấp**
 ### P3 — Setup ít bước, chi tiết mở khi cần
 
 **Finding — VERIFIED:** NewSceneFlow tách upload/chọn file; form có attestation và ProcessingSettings khá nhiều tham số. **Decision: ADAPT.** Hai chặng tương tác “Nguồn dữ liệu” và “Thiết lập & bắt đầu”; summary trước xử lý, advanced settings có thể mở thêm. **Lý do — INFERENCE:** giảm việc người mới phải hiểu mọi tham số trước job đầu tiên. **Evidence:** [NewSceneFlow][r-new], [ProcessingSettings][r-settings]. Đây là đề xuất của tài liệu, không được quy cho Mobbin.
-*Cập nhật 03/10/2026 (Smart Cloud Routing):* Khi tài nguyên VRAM ước tính vượt quá khả năng của GPU cục bộ (nguy cơ crash 95%), thay vì khóa cứng nút bấm hoặc ép người dùng tự động hạ chất lượng mô hình, giao diện hiển thị thẻ đề xuất định tuyến thông minh: cho phép người dùng bấm chuyển quyền xử lý sang máy ảo Colab GPU (Tesla T4 15GB) đã kết nối sẵn để giữ nguyên chất lượng 3DGS cao nhất.
+*Cập nhật 10/10/2026 (gỡ Smart Cloud Routing):* Lựa chọn “Xử lý trên Colab GPU” đã bị gỡ vì nó không chuyển job đi đâu mà chỉ bỏ chặn cảnh báo vượt cấu hình máy, nên job vẫn chạy cục bộ và có thể tràn VRAM. Khi thông số vượt năng lực của máy xử lý (không chỉ bận tạm thời), giao diện chặn nút bắt đầu, hiện thẻ cảnh báo kèm lý do cạnh nút và hướng dẫn giảm các ô tô đỏ hoặc chọn “Tối đa cho máy này”. Khi GPU chỉ đang bận, job vẫn tạo được và tự chờ GPU trống.
 
 ### P4 — Phân biệt đang chạy với chờ người dùng
 
@@ -636,7 +648,7 @@ U1/U2 là ảnh người dùng, đã được mô tả tại §2.4; không có c
 | S10 Report/evidence | U1 Simulation Validation; U2 phần C; [Validation hiện tại][r-validation] | Report cạnh replay/evidence list, drill-down check | ADAPT; không dùng 5/5 hoặc PASS minh họa như fact |
 | S11 Review | U2 phần C; [ReviewLifecycle][r-review] | Action và lý do gần evidence | ADAPT; role/readiness/stale state và rejection reason |
 | S12 Kết quả | [ReleasePanel][r-release], [File Manager list][d-files] | Danh tính gói, trạng thái, download | ADAPT; phân biệt export làm việc/candidate/release |
-| S13 Nhóm | [Users][d-users], [TeamPage][r-team] | Member row, role, trạng thái, thao tác có giới hạn | ADAPT; hai role, mã mời, không custom-role builder |
+| S13 Nhóm | [Users][d-users], [TeamPage][r-team] | Member row, role, trạng thái, thao tác có giới hạn | ADAPT; Guest/Editor/Reviewer, invite cho Editor/Reviewer, không custom-role builder |
 | S14 Import 3DGS | [ImportScenePage][r-import], [File Manager][d-files] | Tên nguồn, chờ nén, lỗi, mở kết quả | ADAPT; không biến import thành reconstruction job |
 | Empty/error/dialog | [Donor UI library][d-ui], [Real2Sim states][r-states] | Nội dung lỗi, hành động phục hồi, modal focus | ADAPT; nội dung theo đúng tình huống, cần QA tương tác |
 
@@ -691,7 +703,7 @@ Mỗi quyết định chỉ chốt cách **UI thể hiện**; không đổi PRD,
 | --- | --- | --- | --- |
 | Q1 | Privacy tự khai so với QA verification | UI giữ nguyên khai báo tự khai với nhãn **"Tự khai — chưa qua QA"** trên scene và job; không có badge "đã xác minh". Nhánh bị chặn (khai báo thiếu, privacy mode không cho phép) hiển thị lý do và khoá `Bắt đầu xử lý` | Policy chạy remote vẫn theo [ADR 0002][adr2] (Proposed) và [PRD NFR-05][prd]; PO + QA chốt policy, UI không nới gate |
 | Q2 | SceneObject → Isaac → review/release trong Studio | Hiện **thật** các bước đã có: xác nhận vật (S08), tạo gói mô phỏng + preflight (S09 phần gói), tải gói (S12 phần candidate). Isaac validation, review và release hiển thị trạng thái **"Chưa khả dụng"** kèm lý do ("cần máy RTX / API chưa triển khai") và điều kiện mở; không dựng report, verdict hay approval minh họa | App thật không được hiển thị kết quả không có nguồn (D-05). Mở lại khi SIM-06 và PRODUCT-10/11 có runtime |
-| Q3 | Import PLY/ZIP tới đâu | Giữ **chỉ xem/chỉnh** (quyết định gói 5, [ADR 0004 §3][adr4]); nhãn `Scene import · chỉ xem/chỉnh sửa`; không hiện CTA metric/collision/release cho import. ZIP có COLMAP cũng theo nhánh này cho tới khi có ADR khác | Video là happy path duy nhất tới gói mô phỏng |
+| Q3 | Import PLY/SOG/ZIP tới đâu | Giữ **chỉ xem/chỉnh** (quyết định gói 5, [ADR 0004 §3][adr4]); nhãn `Scene import · chỉ xem/chỉnh sửa`; không hiện CTA metric/collision/release cho import. ZIP có COLMAP cũng theo nhánh này; SOG input chỉ nhận bundled version 2 với metadata và texture được kiểm tra có giới hạn | Video là happy path duy nhất tới gói mô phỏng |
 | Q4 | Calibration error/tolerance | UI chỉ đọc **kết quả hệ thống trả về** (ngưỡng C–D, độ lệch, đạt/không) của lần xem trước; không in con số độ chính xác cố định trong copy. `e` khoá sau khi đo lại trên preset chất lượng mới (REC-06) | `e` lần 1 ≈ 15,6 cm, chưa khoá |
 | Q5 | Save của Gaussian editor và SceneObject draft | Hai mô hình tách hẳn. **SceneObject:** mỗi thao tác (xác nhận, loại, ẩn, thêm vật cản, sửa transform) ghi ngay một revision; header hiện `rev-00N · đã lưu` sau khi backend trả revision mới, `Đang lưu…` trong lúc chờ, `Lưu lỗi` kèm thử lại. **Không có nút "Lưu nháp"** vì API không có draft chưa lưu. **Editor Gaussian (SuperSplat):** chỉ `Xuất bản làm việc (PLY/SOG)`, nhãn "chỉ trong phiên editor, không lưu vào scene" | Theo behavior API hiện có ([`src/api/product/scene.py`][r-api], `SceneEditor.publish_next`); sửa F5/S06 "Lưu nháp" thành "lưu theo từng thao tác" |
 | Q6 | LOD, overlay, thiết bị yếu | Baseline WebGL2; kiểm capability trước khi tạo viewer; không chạy được thì hiện lý do và đường về danh sách. Overlay chỉ bật lớp có artifact. LOD/streaming **để sau** (follow-up), không hiện tuỳ chọn LOD khi chưa có | Chưa có browser acceptance cho LOD |
@@ -715,14 +727,14 @@ Mỗi quyết định chỉ chốt cách **UI thể hiện**; không đổi PRD,
 | D-12 | Tên nhãn trạng thái scene | Một bảng nhãn duy nhất suy từ JobManifest + progress + SceneIR, dùng chung cho Scenes, Jobs, header: `Đang chờ worker` · `Đang chạy · <stage>` · `Cần xác nhận tỉ lệ` · `Đang dựng collision` · `Cần xác nhận vật thể` (có ứng viên chưa xử lý) · `Sẵn sàng tạo gói` · `Đã có gói mô phỏng` · `Lỗi · <stage>` · `Đã huỷ`. Không có nhãn "Sẵn sàng" chung | §3 Clarity; tránh nhầm preview với sẵn sàng mô phỏng |
 | D-13 | Kiểu chữ và nét kẻ theo landing | **Owner quyết 01/10/2026:** app dùng bộ chữ của landing — **Plus Jakarta Sans** cho chữ giao diện, **IBM Plex Mono** cho nhãn kỹ thuật (utility `label-tech`: mono, chữ hoa, 12px) và giá trị kỹ thuật (ID, revision, số liệu); tiêu đề đậm (`font-extrabold`/`font-bold` + `tracking-tight`), nút `font-semibold`. Palette giữ D-04 (trùng landing); viền đổi sang mực ấm pha loãng của landing (`line` 0,16 · `line-strong` 0,36 · `line-dark` cho nền tối) và viền không khai báo màu của component donor mặc định theo `--border`; bôi chọn chữ, thanh cuộn và tên sản phẩm ("Real2Sim" + nhãn mono "Studio") theo landing. Font nạp một lần ở root layout bằng `next/font` với subset `vietnamese` | Owner muốn app cùng bộ nhận diện với landing; landing không đổi. UI legacy (D-10) giữ palette tối riêng, chỉ nhận font chung. Nhãn kỹ thuật trung tính dùng `ink-muted` (5,43:1 trên paper) vì `ink-subtle` (3,47:1) không đạt AA ở cỡ chữ nhỏ; overline màu `ember-strong` giữ như landing dù chỉ 3,98:1 trên paper — đổi màu này cần owner quyết. **Bổ sung 02/10/2026 (owner: app chưa dùng chữ như landing):** lớp “kỹ thuật” của landing áp cho cả app ở mức nền — nhãn trường `dt` và tiêu đề cột `th` là mono 11px chữ hoa; giá trị `dd`, `code`, `time` và utility `value-tech` (thời lượng, dung lượng, ngày giờ, toạ độ) là mono chữ số đều cột; `Badge` theo thẻ nhãn của landing (mono 11px, chữ hoa, bo góc nhỏ thay cho viên thuốc); nhãn nhóm của sidebar và menu là mono chữ hoa; số thứ tự bước là mono. Chữ thường, tiêu đề và nút vẫn là Plus Jakarta Sans |
 | D-14 | Theme sáng/tối | **Owner quyết 01/10/2026 (thay câu "không có theme switcher" của D-04):** Studio có nút đổi theme ở header và trang đăng nhập. Theme sáng là bản hiện tại và là mặc định; theme tối dùng nâu than ấm lấy từ khung viewport của landing (nền `#1b1714`, thẻ `#25201c`, chữ `#f5efe6`), màu nhấn/trạng thái dùng bản sáng hơn, nút chính giữ cam đậm. Lựa chọn lưu ở localStorage của trình duyệt (`r2s-theme`), không lưu ở backend và không theo cài đặt hệ điều hành. Token Studio thành biến CSS ở `:root`/`.dark` trong `globals.css` | Sở thích hiển thị là state tạm của trình duyệt (AGENTS §8). Palette tối Deep Navy/Jade ở §7.5 vẫn bị bỏ; bản tối mới cùng tông với theme sáng. Landing và UI legacy không đổi theo theme. Tương phản chữ nhỏ trên nền tối ≥ 5:1 (đo bằng công thức WCAG) |
-| D-15 | Thùng rác scene | **Owner yêu cầu 02/10/2026:** xoá scene (hoặc scene nhập) từ trang Scenes là chuyển vào **Thùng rác** (`/trash`, mục điều hướng nhóm Công việc), có bước xác nhận. Ở Thùng rác: khôi phục hoặc xoá hẳn từng mục, nhiều mục đã chọn, hoặc tất cả. Khôi phục đưa scene về đúng trạng thái lúc gỡ. Xoá hẳn xoá cả file trên kho lưu trữ, không khôi phục được và luôn qua hộp thoại xác nhận. Scene đang được worker xử lý hoặc đã có bản phát hành (PRD US-06) không gỡ được. **PROPOSAL chờ owner xác nhận:** gỡ và khôi phục cho Editor, xoá hẳn chỉ Reviewer. **Owner chốt 02/10/2026:** mục nằm trong thùng rác quá **7 ngày** tự bị xoá hẳn (`PRODUCT_TRASH_RETENTION_DAYS`, 0 = tắt); mỗi dòng hiện số ngày còn lại | `features/studio/trash/`, `src/api/studio/trash.py`, `orchestration/projects/deletion.py` |
+| D-15 | Thùng rác scene | Owner yêu cầu 02/10/2026: xoá scene/import từ Scenes vào **Thùng rác** (`/trash`) sau xác nhận; khôi phục đúng trạng thái; xoá hẳn mọi file không hoàn tác và luôn hỏi xác nhận. Scene đang chạy hoặc đã phát hành không gỡ được. Retention 7 ngày (`PRODUCT_TRASH_RETENTION_DAYS`, 0 = tắt). Owner decision 08/10/2026: Guest chỉ gỡ/khôi phục resource mình sở hữu; Editor và Reviewer giữ khả năng cross-user như hiện tại; purge chỉ Reviewer. UI đọc typed per-entry capabilities, nhưng API guard vẫn là authority. | `features/studio/trash/`, `src/api/studio/trash.py`, `orchestration/projects/deletion.py` |
 | D-16 | Bảng đánh giá scene | **Owner yêu cầu 02/10/2026:** mỗi scene có bảng chỉ số **tự kiểm** theo từng bước (video đầu vào, vị trí camera, 3DGS, tỉ lệ mét, hình học & va chạm, tách vật thể, hệ thống), đo từ chính artifact của scene nên có cho mọi dữ liệu người dùng. Hiện ở hai nơi: panel “Thông tin đầu ra” của màn xem từng bước (chỉ số của bước đó) và thẻ “Bảng đánh giá” ở tab Kiểm tra & duyệt (tổng hợp, tải báo cáo `.md` / dữ liệu `.json`). Mỗi chỉ số kèm một câu nêu ý nghĩa. Nhãn Đạt / Cần xem / Không đạt **chỉ** gán khi ngưỡng đã có trong cấu hình hoặc tài liệu (tỉ lệ ảnh COLMAP đăng ký, sai lệch đoạn kiểm C–D theo REC-06, giá trị hỏng trong file 3DGS, cảnh báo kiểm video); chỉ số chưa đo ghi “Chưa đo” kèm lý do, không điền số ước lượng (D-05). Chỉ số so với ground truth (pose, hình học, PSNR trên ảnh giữ lại) thuộc benchmark dataset ở `eval/`, chưa nối vào bảng này | `features/studio/evaluation/`, `src/api/studio/evaluation.py`, `orchestration/evaluation/`, `reconstruction/quality.py` |
 | D-17 | Bảng màu Gruvbox | **Owner yêu cầu 02/10/2026:** giữ nguyên bảng màu hiện tại (be + cam) và thêm lựa chọn bảng màu **Gruvbox**; mỗi bảng có bản sáng và bản tối, nên có bốn biến thể. Chọn ở menu “Chọn giao diện” (header và trang đăng nhập), cạnh nút sáng/tối của D-14; lưu ở localStorage (`r2s-palette`), class `theme-gruvbox` trên `<html>`. **Mọi** màu của UI đi qua biến trong `globals.css` — kể cả landing (trước đây viết cứng mã màu), lớp phủ 3D (khung vật, lưới va chạm), bóng, lớp phủ sau dialog và giao diện của trình xem 3D nhúng (ghi đè biến `--sse-*`). Vai trò màu giữ nguyên, chỉ đổi giá trị. **Owner yêu cầu làm lại 02/10/2026 theo hai repo tham chiếu** (`gruvbox` của morhetz và `gruvbox-material` của sainnhe): mọi giá trị lấy nguyên từ bảng tham chiếu, không tự pha — nền/viền/nền nhạt của trạng thái theo gruvbox-material nền “medium” (trang = bg0, sidebar = bg_dim, thẻ = bg1, vùng lõm = bg4 sáng / bg3 tối, menu/popover = bg3 với mục đang trỏ bg5, viền = bg5 sáng / statusline3 tối, nền trạng thái = bg_visual_green/yellow/red); chữ và màu nhấn theo gruvbox gốc (lựa chọn `foreground = original`: bản sáng nhóm “faded”, bản tối nhóm “bright”): nhấn = orange, hình học = blue, đạt = green, cảnh báo/collider = yellow, lỗi = red. Ngoại lệ duy nhất là nền cam nhạt (orange pha 16–20% vào bg0) vì bảng tham chiếu không có sẵn. Điểm đo trong khung 3D cũng theo bảng màu (`--studio-marker-*`). Giữ màu gốc nên vài cặp chữ màu trên nền nhạt chỉ đạt 3–4:1 (vd. badge cảnh báo bản sáng); chữ thường và chữ trên nút vẫn đạt mức test. Landing luôn dùng bản **sáng** của bảng đang chọn (như D-14: landing không theo chế độ tối). Font giữ nguyên (D-13); đặt thêm ở `<body>` và ở trình xem 3D nhúng (trước đó dùng Arial) để mọi thứ cùng một bộ chữ | `lib/theme.ts`, `features/shell/PaletteMenu.tsx`, `app/globals.css`, `features/landing/`. Test `tests/palette.test.tsx` kiểm tương phản WCAG của cả bốn biến thể (chữ chính ≥ 7:1, chữ phụ và chữ trên nút ≥ 4,5:1), Gruvbox định nghĩa đủ mọi biến, và không còn mã màu viết cứng trong `src/`. Test cũng kiểm mọi giá trị của hai khối Gruvbox thuộc bảng tham chiếu. Ngoài phạm vi: SuperSplat editor nhúng (iframe build riêng) và viewer Rerun giữ giao diện của chúng |
 | D-18 | Ai làm gì trong nhóm dùng chung | **Owner yêu cầu 02/10/2026:** Studio vẫn là không gian chung của nhóm (ADR 0003, không tách dữ liệu theo người), nhưng phải hiện **người tải từng file**, **người tạo scene/tiến trình** và **người duyệt scene**. Danh sách file ở `/new/import-video` và `/new/import-scene` ghi "tải lên bởi …"; thẻ scene ở S01 ghi "tạo bởi …" và "chạy bởi …" khi người chạy lại gần nhất khác người tạo; S04 có cột "Người chạy"; S05 ghi người tạo scene; S11/S12 hiện tên người duyệt thay cho id. Không có thông tin (bản ghi cũ, deployment không bật đăng nhập) thì để trống, không điền tên giả | `UploadRecord.uploaded_by`, `ProjectRecord.created_by` (id + tên lúc thao tác); người chạy job lấy từ nhật ký `gpu.run`; tên người duyệt tra từ `ApprovalRecord.reviewer_id` (contract không đổi). Test: `tests/test_api/test_studio_routes.py`, `tests/test_api/test_review_routes.py`, `frontend/tests/studio-overview.test.tsx` |
 | D-19 | Thời gian xử lý và hàng đợi | **Owner yêu cầu 02/10/2026:** cột thời gian ở S04 là **"Thời gian xử lý"** = tổng thời gian máy chạy các bước đã xong (từ số đo từng bước), **không** gồm lúc xếp hàng và lúc chờ người dùng; job chưa có số đo ghi "Chưa đo". S05 khi job chờ: hiện vị trí trong hàng đợi (xoay vòng theo người gửi), thời gian chờ ước tính từ các lượt chạy đã đo (chưa có số đo thì nói rõ, không điền số), và chi tiết tài nguyên đang thiếu | `SceneSummary.processing_seconds`, `JobProgress.queue`, `JobProgress.resource_wait`; `features/studio/scene/{QueueStatus,ResourceWaitDetail}.tsx` |
 | D-20 | Đề xuất tỉ lệ mét tự động và luồng LiDAR ở S07 | **Owner chốt 02/10/2026:** job chỉ có video — khi worker có MoGe-2, S07 điền sẵn A, B, C, D, ba điểm sàn và khoảng cách **ước lượng** (nhãn rõ là ước lượng, kèm độ bất định), người dùng xem rồi xác nhận hoặc nhập số đo thật (ADR 0001). Job có gói LiDAR ([ADR 0009](decisions/0009-user-lidar-input-and-routing.md)) — **không chọn điểm**: S07 hiện tỉ lệ, sai số căn chỉnh, số frame khớp và một nút xác nhận; S05 có thêm bước "Nhận dữ liệu LiDAR" | Đề xuất MoGe-2 và bước LiDAR trên timeline đã có; màn xác nhận của job LiDAR **chưa làm** ([plan](plans/active/2026-10-02-lidar-video-flow.md), L6) |
 | D-21 | Chọn giao diện | **Owner yêu cầu 02/10/2026:** menu "Chọn giao diện" chỉ còn chọn bảng màu; sáng/tối do nút riêng bên cạnh (không lặp lại trong menu) | `features/shell/PaletteMenu.tsx`, `ThemeToggle.tsx` |
-| D-22 | Bản demo | **Owner yêu cầu 03/10/2026:** scene demo vẫn chỉnh sửa/tương tác được nhưng khôi phục được về trạng thái ban đầu của bản demo — không phải chạy lại tiến trình xử lý. Reviewer "Đặt làm bản demo" (lấy revision hiện tại làm mốc) / "Bỏ đánh dấu"; ai sửa được scene đều bấm "Khôi phục bản demo" → revision SceneIR mới mang nội dung của mốc (lịch sử chỉ tiến; duyệt/phát hành theo revision nên bắt đầu lại từ chưa duyệt). Huy hiệu "Bản demo" ở header và thẻ Scenes. Scene mẫu ở "Thử mẫu" (chỉnh trong phiên editor) có nút "Khôi phục bản gốc" nạp lại file gốc | `features/studio/scene/DemoControls.tsx`, `SceneWorkspace.tsx`, `src/services/orchestration/scene/demo.py`, `src/api/studio/demo.py` |
+| D-22 | Bản demo | **Owner yêu cầu 03/10/2026:** scene demo vẫn chỉnh sửa/tương tác được nhưng khôi phục được về trạng thái ban đầu của bản demo — không phải chạy lại tiến trình xử lý. Reviewer "Đặt mốc gốc" (lấy revision hiện tại làm mốc) / "Bỏ mốc gốc"; ai sửa được scene đều bấm "Khôi phục về mốc gốc" → revision SceneIR mới mang nội dung của mốc (lịch sử chỉ tiến; duyệt/phát hành theo revision nên bắt đầu lại từ chưa duyệt). Huy hiệu "Có mốc gốc" ở header và thẻ Scenes. **Cập nhật 10/10/2026:** nút "Đặt làm bản demo" nay là việc khác — Reviewer xuất scene vào thư viện mẫu (`POST /jobs/{id}/demo/publish`, công khai nên đòi xác nhận và lời khai quyền sử dụng + ẩn danh); xem `docs/DEMO_SCENES.md`. Scene mẫu ở "Thử mẫu" (chỉnh trong phiên editor) có nút "Khôi phục bản gốc" nạp lại file gốc | `features/studio/scene/DemoControls.tsx`, `SceneWorkspace.tsx`, `src/services/orchestration/scene/demo.py`, `src/api/studio/demo.py` |
 
 Không có quyết định architecture/schema/acceptance nào được sửa để đóng các câu hỏi này; các DECISION chỉ chốt cách UI thể hiện và cách triển khai frontend.
 
@@ -739,7 +751,7 @@ Không có quyết định architecture/schema/acceptance nào được sửa đ
 - ~~Implement UI, copy donor code~~ — **đã đổi 30/09/2026:** implement UI trong `frontend/` và copy có chọn lọc code UI donor (MIT, ghi nguồn) nay **trong phạm vi** (§13). Vẫn ngoài phạm vi: sửa backend/schema/contract chỉ để phục vụ UI, đổi production architecture, sửa task/authority documents.
 - Tạo `DESIGN.md`, dựng prototype riêng trong OpenDesign hoặc dùng Impeccable — thay bằng implement trực tiếp trong app (§13).
 - Tạo generic PRD, pricing, billing, CRM, project-management suite hay hệ thống analytics mới. Landing từ export Stitch đã được user yêu cầu riêng (§3.1).
-- Thêm custom role, SSO, chia sẻ công khai, nhiều tổ chức, cộng tác realtime hoặc workflow approval mới.
+- Thêm custom role, SSO, chia sẻ công khai, nhiều tổ chức, cộng tác realtime hoặc workflow approval mới. Ba roles cố định Guest/Editor/Reviewer và Guest signup không invite (sau rollout gates) là product scope đã chốt, không thuộc nhóm non-goals này.
 - Thiết kế thuật toán reconstruction/physics, tự đặt ngưỡng đánh giá, dùng hình minh họa làm benchmark hoặc cam kết an toàn robot thật.
 - Bắt buộc hỗ trợ mọi import/thiết bị, editor mobile đầy đủ, AI auto-scale hay segmentation nâng cao ngoài P0.
 - Xây design-token system đầy đủ hoặc theme playground; chỉ có bộ token palette §7.5 (D-04). Không dùng toàn bộ chức năng trong ảnh/template như product requirements.
@@ -828,7 +840,6 @@ không thay thế các cổng đó. Increment này không thay scope Studio v2 c
 [r-metric]: ../frontend/src/features/studio/MetricConfirmView.tsx
 [r-sample]: ../frontend/src/features/studio/SampleFlow.tsx
 [r-editor]: ../frontend/src/features/studio/EditorFrame.tsx
-[r-header]: ../frontend/src/features/studio/StudioHeader.tsx
 [r-workspace]: ../frontend/src/features/studio/SceneWorkspace.tsx
 [r-timeline]: ../frontend/src/features/studio/PipelineTimeline.tsx
 [r-status]: ../frontend/src/features/studio/sceneStatus.ts

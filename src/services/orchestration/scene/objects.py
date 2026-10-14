@@ -21,13 +21,14 @@ from src.services.orchestration.scene.errors import (
     SceneObjectNotFoundError,
     SceneRevisionConflictError,
 )
-from src.services.orchestration.scene.models import SceneEditResult
+from src.services.orchestration.scene.models import ColliderEditCommand, SceneEditResult
 from src.services.scene.editing.commands import (
     PrimitiveObjectCommand,
     add_primitive_object,
     confirm_object,
     delete_object,
     duplicate_object,
+    edit_box_collider,
     ignore_object,
     rename_object,
     restore_object,
@@ -100,6 +101,31 @@ def apply_object_action(
     except ValueError as error:
         raise SceneEditRejectedError(str(error)) from error
     return editor.publish_next(job_id, expected_revision, updated, action)
+
+
+def edit_collider_scene(scene: SceneIR, command: ColliderEditCommand) -> SceneIR:
+    """Validate a collider command against one scene snapshot and return its pure edit result."""
+    if command.expected_scene_revision != scene.scene_revision:
+        raise SceneRevisionConflictError(
+            f"scene đã đổi: client đang giữ {command.expected_scene_revision}, revision hiện tại là {scene.scene_revision}"
+        )
+    try:
+        return edit_box_collider(
+            scene,
+            command.object_id,
+            dimensions_xyz_m=command.dimensions_xyz_m,
+            local_translation_xyz_m=command.local_translation_xyz_m,
+            local_rotation_quaternion_xyzw=command.local_rotation_quaternion_xyzw,
+        )
+    except ValueError as error:
+        raise SceneEditRejectedError(str(error)) from error
+
+
+def edit_collider(editor: SceneEditor, job_id: str, command: ColliderEditCommand) -> SceneEditResult:
+    """Publish a validated collider override as the next canonical scene revision."""
+    current = editor.current(job_id).scene
+    updated = edit_collider_scene(current, command)
+    return editor.publish_next(job_id, command.expected_scene_revision, updated, "edit_collider")
 
 
 def _next_id(scene: SceneIR, prefix: str) -> str:

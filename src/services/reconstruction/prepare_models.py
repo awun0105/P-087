@@ -26,6 +26,9 @@ class PrepareInputRequest(ContractModel):
     privacy_mode: Literal["self_attested"] = "self_attested"
     sample_fps: float = Field(default=3.0, gt=0, le=30, allow_inf_nan=False)
     max_frames: int = Field(default=300, ge=2, le=5000)
+    #: Che khuôn mặt/biển số trên frame trước khi dựng 3D (AUD-18). Bật mà worker không có anonymizer thì job lỗi,
+    #: không lùi về frame gốc.
+    anonymize: bool = False
 
     @model_validator(mode="after")
     def _manifest_ref(self) -> Self:

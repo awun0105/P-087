@@ -7,18 +7,36 @@ không nhận từ payload.
 
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict
 
 from src.api import auth
+from src.api.auth import require_contributor
+from src.api.ownership import authorize_job_mutation, owner_mutation_allowed
+from src.api.product.deps import scene_unavailable
 from src.api.studio import deps
+from src.models.contracts.artifacts import Checksum, Identifier
+from src.models.contracts.identity import verify_candidate_inventory, verify_content_checksum
 from src.models.contracts.release import ApprovalDecision
+from src.models.contracts.validation import ValidationReport
+from src.models.contracts.validation_run import IsaacValidationRuntimeProfile, ValidationConfig, ValidationRunStatus
+from src.services.orchestration.artifacts import ArtifactStoreError
 from src.services.orchestration.auth import UserRecord
 from src.services.orchestration.auth.service import has_role
-from src.services.orchestration.projects import JobNotFoundError
+from src.services.orchestration.jobs.database import RuntimeStateConflictError
+from src.services.orchestration.projects import JobNotFoundError, ProjectRegistry
+from src.services.orchestration.review.simulation_package import SimulationPackage, current_package
+from src.services.orchestration.review.validation_queue import (
+    ValidationCandidateSnapshot,
+    ValidationOperationStatus,
+    ValidationQueue,
+    ValidationQueueError,
+    ValidationQueueNotFoundError,
+    ValidationRunView,
+)
 from src.services.orchestration.review.workflow import ReviewError, ReviewState, decide, review_state, seal_release
-from src.services.orchestration.scene.errors import SceneNotAvailableError
+from src.services.orchestration.scene.errors import SceneHeadNotReadyError, SceneNotAvailableError
 
 router = APIRouter()
 
@@ -33,6 +51,23 @@ class ReviewDecisionRequest(BaseModel):
     validation_report_checksum: str
     accepted_warning_ids: list[str] = []
     reason: str | None = None
+
+
+class ValidationRunRequest(BaseModel):
+    """Ask to validate the exact candidate currently shown in the Studio."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    candidate_checksum: Checksum
+
+
+class ValidationRunSelectRequest(BaseModel):
+    """Select one completed attempt using the candidate and currently selected run shown by Studio."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    candidate_checksum: Checksum
+    expected_selected_run_id: Identifier | None = None
 
 
 def _reviewer(request: Request) -> UserRecord:
@@ -58,12 +93,316 @@ def _state(job_id: str) -> ReviewState:
     except JobNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
     except SceneNotAvailableError as error:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+        raise scene_unavailable(error) from error
 
 
 def _review_error(error: ReviewError) -> HTTPException:
     code = status.HTTP_409_CONFLICT if error.conflict else status.HTTP_422_UNPROCESSABLE_CONTENT
     return HTTPException(status_code=code, detail=str(error))
+
+
+def _validation_queue(registry: ProjectRegistry) -> ValidationQueue:
+    persistence = registry.persistence
+    if persistence is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Isaac validation cần RuntimeDatabase dùng chung để lưu queue bền vững",
+        )
+    return ValidationQueue(persistence.database, registry.runtime_resolver)
+
+
+def _validation_policy() -> tuple[ValidationConfig, IsaacValidationRuntimeProfile]:
+    settings = deps.settings()
+    config_path = settings.product_isaac_validation_config
+    profile_path = settings.product_isaac_validation_profile
+    if config_path is None or profile_path is None or not config_path.is_file() or not profile_path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Isaac validation chưa được cấu hình: cần PRODUCT_ISAAC_VALIDATION_CONFIG và "
+                "PRODUCT_ISAAC_VALIDATION_PROFILE cùng các artifact RuntimeManifest/robot đã xác minh"
+            ),
+        )
+    try:
+        config = ValidationConfig.model_validate_json(config_path.read_bytes())
+        profile = IsaacValidationRuntimeProfile.model_validate_json(profile_path.read_bytes())
+        verify_content_checksum(config, "config_checksum")
+        verify_content_checksum(profile, "profile_checksum")
+    except (OSError, ValueError) as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Cấu hình Isaac validation không hợp lệ: {error}",
+        ) from error
+    if config.runtime_profile_ref is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="PRODUCT_ISAAC_VALIDATION_CONFIG là policy template; profile được bind riêng từ server setting",
+        )
+    return config, profile
+
+
+def _validation_job_access(job_id: str, user: UserRecord | None, *, mutation: bool) -> ProjectRegistry:
+    registry = deps.registry()
+    try:
+        registry.get_job(job_id)
+        if mutation:
+            authorize_job_mutation(user, registry, job_id, operation="quản lý Isaac validation của")
+        elif user is not None and not owner_mutation_allowed(user, registry.get_job_owner_user_id(job_id)):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Guest chỉ được xem job do mình tạo")
+    except JobNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+    return registry
+
+
+def _current_validation_candidate(
+    job_id: str, registry: ProjectRegistry
+) -> tuple[SimulationPackage, ValidationCandidateSnapshot]:
+    try:
+        package = current_package(registry, job_id)
+    except SceneHeadNotReadyError as error:
+        raise scene_unavailable(error) from error
+    except (ArtifactStoreError, SceneNotAvailableError, ValueError) as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+    if package is None or package.candidate is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cần tạo SimulationPackage hợp lệ cho scene revision hiện tại trước khi chạy Isaac validation",
+        )
+    candidate = package.candidate
+    try:
+        verify_candidate_inventory(candidate)
+        verify_content_checksum(candidate, "candidate_checksum")
+        references = [candidate.entrypoint_usd, *candidate.assets, *candidate.geometry, *candidate.colliders]
+        for reference in references:
+            if reference.job_id != job_id:
+                raise ValueError("Candidate ref belongs to a different job")
+            registry.runtime_resolver.require(reference)
+    except (ArtifactStoreError, ValueError, OSError) as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Candidate không hợp lệ: {error}") from error
+    manifest = candidate.candidate_manifest
+    if (
+        manifest.scene_revision != package.scene_revision
+        or manifest.scene_ir_checksum != package.scene_ir_checksum
+        or package.job_id != job_id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Candidate không khớp SimulationPackage hiện tại"
+        )
+    return package, ValidationCandidateSnapshot(
+        job_id=job_id,
+        scene_revision=package.scene_revision,
+        scene_ir_checksum=package.scene_ir_checksum,
+        candidate_checksum=candidate.candidate_checksum,
+    )
+
+
+def _validation_error(error: Exception) -> HTTPException:
+    if isinstance(error, ValidationQueueNotFoundError):
+        return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error))
+    if isinstance(error, (ArtifactStoreError, RuntimeStateConflictError, ValidationQueueError)):
+        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error))
+    return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error))
+
+
+@router.post(
+    "/jobs/{job_id}/validation-runs",
+    response_model=ValidationRunView,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def post_validation_run(
+    job_id: str,
+    body: ValidationRunRequest,
+    user: UserRecord | None = Depends(require_contributor),
+    idempotency_key: str = Header(..., alias="Idempotency-Key", min_length=1, max_length=128),
+) -> ValidationRunView:
+    """Queue a worker validation attempt for one exact, immutable SimulationPackage candidate."""
+    registry = _validation_job_access(job_id, user, mutation=True)
+    queue = _validation_queue(registry)
+    policy, profile = _validation_policy()
+    try:
+        bound_config = queue.bind_profile(job_id, policy, profile)
+        requester_id = user.user_id if user is not None else "__anonymous__"
+        replayed = queue.replay(
+            job_id=job_id,
+            candidate_checksum=body.candidate_checksum,
+            config_checksum=bound_config.config_checksum,
+            requester_id=requester_id,
+            idempotency_key=idempotency_key,
+        )
+        if replayed is not None:
+            return replayed
+        _, snapshot = _current_validation_candidate(job_id, registry)
+        if body.candidate_checksum != snapshot.candidate_checksum:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Candidate đã thay đổi; tải lại SimulationPackage trước khi chạy validation",
+            )
+        return queue.submit(
+            snapshot,
+            policy,
+            profile=profile,
+            requester_id=requester_id,
+            idempotency_key=idempotency_key,
+        )
+    except HTTPException:
+        raise
+    except (ArtifactStoreError, RuntimeStateConflictError, ValidationQueueError, ValueError, OSError) as error:
+        raise _validation_error(error) from error
+
+
+@router.get("/jobs/{job_id}/validation-runs", response_model=list[ValidationRunView])
+def list_validation_runs(
+    job_id: str,
+    user: UserRecord | None = Depends(require_contributor),
+    limit: int = 100,
+) -> list[ValidationRunView]:
+    registry = _validation_job_access(job_id, user, mutation=False)
+    try:
+        return _validation_queue(registry).list_for_job(job_id, limit=limit)
+    except (ArtifactStoreError, RuntimeStateConflictError, ValidationQueueError, ValueError, OSError) as error:
+        raise _validation_error(error) from error
+
+
+@router.get("/jobs/{job_id}/validation-runs/{run_id}", response_model=ValidationRunView)
+def get_validation_run(
+    job_id: str,
+    run_id: str,
+    user: UserRecord | None = Depends(require_contributor),
+) -> ValidationRunView:
+    registry = _validation_job_access(job_id, user, mutation=False)
+    try:
+        return _validation_queue(registry).get(job_id, run_id)
+    except (ArtifactStoreError, RuntimeStateConflictError, ValidationQueueError, ValueError, OSError) as error:
+        raise _validation_error(error) from error
+
+
+@router.post(
+    "/jobs/{job_id}/validation-runs/{run_id}/select",
+    response_model=ValidationRunView,
+)
+def select_validation_run(
+    job_id: str,
+    run_id: str,
+    body: ValidationRunSelectRequest,
+    user: UserRecord | None = Depends(require_contributor),
+) -> ValidationRunView:
+    """Select only a completed worker run for the exact current candidate and server policy."""
+    registry = _validation_job_access(job_id, user, mutation=True)
+    queue = _validation_queue(registry)
+    _, snapshot = _current_validation_candidate(job_id, registry)
+    if body.candidate_checksum != snapshot.candidate_checksum:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Candidate đã thay đổi; tải lại SimulationPackage trước khi chọn validation",
+        )
+    policy, profile = _validation_policy()
+    try:
+        bound_config = queue.bind_profile(job_id, policy, profile)
+        current = queue.get(job_id, run_id)
+        if current.candidate_checksum != snapshot.candidate_checksum:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Run thuộc candidate cũ")
+        if current.validation_config_checksum != bound_config.config_checksum:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Run thuộc policy validation cũ")
+        if current.run_status != ValidationRunStatus.COMPLETED or current.status != ValidationOperationStatus.COMPLETED:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Chỉ có thể chọn run đã hoàn tất")
+        queue.runs.select_run(
+            job_id,
+            snapshot.candidate_checksum,
+            bound_config.config_checksum,
+            run_id,
+            expected_selected_run_id=body.expected_selected_run_id,
+        )
+        return queue.get(job_id, run_id)
+    except HTTPException:
+        raise
+    except (ArtifactStoreError, RuntimeStateConflictError, ValidationQueueError, ValueError, OSError) as error:
+        raise _validation_error(error) from error
+
+
+@router.get(
+    "/jobs/{job_id}/validation-runs/{run_id}/artifacts/{artifact_name}",
+    response_class=FileResponse,
+)
+def download_validation_artifact(
+    job_id: str,
+    run_id: str,
+    artifact_name: Literal["report.json", "runtime_manifest.json", "execution.log", "observations.json"],
+    user: UserRecord | None = Depends(require_contributor),
+) -> FileResponse:
+    """Resolve one named artifact from the persisted run and verify its checksum before download."""
+    registry = _validation_job_access(job_id, user, mutation=False)
+    queue = _validation_queue(registry)
+    try:
+        queue.get(job_id, run_id)
+        record = queue.runs.get_run(run_id)
+        references = {
+            "report.json": record.report_ref,
+            "runtime_manifest.json": record.runtime_manifest_ref,
+            "execution.log": record.execution_log_ref,
+        }
+        if artifact_name == "observations.json":
+            if record.report_ref is None:
+                raise ValidationQueueError("Validation run chưa có report")
+            report = registry.runtime_resolver.load_model(record.report_ref, ValidationReport)
+            evidence_refs = [
+                reference
+                for item in (*report.checks, *report.path_results)
+                for reference in item.evidence_refs
+                if reference.artifact_type == "IsaacExecutionObservations"
+            ]
+            unique_refs = {
+                (reference.artifact_uri, reference.artifact_checksum): reference for reference in evidence_refs
+            }
+            if len(unique_refs) != 1:
+                raise ValidationQueueError("Report không tham chiếu đúng một artifact observations")
+            reference = next(iter(unique_refs.values()))
+        else:
+            reference = references[artifact_name]
+        if reference is None:
+            raise ValidationQueueError(f"Validation run không có artifact {artifact_name}")
+        path = registry.runtime_resolver.require(reference)
+        media_type = "text/plain; charset=utf-8" if artifact_name == "execution.log" else "application/json"
+        return FileResponse(path, media_type=media_type, filename=artifact_name, content_disposition_type="attachment")
+    except (ArtifactStoreError, RuntimeStateConflictError, ValidationQueueError, ValueError, OSError) as error:
+        raise _validation_error(error) from error
+
+
+@router.post("/jobs/{job_id}/validation-runs/{run_id}/cancel", response_model=ValidationRunView)
+def cancel_validation_run(
+    job_id: str,
+    run_id: str,
+    user: UserRecord | None = Depends(require_contributor),
+) -> ValidationRunView:
+    registry = _validation_job_access(job_id, user, mutation=True)
+    try:
+        return _validation_queue(registry).cancel(job_id, run_id)
+    except (ArtifactStoreError, RuntimeStateConflictError, ValidationQueueError, ValueError, OSError) as error:
+        raise _validation_error(error) from error
+
+
+@router.post(
+    "/jobs/{job_id}/validation-runs/{run_id}/retry",
+    response_model=ValidationRunView,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def retry_validation_run(
+    job_id: str,
+    run_id: str,
+    user: UserRecord | None = Depends(require_contributor),
+    idempotency_key: str = Header(..., alias="Idempotency-Key", min_length=1, max_length=128),
+) -> ValidationRunView:
+    registry = _validation_job_access(job_id, user, mutation=True)
+    _, snapshot = _current_validation_candidate(job_id, registry)
+    try:
+        return _validation_queue(registry).retry(
+            job_id,
+            run_id,
+            requester_id=user.user_id if user is not None else "__anonymous__",
+            idempotency_key=idempotency_key,
+            current_candidate_checksum=snapshot.candidate_checksum,
+        )
+    except (ArtifactStoreError, RuntimeStateConflictError, ValidationQueueError, ValueError, OSError) as error:
+        raise _validation_error(error) from error
 
 
 @router.get("/jobs/{job_id}/review-state", response_model=ReviewState)

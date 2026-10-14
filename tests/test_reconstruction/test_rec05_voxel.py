@@ -109,8 +109,8 @@ def test_runtime_pin_and_capabilities(tmp_path: Path, monkeypatch: pytest.Monkey
     """Không tin source checkout nếu CLI pin hoặc required flag khác."""
     process = VoxelProcess(VoxelRuntimeSettings(cli=Path("unused"), module_path=Path("unused")))
     output = "splat-transform v3.6.6 (afbc281)\n" + " ".join(cluster_command(config()) + collision_command(config()))
-    monkeypatch.setattr(process, "cli", lambda args, target: output)
-    monkeypatch.setattr(process, "run", lambda args, target: "v24")
+    monkeypatch.setattr(process, "cli", lambda args, target, *, cancel_event=None: output)
+    monkeypatch.setattr(process, "run", lambda args, target, *, cancel_event=None: "v24")
     assert "3.6.6" in process.qualify(tmp_path)
     output = output.replace("--voxel-carve", "missing")
     with pytest.raises(GeometryError, match="controls"):

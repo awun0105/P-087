@@ -303,6 +303,8 @@ def test_prepare_volume_rejects_path_outside_canonical_volume(tmp_path: Path, mo
 
 def test_prepare_volume_rejects_symlinked_managed_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A symlink must never be followed by the ownership preparation step."""
+    for variable in container_entrypoint.MANAGED_VOLUME_PATHS:
+        monkeypatch.delenv(variable, raising=False)
     data_root = tmp_path / "data"
     managed_root = data_root / "studio_local"
     managed_root.parent.mkdir(parents=True)
@@ -413,3 +415,20 @@ def test_bootstrap_refuses_disabled_packaged_account(tmp_path: Path, monkeypatch
     monkeypatch.setenv("R2S_BOOTSTRAP_PASSWORD", "password-three")
     with pytest.raises(container_entrypoint.StartupError, match="vô hiệu hóa"):
         container_entrypoint._bootstrap_reviewer(f"sqlite:///{database}")
+
+
+def test_gpu_entrypoint_defaults_pass_the_production_settings_check() -> None:
+    """Image GPU mặc định APP_ENV=production, nên entrypoint phải tự đặt AUTH_REQUIRED (Settings fail-closed)."""
+    from src.config import Settings
+
+    script = (ROOT / "scripts" / "gpu" / "docker_entrypoint.sh").read_text(encoding="utf-8")
+    assert 'export APP_ENV="${APP_ENV:-production}"' in script
+    assert 'export AUTH_REQUIRED="${AUTH_REQUIRED:-true}"' in script
+    settings = Settings(
+        _env_file=None,
+        openai_api_key="not-used-by-studio",
+        app_env="production",
+        auth_required=True,
+        artifact_root="/data/artifacts",
+    )
+    assert settings.auth_required is True

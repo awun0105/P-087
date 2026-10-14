@@ -1,6 +1,7 @@
 "use client";
 
 import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
+import { SOURCE_ROUTES, SOURCE_TITLES } from "@/features/studio/newSceneSources";
 import { createContext, Fragment, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import {
@@ -38,11 +39,11 @@ export function usePageTitle(title: string | null): void {
   }, [setTitle, title]);
 }
 
-/** Ba trang bắt đầu dưới `/new` (features/studio/NewSceneFlow.tsx `SOURCE_ROUTES`). */
+/** Tên ba trang bắt đầu dưới `/new` lấy từ cùng nguồn với tiêu đề trang (features/studio/newSceneSources.ts). */
 const NEW_SCENE_PAGES: Record<string, string> = {
-  "/new/import-video": "Dựng từ video",
-  "/new/import-scene": "Mở scene 3DGS",
-  "/new/try-demo": "Thử mẫu",
+  [SOURCE_ROUTES.video]: SOURCE_TITLES.video.title,
+  [SOURCE_ROUTES.gaussian]: SOURCE_TITLES.gaussian.title,
+  [SOURCE_ROUTES.sample]: SOURCE_TITLES.sample.title,
 };
 
 export function crumbsFor(pathname: string, detailTitle?: string | null, signedIn = true): Crumb[] {
@@ -58,9 +59,11 @@ export function crumbsFor(pathname: string, detailTitle?: string | null, signedI
     }
   }
 
-  const scenes: Crumb = { label: "Scenes", href: "/scenes" };
+  const scenes: Crumb = { label: "Scenes từ video", href: "/scenes" };
+  const imports: Crumb = { label: "Scenes đã import", href: "/imports" };
   if (pathname === APP_HOME) return [{ label: "Tổng quan" }];
-  if (pathname === "/scenes") return [{ label: "Scenes" }];
+  if (pathname === "/scenes") return [{ label: "Scenes từ video" }];
+  if (pathname === "/imports") return [{ label: "Scenes đã import" }];
   const start = NEW_SCENE_PAGES[pathname];
   if (start) return [{ label: "Tạo scene mới", href: "/new" }, { label: start }];
   if (pathname === "/new" || pathname.startsWith("/new")) return [{ label: "Tạo scene mới" }];
@@ -68,11 +71,11 @@ export function crumbsFor(pathname: string, detailTitle?: string | null, signedI
   if (pathname.startsWith("/trash")) return [{ label: "Thùng rác" }];
   if (pathname.startsWith("/team")) return [{ label: "Nhóm" }];
   if (pathname === "/account") return [{ label: "Tài khoản" }];
-  if (pathname.startsWith("/imports/")) return [scenes, { label: "Scene import", href: "/scenes" }, { label: detailTitle ?? "Đang tải scene…" }];
+  if (pathname.startsWith("/imports/")) return [imports, { label: detailTitle ?? "Đang tải scene…" }];
   if (pathname.startsWith("/samples/")) return [scenes, { label: detailTitle ?? "Video mẫu" }];
   const inspection = /^\/scenes\/([^/]+)\/stages\/([^/]+)$/.exec(pathname);
   if (inspection) return [scenes, { label: detailTitle ?? "Scene", href: progressHref(decodeURIComponent(inspection[1])) }, { label: inspectionStage(inspection[2])?.title ?? "Giai đoạn" }];
-  if (pathname.startsWith("/scenes/")) return [scenes, { label: "Scene dựng từ video", href: "/scenes" }, { label: detailTitle ?? "Đang tải scene…" }];
+  if (pathname.startsWith("/scenes/")) return [scenes, { label: detailTitle ?? "Đang tải scene…" }];
   return [{ label: "Tổng quan", href: APP_HOME }];
 }
 

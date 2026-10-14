@@ -28,6 +28,8 @@ class Metric(BaseModel):
     verdict: Verdict | None = None
     #: Ngưỡng dùng cho `verdict` và nơi định nghĩa nó.
     threshold: str | None = None
+    #: Khoảng tham chiếu từ các scene đã chạy và nguồn.
+    reference: str | None = None
 
 
 class StageEvaluation(BaseModel):
@@ -48,11 +50,12 @@ class JobEvaluation(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["1.0"] = "1.0"
+    schema_version: Literal["1.1"] = "1.1"
     job_id: str
     project_id: str
     scene_name: str
     job_status: str
     scene_revision: str | None
     generated_at: datetime
+    summary: list[str] = []
     groups: list[StageEvaluation]

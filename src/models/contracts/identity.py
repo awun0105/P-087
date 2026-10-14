@@ -26,6 +26,16 @@ def canonical_content_checksum(value: BaseModel | dict[str, Any], checksum_field
     return f"sha256:{digest}"
 
 
+def artifact_model_payload(value: BaseModel) -> bytes:
+    """Serialize one contract using the deterministic JSON representation stored as an artifact."""
+    return value.model_dump_json(indent=2).encode("utf-8") + b"\n"
+
+
+def artifact_model_checksum(value: BaseModel) -> str:
+    """Hash the exact pretty-printed JSON bytes used by model artifact publication."""
+    return f"sha256:{hashlib.sha256(artifact_model_payload(value)).hexdigest()}"
+
+
 def verify_content_checksum(value: BaseModel, checksum_field: str) -> None:
     """Reject stale logical identities while leaving byte refs to the resolver."""
     expected = canonical_content_checksum(value, checksum_field)
@@ -55,6 +65,12 @@ def verify_candidate_lineage(
 def verify_candidate_inventory(candidate: CandidatePackage) -> None:
     """Require the manifest inventory to cover exactly the package byte refs."""
     refs = [candidate.entrypoint_usd, *candidate.assets, *candidate.geometry, *candidate.colliders]
+    collision_source_ref = candidate.candidate_manifest.collision_source_ref
+    collision_selection_ref = candidate.candidate_manifest.collision_selection_ref
+    if collision_source_ref is not None and collision_source_ref not in candidate.colliders:
+        raise ValueError("CandidateManifest collision_source_ref is missing from package collider refs")
+    if collision_selection_ref is not None:
+        refs.append(collision_selection_ref)
     checksums = [ref.artifact_checksum for ref in refs]
     if candidate.candidate_manifest.artifact_checksums != checksums:
         raise ValueError("CandidateManifest artifact_checksums do not match package refs")

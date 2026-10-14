@@ -6,7 +6,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ReviewPanel } from "@/features/studio/ReviewPanel";
 import type { Me } from "@/lib/api/auth";
 
-const auth = vi.hoisted(() => ({ me: { auth_required: false, user: null } as Me }));
+const reviewer: NonNullable<Me["user"]> = {
+  user_id: "reviewer-1",
+  email: "reviewer@example.com",
+  display_name: "Reviewer",
+  role: "reviewer",
+  active: true,
+  daily_job_quota: 10,
+};
+const auth = vi.hoisted(() => ({ me: { auth_required: true, user: null } as Me }));
 vi.mock("@/features/studio/AuthProvider", () => ({ useAuth: () => auth }));
 
 const CANDIDATE = "sha256:" + "c".repeat(64);
@@ -18,13 +26,16 @@ function state(status: string, extra: Record<string, unknown> = {}) {
     validation: {
       overall_result: "PASS",
       validator_version: "fixture-0",
+      candidate_checksum: CANDIDATE,
+      report_checksum: REPORT,
+      environment_versions: { isaac_sim: "fixture-0" },
       checks: [
-        { check_id: "scene_load", result: "PASS", message: null },
-        { check_id: "penetration_minor", result: "FAIL", message: "2 cm" },
+        { check_id: "scene_load", result: "PASS", message: null, evidence_refs: [] },
       ],
-      path_results: [{ pair_id: "pair-1", result: "CLEAR", message: null }],
+      path_results: [{ pair_id: "pair-1", result: "BLOCKED", message: "Lối đi có vật cản tùy chọn.", evidence_refs: [] }],
     },
-    warning_ids: ["penetration_minor"],
+    isaac_runtime_proof: true,
+    warning_ids: ["path:pair-1"],
     approval: null,
     release: null,
     release_archive: null,
@@ -41,7 +52,20 @@ describe("ReviewPanel", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     global.fetch = vi.fn();
-    auth.me = { auth_required: false, user: null };
+    auth.me = { auth_required: true, user: reviewer };
+  });
+
+  it("hiển thị trạng thái tải trong khi API chưa trả review state", async () => {
+    let resolveResponse!: (response: Response) => void;
+    const pending = new Promise<Response>((resolve) => {
+      resolveResponse = resolve;
+    });
+    vi.mocked(global.fetch).mockReturnValueOnce(pending);
+    render(<ReviewPanel jobId="job-a" sceneRevision="rev-004" />);
+
+    expect(screen.getByRole("status")).toHaveTextContent("Đang đọc trạng thái duyệt");
+    resolveResponse(reply(state("READY_FOR_REVIEW")));
+    expect(await screen.findByRole("button", { name: "Phê duyệt để phát hành" })).toBeInTheDocument();
   });
 
   it("phê duyệt chỉ sau khi chấp nhận cảnh báo và xác nhận, gửi đúng checksum", async () => {
@@ -57,7 +81,7 @@ describe("ReviewPanel", () => {
     render(<ReviewPanel jobId="job-a" sceneRevision="rev-004" />);
     const approve = await screen.findByRole("button", { name: "Phê duyệt để phát hành" });
     expect(approve).toBeDisabled();
-    fireEvent.click(screen.getByLabelText("penetration_minor"));
+    fireEvent.click(screen.getByLabelText("path:pair-1"));
     fireEvent.click(approve);
     fireEvent.click(screen.getByRole("button", { name: /Xác nhận phê duyệt/ }));
     expect(await screen.findByText(/Tải bản phát hành/)).toBeInTheDocument();
@@ -67,11 +91,11 @@ describe("ReviewPanel", () => {
       decision: "APPROVE",
       candidate_checksum: CANDIDATE,
       validation_report_checksum: REPORT,
-      accepted_warning_ids: ["penetration_minor"],
+      accepted_warning_ids: ["path:pair-1"],
     });
   });
 
-  it("từ chối cần lý do; chưa có báo cáo thì chỉ hiện lý do chặn", async () => {
+  it("từ chối cần lý do khi validation đã đủ điều kiện", async () => {
     vi.mocked(global.fetch).mockResolvedValueOnce(reply(state("READY_FOR_REVIEW")));
     render(<ReviewPanel jobId="job-a" sceneRevision="rev-004" />);
     const reject = await screen.findByRole("button", { name: "Yêu cầu sửa" });
@@ -80,15 +104,36 @@ describe("ReviewPanel", () => {
     await waitFor(() => expect(reject).toBeEnabled());
   });
 
-  it("chưa có validation: chặng Isaac chưa khả dụng, không có nút duyệt", async () => {
+  it("chưa có validation: blocker hiển thị dù không có report và không có action", async () => {
     vi.mocked(global.fetch).mockResolvedValueOnce(
       reply({ ...state("CANDIDATE_READY"), validation: null, warning_ids: [], blockers: ["Chưa có báo cáo validation Isaac"] }),
     );
     render(<ReviewPanel jobId="job-a" sceneRevision="rev-004" />);
-    // Q2: validation Isaac chưa có runtime → báo "Chưa khả dụng", không giả như đang chờ.
-    expect(await screen.findByText(/Chưa khả dụng: cần máy RTX/)).toBeInTheDocument();
+    expect(await screen.findByText("Chưa đủ điều kiện duyệt")).toBeInTheDocument();
+    expect(screen.getByText("Chưa có báo cáo validation Isaac")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Phê duyệt để phát hành" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Yêu cầu sửa" })).toBeNull();
     expect(screen.getByText("Có gói cho revision này")).toBeInTheDocument();
+  });
+
+  it("fail closed nếu API trả READY_FOR_REVIEW nhưng report không có trusted proof", async () => {
+    vi.mocked(global.fetch).mockResolvedValueOnce(
+      reply(state("READY_FOR_REVIEW", { isaac_runtime_proof: false, blockers: ["Legacy report không được tin cậy"] })),
+    );
+    render(<ReviewPanel jobId="job-a" sceneRevision="rev-004" />);
+    expect(await screen.findByText("Legacy report không được tin cậy")).toBeInTheDocument();
+    expect(screen.getByText(/chỉ dùng để xem thông tin/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Phê duyệt để phát hành" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Yêu cầu sửa" })).toBeNull();
+  });
+
+  it("tắt đăng nhập: không hiện nút duyệt và giải thích cần bật đăng nhập Reviewer", async () => {
+    auth.me = { auth_required: false, user: null };
+    vi.mocked(global.fetch).mockResolvedValueOnce(reply(state("READY_FOR_REVIEW")));
+    render(<ReviewPanel jobId="job-1" sceneRevision="rev-004" />);
+    expect(await screen.findByText(/chưa bật đăng nhập nên không thể duyệt/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Phê duyệt để phát hành" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Yêu cầu sửa" })).toBeNull();
   });
 
   it("Editor chỉ đọc báo cáo; không thấy action duyệt hoặc từ chối", async () => {
@@ -108,28 +153,55 @@ describe("ReviewPanel", () => {
     expect(screen.queryByRole("button", { name: "Phê duyệt để phát hành" })).toBeNull();
   });
 
-  it("cảnh báo cần chấp nhận hiện kèm thông điệp và bằng chứng của check; báo cáo thiếu bằng chứng Isaac có cảnh báo", async () => {
-    vi.mocked(global.fetch).mockResolvedValueOnce(reply(state("READY_FOR_REVIEW", { isaac_runtime_proof: false })));
+  it("optional path warning hiện message/evidence để Reviewer chấp nhận; không nhầm với failed check", async () => {
+    vi.mocked(global.fetch).mockResolvedValueOnce(reply(state("READY_FOR_REVIEW")));
     const onState = vi.fn();
     render(<ReviewPanel jobId="job-a" sceneRevision="rev-004" onState={onState} />);
-    const checkbox = await screen.findByLabelText("penetration_minor");
-    expect(checkbox).toHaveAccessibleDescription("2 cm · không kèm bằng chứng");
-    expect(screen.getByText(/chưa có bằng chứng chạy Isaac Sim thật/)).toBeInTheDocument();
+    const checkbox = await screen.findByLabelText("path:pair-1");
+    expect(checkbox).toHaveAccessibleDescription("Lối đi có vật cản tùy chọn. · không kèm bằng chứng");
+    expect(screen.queryByText(/chưa gắn với validation run worker/)).toBeNull();
     // Màn cha nhận đúng trạng thái đã chuẩn hoá để vẽ thẻ báo cáo.
-    await waitFor(() => expect(onState).toHaveBeenLastCalledWith(expect.objectContaining({ isaac_runtime_proof: false, warning_ids: ["penetration_minor"] })));
+    await waitFor(() => expect(onState).toHaveBeenLastCalledWith(expect.objectContaining({ isaac_runtime_proof: true, warning_ids: ["path:pair-1"] })));
   });
 
   it("đã quyết định thì hiện nguồn kết quả: checksum gói, báo cáo và bản ghi duyệt", async () => {
     const record = "sha256:" + "a".repeat(64);
     vi.mocked(global.fetch).mockResolvedValueOnce(
       reply(state("APPROVED", {
-        approval: { reviewer_id: "u-rev", decision: "APPROVE", reason: null, decided_at: "2026-09-30T10:00:00Z", candidate_checksum: CANDIDATE, validation_report_checksum: REPORT, record_checksum: record, accepted_warning_ids: ["penetration_minor"] },
+        approval: { reviewer_id: "u-rev", decision: "APPROVE", reason: null, decided_at: "2026-09-30T10:00:00Z", candidate_checksum: CANDIDATE, validation_report_checksum: REPORT, record_checksum: record, accepted_warning_ids: ["path:pair-1"] },
       })),
     );
     render(<ReviewPanel jobId="job-a" sceneRevision="rev-004" />);
     expect(await screen.findByText("Nguồn kết quả của quyết định")).toBeInTheDocument();
     expect(screen.getByText(record)).toBeInTheDocument();
     expect(screen.getByText(CANDIDATE)).toBeInTheDocument();
+  });
+
+  it("hiện lỗi seal an toàn và cho Reviewer thử lại dù release đang ở APPROVED", async () => {
+    auth.me = {
+      auth_required: true,
+      user: { user_id: "u-rev", email: "reviewer@example.com", display_name: "Reviewer", role: "reviewer", active: true, daily_job_quota: 10 },
+    };
+    vi.mocked(global.fetch)
+      .mockResolvedValueOnce(
+        reply(state("APPROVED", {
+          approval: { reviewer_id: "u-rev", decision: "APPROVE", reason: null, decided_at: "2026-09-30T10:00:00Z", candidate_checksum: CANDIDATE, validation_report_checksum: REPORT, record_checksum: "sha256:" + "a".repeat(64), accepted_warning_ids: ["path:pair-1"] },
+          release_seal_error: "Bản phát hành chưa hoàn tất hoặc chưa vượt qua kiểm tra toàn vẹn; Reviewer có thể thử lại.",
+          blockers: ["Release archive chưa vượt qua kiểm tra toàn vẹn"],
+        })),
+      )
+      .mockResolvedValueOnce(reply(state("RELEASED", {
+        approval: { reviewer_id: "u-rev", decision: "APPROVE", reason: null, decided_at: "2026-09-30T10:00:00Z", candidate_checksum: CANDIDATE, validation_report_checksum: REPORT, record_checksum: "sha256:" + "a".repeat(64), accepted_warning_ids: ["path:pair-1"] },
+        release: { release_timestamp: "2026-09-30T10:00:01Z", release_manifest_checksum: "sha256:" + "e".repeat(64) },
+        release_archive: { artifact_uri: "artifact://x/release.zip" },
+      })));
+
+    render(<ReviewPanel jobId="job-a" sceneRevision="rev-004" />);
+
+    expect(await screen.findByText(/Bản phát hành chưa hoàn tất/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Thử lại phát hành" }));
+    expect(await screen.findByText(/Tải bản phát hành/)).toBeInTheDocument();
+    expect(String(vi.mocked(global.fetch).mock.calls[1]?.[0])).toContain("/api/v1/jobs/job-a/release-seal");
   });
 
   it("lỗi đọc trạng thái duyệt có đường thử lại", async () => {

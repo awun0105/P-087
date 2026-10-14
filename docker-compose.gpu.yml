@@ -10,6 +10,8 @@ services:
       PRODUCT_OBJECTIFY_REMOTE_WORKER: "true"
       PRODUCT_PROCESSING_CONFIG: /app/configs/product/processing_presets_v1.json
       PRODUCT_RUNTIME_MANIFEST: /app/data/studio_local/runtime_manifest.json
+      # Do gpu-runtime-init sinh trên volume dùng chung; API chỉ đọc.
+      PRODUCT_INPUT_RUNTIME_REGISTRY: /app/data/studio_local/input_runtime_registry.json
     depends_on:
       data-restore:
         condition: service_completed_successfully
@@ -41,15 +43,21 @@ services:
         fi;
         .venv/bin/python -m scripts.gpu.make_runtime_manifest
         --out "$$PRODUCT_RUNTIME_MANIFEST";
+        : "$${PRODUCT_INPUT_RUNTIME_REGISTRY:?cần đặt PRODUCT_INPUT_RUNTIME_REGISTRY cho gpu-runtime-init}";
+        .venv/bin/python -m scripts.gpu.qualify_input_runtimes
+        --out "$$PRODUCT_INPUT_RUNTIME_REGISTRY";
         .venv/bin/python -m scripts.kaggle.preflight
     environment:
       APP_ENV: development
       AUTH_REQUIRED: "true"
+      AUTH_GUEST_SIGNUP_ENABLED: "${AUTH_GUEST_SIGNUP_ENABLED:-true}"
       DATABASE_URL: sqlite:////data/studio_local/runtime.db
       ARTIFACT_ROOT: /data/studio_local/artifacts
       PRODUCT_WORKER_ROOT: /data/studio_local/workers
       PRODUCT_PROCESSING_CONFIG: /opt/real2sim/app/configs/product/processing_presets_v1.json
       PRODUCT_RUNTIME_MANIFEST: /data/studio_local/runtime_manifest.json
+      PRODUCT_INPUT_RUNTIME_REGISTRY: /data/studio_local/input_runtime_registry.json
+      REC17_LIDAR_ODOMETRY_PYTHON: /opt/real2sim/lidar_runtime/bin/python
       R2S_STATE: /data
       # Replace any host-local values inherited from `.env.studio`; all heavy
       # tools live at these paths inside Dockerfile.gpu.
@@ -61,7 +69,7 @@ services:
       REC04_SPLAT_MODULE_PATH: /opt/real2sim/runtime/node_modules/@playcanvas/splat-transform/dist/index.mjs
       REC05_VOXEL_CLI: /opt/real2sim/runtime/node_modules/@playcanvas/splat-transform/bin/cli.mjs
       REC05_VOXEL_MODULE_PATH: /opt/real2sim/runtime/node_modules/@playcanvas/splat-transform/dist/index.mjs
-      PRODUCT_GEOMETRY_CONFIG: /opt/real2sim/app/configs/product/geometry_v1.json
+      PRODUCT_GEOMETRY_CONFIG: ${PRODUCT_GEOMETRY_CONFIG:-/opt/real2sim/app/configs/product/geometry_indoor_v1.json}
       PRODUCT_SCENE_RUNTIME_PYTHON: /opt/real2sim/scene_runtime/bin/python
       PRODUCT_SAM2_CHECKPOINT: /opt/real2sim/scene_runtime/checkpoints/sam2.1_hiera_tiny.pt
       PRODUCT_LAMA_CHECKPOINT: /opt/real2sim/scene_runtime/weights/big-lama.pt
@@ -86,13 +94,16 @@ services:
       - ${STUDIO_ENV_FILE:-.env.studio}
     environment:
       APP_ENV: development
+      REC17_LIDAR_ODOMETRY_PYTHON: /opt/real2sim/lidar_runtime/bin/python
       AUTH_REQUIRED: "true"
+      AUTH_GUEST_SIGNUP_ENABLED: "${AUTH_GUEST_SIGNUP_ENABLED:-true}"
       AUTH_COOKIE_SECURE: "false"
       DATABASE_URL: sqlite:////data/studio_local/runtime.db
       ARTIFACT_ROOT: /data/studio_local/artifacts
       PRODUCT_WORKER_ROOT: /data/studio_local/workers
       PRODUCT_PROCESSING_CONFIG: /opt/real2sim/app/configs/product/processing_presets_v1.json
       PRODUCT_RUNTIME_MANIFEST: /data/studio_local/runtime_manifest.json
+      PRODUCT_INPUT_RUNTIME_REGISTRY: /data/studio_local/input_runtime_registry.json
       PRODUCT_DEMO_DIR: /data/demo/library
       PRODUCT_ASSET_PREVIEW_DIR: /data/asset_previews
       PRODUCT_RERUN_RECORDING_DIR: /data/rerun_recordings
@@ -109,7 +120,7 @@ services:
       REC04_SPLAT_MODULE_PATH: /opt/real2sim/runtime/node_modules/@playcanvas/splat-transform/dist/index.mjs
       REC05_VOXEL_CLI: /opt/real2sim/runtime/node_modules/@playcanvas/splat-transform/bin/cli.mjs
       REC05_VOXEL_MODULE_PATH: /opt/real2sim/runtime/node_modules/@playcanvas/splat-transform/dist/index.mjs
-      PRODUCT_GEOMETRY_CONFIG: /opt/real2sim/app/configs/product/geometry_v1.json
+      PRODUCT_GEOMETRY_CONFIG: ${PRODUCT_GEOMETRY_CONFIG:-/opt/real2sim/app/configs/product/geometry_indoor_v1.json}
       PRODUCT_SCENE_RUNTIME_PYTHON: /opt/real2sim/scene_runtime/bin/python
       PRODUCT_SAM2_CHECKPOINT: /opt/real2sim/scene_runtime/checkpoints/sam2.1_hiera_tiny.pt
       PRODUCT_LAMA_CHECKPOINT: /opt/real2sim/scene_runtime/weights/big-lama.pt

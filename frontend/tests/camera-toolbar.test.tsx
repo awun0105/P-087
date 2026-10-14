@@ -12,9 +12,11 @@ function controls(): ViewerControls {
     setCameraMode: vi.fn(() => true),
     frameScene: vi.fn(() => true),
     resetCamera: vi.fn(() => true),
+    gotoPose: vi.fn(() => true),
     playTrajectory: vi.fn(() => true),
     pauseTrajectory: vi.fn(() => true),
     seekTrajectory: vi.fn(() => true),
+    getCameraPose: vi.fn(() => null),
   };
 }
 const loaded: PlayCanvasRuntime = { ...INITIAL_RUNTIME, loaded: true, progress: 100 };

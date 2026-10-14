@@ -35,7 +35,10 @@ const fileSystem = {
         };
     }
 };
-const options = { filename: process.argv[3] ?? 'input.ply', inputFormat: 'ply', fileSystem };
+const filename = process.argv[3] ?? 'input.ply';
+const inputFormat = process.argv[5] ?? 'ply';
+if (!['ply', 'sog'].includes(inputFormat)) throw new Error('Unsupported input format');
+const options = { filename, inputFormat, fileSystem };
 const info = await api.readFileInfo(options);
 if (!info.gaussian || info.numGaussians < 1 || info.numLods !== 1) throw new Error('Invalid Gaussian PLY');
 const sources = await api.readFile(options);

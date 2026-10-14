@@ -16,13 +16,14 @@ BundleMetricVerifier đo lại, không tự tin số.
 
 import hashlib
 import json
+import math
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, FiniteFloat
+from pydantic import Field, FiniteFloat, SerializerFunctionWrapHandler, model_serializer, model_validator
 
 from src.models.contracts.artifacts import ArtifactDataClass, Checksum, ContractModel, Identifier, ProductArtifactRef
 from src.models.contracts.coordinates import MetricScale
@@ -59,7 +60,11 @@ from src.services.reconstruction.rgb.geometry.geometry_publication import (
     GeometryPublisher,
     RgbGeometryService,
 )
-from src.services.reconstruction.rgb.geometry.voxel import VoxelConfig
+from src.services.reconstruction.rgb.geometry.voxel import (
+    StatisticalOutlierRemovalConfig,
+    VoxelConfig,
+    require_voxel_capacity,
+)
 from src.services.reconstruction.rgb.pose.pose_publication import CameraPoseResolver
 from src.services.reconstruction.rgb.preflight.publication import ArtifactWriter
 from src.services.reconstruction.rgb.splat.visual_publication import VisualResolver
@@ -70,7 +75,7 @@ Vector3 = tuple[FiniteFloat, FiniteFloat, FiniteFloat]
 class GeometryProfile(ContractModel):
     """`configs/product/geometry_v1.json`: thông số REC-05 không kèm seed (seed tính theo scene)."""
 
-    schema_version: Literal["1.0"] = "1.0"
+    schema_version: Literal["1.0", "1.1", "1.2"] = "1.0"
     profile: Identifier
     note: str = ""
     resolution_m: FiniteFloat = Field(gt=0)
@@ -90,8 +95,82 @@ class GeometryProfile(ContractModel):
     #: Seed lọc cụm đặt ngay trên mặt sàn dưới camera đầu (sàn là cụm lớn liên thông).
     cluster_seed_height_m: FiniteFloat = Field(ge=0)
     cleanup: Literal["cluster", "floaters"]
+    statistical_outlier_removal: StatisticalOutlierRemovalConfig | None = None
     gpu_index: int = Field(ge=0, strict=True)
     max_gaussian_scale_log: FiniteFloat | None = 1.0
+    external_fill_size_m: FiniteFloat | None = Field(default=None, gt=0)
+    floor_fill_size_m: FiniteFloat | None = Field(default=None, gt=0, exclude_if=lambda value: value is None)
+    collision_mesh: Literal["smooth", "faces"] = Field(default="smooth", exclude_if=lambda value: value == "smooth")
+
+    @model_serializer(mode="wrap")
+    def _versioned_payload(self, handler: SerializerFunctionWrapHandler) -> dict:
+        """Keep legacy profile serialization unchanged for existing bundle checksums."""
+        payload = handler(self)
+        if self.schema_version != "1.2":
+            payload.pop("external_fill_size_m", None)
+        return payload
+
+    @model_validator(mode="after")
+    def _sor_requires_versioned_opt_in(self) -> "GeometryProfile":
+        if self.statistical_outlier_removal is not None and self.schema_version not in ("1.1", "1.2"):
+            raise ValueError("statistical outlier removal requires GeometryProfile schema 1.1 or 1.2")
+        if self.external_fill_size_m is not None and self.schema_version != "1.2":
+            raise ValueError("external fill requires GeometryProfile schema 1.2")
+        return self
+
+    def checksum(self) -> str:
+        """Profile identity uses the historical compact JSON encoding."""
+        return "sha256:" + hashlib.sha256(self.model_dump_json().encode()).hexdigest()
+
+
+_MAX_VOXEL_CELLS = 1_500_000_000.0
+
+
+def build_voxel_config(
+    profile: GeometryProfile,
+    crop: tuple[Vector3, Vector3],
+    seed: Vector3,
+) -> VoxelConfig:
+    """Keep the requested cleanup profile intact; reject crops that require coarser voxels."""
+    low, high = crop
+    fill_size = max(profile.external_fill_size_m or 0, profile.floor_fill_size_m or 0)
+    if fill_size:
+        require_voxel_capacity(
+            tuple(upper - lower for lower, upper in zip(low, high, strict=True)),
+            profile.resolution_m,
+            fill_size,
+        )
+    volume_m3 = math.prod(upper - lower for lower, upper in zip(low, high, strict=True))
+    minimum_resolution_m = (volume_m3 / _MAX_VOXEL_CELLS) ** (1 / 3) if volume_m3 > 0 else 0.0
+    if minimum_resolution_m > profile.resolution_m:
+        raise ValueError(
+            f"requested voxel resolution {profile.resolution_m:g} m exceeds voxel capacity; "
+            f"minimum feasible resolution is {minimum_resolution_m:g} m. "
+            "Reduce the crop or explicitly select a coarser geometry profile."
+        )
+
+    cluster_seed = (seed[0], seed[1], profile.cluster_seed_height_m)
+    return VoxelConfig(
+        schema_version=profile.schema_version,
+        resolution_m=profile.resolution_m,
+        opacity=profile.opacity,
+        cluster_resolution_m=profile.cluster_resolution_m,
+        cluster_opacity=profile.cluster_opacity,
+        cluster_min_contribution=profile.cluster_min_contribution,
+        cluster_seed_world=cluster_seed,
+        navigation_seed_world=seed,
+        capsule_height_m=profile.capsule_height_m,
+        capsule_radius_m=profile.capsule_radius_m,
+        max_seed_relocation_m=profile.max_seed_relocation_m,
+        gpu_index=profile.gpu_index,
+        crop_box_world=crop,
+        cleanup=profile.cleanup,
+        statistical_outlier_removal=profile.statistical_outlier_removal,
+        max_gaussian_scale_log=profile.max_gaussian_scale_log,
+        external_fill_size_m=profile.external_fill_size_m,
+        floor_fill_size_m=profile.floor_fill_size_m,
+        collision_mesh=profile.collision_mesh,
+    )
 
 
 class FinalizeRequest(ContractModel):
@@ -279,29 +358,7 @@ class FinalizeWorker:
                 profile.crop_height_m,
             ),
         )
-        volume_m3 = (crop[1][0] - crop[0][0]) * (crop[1][1] - crop[0][1]) * (crop[1][2] - crop[0][2])
-        safe_resolution = profile.resolution_m
-        if volume_m3 > 0:
-            min_res = (volume_m3 / 1_500_000_000.0) ** (1 / 3)
-            safe_resolution = max(profile.resolution_m, float(min_res))
-
-        cluster_seed = (seed[0], seed[1], profile.cluster_seed_height_m)
-        config = VoxelConfig(
-            resolution_m=safe_resolution,
-            opacity=profile.opacity,
-            cluster_resolution_m=max(profile.cluster_resolution_m, safe_resolution),
-            cluster_opacity=profile.cluster_opacity,
-            cluster_min_contribution=profile.cluster_min_contribution,
-            cluster_seed_world=cluster_seed,
-            navigation_seed_world=seed,
-            capsule_height_m=profile.capsule_height_m,
-            capsule_radius_m=profile.capsule_radius_m,
-            max_seed_relocation_m=profile.max_seed_relocation_m,
-            gpu_index=profile.gpu_index,
-            crop_box_world=crop,
-            cleanup=profile.cleanup,
-            max_gaussian_scale_log=profile.max_gaussian_scale_log,
-        )
+        config = build_voxel_config(profile, crop, seed)
         raw_visual = confirmation.preview.request.source_visual
         geometry = RgbGeometryService(
             GeometryDependencies(
@@ -363,12 +420,32 @@ class FinalizeWorker:
         record = LidarPackageRecord.model_validate_json(self.visuals.require(request.lidar_package_ref).read_bytes())
         if record.job_id != request.job_id or result.canonical_pose_ref is None or result.geometry_ref is None:
             raise ValueError("gói LiDAR không thuộc job này hoặc scene chưa có pose/hình học canonical")
-        poses = sorted(
-            json.loads(self.visuals.require(result.canonical_pose_ref).read_text())["poses"],
-            key=lambda pose: pose["frame_id"],
-        )
+        canonical_pose_path = self.visuals.require(result.canonical_pose_ref)
+        canonical_pose_payload = json.loads(canonical_pose_path.read_text())
+        poses = sorted(canonical_pose_payload["poses"], key=lambda pose: pose["frame_id"])
         trajectory = parse_trajectory(self.visuals.require(record.trajectory_ref).read_text(encoding="utf-8"))
-        priors = camera_priors(trajectory, record.sensor_from_camera, tuple(pose["frame_id"] for pose in poses))
+        source_frame_ids = None
+        source_frame_count = None
+        from src.services.reconstruction.rgb.frames.frame_set import FrameSetResolver
+
+        source_frame_set = ProductArtifactRef.model_validate(canonical_pose_payload["source_frame_set"])
+        frames = FrameSetResolver(self.deps.resolve, self.deps.resolve).load(source_frame_set)
+        mapped = [frame.source_frame_id is not None for frame in frames.frames]
+        if any(mapped) and not all(mapped):
+            raise ValueError("canonical RGB frame set contains a partial source-frame map")
+        if frames.video_preparation is not None:
+            if not all(mapped):
+                raise ValueError("canonical RGB frame set is missing its verified source-frame map")
+            source_by_frame = {frame.frame_id: frame.source_frame_id for frame in frames.frames}
+            source_frame_ids = tuple(source_by_frame[pose["frame_id"]] for pose in poses)
+            source_frame_count = frames.video_preparation.client_manifest.source_video.frame_count
+        priors = camera_priors(
+            trajectory,
+            record.sensor_from_camera,
+            tuple(pose["frame_id"] for pose in poses),
+            source_frame_ids,
+            source_frame_count,
+        )
         fit = fit_world_from_lidar_map(
             [prior.translation for prior in priors], [tuple(pose["translation"]) for pose in poses]
         )
@@ -379,6 +456,15 @@ class FinalizeWorker:
             "job_id": request.job_id,
             "method": fit.method,
             "frame_count": fit.pair_count,
+            "inlier_frame_count": fit.inlier_pair_count,
+            "rejected_frame_count": fit.rejected_pair_count,
+            "inlier_threshold_m": fit.inlier_threshold_m,
+            "base_inlier_threshold_m": fit.base_inlier_threshold_m,
+            "max_outlier_fraction": fit.max_outlier_fraction,
+            "ransac_iterations": fit.ransac_iterations,
+            "random_seed": fit.random_seed,
+            "rank_ratio": fit.rank_ratio,
+            "prior_assumptions": list(fit.prior_assumptions),
             "residual_rms_m": fit.rms_residual_m,
             "residual_median_m": fit.median_residual_m,
             "residual_max_m": fit.max_residual_m,
@@ -421,6 +507,8 @@ class FinalizeWorker:
                 "ground_truth_assisted": ground_truth,
                 "lidar_alignment": {
                     "method": fit.method,
+                    "inlier_frame_count": fit.inlier_pair_count,
+                    "rejected_frame_count": fit.rejected_pair_count,
                     "residual_median_m": round(fit.median_residual_m, 4),
                     "residual_max_m": round(fit.max_residual_m, 4),
                 },
@@ -467,8 +555,8 @@ class FinalizeWorker:
                 "evidence_kind": "real_measurement",
                 "distance_source": data.distance_source,
                 "geometry_profile": request.geometry.profile,
-                "geometry_profile_checksum": "sha256:"
-                + hashlib.sha256(request.geometry.model_dump_json().encode()).hexdigest(),
+                "geometry_profile_checksum": request.geometry.checksum(),
+                "geometry_profile_snapshot": request.geometry.model_dump(mode="json"),
                 **(lidar.provenance if lidar else {}),
             },
         )
@@ -540,11 +628,17 @@ class FinalizeWorker:
 
 def _human_message(error: Exception) -> str:
     """Thông báo cho người dùng; không kèm đường dẫn hay stderr của tool."""
-    text = str(error)
+    text = " ".join(str(item) for item in (error, error.__cause__) if item is not None).lower()
+    if "external fill" in text or "--voxel-external-fill" in text:
+        if "voxel capacity" in text:
+            return "Vùng dựng và khoảng đệm fill vượt giới hạn voxel; thu hẹp vùng hoặc chọn profile khác"
+        return "Không thực hiện được external fill; kiểm tra vùng cắt, độ kín của phòng và vị trí robot bắt đầu"
     if "tolerance" in text or "independent" in text:
         return "Đoạn kiểm C–D đo lại trên scene đã quy đổi mét vượt ngưỡng; xác nhận lại tỉ lệ"
     if "seed" in text or "clearance" in text:
         return "Không tìm được chỗ trống cho robot quanh camera đầu; cần chọn điểm robot đứng"
+    if "voxel capacity" in text:
+        return "Vùng dựng vượt giới hạn voxel ở độ phân giải đã chọn; thu hẹp vùng làm việc hoặc xác nhận profile khác"
     return "Dựng hình học/collision hoặc đóng gói bundle thất bại; xem log attempt rồi thử lại"
 
 
@@ -575,9 +669,24 @@ def load_finalize_result(
     return result
 
 
-def load_geometry_profile(path: Path) -> GeometryProfile:
-    """Đọc file thông số REC-05 (không default ngầm)."""
-    return GeometryProfile.model_validate(json.loads(path.read_text()))
+def load_geometry_profile(path: Path, *, overrides: dict[str, object] | None = None) -> GeometryProfile:
+    """Load the deployment profile and validate explicit per-job geometry controls."""
+    profile = GeometryProfile.model_validate(json.loads(path.read_text()))
+    if not overrides:
+        return profile
+    allowed = {"resolution_m", "collision_mesh", "external_fill_size_m", "floor_fill_size_m"}
+    if unknown := overrides.keys() - allowed:
+        raise ValueError(f"Unsupported geometry controls: {sorted(unknown)}")
+    values = dict(overrides)
+    for key in ("external_fill_size_m", "floor_fill_size_m"):
+        if key in values:
+            if isinstance(values[key], bool):
+                raise ValueError(f"{key} must be a number")
+            if values[key] == 0:
+                values[key] = None
+    if values.get("external_fill_size_m") is not None:
+        values["schema_version"] = "1.2"
+    return GeometryProfile.model_validate(profile.model_dump() | values)
 
 
 class ConfirmationSummary(ContractModel):

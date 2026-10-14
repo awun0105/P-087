@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import zipfile
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -19,10 +21,27 @@ from scripts.cloud.package_publish import (
     validate_staged_package,
 )
 from scripts.studio.data_package import PackageError, pack
+from src.models.contracts.artifacts import ArtifactDataClass, ProductArtifactRef
 from src.models.contracts.identity import canonical_content_checksum
-from src.services.orchestration.artifacts.checksum import sha256_file
+from src.models.contracts.scene import SceneEnvironment, SceneIR
+from src.models.contracts.validation_run import (
+    ValidationConfig,
+    ValidationRunOrigin,
+    ValidationRunRecord,
+    ValidationRunStatus,
+)
+from src.services.orchestration.artifacts import ArtifactResolver
+from src.services.orchestration.artifacts.checksum import sha256_bytes, sha256_file
 from src.services.orchestration.artifacts.remote import RemoteObject
 from src.services.orchestration.jobs.database import RuntimeDatabase
+from src.services.orchestration.scene.editor import SceneEditor
+from src.services.orchestration.scene.heads import (
+    PendingScenePublication,
+    SceneHeadBackfillItem,
+    SceneHeadRecord,
+    SceneHeadRepairRecord,
+    SceneHeadRepository,
+)
 
 
 class MemoryStore:
@@ -221,6 +240,316 @@ def test_publish_is_idempotent_then_imports_rows_atomically(tmp_path: Path) -> N
         assert transaction.execute("SELECT COUNT(*) FROM r2s_sessions").fetchone() == (0,)
     with pytest.raises(PackagePublishError, match="not empty"):
         import_rows(target, package.rows)
+
+
+def test_scene_head_and_resumable_repair_cross_package_publish(tmp_path: Path) -> None:
+    """Typed scene state survives package verification and production row import."""
+    _make_package(tmp_path)
+    source = tmp_path / "source"
+    runtime_db = source / "data/studio_local/runtime.db"
+    fixture_root = Path(__file__).resolve().parents[2] / "fixtures"
+    scene = SceneIR.model_validate_json((fixture_root / "scene_ir/scene.json").read_bytes())
+    geometry_bytes = b"scene-geometry"
+    geometry_uri = "artifact://jobs/job-a/scene/environment.glb"
+    geometry_reference = ProductArtifactRef(
+        artifact_type="CollisionMesh",
+        schema_version="1.0",
+        artifact_uri=geometry_uri,
+        artifact_checksum=sha256_bytes(geometry_bytes),
+        data_class=ArtifactDataClass.DERIVED,
+        producer_stage="ST-SCENE-ASSEMBLE",
+        job_id="job-a",
+    )
+    geometry_path = source / "data/studio_local/artifacts" / geometry_uri.removeprefix("artifact://")
+    geometry_path.parent.mkdir(parents=True, exist_ok=True)
+    geometry_path.write_bytes(geometry_bytes)
+    scene_draft = scene.model_copy(
+        update={
+            "environment": SceneEnvironment(geometry_ref=geometry_reference),
+            "objects": [],
+            "provenance": {"source": "package-head-roundtrip-test"},
+            "scene_ir_checksum": "sha256:" + "0" * 64,
+        }
+    )
+    scene = scene_draft.model_copy(
+        update={"scene_ir_checksum": canonical_content_checksum(scene_draft, "scene_ir_checksum")}
+    )
+    scene_bytes = scene.model_dump_json(indent=2).encode("utf-8") + b"\n"
+    scene_path = source / "data/studio_local/artifacts/jobs/job-a/scene/scene_ir.rev-001.json"
+    scene_path.parent.mkdir(parents=True, exist_ok=True)
+    scene_path.write_bytes(scene_bytes)
+    reference = SceneEditor._reference_for("job-a", scene.scene_revision, sha256_bytes(scene_bytes))
+    item_draft = SceneHeadBackfillItem(
+        schema_version="1.0",
+        job_id="job-a",
+        scene_id=scene.scene_id,
+        scene_revision=scene.scene_revision,
+        revision_number=1,
+        supersedes_revision=None,
+        scene_ir_checksum=scene.scene_ir_checksum,
+        scene_reference=reference,
+        item_checksum="sha256:" + "0" * 64,
+    )
+    item = item_draft.model_copy(update={"item_checksum": canonical_content_checksum(item_draft, "item_checksum")})
+    head = SceneHeadRecord.freeze(item, generation=1, allocation_sequence=1)
+    inventory_checksum = sha256_bytes(json.dumps([reference.artifact_uri], separators=(",", ":")).encode())
+    repair = SceneHeadRepairRecord.start("job-a", inventory_checksum, 1)
+    database = RuntimeDatabase(f"sqlite:///{runtime_db}")
+    with database.transaction(write=True) as transaction:
+        transaction.execute(
+            "INSERT INTO r2s_scene_heads(job_id,generation,allocation_sequence,head_checksum,payload) "
+            "VALUES (?,?,?,?,?)",
+            (head.job_id, head.generation, head.allocation_sequence, head.head_checksum, head.model_dump_json()),
+        )
+        transaction.execute(
+            "INSERT INTO r2s_scene_head_repairs(job_id,status,generation,repair_checksum,payload) VALUES (?,?,?,?,?)",
+            (repair.job_id, repair.status, repair.generation, repair.repair_checksum, repair.model_dump_json()),
+        )
+        transaction.execute(
+            "INSERT INTO r2s_scene_head_backfill_items(job_id,scene_revision,item_checksum,payload) VALUES (?,?,?,?)",
+            (item.job_id, item.scene_revision, item.item_checksum, item.model_dump_json()),
+        )
+    publication_draft = PendingScenePublication(
+        schema_version="1.0",
+        job_id="job-a",
+        writer_id="failed-writer",
+        fencing_token="fenced-token",
+        expected_generation=2,
+        expected_scene_revision="rev-001",
+        target_scene_revision="rev-002",
+        operation="test-aborted-publication",
+        payload_checksum=None,
+        artifact_reference=None,
+        lease_expires_at=datetime.now(UTC) + timedelta(minutes=15),
+        status="ABORTED",
+        publication_checksum="sha256:" + "0" * 64,
+    )
+    publication = publication_draft.model_copy(
+        update={"publication_checksum": canonical_content_checksum(publication_draft, "publication_checksum")}
+    )
+    with database.transaction(write=True) as transaction:
+        transaction.execute(
+            "INSERT INTO r2s_scene_publications(job_id,expected_generation,target_revision,lease_expires_at,payload) "
+            "VALUES (?,?,?,?,?)",
+            (
+                publication.job_id,
+                publication.expected_generation,
+                publication.target_scene_revision,
+                publication.lease_expires_at.isoformat(),
+                publication.model_dump_json(),
+            ),
+        )
+    package_path = pack(source, tmp_path / "scene-head-publish.zip")
+
+    staging = tmp_path / "scene-head-staging"
+    extract_package(package_path, staging)
+    package = validate_staged_package(staging)
+    assert len(package.rows["r2s_scene_heads"]) == 1
+    assert len(package.rows["r2s_scene_head_repairs"]) == 1
+    assert len(package.rows["r2s_scene_head_backfill_items"]) == 1
+    assert len(package.rows["r2s_scene_publications"]) == 1
+
+    target = RuntimeDatabase(f"sqlite:///{tmp_path / 'scene-head-target.db'}")
+    imported = import_rows(target, package.rows)
+    assert imported["r2s_scene_heads"] == 1
+    assert imported["r2s_scene_head_repairs"] == 1
+    assert imported["r2s_scene_head_backfill_items"] == 1
+    assert imported["r2s_scene_publications"] == 1
+    with target.transaction() as transaction:
+        assert transaction.execute("SELECT head_checksum FROM r2s_scene_heads").fetchone() == (head.head_checksum,)
+        assert transaction.execute("SELECT repair_checksum FROM r2s_scene_head_repairs").fetchone() == (
+            repair.repair_checksum,
+        )
+        assert transaction.execute("SELECT item_checksum FROM r2s_scene_head_backfill_items").fetchone() == (
+            item.item_checksum,
+        )
+        restored_publication = PendingScenePublication.model_validate_json(
+            transaction.execute("SELECT payload FROM r2s_scene_publications").fetchone()[0]
+        )
+        assert restored_publication.status == "ABORTED"
+        assert restored_publication.fencing_token == "redacted"
+
+    restored_scene = SceneEditor(
+        fixture_root,
+        ArtifactResolver(staging / "data/studio_local/artifacts"),
+        SceneHeadRepository(target),
+    ).current("job-a")
+    assert restored_scene.scene.scene_revision == "rev-001"
+    assert restored_scene.scene_reference == reference
+    assert restored_scene.scene == scene
+
+    invalid_rows = dict(package.rows)
+    head_row = invalid_rows["r2s_scene_heads"][0]
+    tampered_payload = json.loads(head_row[-1])
+    tampered_payload["scene_revision"] = "rev-002"
+    invalid_rows["r2s_scene_heads"] = [(*head_row[:-1], json.dumps(tampered_payload))]
+    rejected_target = RuntimeDatabase(f"sqlite:///{tmp_path / 'scene-head-rejected.db'}")
+    with pytest.raises(PackagePublishError, match="invalid checksummed scene-head state"):
+        import_rows(rejected_target, invalid_rows)
+    with rejected_target.transaction() as transaction:
+        assert transaction.execute("SELECT COUNT(*) FROM r2s_scene_heads").fetchone() == (0,)
+
+
+def test_validation_history_is_verified_and_imported_with_its_job(tmp_path: Path) -> None:
+    """Completed operational history follows the package while mutable attempts do not."""
+    archive_path, _ = _make_package(tmp_path)
+    staging = tmp_path / "validation-history"
+    extract_package(archive_path, staging)
+    job_id = "job-a"
+    config_draft = ValidationConfig(
+        schema_version="1.0",
+        policy_id="package-validation-policy-v1",
+        required_check_ids=["ISAAC_LOAD"],
+        warning_check_ids=[],
+        path_pairs=[],
+        config_checksum="sha256:" + "0" * 64,
+    )
+    config = config_draft.model_copy(
+        update={"config_checksum": canonical_content_checksum(config_draft, "config_checksum")}
+    )
+    config_uri = (
+        f"artifact://jobs/{job_id}/validation/configs/"
+        f"{config.config_checksum.removeprefix('sha256:')}/validation_config.json"
+    )
+    config_bytes = config.model_dump_json(indent=2).encode()
+    config_ref = ProductArtifactRef(
+        artifact_type="ValidationConfig",
+        schema_version="1.0",
+        artifact_uri=config_uri,
+        artifact_checksum=sha256_bytes(config_bytes),
+        data_class="derived",
+        producer_stage="ST-ISAAC-VALIDATE",
+        job_id=job_id,
+    )
+    config_path = staging / "data/studio_local/artifacts" / config_uri.removeprefix("artifact://")
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_bytes(config_bytes)
+    requested_at = datetime(2026, 10, 8, tzinfo=UTC)
+    draft = ValidationRunRecord(
+        schema_version="1.0",
+        run_id="run-failed-001",
+        attempt=1,
+        job_id=job_id,
+        scene_revision="rev-001",
+        scene_ir_checksum="sha256:" + "1" * 64,
+        candidate_checksum="sha256:" + "2" * 64,
+        validation_config_checksum=config.config_checksum,
+        validation_config_ref=config_ref,
+        origin=ValidationRunOrigin.WORKER,
+        status=ValidationRunStatus.FAILED,
+        requested_at=requested_at,
+        started_at=requested_at + timedelta(seconds=1),
+        completed_at=requested_at + timedelta(seconds=2),
+        worker_id="worker-package-test",
+        lease_id="lease-package-test",
+        fencing_token=1,
+        run_checksum="sha256:" + "0" * 64,
+    )
+    run = draft.model_copy(update={"run_checksum": canonical_content_checksum(draft, "run_checksum")})
+    database_path = staging / "data/studio_local/runtime.db"
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            """INSERT INTO r2s_validation_runs
+               (run_id,job_id,candidate_checksum,config_checksum,attempt,status,run_checksum,payload)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (
+                run.run_id,
+                run.job_id,
+                run.candidate_checksum,
+                run.validation_config_checksum,
+                run.attempt,
+                run.status.value,
+                run.run_checksum,
+                run.model_dump_json(),
+            ),
+        )
+
+    package = validate_staged_package(staging)
+    assert package.rows["r2s_validation_runs"] == [
+        (
+            run.run_id,
+            run.job_id,
+            run.candidate_checksum,
+            run.validation_config_checksum,
+            run.attempt,
+            run.status.value,
+            run.run_checksum,
+            run.model_dump_json(),
+        )
+    ]
+    target = RuntimeDatabase(f"sqlite:///{tmp_path / 'validation-history-target.db'}")
+    imported = import_rows(target, package.rows)
+    assert imported["r2s_validation_runs"] == 1
+    with target.transaction() as transaction:
+        assert transaction.execute("SELECT run_id,status FROM r2s_validation_runs").fetchall() == [
+            (run.run_id, "FAILED")
+        ]
+
+
+def test_completed_worker_validation_cannot_cross_package_without_authenticated_receipt(tmp_path: Path) -> None:
+    """A checksummed uploaded DB row alone cannot turn user-controlled bytes into worker proof."""
+    archive_path, _ = _make_package(tmp_path)
+    staging = tmp_path / "untrusted-worker-validation"
+    extract_package(archive_path, staging)
+    job_id = "job-a"
+
+    def reference(artifact_type: str, tail: str) -> ProductArtifactRef:
+        return ProductArtifactRef(
+            artifact_type=artifact_type,
+            schema_version="1.0",
+            artifact_uri=f"artifact://jobs/{job_id}/validation/untrusted/{tail}",
+            artifact_checksum="sha256:" + "a" * 64,
+            data_class="derived",
+            producer_stage="ST-ISAAC-VALIDATE",
+            job_id=job_id,
+        )
+
+    requested_at = datetime(2026, 10, 8, tzinfo=UTC)
+    draft = ValidationRunRecord(
+        schema_version="1.0",
+        run_id="run-forged-completed",
+        attempt=1,
+        job_id=job_id,
+        scene_revision="rev-001",
+        scene_ir_checksum="sha256:" + "1" * 64,
+        candidate_checksum="sha256:" + "2" * 64,
+        validation_config_checksum="sha256:" + "3" * 64,
+        validation_config_ref=reference("ValidationConfig", "config.json"),
+        origin=ValidationRunOrigin.WORKER,
+        status=ValidationRunStatus.COMPLETED,
+        requested_at=requested_at,
+        started_at=requested_at + timedelta(seconds=1),
+        completed_at=requested_at + timedelta(seconds=2),
+        worker_id="untrusted-package",
+        lease_id="forged-lease",
+        fencing_token=1,
+        runtime_manifest_ref=reference("RuntimeManifest", "runtime.json"),
+        report_ref=reference("ValidationReport", "report.json"),
+        report_checksum="sha256:" + "4" * 64,
+        execution_log_ref=reference("ValidationExecutionLog", "execution.log"),
+        run_checksum="sha256:" + "0" * 64,
+    )
+    run = draft.model_copy(update={"run_checksum": canonical_content_checksum(draft, "run_checksum")})
+    database_path = staging / "data/studio_local/runtime.db"
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            """INSERT INTO r2s_validation_runs
+               (run_id,job_id,candidate_checksum,config_checksum,attempt,status,run_checksum,payload)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (
+                run.run_id,
+                run.job_id,
+                run.candidate_checksum,
+                run.validation_config_checksum,
+                run.attempt,
+                run.status.value,
+                run.run_checksum,
+                run.model_dump_json(),
+            ),
+        )
+
+    with pytest.raises(PackagePublishError, match="authenticated receipt"):
+        validate_staged_package(staging)
 
 
 def test_publisher_preserves_explicit_seed_accounts_without_sessions(tmp_path: Path) -> None:

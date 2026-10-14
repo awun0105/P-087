@@ -1,4 +1,5 @@
 import { HERO, HERO_CHAIN } from "@/features/landing/content";
+import type { Language } from "@/lib/i18n";
 
 /**
  * Sơ đồ mặt bằng một lối đi trong kho, nhìn từ trên xuống: chấm Gaussian (Visual),
@@ -38,13 +39,30 @@ function gaussianDots() {
 const DOTS = gaussianDots();
 const BAYS = [40, 160, 280, 400];
 
-export function HeroScene() {
+export function HeroScene({
+  hero = HERO,
+  heroChain = HERO_CHAIN,
+  lang = "vi",
+}: {
+  hero?: typeof HERO;
+  heroChain?: readonly { label: string; detail: string; tone: string }[];
+  lang?: Language;
+}) {
+  const svgTitle =
+    lang === "en"
+      ? "Top-down layout diagram of warehouse aisle: two rack rows, pallet with collision hull, metric grid, and Start-to-Goal path around the obstacle."
+      : "Sơ đồ mặt bằng lối đi trong kho: hai dãy kệ và một pallet có hộp va chạm, lưới một mét, và đường đi của robot từ Start tới Goal vòng qua pallet.";
+  const caption =
+    lang === "en"
+      ? "Pipeline schematic diagram, not rendered result."
+      : "Sơ đồ minh hoạ luồng xử lý, không phải ảnh chụp kết quả.";
+
   return (
     <figure className="lp-viewport">
       <div className="flex items-center justify-between gap-3 border-b border-line-dark px-4 py-2.5">
-        <span className="font-mono text-[12px] text-on-dark/70">{HERO.sceneLabel}</span>
+        <span className="font-mono text-[12px] text-on-dark/70">{hero.sceneLabel}</span>
         <span className="hidden gap-1.5 sm:flex" aria-hidden>
-          {HERO.pillars.map((p) => (
+          {hero.pillars.map((p) => (
             <span key={p} className="rounded border border-line-dark px-1.5 py-0.5 font-mono text-[11px] text-on-dark/60">
               {p}
             </span>
@@ -53,9 +71,7 @@ export function HeroScene() {
       </div>
 
       <svg viewBox="0 0 560 360" className="block h-auto w-full" role="img" aria-labelledby="hero-scene-title">
-        <title id="hero-scene-title">
-          Sơ đồ mặt bằng lối đi trong kho: hai dãy kệ và một pallet có hộp va chạm, lưới một mét, và đường đi của robot từ Start tới Goal vòng qua pallet.
-        </title>
+        <title id="hero-scene-title">{svgTitle}</title>
 
         {/* Lưới mét */}
         <g stroke="var(--studio-on-dark)" strokeOpacity="0.07">
@@ -113,7 +129,7 @@ export function HeroScene() {
       </svg>
 
       <ol className="grid grid-cols-2 gap-px border-t border-line-dark bg-line-dark sm:grid-cols-5">
-        {HERO_CHAIN.map((c, i) => (
+        {heroChain.map((c, i) => (
           <li key={c.label} className="bg-viewport-deep px-3 py-3" data-tone={c.tone}>
             <span className="font-mono text-[11px] text-on-dark/50">{String(i + 1).padStart(2, "0")}</span>
             <span className="lp-chain-label mt-0.5 block text-[13px] font-semibold">{c.label}</span>
@@ -121,7 +137,7 @@ export function HeroScene() {
           </li>
         ))}
       </ol>
-      <figcaption className="px-4 py-2 text-[12px] text-on-dark/50">Sơ đồ minh hoạ luồng xử lý, không phải ảnh chụp kết quả.</figcaption>
+      <figcaption className="px-4 py-2 text-[12px] text-on-dark/50">{caption}</figcaption>
     </figure>
   );
 }

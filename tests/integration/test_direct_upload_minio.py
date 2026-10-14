@@ -5,6 +5,8 @@ Bỏ qua khi không có `R2S_TEST_S3_ENDPOINT` (xem `test_s3_artifact_store.py`)
 
 import hashlib
 import os
+import struct
+import subprocess
 from pathlib import Path
 from uuid import uuid4
 
@@ -61,10 +63,35 @@ async def client():
         yield ac
 
 
+@pytest.fixture
+def valid_video(tmp_path: Path) -> bytes:
+    """Exercise storage transfer with actual MP4 bytes that pass input classification."""
+    path = tmp_path / "transfer.mp4"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=duration=0.2:size=64x48:rate=5",
+            "-c:v",
+            "mpeg4",
+            str(path),
+        ],
+        check=True,
+    )
+    return path.read_bytes()
+
+
 @pytest.mark.asyncio
-async def test_browser_style_direct_upload(client: AsyncClient, cloud: Settings) -> None:
+async def test_browser_style_direct_upload(client: AsyncClient, cloud: Settings, valid_video: bytes) -> None:
     assert (await client.get("/api/v1/uploads/config")).json()["direct"] is True
-    payload = os.urandom(MIN_PART_BYTES + 4096)
+    # A valid MP4 free box makes the clip span two parts without corrupting its content.
+    padding = MIN_PART_BYTES + 4096 - len(valid_video)
+    payload = valid_video + struct.pack(">I4s", padding, b"free") + bytes(padding - 8)
 
     begun = await client.post("/api/v1/uploads/direct", json={"filename": "kho.mp4", "size_bytes": len(payload)})
     assert begun.status_code == 201, begun.text
@@ -109,15 +136,19 @@ async def test_lying_about_size_is_rejected(client: AsyncClient, cloud: Settings
 
 
 @pytest.mark.asyncio
-async def test_stuck_verification_is_resumed_by_complete(client: AsyncClient, cloud: Settings) -> None:
+async def test_stuck_verification_is_resumed_by_complete(
+    client: AsyncClient, cloud: Settings, valid_video: bytes
+) -> None:
     """Mô phỏng API khởi động lại giữa lúc kiểm tra: phiên kẹt VERIFYING, gọi lại complete là xong."""
     from src.api.studio import deps
 
-    begun = (await client.post("/api/v1/uploads/direct", json={"filename": "kho.mp4", "size_bytes": 7})).json()
+    begun = (
+        await client.post("/api/v1/uploads/direct", json={"filename": "kho.mp4", "size_bytes": len(valid_video)})
+    ).json()
     upload_id = begun["upload_id"]
     url = (await client.post(f"/api/v1/uploads/direct/{upload_id}/urls", json={"part_numbers": [1]})).json()["urls"]
     with httpx.Client(timeout=30) as storage:
-        assert storage.put(url["1"], content=b"7 bytes").status_code == 200
+        assert storage.put(url["1"], content=valid_video).status_code == 200
     deps.direct_uploads().complete(upload_id)  # ghép nhưng không có tác vụ kiểm tra nền
     assert (await client.get(f"/api/v1/uploads/direct/{upload_id}")).json()["status"] == "VERIFYING"
 

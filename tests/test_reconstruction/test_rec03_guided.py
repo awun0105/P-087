@@ -13,7 +13,14 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from src.models.contracts.artifacts import ArtifactDataClass, ProductArtifactRef
 from src.models.contracts.coordinates import Transform
+from src.models.contracts.identity import canonical_content_checksum
+from src.models.contracts.manifests import StageId
+from src.models.contracts.video_preparation import (
+    ClientVideoPreparationManifest,
+    ServerVideoPreparationVerification,
+)
 from src.services.orchestration.artifacts.store import ArtifactResolver, FilesystemArtifactStore
 from src.services.reconstruction.adapters.colmap import ColmapAdapter, ColmapDependencies, ColmapRequest
 from src.services.reconstruction.adapters.colmap_priors import (
@@ -24,13 +31,19 @@ from src.services.reconstruction.adapters.colmap_priors import (
     prepare_guidance,
 )
 from src.services.reconstruction.adapters.colmap_runtime import ColmapError
-from src.services.reconstruction.lidar.camera_priors import CameraPriorError, camera_priors
+from src.services.reconstruction.lidar.camera_priors import (
+    CameraPriorError,
+    camera_priors,
+    prepared_camera_calibration,
+)
 from src.services.reconstruction.lidar.fusion import ScanPose
+from src.services.reconstruction.lidar.package import CameraCalibration
 from src.services.reconstruction.preview_models import PreparedPreviewRequest
 from tests.test_reconstruction.test_rec03_colmap import FixtureProcess, config, frame_source, sparse
 
 IDENTITY = (0.0, 0.0, 0.0, 1.0)
 QUARTER_TURN = (0.0, 0.0, math.sin(math.pi / 4), math.cos(math.pi / 4))
+ROOT = Path(__file__).parents[2]
 SCHEMA = """
 CREATE TABLE cameras (camera_id INTEGER PRIMARY KEY, model INTEGER, width INTEGER, height INTEGER, params BLOB,
                       prior_focal_length INTEGER);
@@ -39,6 +52,57 @@ CREATE TABLE pose_priors (pose_prior_id INTEGER PRIMARY KEY, corr_data_id INTEGE
                           corr_sensor_type INTEGER, position BLOB, position_covariance BLOB, gravity BLOB,
                           coordinate_system INTEGER);
 """
+
+
+def _rotated_sar_video_verification() -> ServerVideoPreparationVerification:
+    fixture = json.loads((ROOT / "fixtures/contracts/video_preparation_v1.json").read_text())
+    payload = fixture["preparation_manifest"]
+    payload["source_video"].update(
+        coded_width=640,
+        coded_height=480,
+        display_width=480,
+        display_height=960,
+        sample_aspect_ratio={"numerator": 3, "denominator": 2},
+        rotation_degrees=90,
+    )
+    payload["prepared_video"].update(
+        coded_width=240,
+        coded_height=480,
+        display_width=240,
+        display_height=480,
+    )
+    payload["pixel_transform"]["matrix"] = [
+        [0.0, -0.5, 239.25],
+        [0.75, 0.0, -0.125],
+        [0.0, 0.0, 1.0],
+    ]
+    payload["preparation_checksum"] = "sha256:" + "0" * 64
+    payload["preparation_checksum"] = canonical_content_checksum(payload, "preparation_checksum")
+    manifest = ClientVideoPreparationManifest.model_validate(payload)
+    frame_map_ref = ProductArtifactRef(
+        artifact_type="VideoFrameMap",
+        schema_version="1.0",
+        artifact_uri="artifact://jobs/upload-projection/input/video_frame_map.jsonl",
+        artifact_checksum=manifest.frame_map.checksum,
+        data_class=ArtifactDataClass.PRODUCT_INPUT,
+        producer_stage=StageId.INPUT_VALIDATE,
+        job_id="upload-projection",
+    )
+    verification_payload = {
+        "schema_version": "1.0",
+        "status": "server_verified",
+        "uploaded_checksum": manifest.prepared_file.checksum,
+        "uploaded_size_bytes": manifest.prepared_file.size_bytes,
+        "client_manifest": manifest.model_dump(mode="json"),
+        "observed_video": manifest.prepared_video.model_dump(mode="json"),
+        "frame_map_ref": frame_map_ref.model_dump(mode="json"),
+        "original_source_status": "client_declared_unverified",
+        "verification_checksum": "sha256:" + "0" * 64,
+    }
+    verification_payload["verification_checksum"] = canonical_content_checksum(
+        verification_payload, "verification_checksum"
+    )
+    return ServerVideoPreparationVerification.model_validate(verification_payload)
 
 
 def _database(workspace: Path, names: tuple[str, ...], width: int = 640, height: int = 360) -> None:
@@ -75,6 +139,61 @@ def test_sensor_pose_and_calibration_give_the_camera_pose() -> None:
     assert second.rotation_xyzw == pytest.approx(QUARTER_TURN)
     with pytest.raises(CameraPriorError, match="quỹ đạo chỉ có 2 pose"):
         camera_priors(poses, offset, (0, 5))
+
+
+def test_downsampled_frame_ids_use_their_original_trajectory_rows() -> None:
+    poses = [ScanPose(float(index), (float(index), 0.0, 1.0), IDENTITY) for index in range(5)]
+    offset = Transform(
+        parent_frame="lidar_sensor",
+        local_frame="camera",
+        translation_xyz=(0.0, 0.0, 0.0),
+        rotation_quaternion_xyzw=IDENTITY,
+    )
+
+    priors = camera_priors(poses, offset, (0, 1, 2), (0, 2, 4), source_frame_count=5)
+
+    assert [prior.frame_id for prior in priors] == [0, 1, 2]
+    assert [prior.source_frame_id for prior in priors] == [0, 2, 4]
+    assert [prior.translation[0] for prior in priors] == [0.0, 2.0, 4.0]
+    with pytest.raises(CameraPriorError, match="source frame count"):
+        camera_priors(poses, offset, (0, 1, 2), (0, 2, 4), source_frame_count=4)
+
+
+def test_prepared_calibration_preserves_projection_after_sar_rotation_and_resize() -> None:
+    verification = _rotated_sar_video_verification()
+    extrinsic = Transform(
+        parent_frame="lidar_sensor",
+        local_frame="camera",
+        translation_xyz=(0.1, 0.0, 0.0),
+        rotation_quaternion_xyzw=IDENTITY,
+    )
+    camera = CameraCalibration(width=640, height=480, fx=400, fy=380, cx=320, cy=240)
+
+    prepared_extrinsic, calibration = prepared_camera_calibration(extrinsic, camera, verification)
+
+    assert prepared_extrinsic.translation_xyz == pytest.approx(extrinsic.translation_xyz)
+    assert prepared_extrinsic.rotation_quaternion_xyzw == pytest.approx((0.0, 0.0, -math.sqrt(0.5), math.sqrt(0.5)))
+    assert calibration is not None
+    width, height, parameters = calibration
+    assert (width, height) == (240, 480)
+    fx, fy, cx, cy = parameters[:4]
+
+    point_source = (0.1, -0.2, 2.0)
+    pixel_source = (
+        camera.fx * point_source[0] / point_source[2] + camera.cx,
+        camera.fy * point_source[1] / point_source[2] + camera.cy,
+    )
+    matrix = verification.client_manifest.pixel_transform.matrix
+    pixel_expected = (
+        matrix[0][0] * pixel_source[0] + matrix[0][1] * pixel_source[1] + matrix[0][2],
+        matrix[1][0] * pixel_source[0] + matrix[1][1] * pixel_source[1] + matrix[1][2],
+    )
+    point_prepared = (-point_source[1], point_source[0], point_source[2])
+    pixel_prepared = (
+        fx * point_prepared[0] / point_prepared[2] + cx,
+        fy * point_prepared[1] / point_prepared[2] + cy,
+    )
+    assert pixel_prepared == pytest.approx(pixel_expected)
 
 
 def test_prior_model_and_position_priors_are_written_for_colmap(tmp_path: Path) -> None:

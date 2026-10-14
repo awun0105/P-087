@@ -4,13 +4,16 @@ from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
+from dotenv import load_dotenv
 from httpx import ASGITransport, AsyncClient
+
+load_dotenv()
 
 # Thiết lập dummy API key để Settings không báo lỗi khi chạy unit tests
 os.environ.setdefault("OPENAI_API_KEY", "sk-mock-testing-key")
 
-from src.main import app
-from src.services.orchestration.projects.registry import DEFAULT_RUNTIME_ROOT
+from src.main import app  # noqa: E402
+from src.services.orchestration.projects.registry import DEFAULT_RUNTIME_ROOT  # noqa: E402
 
 
 @pytest.fixture(autouse=True)

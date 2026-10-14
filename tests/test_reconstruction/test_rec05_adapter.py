@@ -1,6 +1,7 @@
 """Fixture orchestration proof tách biệt real GPU qualification."""
 
 import json
+import struct
 from pathlib import Path
 
 import pytest
@@ -37,7 +38,8 @@ class FixtureProcess(VoxelProcess):
         elif name == "inspect-cluster":
             (workspace / "cluster-inspection.json").write_text('{"info":{"numGaussians":255}}')
         elif name == "cluster":
-            (workspace / "cluster.ply").write_bytes((workspace / "input.ply").read_bytes())
+            input_path = workspace / Path(arguments[1]).name
+            (workspace / "cluster.ply").write_bytes(input_path.read_bytes())
         elif name == "collision":
             voxel_fixture(workspace)
             write_fixture(workspace / "geometry.collision.glb", collision_fixture())
@@ -74,6 +76,25 @@ def request(source: Path) -> SyntheticVoxelRequest:
     return SyntheticVoxelRequest(source=source, source_checksum=file_checksum(source), config=config())
 
 
+class RecordingFixtureProcess(FixtureProcess):
+    def __init__(self, settings: VoxelRuntimeSettings) -> None:
+        super().__init__(settings)
+        self.cluster_input_filename: str | None = None
+
+    def run(self, arguments: tuple[str, ...], target: tuple[Path, str]) -> str:
+        if target[1] == "cluster":
+            self.cluster_input_filename = Path(arguments[1]).name
+        return super().run(arguments, target)
+
+
+def _gaussian_ply(count: int) -> bytes:
+    fields = ("x", "y", "z", "opacity", "scale_0", "scale_1", "scale_2", "rot_0", "f_dc_0")
+    header = ["ply", "format binary_little_endian 1.0", f"element vertex {count}"]
+    header.extend(f"property float {name}" for name in fields)
+    header.extend(("element face 0", "property list uchar int vertex_indices", "end_header"))
+    return ("\n".join(header) + "\n").encode("ascii") + struct.pack("<9f", *([0.0] * 9)) * count
+
+
 def test_private_attempt_and_immutable_source(tmp_path: Path) -> None:
     """Không publish shared artifact hay overwrite attempt hiện hữu."""
     source = tmp_path / "source.ply"
@@ -88,6 +109,30 @@ def test_private_attempt_and_immutable_source(tmp_path: Path) -> None:
     assert json.loads((output / "qualification.json").read_text()) == report
     with pytest.raises(FileExistsError):
         adapter().run_synthetic(task, output)
+
+
+def test_opt_in_sor_is_run_before_the_upstream_cluster_filter(tmp_path: Path) -> None:
+    source = tmp_path / "source.ply"
+    source.write_bytes(_gaussian_ply(256))
+    settings = VoxelRuntimeSettings(cli=Path("unused"), module_path=Path("unused"))
+    process = RecordingFixtureProcess(settings)
+    cfg = config(
+        schema_version="1.1",
+        statistical_outlier_removal={
+            "neighbors": 8,
+            "standard_deviation_ratio": 1.0,
+            "max_gaussians": 512,
+        },
+    )
+    task = SyntheticVoxelRequest(source=source, source_checksum=file_checksum(source), config=cfg)
+
+    report = SplatTransformVoxelAdapter(process).run_synthetic(task, tmp_path / "sor-attempt")
+
+    assert process.cluster_input_filename == "statistical-filtered-input.ply"
+    evidence = report["statistical_filter_evidence"]
+    assert evidence["quality_status"] == "diagnostic_only"
+    assert evidence["input_gaussian_count"] == evidence["retained_gaussian_count"] == 256
+    assert report["files"]["statistical-filtered-input.ply"] == evidence["output_checksum"]
 
 
 @pytest.mark.parametrize("failure", ["missing", "tampered", "non_synthetic"])

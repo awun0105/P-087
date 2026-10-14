@@ -3,15 +3,19 @@
 import numpy as np
 import pytest
 
+from src.models.contracts.floor_model import FloorModel
 from src.services.scene.decomposition.gaussian_split import (
     BACKGROUND,
     SplitConfig,
+    assign_floor_gaussians_to_background,
     label_gaussians,
+    positions,
     read_gaussian_ply,
     split,
     working_set,
     write_gaussian_ply,
 )
+from src.services.scene.floor_model import fit_canonical_floor_model, point_cloud_checksum
 
 _FIELDS = ["x", "y", "z", "rot_0", "rot_1", "rot_2", "rot_3", "scale_0", "scale_1", "scale_2", "opacity"]
 _FIELDS += ["f_dc_0", "f_dc_1", "f_dc_2"]
@@ -36,6 +40,11 @@ def _scene() -> tuple[np.ndarray, np.ndarray]:
     return rows, np.arange(0, 600, 3)  # chỉ 1/3 Gaussian của vật là hạt giống
 
 
+def _floor_model(rows: np.ndarray) -> FloorModel:
+    points = positions(rows)
+    return fit_canonical_floor_model(points, point_cloud_checksum(points))
+
+
 def test_ply_round_trip_is_byte_identical() -> None:
     rows, _ = _scene()
     payload = write_gaussian_ply(rows)
@@ -52,7 +61,7 @@ def test_non_gaussian_ply_is_rejected() -> None:
 
 def test_labels_grow_from_seeds_to_neighbours_but_not_to_floor() -> None:
     rows, seeds = _scene()
-    labels = label_gaussians(rows, [seeds])
+    labels = label_gaussians(rows, [seeds], _floor_model(rows))
 
     assert (labels[:600] == 0).mean() > 0.95  # gần hết khối vật được gán dù chỉ 1/3 là hạt giống
     assert (labels[600:] == BACKGROUND).all()  # sàn ngay dưới vật không bị kéo theo
@@ -61,14 +70,14 @@ def test_labels_grow_from_seeds_to_neighbours_but_not_to_floor() -> None:
 def test_large_gaussians_stay_in_background() -> None:
     rows, seeds = _scene()
     rows["scale_0"][1] = np.log(2.0)  # một Gaussian cỡ 2 m nằm giữa vật, không phải hạt giống
-    labels = label_gaussians(rows, [seeds])
+    labels = label_gaussians(rows, [seeds], _floor_model(rows))
 
     assert labels[1] == BACKGROUND
 
 
 def test_split_writes_objects_in_axis_aligned_local_frame() -> None:
     rows, seeds = _scene()
-    background, parts = split(rows, label_gaussians(rows, [seeds]))
+    background, parts = split(rows, label_gaussians(rows, [seeds], _floor_model(rows)))
 
     assert len(parts) == 1
     part = parts[0]
@@ -80,9 +89,39 @@ def test_split_writes_objects_in_axis_aligned_local_frame() -> None:
     assert len(background) + len(part.rows) == len(rows)
 
 
+def test_tilted_floor_is_excluded_from_gaussian_seeds_and_growth() -> None:
+    rng = np.random.default_rng(31)
+    floor_xy = rng.uniform([-2.0, -2.0], [2.0, 2.0], size=(900, 2))
+    floor = np.column_stack([floor_xy, 0.12 * floor_xy[:, 0]])
+    object_xy = rng.uniform([0.8, -0.2], [1.2, 0.2], size=(500, 2))
+    object_points = np.column_stack([object_xy, 0.12 * object_xy[:, 0] + rng.uniform(0.12, 0.45, size=len(object_xy))])
+    rows = _rows(np.vstack([floor, object_points]))
+    floor_seeds = np.flatnonzero((floor[:, 0] > 0.7) & (floor[:, 0] < 1.3))
+    object_seeds = 900 + np.arange(0, 500, 3)
+
+    labels = label_gaussians(rows, [np.concatenate([floor_seeds, object_seeds])], _floor_model(rows))
+
+    assert (labels[:900] == BACKGROUND).all()
+    assert (labels[900:] == 0).mean() > 0.95
+
+
+def test_lifted_floor_labels_return_to_background_without_dropping_rows() -> None:
+    rows, _ = _scene()
+    lifted_labels = np.zeros(len(rows), dtype=np.int32)
+
+    labels = assign_floor_gaussians_to_background(rows, lifted_labels, _floor_model(rows))
+
+    assert (labels[:600] == 0).all()
+    assert (labels[600:] == BACKGROUND).all()
+    assert len(labels) == len(rows)
+
+
 def test_tiny_instances_return_to_background() -> None:
     rows, _ = _scene()
-    background, parts = split(rows, label_gaussians(rows, [np.arange(5)], SplitConfig(grow_radius_m=0.0)))
+    background, parts = split(
+        rows,
+        label_gaussians(rows, [np.arange(5)], _floor_model(rows), SplitConfig(grow_radius_m=0.0)),
+    )
 
     assert parts == [] and len(background) == len(rows)
 

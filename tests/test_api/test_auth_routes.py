@@ -1,5 +1,6 @@
-"""Đăng nhập hai role khi bật AUTH_REQUIRED: khách / Editor / Reviewer (ADR 0003 §3)."""
+"""Đăng nhập ba role khi bật AUTH_REQUIRED: Guest / Editor / Reviewer."""
 
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -7,8 +8,11 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from src.config import Settings
+from src.models.contracts.manifests import ExecutionError, JobStatus, StageId
 from src.services.orchestration.auth import AuthService
+from src.services.orchestration.jobs import TransitionRequest
 from src.services.orchestration.jobs.database import RuntimeDatabase
+from src.services.orchestration.projects.models import JobCreateInput
 from src.services.orchestration.projects.registry import ProjectRegistry
 
 PASSWORD = "mat-khau-du-dai"
@@ -44,6 +48,40 @@ def secured(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AuthService:
     return AuthService(database)
 
 
+@pytest.fixture
+def product_registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ProjectRegistry:
+    from src.api.product import deps
+
+    registry = ProjectRegistry(runtime_root=tmp_path / "product-artifacts")
+    registry.seed_from_fixtures()
+    monkeypatch.setattr(deps, "get_project_registry", lambda: registry)
+    assert deps.registry() is registry
+    return registry
+
+
+def _failed_job(registry: ProjectRegistry, *, retryable: bool = True) -> str:
+    job = registry.create_job(JobCreateInput(project_id="project-fixture-001"))
+    registry.transition_job(job.job_id, TransitionRequest(target_status=JobStatus.RUNNING))
+    registry.transition_job(
+        job.job_id,
+        TransitionRequest(
+            target_status=JobStatus.FAILED,
+            error=ExecutionError(
+                stage_id=StageId.INPUT_VALIDATE,
+                error_code="PREVIEW_RUNNER_FAILED",
+                human_message="Fixture failure",
+                retryable=retryable,
+                details={"exception_type": "TimeoutError"},
+            ),
+        ),
+    )
+    return job.job_id
+
+
+def _gpu_run_count(auth_service: AuthService, user_id: str) -> int:
+    return auth_service.count_actions(user_id, "gpu.run", datetime.now(UTC) - timedelta(days=1))
+
+
 @pytest_asyncio.fixture
 async def client():
     from src.main import app
@@ -60,7 +98,7 @@ async def _login(client: AsyncClient, email: str) -> None:
 @pytest.mark.asyncio
 async def test_guest_sees_samples_but_not_team_data(client: AsyncClient, secured: AuthService) -> None:
     me = (await client.get("/api/v1/auth/me")).json()
-    assert me == {"auth_required": True, "user": None}
+    assert me == {"auth_required": True, "guest_signup_enabled": True, "user": None, "quota": None}
     assert (await client.get("/api/v1/samples")).status_code == 200
     for method, path in [
         ("GET", "/api/v1/scenes"),
@@ -68,7 +106,6 @@ async def test_guest_sees_samples_but_not_team_data(client: AsyncClient, secured
         ("POST", "/api/v1/uploads/direct"),
         ("GET", "/api/v1/projects"),
         ("GET", "/api/v1/auth/users"),
-        ("POST", "/api/v1/chat"),
     ]:
         response = await client.request(method, path, json={} if method == "POST" else None)
         assert response.status_code == 401, (path, response.text)
@@ -82,6 +119,7 @@ async def test_invite_flow_and_role_boundaries(client: AsyncClient, secured: Aut
     assert cookie
     invite = await client.post("/api/v1/auth/invites", json={"role": "editor"})
     assert invite.status_code == 201
+    assert (await client.post("/api/v1/auth/invites", json={"role": "guest"})).status_code == 422
     code = invite.json()["code"]
     assert (await client.get("/api/v1/auth/users")).status_code == 200
 
@@ -101,6 +139,126 @@ async def test_invite_flow_and_role_boundaries(client: AsyncClient, secured: Aut
     assert (await client.post("/api/v1/auth/invites", json={"role": "editor"})).status_code == 403
     review = await client.post("/api/v1/jobs/job-x/review/approve", json={})
     assert review.status_code == 403  # chỉ Reviewer được duyệt
+
+
+@pytest.mark.asyncio
+async def test_guest_signup_can_be_explicitly_disabled(
+    client: AsyncClient, secured: AuthService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from src.api import auth
+
+    disabled = auth.settings().model_copy(update={"auth_guest_signup_enabled": False})
+    monkeypatch.setattr(auth, "get_settings", lambda: disabled)
+    for path in ("/api/v1/auth/register/guest", "/api/v1/auth/register"):
+        response = await client.post(
+            path, json={"email": "guest@example.com", "display_name": "Guest", "password": PASSWORD}
+        )
+        assert response.status_code == 404
+
+    assert (await client.get("/api/v1/auth/me")).json()["guest_signup_enabled"] is False
+    assert secured.list_users() == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invite", [{}, {"invite_code": None}, {"invite_code": ""}, {"invite_code": "   "}])
+async def test_register_without_invite_creates_guest_and_session(
+    client: AsyncClient, secured: AuthService, invite: dict[str, str | None]
+) -> None:
+    response = await client.post(
+        "/api/v1/auth/register",
+        json={"email": "visitor@example.com", "display_name": "Visitor", "password": PASSWORD, **invite},
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["role"] == "guest"
+    assert "httponly" in response.headers["set-cookie"].lower()
+    me = (await client.get("/api/v1/auth/me")).json()
+    assert me["guest_signup_enabled"] is True and me["user"]["role"] == "guest"
+    assert me["quota"]["limit"] == 3
+    assert (await client.post("/api/v1/auth/invites", json={"role": "reviewer"})).status_code == 403
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("extra", [{"invite_code": "invalid-code"}, {"invite_code": "x"}, {"role": "reviewer"}])
+async def test_register_rejects_invalid_invite_and_client_role_without_guest_fallback(
+    client: AsyncClient, secured: AuthService, extra: dict[str, str]
+) -> None:
+    response = await client.post(
+        "/api/v1/auth/register",
+        json={"email": "visitor@example.com", "display_name": "Visitor", "password": PASSWORD, **extra},
+    )
+    assert response.status_code in {401, 422}
+    assert secured.list_users() == []
+
+
+@pytest.mark.asyncio
+async def test_guest_signup_uses_server_role_with_shared_reads_and_reviewer_routes_closed(
+    client: AsyncClient,
+    secured: AuthService,
+    product_registry: ProjectRegistry,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from src.api import auth
+
+    enabled = Settings(
+        database_url=secured.database._url,
+        artifact_root=tmp_path / "artifacts",
+        auth_required=True,
+        auth_guest_signup_enabled=True,
+    )
+    monkeypatch.setattr(auth, "get_settings", lambda: enabled)
+
+    response = await client.post(
+        "/api/v1/auth/register/guest",
+        json={"email": " Guest@Example.com ", "display_name": " Hà Linh ", "password": PASSWORD},
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["role"] == "guest"
+    assert response.json()["email"] == "guest@example.com"
+    assert response.json()["display_name"] == "Hà Linh"
+    cookie = response.headers["set-cookie"].lower()
+    assert "httponly" in cookie and "samesite=lax" in cookie
+    me = (await client.get("/api/v1/auth/me")).json()
+    assert me["guest_signup_enabled"] is True and me["user"]["role"] == "guest"
+    assert (await client.get("/api/v1/scenes")).status_code == 200
+    assert product_registry.list_projects()
+    assert (await client.get("/api/v1/projects")).status_code == 200
+    created_project = await client.post(
+        "/api/v1/projects",
+        json={
+            "name": "Guest project",
+            "source_type": "upload",
+            "input_manifest_checksum": "sha256:" + "a" * 64,
+            "attestation": ATTESTATION,
+        },
+    )
+    assert created_project.status_code == 201, created_project.text
+    assert created_project.json()["created_by"]["user_id"] == response.json()["user_id"]
+    assert created_project.json()["created_by"]["role"] == "guest"
+    invite = await client.post("/api/v1/auth/invites", json={"role": "editor"})
+    assert invite.status_code == 403
+
+    forged_role = await client.post(
+        "/api/v1/auth/register/guest",
+        json={"email": "forged@example.com", "display_name": "Guest", "password": PASSWORD, "role": "reviewer"},
+    )
+    supplied_invite = await client.post(
+        "/api/v1/auth/register/guest",
+        json={
+            "email": "invite@example.com",
+            "display_name": "Guest",
+            "password": PASSWORD,
+            "invite_code": "not-valid",
+        },
+    )
+    duplicate = await client.post(
+        "/api/v1/auth/register/guest",
+        json={"email": "GUEST@example.com", "display_name": "Duplicate", "password": PASSWORD},
+    )
+    assert forged_role.status_code == supplied_invite.status_code == 422
+    assert duplicate.status_code == 409
+    assert [user.email for user in secured.list_users()] == ["guest@example.com"]
 
 
 @pytest.mark.asyncio
@@ -137,14 +295,89 @@ async def test_reviewer_has_no_daily_quota(client: AsyncClient, secured: AuthSer
 
 
 @pytest.mark.asyncio
-async def test_retry_counts_against_gpu_quota(client: AsyncClient, secured: AuthService) -> None:
+async def test_retry_counts_against_gpu_quota(
+    client: AsyncClient, secured: AuthService, product_registry: ProjectRegistry
+) -> None:
     reviewer = secured.create_user("lead@example.com", "Lead", PASSWORD, "reviewer")
     editor = secured.create_user("e@example.com", "E", PASSWORD, "editor")
     secured.update_user(reviewer, editor.user_id, daily_job_quota=1)
     secured.audit(editor.user_id, "gpu.run", "job-old", {"kind": "scene.create"})  # đã dùng 1 lượt
+    job_id = _failed_job(product_registry)
+    attempts_before = product_registry.list_job_attempts(job_id)
     await _login(client, "e@example.com")
-    response = await client.post("/api/v1/jobs/job-x/retry")
+    response = await client.post(f"/api/v1/jobs/{job_id}/retry")
+
     assert response.status_code == 429 and "xử lý GPU" in response.json()["detail"]
+    assert product_registry.get_job(job_id).status == JobStatus.FAILED
+    assert product_registry.list_job_attempts(job_id) == attempts_before
+    assert _gpu_run_count(secured, editor.user_id) == 1
+
+
+@pytest.mark.asyncio
+async def test_product_job_creation_counts_against_gpu_quota(
+    client: AsyncClient, secured: AuthService, product_registry: ProjectRegistry
+) -> None:
+    reviewer = secured.create_user("lead@example.com", "Lead", PASSWORD, "reviewer")
+    editor = secured.create_user("e@example.com", "E", PASSWORD, "editor")
+    secured.update_user(reviewer, editor.user_id, daily_job_quota=0)
+    jobs_before = product_registry.list_jobs("project-fixture-001")
+    await _login(client, "e@example.com")
+
+    response = await client.post("/api/v1/projects/project-fixture-001/jobs", json={})
+
+    assert response.status_code == 429
+    assert product_registry.list_jobs("project-fixture-001") == jobs_before
+    assert _gpu_run_count(secured, editor.user_id) == 0
+
+
+@pytest.mark.asyncio
+async def test_retry_accepts_eligible_job_and_records_gpu_usage_once(
+    client: AsyncClient, secured: AuthService, product_registry: ProjectRegistry
+) -> None:
+    reviewer = secured.create_user("lead@example.com", "Lead", PASSWORD, "reviewer")
+    editor = secured.create_user("e@example.com", "E", PASSWORD, "editor")
+    secured.update_user(reviewer, editor.user_id, daily_job_quota=2)
+    secured.audit(editor.user_id, "gpu.run", "job-old", {"kind": "scene.create"})
+    job_id = _failed_job(product_registry)
+    await _login(client, "e@example.com")
+
+    response = await client.post(f"/api/v1/jobs/{job_id}/retry")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["job_id"] == job_id
+    assert response.json()["status"] == JobStatus.QUEUED
+    assert product_registry.list_job_attempts(job_id)[-1].status == JobStatus.QUEUED
+    attempts = await client.get(f"/api/v1/jobs/{job_id}/attempts")
+    assert attempts.json()["attempts"][-1]["requested_by"] == {
+        "user_id": editor.user_id,
+        "display_name": "E",
+        "role": "editor",
+    }
+    assert _gpu_run_count(secured, editor.user_id) == 2
+
+
+@pytest.mark.asyncio
+async def test_retry_rejects_missing_and_non_retryable_jobs(
+    client: AsyncClient, secured: AuthService, product_registry: ProjectRegistry
+) -> None:
+    editor = secured.create_user("e@example.com", "E", PASSWORD, "editor")
+    non_retryable_job_id = _failed_job(product_registry, retryable=False)
+    await _login(client, "e@example.com")
+
+    missing = await client.post("/api/v1/jobs/job-missing/retry")
+    denied = await client.post(f"/api/v1/jobs/{non_retryable_job_id}/retry")
+
+    assert missing.status_code == 404
+    assert denied.status_code == 409
+    assert product_registry.get_job(non_retryable_job_id).status == JobStatus.FAILED
+    assert _gpu_run_count(secured, editor.user_id) == 0
+
+
+@pytest.mark.asyncio
+async def test_retry_requires_authenticated_user(client: AsyncClient, secured: AuthService) -> None:
+    response = await client.post("/api/v1/jobs/job-missing/retry")
+
+    assert response.status_code == 401
 
 
 @pytest.mark.asyncio

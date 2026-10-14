@@ -9,7 +9,17 @@ import type { SampleSummary } from "@/lib/types";
  * Scene mẫu lấy trực tiếp từ API. Khi API không trả được dữ liệu, khối này ẩn hẳn
  * thay vì hiện "OFFLINE" hay "Đang nạp" làm người xem tưởng sản phẩm hỏng.
  */
-export function LandingSamples({ title, lead, studioUrl }: { title: string; lead: string; studioUrl: string }) {
+export function LandingSamples({
+  title,
+  lead,
+  studioUrl,
+  openLabel = "Mở scene mẫu",
+}: {
+  title: string;
+  lead: string;
+  studioUrl: string;
+  openLabel?: string;
+}) {
   const [samples, setSamples] = useState<SampleSummary[]>([]);
 
   useEffect(() => {
@@ -45,7 +55,9 @@ export function LandingSamples({ title, lead, studioUrl }: { title: string; lead
               </span>
               <span className="mt-2 text-[16px] font-bold text-ink">{s.title}</span>
               <span className="mt-1.5 text-[14px] leading-relaxed text-ink-muted">{s.description}</span>
-              <span className="mt-auto pt-4 text-[14px] font-semibold text-ember-strong group-hover:underline">Mở scene mẫu</span>
+              <span className="mt-auto pt-4 text-[14px] font-semibold text-ember-strong group-hover:underline">
+                {openLabel}
+              </span>
             </a>
           </li>
         ))}

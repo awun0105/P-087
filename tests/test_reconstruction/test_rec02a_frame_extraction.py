@@ -5,12 +5,17 @@ import json
 import subprocess
 from dataclasses import asdict
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from src.models.contracts.artifacts import ArtifactDataClass, ProductArtifactRef
 from src.models.contracts.identity import canonical_content_checksum
-from src.models.contracts.manifests import InputManifest, PrivacyInspectionScope, PrivacyResult
+from src.models.contracts.manifests import InputManifest, PrivacyInspectionScope, PrivacyResult, StageId
+from src.models.contracts.video_preparation import (
+    ClientVideoPreparationManifest,
+    ServerVideoPreparationVerification,
+)
 from src.services.orchestration.artifacts.store import ArtifactResolver, FilesystemArtifactStore
 from src.services.reconstruction.adapters.colmap_input import ColmapInputAdapter
 from src.services.reconstruction.adapters.torwic_frame_source import TorwicFrameSource, TorwicFrameSourceConfig
@@ -133,6 +138,45 @@ def _config(mode: str) -> ExtractionConfig:
     return ExtractionConfig.model_validate(payload)
 
 
+def _video_preparation_with_resolvable_map(tmp_path: Path):
+    fixture = json.loads((ROOT / "fixtures/contracts/video_preparation_v1.json").read_text())
+    rows = fixture["frame_map_rows"]
+    sidecar = b"".join(json.dumps(row, separators=(",", ":")).encode() + b"\n" for row in rows)
+    payload = fixture["preparation_manifest"]
+    payload["frame_map"].update(size_bytes=len(sidecar), checksum=_sha(sidecar))
+    payload["preparation_checksum"] = "sha256:" + "0" * 64
+    payload["preparation_checksum"] = canonical_content_checksum(payload, "preparation_checksum")
+    manifest = ClientVideoPreparationManifest.model_validate(payload)
+    upload_id = "upload-frame-map-test"
+    frame_map_ref = ProductArtifactRef(
+        artifact_type="VideoFrameMap",
+        schema_version="1.0",
+        artifact_uri=f"artifact://jobs/{upload_id}/input/video_frame_map.jsonl",
+        artifact_checksum=manifest.frame_map.checksum,
+        data_class=ArtifactDataClass.PRODUCT_INPUT,
+        producer_stage=StageId.INPUT_VALIDATE,
+        job_id=upload_id,
+    )
+    verification_payload = {
+        "schema_version": "1.0",
+        "status": "server_verified",
+        "uploaded_checksum": manifest.prepared_file.checksum,
+        "uploaded_size_bytes": manifest.prepared_file.size_bytes,
+        "client_manifest": manifest.model_dump(mode="json"),
+        "observed_video": manifest.prepared_video.model_dump(mode="json"),
+        "frame_map_ref": frame_map_ref.model_dump(mode="json"),
+        "original_source_status": "client_declared_unverified",
+        "verification_checksum": "sha256:" + "0" * 64,
+    }
+    verification_payload["verification_checksum"] = canonical_content_checksum(
+        verification_payload, "verification_checksum"
+    )
+    verification = ServerVideoPreparationVerification.model_validate(verification_payload)
+    resolver = ArtifactResolver(tmp_path / "map_artifacts")
+    FilesystemArtifactStore(resolver).publish(frame_map_ref, sidecar)
+    return verification, resolver
+
+
 def _service(
     root: Path, manifest: InputManifest, paths: tuple[Path, ...], gate: RGBPrivacyGate
 ) -> tuple[RGBFrameExtractor, ArtifactResolver]:
@@ -194,6 +238,26 @@ def test_privacy_and_timestamp_errors_publish_nothing(tmp_path: Path) -> None:
             FrameExtractionRequest(manifest, quality, proof, request.config, "rec02a-test", {0: "1", 1: "0"})
         )
     assert not resolver.resolve("artifact://jobs/rec02a-test/rec02a/frame_set.json").exists()
+
+
+def test_prepared_video_map_carries_source_indices_into_frame_set_input(tmp_path: Path) -> None:
+    verification, resolver = _video_preparation_with_resolvable_map(tmp_path)
+    service = RGBFrameExtractor(
+        FrameExtractionDependencies(
+            writer=None,  # This focused seam exercises only map loading and validation.
+            resolve_input=lambda _: tmp_path,
+            gate=None,
+            decoder=None,
+            resolve_product=resolver.require,
+        )
+    )
+    request = FrameExtractionRequest(None, None, None, None, "frame-map-test", video_preparation=verification)
+    decoded = SimpleNamespace(timestamps=["0", "0.0333333333", "0.0666666667"])
+    chosen = [SimpleNamespace(frame_id=index) for index in range(3)]
+
+    source_ids = service._source_frame_ids(request, chosen, decoded)
+
+    assert source_ids == {0: 0, 1: 2, 2: 4}
 
 
 def test_torwic_source_adapter_resolves_declared_inventory(tmp_path: Path) -> None:

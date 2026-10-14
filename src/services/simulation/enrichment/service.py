@@ -48,6 +48,9 @@ def _enrich_single_object(
     auto_generate: bool,
 ) -> SceneObject:
     """Gắn hoặc sinh collider cho một SceneObject đơn lẻ."""
+    if obj.collider is not None and isinstance(obj.collider.provenance.get("manual_override"), dict):
+        return obj
+
     if obj.id in collider_map:
         chosen_collider = collider_map[obj.id]
         if chosen_collider.local_transform.parent_frame != obj.local_frame:

@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MoveToTrashButton } from "@/features/studio/trash/MoveToTrashButton";
 import { remainingLabel, TrashPage } from "@/features/studio/trash/TrashPage";
-import type { Me } from "@/lib/api/auth";
+import type { Me, Role } from "@/lib/api/auth";
 import { parseTrashEntries } from "@/lib/api/studio";
 
 const auth = vi.hoisted(() => ({ me: { auth_required: false, user: null } as Me }));
@@ -15,6 +15,14 @@ function entry(id: string, title: string) {
   return {
     entry_id: id, title, deleted_at: "2026-10-02T01:00:00Z", expires_at: "2026-10-09T01:00:00Z", deleted_by: null, size_bytes: 2_000_000,
     items: [{ kind: "scene", identifier: `project-${id}`, name: title, detail: "job-1 CANCELLED" }, { kind: "upload", identifier: `upload-${id}`, name: "walk.mp4", detail: "" }],
+    capabilities: { can_restore: true, can_purge: true },
+  };
+}
+
+function signedIn(role: Role): Me {
+  return {
+    auth_required: true,
+    user: { user_id: "user-1", email: "user@example.test", display_name: "User", role, active: true, daily_job_quota: 3 },
   };
 }
 
@@ -95,12 +103,48 @@ describe("TrashPage", () => {
 
   it("Editor khôi phục được nhưng không xoá hẳn được", async () => {
     auth.me = { auth_required: true, user: { user_id: "u1", email: "e@x.dev", display_name: "E", role: "editor", daily_job_quota: 3 } } as Me;
-    backend([entry("a", "Kho A")]);
+    backend([{ ...entry("a", "Kho A"), capabilities: { can_restore: true, can_purge: false } }]);
     render(<TrashPage />);
     expect(await screen.findByRole("button", { name: "Xoá hẳn Kho A" })).toBeDisabled();
     expect(screen.getByRole("button", { name: /Xoá tất cả/ })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Khôi phục Kho A" })).toBeEnabled();
-    expect(screen.getByText(/Chỉ Reviewer xoá hẳn được/)).toBeInTheDocument();
+    expect(screen.getByText("Chỉ Reviewer xoá hẳn được.")).toBeInTheDocument();
+    expect(screen.queryByText(/Guest chỉ khôi phục/)).toBeNull();
+  });
+
+  it("Guest chỉ chọn và khôi phục entry có capability sở hữu; request bulk không gửi entry foreign", async () => {
+    auth.me = { auth_required: true, user: { user_id: "guest-1", email: "guest@example.test", display_name: "Guest", role: "guest", daily_job_quota: 10 } } as Me;
+    const mine = { ...entry("mine", "Scene của tôi"), capabilities: { can_restore: true, can_purge: false } };
+    const foreign = { ...entry("foreign", "Scene của người khác"), capabilities: { can_restore: false, can_purge: false } };
+    const calls = backend([mine, foreign]);
+    render(<TrashPage />);
+
+    expect(await screen.findByRole("button", { name: "Khôi phục Scene của tôi" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Khôi phục Scene của người khác" })).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: "Chọn Scene của người khác" })).toBeDisabled();
+    expect(screen.getByText("Chỉ Reviewer xoá hẳn được. Guest chỉ khôi phục resource do mình sở hữu.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Chọn tất cả" }));
+    expect(screen.getByText("Đã chọn 1/2 mục")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Khôi phục mục đã chọn" }));
+    await waitFor(() => expect(screen.queryByText("Scene của tôi")).toBeNull());
+    expect(calls).toEqual([{ url: "/api/v1/trash/restore", ids: ["mine"] }]);
+    expect(screen.getByText("Scene của người khác")).toBeInTheDocument();
+  });
+
+  it.each([
+    { role: "guest" as const, canRestore: false, canPurge: false },
+    { role: "editor" as const, canRestore: true, canPurge: false },
+    { role: "reviewer" as const, canRestore: true, canPurge: true },
+  ])("legacy trash response preserves $role fallback and denies Guest", async ({ role, canRestore, canPurge }) => {
+    auth.me = signedIn(role);
+    const legacy = entry("legacy", "Kho cũ");
+    Reflect.deleteProperty(legacy, "capabilities");
+    backend([legacy]);
+    render(<TrashPage />);
+
+    expect(await screen.findByRole("button", { name: "Khôi phục Kho cũ" })).toHaveProperty("disabled", !canRestore);
+    expect(screen.getByRole("button", { name: "Xoá hẳn Kho cũ" })).toHaveProperty("disabled", !canPurge);
   });
 
   it("khách không tải thùng rác", async () => {
@@ -146,5 +190,12 @@ describe("parseTrashEntries", () => {
     expect(() => parseTrashEntries({ entries: [{ entry_id: "a" }] })).toThrow();
     expect(() => parseTrashEntries({ entries: [{ ...entry("a", "A"), items: [{ kind: "khac", identifier: "x", name: "y" }] }] })).toThrow();
     expect(() => parseTrashEntries(null)).toThrow();
+  });
+
+  it("giữ thiếu capability như API cũ để trang fallback theo role, nhưng từ chối capability hỏng", () => {
+    const legacy = entry("old", "Kho cũ");
+    Reflect.deleteProperty(legacy, "capabilities");
+    expect(parseTrashEntries({ entries: [legacy] })[0].capabilities).toBeUndefined();
+    expect(() => parseTrashEntries({ entries: [{ ...entry("bad", "Kho sai"), capabilities: { can_restore: true, can_purge: "yes" } }] })).toThrow();
   });
 });

@@ -6,6 +6,7 @@ gốc (null khi nguồn không ghi được), UI không được bịa số.
 """
 
 import re
+from collections.abc import Iterable
 from datetime import datetime
 from typing import Literal, Self
 
@@ -17,6 +18,26 @@ from src.services.orchestration.jobs.progress import STUDIO_PIPELINE
 from src.services.reconstruction.views import CameraMarker
 
 _FILE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+
+
+def pipeline_for_stage_ids(present: Iterable[StageId]) -> tuple[StageId, ...]:
+    """Thứ tự bước của một job/bundle: pipeline Studio, thêm bước LiDAR mà job thật sự có.
+
+    Cùng quy tắc với `frontend/src/features/studio/stages.ts::stagesFor` để phát lại mẫu hiện đúng các bước như scene
+    thật: job odometry chỉ thêm bước odometry; job nộp gói LiDAR thêm bước nhận dữ liệu và, nếu có, QA calibration.
+    """
+    ids = set(present)
+    index = STUDIO_PIPELINE.index(StageId.FRAME_EXTRACT) + 1
+    if StageId.LIDAR_ODOMETRY in ids:
+        lidar: tuple[StageId, ...] = (StageId.LIDAR_ODOMETRY,)
+    elif StageId.LIDAR_INGEST in ids:
+        lidar = (
+            StageId.LIDAR_INGEST,
+            *((StageId.LIDAR_CALIBRATION_QA,) if StageId.LIDAR_CALIBRATION_QA in ids else ()),
+        )
+    else:
+        lidar = ()
+    return (*STUDIO_PIPELINE[:index], *lidar, *STUDIO_PIPELINE[index:])
 
 
 class DemoFile(BaseModel):
@@ -37,6 +58,40 @@ class DemoFile(BaseModel):
         return value
 
 
+class DemoFact(BaseModel):
+    """Một số đo thật của stage (nhãn + giá trị đã định dạng); không bao giờ do UI tự điền."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    label: str = Field(min_length=1, max_length=80)
+    value: str = Field(min_length=1, max_length=160)
+
+
+class DemoStageAsset(BaseModel):
+    """Một "thẻ" kết quả của stage để khung xem trước hiển thị.
+
+    Thêm cảnh demo mới = ghi thêm asset vào bundle; thêm kiểu thẻ mới = thêm một giá trị vào `kind` ở đây và một
+    renderer cùng tên ở frontend (`features/studio/showcase/registry.ts`).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["image", "video", "facts"]
+    title: str = Field(default="", max_length=120)
+    caption: str = Field(default="", max_length=300)
+    file: DemoFile | None = None
+    facts: list[DemoFact] = Field(default_factory=list, max_length=12)
+
+    @model_validator(mode="after")
+    def _matches_kind(self) -> Self:
+        if self.kind == "facts":
+            if not self.facts or self.file is not None:
+                raise ValueError("asset facts cần danh sách số đo và không kèm file")
+        elif self.file is None or self.facts:
+            raise ValueError(f"asset {self.kind} cần đúng một file và không kèm số đo")
+        return self
+
+
 class DemoStage(BaseModel):
     """Evidence của stage; `duration_seconds` null khi chưa có mốc thời gian."""
 
@@ -47,6 +102,8 @@ class DemoStage(BaseModel):
     state: Literal["succeeded", "pending", "failed"] = "succeeded"
     duration_seconds: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     summary: str = Field(default="", max_length=300)
+    #: Kết quả hiển thị của bước (ảnh, video, số đo); rỗng với bundle cũ.
+    assets: list[DemoStageAsset] = Field(default_factory=list, max_length=8)
 
 
 class DemoSource(BaseModel):
@@ -98,10 +155,11 @@ class DemoManifest(BaseModel):
         self.stages = [
             records.get(stage_id)
             or DemoStage(stage_id=stage_id, state="pending", summary="Mẫu này chưa ghi kết quả của bước này.")
-            for stage_id in STUDIO_PIPELINE
+            for stage_id in pipeline_for_stage_ids(records)
         ]
         return self
 
     def files(self) -> list[DemoFile]:
-        """Allow-list duy nhất của file được phục vụ qua API."""
-        return [*([self.video] if self.video else []), *self.frames, self.splat]
+        """Allow-list duy nhất của file được phục vụ qua API (gồm cả file của asset từng bước)."""
+        assets = [asset.file for stage in self.stages for asset in stage.assets if asset.file is not None]
+        return [*([self.video] if self.video else []), *self.frames, *assets, self.splat]

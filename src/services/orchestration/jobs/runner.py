@@ -12,14 +12,17 @@ Runner không tự cấp privacy approval: gate nằm ở project policy và REC
 """
 
 import argparse
+import hashlib
 import json
 import logging
 import os
 import re
 import signal
+import stat
 import subprocess
 import sys
 import time
+import zipfile
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -29,7 +32,32 @@ from threading import Event
 from uuid import uuid4
 
 from src.config import Settings, get_settings
-from src.models.contracts.artifacts import ProductArtifactRef
+from src.models.contracts.artifacts import ArtifactDataClass, ArtifactRef, ProductArtifactRef
+from src.models.contracts.input_assembly import (
+    CandidateState,
+    ClockRelation,
+    CloudObservationState,
+    DistanceUnit,
+    InputAssemblySnapshot,
+    InputAssetFormat,
+    InputRecipe,
+    InputResolutionReport,
+    InputResolutionState,
+    InputRole,
+    RecipeGroup,
+    RuntimeCapabilityKey,
+    RuntimeCapabilityRecord,
+    RuntimeQualificationRegistry,
+    RuntimeQualificationStatus,
+    StagedInputFile,
+    TimestampUnit,
+    TrajectoryOrigin,
+    VideoRecipeCandidate,
+    verify_input_assembly_checksum,
+    verify_input_recipe_checksum,
+    verify_input_resolution_checksum,
+    verify_runtime_registry_checksum,
+)
 from src.models.contracts.manifests import (
     ExecutionError,
     InputManifest,
@@ -41,9 +69,18 @@ from src.models.contracts.manifests import (
 )
 from src.models.contracts.preview import ReconstructionPreview
 from src.models.contracts.retryability import classify_retryability
-from src.services.orchestration.artifacts import ArtifactResolver, FilesystemArtifactStore
+from src.services.orchestration.artifacts import (
+    ArtifactResolver,
+    ArtifactStoreError,
+    FilesystemArtifactStore,
+    sha256_bytes,
+)
 from src.services.orchestration.benchmark import build_benchmark, publish_benchmark
+from src.services.orchestration.inputs import InputAssemblyService
+from src.services.orchestration.inputs.compatibility import INPUT_ASSEMBLY_RUNNABLE_RECIPE_GROUPS
+from src.services.orchestration.inputs.loose_package import LoosePackageError, verify_package_members
 from src.services.orchestration.jobs.admission import ResourceAdmission, job_drivers, touch_job_reservation
+from src.services.orchestration.jobs.anonymization_review import accept_when_nothing_redacted
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
 from src.services.orchestration.jobs.dispatch import (
     ResolvedProcessing,
@@ -51,12 +88,19 @@ from src.services.orchestration.jobs.dispatch import (
     require_profile,
     resolve_job_processing,
 )
+from src.services.orchestration.jobs.log_context import configure_worker_logging, job_log_context
 from src.services.orchestration.jobs.models import PreparedInputReceipt, TransitionRequest
-from src.services.orchestration.jobs.progress import awaiting_finalize, metric_confirmation_stage
+from src.services.orchestration.jobs.progress import (
+    awaiting_anonymization_review,
+    awaiting_finalize,
+    awaiting_reviewed_preview,
+    metric_confirmation_stage,
+)
 from src.services.orchestration.jobs.workspace import attempt_lease, cleanup_attempt_workspace, cleanup_finished_job
 from src.services.orchestration.processing import is_presets_file, load_presets
 from src.services.orchestration.processing.capability import latest as latest_capability
 from src.services.orchestration.processing.capability import measure_capacity
+from src.services.orchestration.processing.config import load_job_config
 from src.services.orchestration.processing.observed import load_usages
 from src.services.orchestration.processing.telemetry import (
     Outcome,
@@ -65,6 +109,7 @@ from src.services.orchestration.processing.telemetry import (
     ResourceUsage,
     sampled_section,
 )
+from src.services.orchestration.projects.models import LidarPackageMember, ProjectRecord
 from src.services.orchestration.projects.registry import ProjectRegistry, get_project_registry
 from src.services.reconstruction import (
     MogeSettings,
@@ -79,6 +124,12 @@ logger = logging.getLogger(__name__)
 
 _MAX_TOOL_RESPONSE_BYTES = 1048576
 _JOB_ID_PATTERN = r"[A-Za-z0-9][A-Za-z0-9._-]*"
+
+
+def _attempt_log_id(registry: ProjectRegistry, job_id: str) -> str:
+    """Use the durable attempt sequence as the stable log correlation ID."""
+    history = registry.list_job_attempts(job_id)
+    return str(history[-1].attempt) if history else "-"
 
 
 class PreviewCancelledError(RuntimeError):
@@ -117,6 +168,14 @@ class _Attempt:
     exhausted: bool = False
 
 
+@dataclass(frozen=True)
+class _AcceptedRecipeEvidence:
+    assembly: InputAssemblySnapshot
+    report: InputResolutionReport
+    runtime_registry: RuntimeQualificationRegistry
+    recipe: InputRecipe
+
+
 class _StageProgress:
     """Đọc dần progress file của REC (JSON lines StageArtifact) và đẩy stage RUNNING vào job."""
 
@@ -136,8 +195,10 @@ class _StageProgress:
         self.offset += len(complete)
         for line in complete.splitlines():
             stage = StageArtifact.model_validate_json(line)
-            if stage.status == StageStatus.RUNNING and stage.stage_id != self.attempt.job.current_stage:
-                self.attempt.job = self.attempt.registry.record_stage_progress(self.attempt.job, stage.stage_id)
+            if stage.status == StageStatus.RUNNING:
+                self.attempt.job = self.attempt.registry.record_stage_progress(
+                    self.attempt.job, stage.stage_id, started_at=stage.started_at
+                )
 
 
 def _run_tool(
@@ -327,10 +388,12 @@ def _record_runner_failure(attempt: _Attempt, error: BaseException) -> None:
     """Process boundary: ghi FAILED có redaction trên đúng revision runner đang giữ."""
     current = attempt.registry.get_job(attempt.job.job_id)
     if current.job_manifest_checksum != attempt.job.job_manifest_checksum:
+        if current.status == JobStatus.CANCELLED:
+            _record_benchmark(attempt)
         return
     details = {"exception_type": type(error).__name__}
     try:
-        attempt.registry.transition_job(
+        attempt.job = attempt.registry.transition_job(
             attempt.job.job_id,
             TransitionRequest(
                 target_status=JobStatus.FAILED,
@@ -344,6 +407,7 @@ def _record_runner_failure(attempt: _Attempt, error: BaseException) -> None:
             ),
             expected_checksum=attempt.job.job_manifest_checksum,
         )
+        _record_benchmark(attempt)
     except RuntimeStateConflictError:
         logger.info("Worker failure không ghi đè revision mới hơn")
 
@@ -450,10 +514,11 @@ def _execute_preview(attempt: _Attempt, frames: ProductArtifactRef, profile: Res
     receipt = verify_prepared_preview(reference, attempt.registry.runtime_resolver.require)
     if receipt.attempt_id != attempt_id or (receipt.error is None) != (exit_code == 0):
         raise ValueError("Worker result khác attempt/exit status")
+    preview_verified_at = datetime.now(UTC) if receipt.error is None else None
     # Trước khi job chuyển sang chờ xác nhận tỉ lệ: khi người dùng mở bước đó thì đề xuất đã có (hoặc
     # chắc chắn không có), UI không phải đoán "đang tính" hay "không bật".
     _propose_metric(attempt, receipt.preview_ref)
-    job = attempt.registry.record_preview(attempt.job, receipt)
+    job = attempt.registry.record_preview(attempt.job, receipt, verified_at=preview_verified_at)
     _record_benchmark(attempt)
     if receipt.error is None:
         _cleanup_attempt_workspace(attempt)
@@ -560,11 +625,307 @@ def _record_benchmark(attempt: _Attempt) -> None:
         logger.exception("Không ghi được benchmark cho job %s", attempt.job.job_id)
 
 
-def _pull_input(resolver: ArtifactResolver, manifest_ref: ProductArtifactRef) -> None:
-    """Đưa InputManifest và video gốc vào cache cục bộ, kiểm đúng checksum trong manifest."""
+def _pull_input(resolver: ArtifactResolver, manifest_ref: ProductArtifactRef) -> InputManifest:
+    """Đưa InputManifest và input gốc vào cache cục bộ, kiểm đúng checksum trong manifest."""
     manifest = InputManifest.model_validate_json(resolver.require(manifest_ref).read_bytes())
     for item in manifest.files:
         resolver.require_uri(item.artifact_uri, item.checksum)
+    return manifest
+
+
+def _validate_project_input_recipe(
+    attempt: _Attempt,
+    project: ProjectRecord,
+    manifest: InputManifest,
+) -> _AcceptedRecipeEvidence | None:
+    """Recheck the accepted recipe, worker qualification, and bound source bytes before reconstruction resumes."""
+    assembly_ref = project.input_assembly_ref
+    if assembly_ref is None:
+        return None
+    resolution_ref = project.input_resolution_ref
+    recipe_ref = project.input_recipe_ref
+    runtime_ref = project.input_runtime_registry_ref
+    references = (assembly_ref, resolution_ref, recipe_ref, runtime_ref)
+    if any(reference is None for reference in references):
+        raise ValueError("Grouped input project is missing an immutable evidence reference")
+    if any(reference.job_id != project.project_id for reference in references if reference is not None):
+        raise ValueError("Grouped input evidence points outside the project namespace")
+    resolver = attempt.registry.runtime_resolver
+    assembly = InputAssemblySnapshot.model_validate_json(resolver.require(assembly_ref).read_bytes())
+    report = InputResolutionReport.model_validate_json(resolver.require(resolution_ref).read_bytes())
+    recipe = InputRecipe.model_validate_json(resolver.require(recipe_ref).read_bytes())
+    runtime_registry = RuntimeQualificationRegistry.model_validate_json(resolver.require(runtime_ref).read_bytes())
+    verify_input_assembly_checksum(assembly)
+    verify_input_resolution_checksum(report)
+    verify_input_recipe_checksum(recipe)
+    verify_runtime_registry_checksum(runtime_registry)
+    if (
+        recipe.assembly_id != assembly.assembly_id
+        or recipe.assembly_revision != assembly.revision
+        or recipe.assembly_checksum != assembly.assembly_checksum
+        or report.assembly_id != assembly.assembly_id
+        or report.assembly_revision != assembly.revision
+        or report.assembly_checksum != assembly.assembly_checksum
+        or report.report_checksum != recipe.resolution_checksum
+        or report.runtime_registry_checksum != runtime_registry.registry_checksum
+        or recipe.config_checksum != attempt.job.config_checksum
+        or manifest.input_manifest_checksum != attempt.job.input_manifest_checksum
+    ):
+        raise ValueError("Grouped input recipe, report, runtime, and job checksums do not form one exact chain")
+    if report.state != InputResolutionState.READY or report.recommended_candidate_id != recipe.candidate_id:
+        raise ValueError("Accepted grouped input recipe is no longer the unique ready resolution")
+    candidate = next((item for item in report.candidates if item.candidate_id == recipe.candidate_id), None)
+    if (
+        not isinstance(candidate, VideoRecipeCandidate)
+        or candidate.state != CandidateState.READY
+        or candidate.runtime.status != RuntimeQualificationStatus.QUALIFIED
+        or candidate.recipe_group not in INPUT_ASSEMBLY_RUNNABLE_RECIPE_GROUPS
+        or recipe.recipe_group != candidate.recipe_group
+        or recipe.bindings != candidate.bindings
+        or recipe.excluded_file_ids != candidate.excluded_file_ids
+        or recipe.trajectory_origin != candidate.trajectory_origin
+    ):
+        raise ValueError("Accepted recipe has no current qualified reconstruction adapter")
+    versions = {item.component_id: item for item in recipe.component_versions}
+    runtime_version = versions.get(f"runtime-{candidate.runtime.runtime_id}")
+    resolver_version = versions.get("input-resolver")
+    if (
+        runtime_version is None
+        or runtime_version.version != candidate.runtime.runtime_version
+        or runtime_version.config_checksum != candidate.runtime.qualification_evidence_checksum
+        or resolver_version is None
+        or resolver_version.version != report.resolver_version
+        or resolver_version.config_checksum != runtime_registry.registry_checksum
+    ):
+        raise ValueError("Accepted recipe component versions do not match the qualified runtime evidence")
+    bindings = {binding.role: binding.file_ids for binding in candidate.bindings}
+    video_ids = bindings.get(InputRole.RGB_VIDEO, [])
+    if len(video_ids) != 1:
+        raise ValueError("Accepted recipe must bind exactly one RGB video")
+    by_id = {item.file_id: item for item in assembly.files}
+    video = by_id[video_ids[0]]
+    video_manifest = [item for item in manifest.files if item.media_type in {"video/mp4", "video/quicktime"}]
+    if (
+        len(video_manifest) != 1
+        or video.archive_member is not None
+        or video.source_file.checksum != video_manifest[0].checksum
+        or video.source_file.artifact_uri != video_manifest[0].artifact_uri
+    ):
+        raise ValueError("Accepted RGB binding does not match the worker InputManifest video")
+    if candidate.recipe_group == RecipeGroup.RGB_ONLY:
+        if manifest.input_configuration.registered_lidar_present or len(manifest.files) != 1:
+            raise ValueError("R1 recipe must dispatch the video-only worker path")
+        selected_upload_ids = {video.upload_id}
+    elif candidate.recipe_group in {RecipeGroup.REGISTERED_MAP, RecipeGroup.SINGLE_STATIC_CLOUD}:
+        source_role = (
+            InputRole.REGISTERED_LIDAR_MAP
+            if candidate.recipe_group == RecipeGroup.REGISTERED_MAP
+            else InputRole.STATIC_LIDAR_CLOUD
+        )
+        source_ids = bindings.get(source_role, [])
+        declarations = assembly.declarations
+        source = by_id[source_ids[0]] if len(source_ids) == 1 else None
+        expected_cloud_state = (
+            CloudObservationState.REGISTERED_MAP
+            if candidate.recipe_group == RecipeGroup.REGISTERED_MAP
+            else CloudObservationState.SINGLE_STATIC_CLOUD
+        )
+        if (
+            manifest.input_configuration.registered_lidar_present
+            or manifest.lidar_metadata is not None
+            or len(manifest.files) != 1
+            or source is None
+            or source.observed_format not in {InputAssetFormat.POINT_CLOUD_PCD, InputAssetFormat.POINT_CLOUD_PLY}
+            or declarations.cloud_state is None
+            or declarations.cloud_state.value != expected_cloud_state
+            or declarations.same_scene is None
+            or declarations.same_scene.value is not True
+            or declarations.coordinate_unit is None
+            or declarations.lidar_frame_id is None
+        ):
+            raise ValueError("R2/R3 recipe must bind one exact map/cloud source and a video-only worker manifest")
+        selected_upload_ids = {video.upload_id, source.upload_id}
+    elif candidate.recipe_group == RecipeGroup.SUPPLIED_TRAJECTORY:
+        if not manifest.input_configuration.registered_lidar_present or manifest.lidar_metadata is None:
+            raise ValueError("R4 recipe requires the existing LiDAR package worker stage")
+        role_ids = [
+            file_id
+            for role in (
+                InputRole.LIDAR_SCAN,
+                InputRole.SENSOR_TRAJECTORY,
+                InputRole.CAMERA_LIDAR_CALIBRATION,
+                InputRole.RGB_FRAME_TIMES,
+            )
+            for file_id in bindings.get(role, [])
+        ]
+        if not role_ids:
+            raise ValueError("R4 recipe has no LiDAR package members")
+        package_upload_ids = {by_id[file_id].upload_id for file_id in role_ids}
+        package_checksums = {
+            by_id[file_id].archive_member.container_checksum
+            for file_id in role_ids
+            if by_id[file_id].archive_member is not None
+        }
+        lidar_files = [item for item in manifest.files if item.media_type == "application/zip"]
+        lidar_provenance = (manifest.preparation_provenance or {}).get("lidar")
+        synthesized = lidar_provenance.get("package_members") if isinstance(lidar_provenance, dict) else None
+        if synthesized is not None:
+            # Gói do server đóng từ file rời: kiểm theo danh sách thành viên + checksum nguồn đã niêm phong.
+            evidence = lidar_provenance.get("evidence") if isinstance(lidar_provenance, dict) else None
+            if (
+                len(lidar_files) != 1
+                or not isinstance(evidence, dict)
+                or not isinstance(synthesized, list)
+                or lidar_provenance.get("trajectory_origin") != "supplied"
+                or candidate.trajectory_origin != TrajectoryOrigin.SUPPLIED
+            ):
+                raise ValueError("R4 recipe does not match the synthesized LiDAR package in InputManifest")
+            try:
+                verify_package_members(
+                    [LidarPackageMember.model_validate(item) for item in synthesized],
+                    staged=by_id,
+                    role_bindings=bindings,
+                    trajectory_member=str(evidence["trajectory_member"]),
+                    calibration_member=str(evidence["calibration_member"]),
+                    frame_times_member=str(evidence["frame_times_member"]),
+                    scan_count=int(evidence["scan_count"]),
+                )
+            except (LoosePackageError, ValueError, KeyError, TypeError) as error:
+                raise ValueError("R4 synthesized package does not match the accepted recipe") from error
+            # Đối chiếu độc lập với danh sách thành viên trong manifest: tên thành viên thật của gói trên đĩa.
+            # require_uri tải từ kho từ xa khi cần và kiểm checksum; không tìm thấy gói thì lỗi, không bỏ qua.
+            import zipfile
+
+            package_path = resolver.require_uri(lidar_files[0].artifact_uri, lidar_files[0].checksum)
+            try:
+                with zipfile.ZipFile(package_path) as package:
+                    actual_members = set(package.namelist())
+            except zipfile.BadZipFile as error:
+                raise ValueError("R4 synthesized package is not a readable archive") from error
+            if actual_members != {str(item["member_path"]) for item in synthesized}:
+                raise ValueError("R4 synthesized package contents differ from its recorded member list")
+            selected_upload_ids = {video.upload_id, *(by_id[file_id].upload_id for file_id in role_ids)}
+        else:
+            if (
+                len(package_upload_ids) != 1
+                or any(by_id[file_id].archive_member is None for file_id in role_ids)
+                or len(package_checksums) != 1
+                or len(lidar_files) != 1
+                or next(iter(package_checksums)) != lidar_files[0].checksum
+                or not isinstance(lidar_provenance, dict)
+                or lidar_provenance.get("trajectory_origin") != "supplied"
+                or candidate.trajectory_origin != TrajectoryOrigin.SUPPLIED
+            ):
+                raise ValueError("R4 recipe does not match the supplied-trajectory LiDAR package in InputManifest")
+            selected_upload_ids = {video.upload_id, *package_upload_ids}
+    else:
+        if (
+            manifest.input_configuration.registered_lidar_present
+            or manifest.lidar_metadata is not None
+            or len(manifest.files) != 1
+            or candidate.trajectory_origin != TrajectoryOrigin.ESTIMATED
+            or bindings.get(InputRole.SENSOR_TRAJECTORY)
+        ):
+            raise ValueError("R5/R6 must estimate a scan-native trajectory without entering the legacy LiDAR path")
+        scan_ids = bindings.get(InputRole.LIDAR_SCAN, [])
+        timestamp_ids = bindings.get(InputRole.LIDAR_SCAN_TIMES, [])
+        if (
+            len(scan_ids) < 2
+            or len(timestamp_ids) != 1
+            or assembly.declarations.coordinate_unit is None
+            or assembly.declarations.coordinate_unit.value != DistanceUnit.METER
+            or assembly.declarations.lidar_frame_id is None
+            or (assembly.declarations.lidar_timestamp_unit is None and assembly.declarations.timestamp_unit is None)
+        ):
+            raise ValueError("R5/R6 recipe lost its metric ordered scans, sensor frame, or scan timestamps")
+        if candidate.recipe_group == RecipeGroup.SENSOR_GUIDED and (
+            len(bindings.get(InputRole.CAMERA_LIDAR_CALIBRATION, [])) != 1
+            or len(bindings.get(InputRole.RGB_FRAME_TIMES, [])) != 1
+            or (assembly.declarations.rgb_timestamp_unit is None and assembly.declarations.timestamp_unit is None)
+        ):
+            raise ValueError("R6 requires exact calibration and RGB frame-time bindings")
+        if candidate.recipe_group == RecipeGroup.ESTIMATED_TRAJECTORY and (
+            bindings.get(InputRole.CAMERA_LIDAR_CALIBRATION) or bindings.get(InputRole.RGB_FRAME_TIMES)
+        ):
+            raise ValueError("R5 scan-only recipe cannot bind R6 calibration or RGB frame times")
+        selected_ids = [
+            *scan_ids,
+            *timestamp_ids,
+            *bindings.get(InputRole.CAMERA_LIDAR_CALIBRATION, []),
+            *bindings.get(InputRole.RGB_FRAME_TIMES, []),
+        ]
+        selected_files = [by_id[file_id] for file_id in selected_ids]
+        if any(item.observed_format != InputAssetFormat.POINT_CLOUD_PCD for item in selected_files[: len(scan_ids)]):
+            raise ValueError("R5/R6 currently support checked PCD scans only")
+        if any(
+            item.archive_member is not None and item.archive_member.container_checksum != item.source_file.checksum
+            for item in selected_files
+        ):
+            raise ValueError("R5/R6 archive member no longer matches its uploaded container checksum")
+        selected_upload_ids = {video.upload_id, *(by_id[file_id].upload_id for file_id in selected_ids)}
+
+        odometry_runtime = next(
+            (item for item in runtime_registry.capabilities if item.capability_key == RuntimeCapabilityKey.R5), None
+        )
+        if candidate.recipe_group == RecipeGroup.SENSOR_GUIDED:
+            odometry_component = (
+                versions.get(f"runtime-R5-{odometry_runtime.runtime_id}") if odometry_runtime is not None else None
+            )
+            if (
+                odometry_runtime is None
+                or odometry_runtime.status != RuntimeQualificationStatus.QUALIFIED
+                or odometry_component is None
+                or odometry_component.version != odometry_runtime.runtime_version
+                or odometry_component.config_checksum != odometry_runtime.qualification_evidence_checksum
+            ):
+                raise ValueError("R6 requires the exact qualified R5 odometry runtime")
+            if assembly.declarations.clock_relation is None or assembly.declarations.clock_relation.value not in {
+                ClockRelation.SAME_CLOCK,
+                ClockRelation.KNOWN_OFFSET,
+            }:
+                raise ValueError("R6 requires a declared RGB-to-LiDAR clock relation")
+            if (
+                assembly.declarations.clock_relation.value == ClockRelation.KNOWN_OFFSET
+                and assembly.declarations.clock_offset_seconds is None
+            ):
+                raise ValueError("R6 known-offset clock relation requires the exact offset in seconds")
+        if candidate.recipe_group in {RecipeGroup.ESTIMATED_TRAJECTORY, RecipeGroup.SENSOR_GUIDED}:
+            from src.services.reconstruction.lidar.odometry import (
+                DEFAULT_LIDAR_ODOMETRY_PROFILE_VERSION,
+                lidar_odometry_profile_checksum,
+            )
+
+            profile_component = versions.get("odometry-profile")
+            if (
+                profile_component is None
+                or profile_component.version != DEFAULT_LIDAR_ODOMETRY_PROFILE_VERSION
+                or profile_component.config_checksum != lidar_odometry_profile_checksum()
+            ):
+                raise ValueError("Accepted R5/R6 recipe does not bind the exact odometry profile")
+    service = InputAssemblyService(
+        RuntimeDatabase(attempt.settings.database_url),
+        str(attempt.settings.product_input_runtime_registry)
+        if attempt.settings.product_input_runtime_registry is not None
+        else None,
+        resolver,
+    )
+    stored = service.get_assembly(assembly.assembly_id, assembly.revision)
+    if stored.snapshot != assembly:
+        raise ValueError("Published input assembly differs from the durable assembly revision")
+    service.verify_upload_sources(stored, upload_ids=selected_upload_ids)
+    current_resolution = service.resolve(assembly.assembly_id, assembly.revision)
+    if current_resolution.report != report or current_resolution.runtime_registry != runtime_registry:
+        raise ValueError("Worker runtime or input resolver version differs from the accepted recipe")
+    return _AcceptedRecipeEvidence(assembly, report, runtime_registry, recipe)
+
+
+def must_anonymize(job_choice: bool, settings: object, privacy_mode: str) -> bool:
+    """Job tự chọn, deployment bắt buộc cho mọi job, hoặc project ở chế độ `qa_verified`.
+
+    Worker tự quyết theo chế độ của project, không tin cấu hình job do API ghi: một job `qa_verified` thiếu cờ
+    `anonymize` vẫn bị che. Settings giả trong test có thể không có trường `product_anonymize_input`.
+    """
+    return job_choice or bool(getattr(settings, "product_anonymize_input", False)) or privacy_mode == "qa_verified"
 
 
 def _execute_prepare(attempt: _Attempt, profile: ResolvedProcessing) -> JobManifest:
@@ -572,7 +933,8 @@ def _execute_prepare(attempt: _Attempt, profile: ResolvedProcessing) -> JobManif
     project = attempt.registry.get_project(attempt.job.project_id)
     if project.input_manifest_ref is None:
         raise ValueError("Project không có InputManifest đã publish")
-    _pull_input(attempt.registry.runtime_resolver, project.input_manifest_ref)
+    manifest = _pull_input(attempt.registry.runtime_resolver, project.input_manifest_ref)
+    _validate_project_input_recipe(attempt, project, manifest)
     quality_profile = json.loads(attempt.settings.product_upload_quality_profile.read_bytes())
     request = {
         "schema_version": "1.0",
@@ -583,6 +945,7 @@ def _execute_prepare(attempt: _Attempt, profile: ResolvedProcessing) -> JobManif
         "privacy_mode": "self_attested",
         "sample_fps": profile.sample_fps,
         "max_frames": profile.max_frames,
+        "anonymize": must_anonymize(profile.anonymize, attempt.settings, project.privacy_mode),
     }
     request_path = attempt.workspace / "prepare.request.json"
     with request_path.open("x", encoding="utf-8") as stream:
@@ -603,14 +966,18 @@ def _execute_prepare(attempt: _Attempt, profile: ResolvedProcessing) -> JobManif
     receipt = PreparedInputReceipt.model_validate(payload["result"])
     if (receipt.error is None) != (exit_code == 0):
         raise ValueError("Prepare result khác exit status")
-    return attempt.registry.record_prepared_input(attempt.job, receipt)
+    job = attempt.registry.record_prepared_input(attempt.job, receipt)
+    attempt.job = job
+    if job.status == JobStatus.FAILED:
+        _record_benchmark(attempt)
+    return job
 
 
-def _execute_lidar_ingest(attempt: _Attempt) -> JobManifest:
+def _execute_lidar_ingest(attempt: _Attempt, rgb_frame_set_ref: ProductArtifactRef) -> JobManifest:
     """`ST-LIDAR-INGEST` cho job có gói LiDAR (ADR 0009): giải gói, ghép scan nếu cần, publish đám mây + bản ghi gói.
 
     Job chỉ có video trả nguyên job. Bằng chứng nhận diện lấy từ InputManifest (đã lưu lúc tạo scene), không nhận
-    diện lại từ tên file. Chạy ngay trong worker (CPU + RAM, không dùng GPU) và được đo như một công cụ riêng.
+    diện lại từ tên file. Sau ingest, QA calibration chiếu các scan gốc theo pose lên RGB trước khi chạy COLMAP.
     """
     from src.services.reconstruction import LidarEvidence, LidarPackageError, LidarPackageIngest
 
@@ -662,7 +1029,468 @@ def _execute_lidar_ingest(attempt: _Attempt) -> JobManifest:
         started_at=started,
         completed_at=datetime.now(UTC),
     )
-    return attempt.registry.record_lidar_ingest(attempt.job, stage)
+    attempt.job = attempt.registry.record_lidar_ingest(attempt.job, stage)
+    attempt.job = attempt.registry.record_stage_progress(attempt.job, StageId.LIDAR_CALIBRATION_QA)
+    qa_started = datetime.now(UTC)
+    project = attempt.registry.get_project(attempt.job.project_id)
+    declarations = None
+    if project.input_assembly_ref is not None:
+        try:
+            assembly = InputAssemblySnapshot.model_validate_json(
+                resolver.require(project.input_assembly_ref).read_bytes()
+            )
+            declarations = assembly.declarations
+        except (ArtifactStoreError, ValueError) as error:
+            logger.warning(
+                "LiDAR QA declarations unavailable for job %s; continuing as inconclusive cause=%s",
+                attempt.job.job_id,
+                type(error).__name__,
+            )
+    from src.models.contracts.lidar_calibration_qa import LidarCalibrationQAResult
+    from src.services.reconstruction.lidar.calibration_qa_worker import run_lidar_calibration_qa
+
+    with _sampled(attempt, "lidar_calibration_qa"):
+        qa = run_lidar_calibration_qa(
+            resolver=resolver,
+            writer=FilesystemArtifactStore(resolver),
+            job_id=attempt.job.job_id,
+            package_ref=result.reference,
+            package=result.record,
+            input_manifest=manifest,
+            rgb_frame_set_ref=rgb_frame_set_ref,
+            declarations=declarations,
+        )
+    resolver.sync_up(attempt.job.job_id)
+    qa_failed = qa.report.result == LidarCalibrationQAResult.FAIL
+    qa_error = (
+        ExecutionError(
+            error_code="LIDAR_CALIBRATION_QA_FAILED",
+            stage_id=StageId.LIDAR_CALIBRATION_QA,
+            human_message="LiDAR calibration QA found structural input inconsistencies; correct the source and create a new job.",
+            retryable=False,
+            details={"action": "Correct calibration, units, timestamps, or source bindings and create a new job"},
+        )
+        if qa_failed
+        else None
+    )
+    qa_stage = StageArtifact(
+        stage_id=StageId.LIDAR_CALIBRATION_QA,
+        status=StageStatus.FAILED if qa_failed else StageStatus.SUCCEEDED,
+        artifact_type=qa.report_ref.artifact_type,
+        artifact_uri=qa.report_ref.artifact_uri,
+        artifact_checksum=qa.report_ref.artifact_checksum,
+        data_class=qa.report_ref.data_class,
+        started_at=qa_started,
+        completed_at=datetime.now(UTC),
+        error=qa_error,
+    )
+    return attempt.registry.record_lidar_calibration_qa(attempt.job, qa_stage)
+
+
+def _staged_upload_ref(staged: StagedInputFile) -> ArtifactRef:
+    """Represent the exact uploaded container without relabeling it as a job-derived artifact."""
+    return ArtifactRef(
+        artifact_type="InputAssemblyUpload",
+        schema_version="1.0",
+        artifact_uri=staged.source_file.artifact_uri,
+        artifact_checksum=staged.source_file.checksum,
+        data_class=staged.source_file.data_class,
+        producer_stage=StageId.INPUT_VALIDATE,
+        job_id=None,
+        source_provenance={"upload_id": staged.upload_id, "file_id": staged.file_id},
+    )
+
+
+def _read_staged_member_bytes(attempt: _Attempt, staged: StagedInputFile, max_bytes: int) -> bytes:
+    """Read one direct input or ZIP member while verifying both stored identities."""
+    source = attempt.registry.runtime_resolver.require_uri(staged.source_file.artifact_uri, staged.source_file.checksum)
+    member = staged.archive_member
+    if member is None:
+        if source.stat().st_size > max_bytes:
+            raise ValueError("Input assembly member exceeds the configured byte limit")
+        payload = source.read_bytes()
+        if sha256_bytes(payload) != staged.source_file.checksum:
+            raise ArtifactStoreError("Input assembly source changed after its checksum was verified")
+        return payload
+    if member.container_checksum != staged.source_file.checksum or member.uncompressed_size_bytes > max_bytes:
+        raise ValueError("Input assembly ZIP member does not match its bounded source identity")
+    try:
+        with zipfile.ZipFile(source) as archive:
+            matches = [info for info in archive.infolist() if info.filename == member.member_path]
+            if len(matches) != 1:
+                raise ValueError("Input assembly ZIP member is missing or duplicated")
+            info = matches[0]
+            mode = info.external_attr >> 16
+            if info.is_dir() or info.flag_bits & 0x1 or stat.S_ISLNK(mode):
+                raise ValueError("Input assembly ZIP member must be an unencrypted regular file")
+            if info.file_size != member.uncompressed_size_bytes:
+                raise ValueError("Input assembly ZIP member size differs from its staged identity")
+            digest = hashlib.sha256()
+            payload = bytearray()
+            with archive.open(info) as stream:
+                while chunk := stream.read(1024 * 1024):
+                    payload.extend(chunk)
+                    if len(payload) > max_bytes or len(payload) > member.uncompressed_size_bytes:
+                        raise ValueError("Input assembly ZIP member exceeds its declared size")
+                    digest.update(chunk)
+    except (zipfile.BadZipFile, KeyError, RuntimeError, OSError) as error:
+        raise ValueError("Input assembly ZIP member is unreadable") from error
+    if len(payload) != member.uncompressed_size_bytes or "sha256:" + digest.hexdigest() != member.member_checksum:
+        raise ArtifactStoreError("Input assembly ZIP member changed after its checksum was verified")
+    return bytes(payload)
+
+
+def _publish_staged_member(
+    attempt: _Attempt,
+    assembly: InputAssemblySnapshot,
+    staged: StagedInputFile,
+    role: InputRole,
+) -> ProductArtifactRef:
+    """Copy small exact R5/R6 evidence into this attempt's durable product-input namespace."""
+    payload = _read_staged_member_bytes(attempt, staged, 16 * 1024 * 1024)
+    source_provenance: dict[str, object] = {
+        "assembly_checksum": assembly.assembly_checksum,
+        "file_id": staged.file_id,
+        "upload_id": staged.upload_id,
+        "role": role.value,
+        "source_file_checksum": staged.source_file.checksum,
+    }
+    if staged.archive_member is not None:
+        source_provenance["source_member_checksum"] = staged.archive_member.member_checksum
+        source_provenance["source_member_path"] = staged.archive_member.member_path
+    reference = ProductArtifactRef(
+        artifact_type="InputAssemblyMember",
+        schema_version="1.0",
+        artifact_uri=(
+            f"artifact://jobs/{attempt.job.job_id}/attempts/{attempt.workspace.name}/lidar-odometry/input/"
+            f"{hashlib.sha256(staged.file_id.encode('utf-8')).hexdigest()}.bin"
+        ),
+        artifact_checksum=sha256_bytes(payload),
+        data_class=ArtifactDataClass.PRODUCT_INPUT,
+        producer_stage=StageId.INPUT_VALIDATE,
+        job_id=attempt.job.job_id,
+        source_provenance=source_provenance,
+    )
+    writer = FilesystemArtifactStore(attempt.registry.runtime_resolver)
+    if writer.publish(reference, payload) != reference:
+        raise ArtifactStoreError("Input assembly member publication changed its identity")
+    if attempt.registry.runtime_resolver.require(reference).read_bytes() != payload:
+        raise ArtifactStoreError("Published input assembly member failed read-back verification")
+    return reference
+
+
+def _publish_accepted_input_evidence(
+    attempt: _Attempt,
+    source: ProductArtifactRef | None,
+    filename: str,
+) -> ProductArtifactRef:
+    """Copy one immutable project input record into the consuming job's namespace."""
+    if source is None:
+        raise ValueError("Estimated odometry requires every accepted input evidence reference")
+    payload = attempt.registry.runtime_resolver.require(source).read_bytes()
+    reference = ProductArtifactRef(
+        artifact_type=source.artifact_type,
+        schema_version=source.schema_version,
+        artifact_uri=(
+            f"artifact://jobs/{attempt.job.job_id}/attempts/{attempt.workspace.name}/lidar-odometry/input/{filename}"
+        ),
+        artifact_checksum=sha256_bytes(payload),
+        data_class=source.data_class,
+        producer_stage=source.producer_stage,
+        job_id=attempt.job.job_id,
+        source_provenance={
+            "accepted_project_ref_uri": source.artifact_uri,
+            "accepted_project_ref_checksum": source.artifact_checksum,
+        },
+    )
+    writer = FilesystemArtifactStore(attempt.registry.runtime_resolver)
+    if writer.publish(reference, payload) != reference:
+        raise ArtifactStoreError("Accepted input evidence copy changed its identity")
+    if attempt.registry.runtime_resolver.require(reference).read_bytes() != payload:
+        raise ArtifactStoreError("Accepted input evidence copy failed read-back verification")
+    return reference
+
+
+def _preview_start_stage(registry: ProjectRegistry, job: JobManifest) -> StageId:
+    """Claim the sensor-odometry stage before camera preview only for accepted R5/R6 recipes."""
+    project = registry.get_project(job.project_id)
+    recipe_ref = project.input_recipe_ref
+    if recipe_ref is None:
+        return StageId.CAMERA_POSE
+    recipe = InputRecipe.model_validate_json(registry.runtime_resolver.require(recipe_ref).read_bytes())
+    verify_input_recipe_checksum(recipe)
+    if recipe.recipe_group not in {RecipeGroup.ESTIMATED_TRAJECTORY, RecipeGroup.SENSOR_GUIDED}:
+        return StageId.CAMERA_POSE
+    completed = next(
+        (
+            item
+            for item in reversed(job.stage_artifacts)
+            if item.stage_id == StageId.LIDAR_ODOMETRY and item.status == StageStatus.SUCCEEDED
+        ),
+        None,
+    )
+    return StageId.CAMERA_POSE if completed is not None else StageId.LIDAR_ODOMETRY
+
+
+def _execute_lidar_odometry(attempt: _Attempt) -> JobManifest:
+    """Run accepted R5/R6 scan odometry and persist source evidence before RGB preview."""
+    from src.models.contracts.reconstruction import (
+        EstimatedTrajectoryConsumerEvidence,
+        EstimatedTrajectoryMapEvidence,
+        EstimatedTrajectoryMapStats,
+        EstimatedTrajectoryProductEvidence,
+    )
+    from src.services.reconstruction.lidar.odometry import (
+        LidarOdometryRuntimeSettings,
+        LidarOdometryScanInput,
+        LidarOdometryWorker,
+        LidarOdometryWorkerRequest,
+        default_lidar_odometry_profile,
+    )
+
+    project = attempt.registry.get_project(attempt.job.project_id)
+    if project.input_manifest_ref is None:
+        return attempt.job
+    manifest = _pull_input(attempt.registry.runtime_resolver, project.input_manifest_ref)
+    accepted = _validate_project_input_recipe(attempt, project, manifest)
+    if accepted is None or accepted.recipe.recipe_group not in {
+        RecipeGroup.ESTIMATED_TRAJECTORY,
+        RecipeGroup.SENSOR_GUIDED,
+    }:
+        return attempt.job
+    recipe = accepted.recipe
+    group = recipe.recipe_group
+    bindings = {binding.role: binding.file_ids for binding in recipe.bindings}
+    by_id = {item.file_id: item for item in accepted.assembly.files}
+    previous = next(
+        (
+            item
+            for item in reversed(attempt.job.stage_artifacts)
+            if item.stage_id == StageId.LIDAR_ODOMETRY and item.status == StageStatus.SUCCEEDED
+        ),
+        None,
+    )
+    if previous is not None:
+        if previous.artifact_uri is None or previous.artifact_checksum is None or previous.artifact_type is None:
+            raise ValueError("Previously completed odometry stage is missing its immutable evidence reference")
+        previous_ref = ProductArtifactRef(
+            artifact_type=previous.artifact_type,
+            schema_version="1.0",
+            artifact_uri=previous.artifact_uri,
+            artifact_checksum=previous.artifact_checksum,
+            data_class=previous.data_class,
+            producer_stage=previous.stage_id,
+            job_id=attempt.job.job_id,
+        )
+        previous_payload = attempt.registry.runtime_resolver.require(previous_ref).read_bytes()
+        previous_document = json.loads(previous_payload)
+        if previous_document.get("artifact_type") == "EstimatedTrajectoryProductEvidence":
+            previous_evidence = EstimatedTrajectoryProductEvidence.model_validate_json(
+                previous_payload
+            ).consumer_evidence
+        else:
+            previous_evidence = EstimatedTrajectoryConsumerEvidence.model_validate_json(previous_payload)
+        accepted_refs = (
+            project.input_assembly_ref,
+            project.input_resolution_ref,
+            project.input_runtime_registry_ref,
+            project.input_recipe_ref,
+        )
+        if any(reference is None for reference in accepted_refs):
+            raise ValueError("Previously completed odometry stage lost its accepted input evidence chain")
+        if (
+            any(
+                evidence_ref.artifact_checksum != source_ref.artifact_checksum
+                or evidence_ref.artifact_type != source_ref.artifact_type
+                for evidence_ref, source_ref in zip(
+                    (
+                        previous_evidence.assembly_ref,
+                        previous_evidence.resolution_ref,
+                        previous_evidence.runtime_registry_ref,
+                        previous_evidence.recipe_ref,
+                    ),
+                    accepted_refs,
+                    strict=True,
+                )
+                if source_ref is not None
+            )
+            or previous_evidence.ingest_binding.recipe_checksum != recipe.recipe_checksum
+        ):
+            raise ValueError("Previously completed odometry evidence belongs to a different accepted input recipe")
+        return attempt.registry.record_stage_progress(attempt.job, StageId.CAMERA_POSE)
+
+    if attempt.job.current_stage != StageId.LIDAR_ODOMETRY:
+        attempt.job = attempt.registry.record_stage_progress(attempt.job, StageId.LIDAR_ODOMETRY)
+    odometry_runtime = next(
+        (item for item in accepted.runtime_registry.capabilities if item.capability_key == RuntimeCapabilityKey.R5),
+        None,
+    )
+    if odometry_runtime is None or odometry_runtime.status != RuntimeQualificationStatus.QUALIFIED:
+        raise ValueError("R5 odometry worker is not qualified for this accepted recipe")
+    sensor_runtime: RuntimeCapabilityRecord | None = None
+    if group == RecipeGroup.SENSOR_GUIDED:
+        sensor_runtime = next(
+            (item for item in accepted.runtime_registry.capabilities if item.capability_key == RuntimeCapabilityKey.R6),
+            None,
+        )
+        if sensor_runtime is None or sensor_runtime.status != RuntimeQualificationStatus.QUALIFIED:
+            raise ValueError("R6 sensor-guided worker is not qualified for this accepted recipe")
+
+    scan_time_file = by_id[bindings[InputRole.LIDAR_SCAN_TIMES][0]]
+    timestamp_ref = _publish_staged_member(attempt, accepted.assembly, scan_time_file, InputRole.LIDAR_SCAN_TIMES)
+    timestamp_unit = (
+        accepted.assembly.declarations.lidar_timestamp_unit or accepted.assembly.declarations.timestamp_unit
+    )
+    sensor_frame = accepted.assembly.declarations.lidar_frame_id
+    if timestamp_unit is None or sensor_frame is None:
+        raise ValueError("Accepted odometry recipe lost the required scan clock or sensor-frame declaration")
+    scan_inputs = [
+        LidarOdometryScanInput(
+            file_id=file_id,
+            reference=_staged_upload_ref(by_id[file_id]),
+            archive_member=by_id[file_id].archive_member,
+        )
+        for file_id in bindings[InputRole.LIDAR_SCAN]
+    ]
+    calibration_ref = None
+    rgb_frame_times_ref = None
+    if group == RecipeGroup.SENSOR_GUIDED:
+        calibration_ref = _publish_staged_member(
+            attempt,
+            accepted.assembly,
+            by_id[bindings[InputRole.CAMERA_LIDAR_CALIBRATION][0]],
+            InputRole.CAMERA_LIDAR_CALIBRATION,
+        )
+        rgb_frame_times_ref = _publish_staged_member(
+            attempt,
+            accepted.assembly,
+            by_id[bindings[InputRole.RGB_FRAME_TIMES][0]],
+            InputRole.RGB_FRAME_TIMES,
+        )
+
+    profile = default_lidar_odometry_profile()
+    started_at = datetime.now(UTC)
+    request = LidarOdometryWorkerRequest(
+        job_id=attempt.job.job_id,
+        attempt_id=attempt.workspace.name,
+        assembly_id=accepted.assembly.assembly_id,
+        assembly_revision=accepted.assembly.revision,
+        assembly_checksum=accepted.assembly.assembly_checksum,
+        recipe_checksum=recipe.recipe_checksum,
+        scans=scan_inputs,
+        timestamp_file_ref=timestamp_ref,
+        timestamp_unit=TimestampUnit(timestamp_unit.value),
+        scan_coordinate_unit=DistanceUnit.METER,
+        sensor_frame_id=sensor_frame.value,
+        odometry_map_frame_id=f"{attempt.job.job_id}-lidar-map",
+        profile=profile,
+        runtime_qualification=odometry_runtime,
+    )
+    resolver = attempt.registry.runtime_resolver
+
+    def lease_is_current() -> bool:
+        current = attempt.registry.get_job(attempt.job.job_id)
+        return (
+            current.status == JobStatus.RUNNING
+            and current.current_stage == StageId.LIDAR_ODOMETRY
+            and current.job_manifest_checksum == attempt.job.job_manifest_checksum
+        )
+
+    writer = FilesystemArtifactStore(resolver)
+    worker = LidarOdometryWorker(resolver, writer, LidarOdometryRuntimeSettings())
+    with _sampled(attempt, "lidar_odometry"):
+        result = worker.run(request, lease_is_current=lease_is_current)
+    job_accepted_refs = (
+        _publish_accepted_input_evidence(attempt, project.input_assembly_ref, "input_assembly.json"),
+        _publish_accepted_input_evidence(attempt, project.input_resolution_ref, "input_resolution.json"),
+        _publish_accepted_input_evidence(attempt, project.input_runtime_registry_ref, "input_runtime_registry.json"),
+        _publish_accepted_input_evidence(attempt, project.input_recipe_ref, "input_recipe.json"),
+    )
+    evidence = EstimatedTrajectoryConsumerEvidence(
+        job_id=attempt.job.job_id,
+        recipe_group=group.value,
+        assembly_ref=job_accepted_refs[0],
+        resolution_ref=job_accepted_refs[1],
+        runtime_registry_ref=job_accepted_refs[2],
+        recipe_ref=job_accepted_refs[3],
+        trajectory_ref=result.artifact_ref,
+        ingest_binding=result.ingest_binding,
+        lidar_scan_times_ref=timestamp_ref,
+        camera_lidar_calibration_ref=calibration_ref,
+        rgb_frame_times_ref=rgb_frame_times_ref,
+        odometry_runtime_id=odometry_runtime.runtime_id,
+        odometry_runtime_version=odometry_runtime.runtime_version,
+        odometry_profile_checksum=result.trajectory.config_checksum,
+        runtime_qualification_status=odometry_runtime.status.value,
+        runtime_qualification_evidence_checksum=odometry_runtime.qualification_evidence_checksum,
+        sensor_guided_runtime_id=sensor_runtime.runtime_id if sensor_runtime is not None else None,
+        sensor_guided_runtime_version=sensor_runtime.runtime_version if sensor_runtime is not None else None,
+        sensor_guided_runtime_evidence_checksum=(
+            sensor_runtime.qualification_evidence_checksum if sensor_runtime is not None else None
+        ),
+    )
+    map_evidence = EstimatedTrajectoryMapEvidence(
+        job_id=attempt.job.job_id,
+        trajectory_ref=result.artifact_ref,
+        ingest_binding=result.ingest_binding,
+        map_cloud_ref=result.map_cloud_ref,
+        map_frame_id=result.ingest_binding.odometry_map_frame_id,
+        map_status="ready" if result.map_cloud_ref is not None else "blocked",
+        point_count=result.map_fusion_stats.point_count if result.map_fusion_stats is not None else None,
+        fusion_profile_checksum=result.map_fusion_profile_checksum,
+        fusion_stats=(
+            EstimatedTrajectoryMapStats.model_validate(result.map_fusion_stats.model_dump(mode="python"))
+            if result.map_fusion_stats is not None
+            else None
+        ),
+        diagnostic_code=result.map_diagnostic_code,
+    )
+    product_evidence = EstimatedTrajectoryProductEvidence(
+        job_id=attempt.job.job_id,
+        consumer_evidence=evidence,
+        map_evidence=map_evidence,
+    )
+    payload = product_evidence.model_dump_json(indent=2).encode("utf-8") + b"\n"
+    evidence_ref = ProductArtifactRef(
+        artifact_type=product_evidence.artifact_type,
+        schema_version=product_evidence.schema_version,
+        artifact_uri=(
+            f"artifact://jobs/{attempt.job.job_id}/attempts/{attempt.workspace.name}/lidar-odometry/product-evidence.json"
+        ),
+        artifact_checksum=sha256_bytes(payload),
+        data_class=ArtifactDataClass.DERIVED,
+        producer_stage=StageId.LIDAR_ODOMETRY,
+        job_id=attempt.job.job_id,
+        source_provenance={
+            "assembly_checksum": accepted.assembly.assembly_checksum,
+            "recipe_checksum": recipe.recipe_checksum,
+            "trajectory_ref_checksum": result.artifact_ref.artifact_checksum,
+            "world_frame_status": evidence.world_frame_status,
+            "floor_status": evidence.floor_status,
+            "alignment_status": evidence.alignment_status,
+            "map_status": map_evidence.map_status,
+            "map_cloud_checksum": map_evidence.map_cloud_ref.artifact_checksum
+            if map_evidence.map_cloud_ref is not None
+            else None,
+        },
+    )
+    if writer.publish(evidence_ref, payload) != evidence_ref:
+        raise ArtifactStoreError("Odometry consumer evidence publication changed its identity")
+    stored = EstimatedTrajectoryProductEvidence.model_validate_json(resolver.require(evidence_ref).read_bytes())
+    if stored.model_dump(mode="json") != product_evidence.model_dump(mode="json"):
+        raise ArtifactStoreError("Odometry product evidence failed read-back verification")
+    resolver.sync_up(attempt.job.job_id)
+    stage = StageArtifact(
+        stage_id=StageId.LIDAR_ODOMETRY,
+        status=StageStatus.SUCCEEDED,
+        artifact_type=evidence_ref.artifact_type,
+        artifact_uri=evidence_ref.artifact_uri,
+        artifact_checksum=evidence_ref.artifact_checksum,
+        data_class=evidence_ref.data_class,
+        started_at=started_at,
+        completed_at=datetime.now(UTC),
+    )
+    return attempt.registry.record_lidar_odometry(attempt.job, stage)
 
 
 def run_prepared_job(job_id: str, frame_set_uri: str, *, expected_checksum: str | None = None) -> JobManifest:
@@ -672,38 +1500,112 @@ def run_prepared_job(job_id: str, frame_set_uri: str, *, expected_checksum: str 
     if frames is None or frames.artifact_uri != frame_set_uri:
         raise ValueError("Frame set không phải output thành công duy nhất trong JobManifest")
     attempt, profile = _start_attempt(job_id, expected_checksum, StageId.CAMERA_POSE)
-    try:
-        with attempt_lease(attempt.workspace):
-            job = _execute_preview(attempt, frames, profile)
-        return _requeue_if_exhausted(attempt) or job
-    except BaseException as error:
-        _record_runner_failure(attempt, error)
-        _requeue_if_exhausted(attempt)
-        raise
+    with job_log_context(attempt.job.job_id, _attempt_log_id(attempt.registry, attempt.job.job_id)):
+        try:
+            with attempt_lease(attempt.workspace):
+                project = attempt.registry.get_project(attempt.job.project_id)
+                if project.input_recipe_ref is not None:
+                    if project.input_manifest_ref is None:
+                        raise ValueError("Grouped input project has no InputManifest")
+                    manifest = _pull_input(attempt.registry.runtime_resolver, project.input_manifest_ref)
+                    _validate_project_input_recipe(attempt, project, manifest)
+                    attempt.job = _execute_lidar_odometry(attempt)
+                    if attempt.job.status != JobStatus.RUNNING:
+                        return attempt.job
+                job = _execute_preview(attempt, frames, profile)
+            return _requeue_if_exhausted(attempt) or job
+        except BaseException as error:
+            _record_runner_failure(attempt, error)
+            _requeue_if_exhausted(attempt)
+            raise
 
 
 def run_video_job(job_id: str, *, expected_checksum: str | None = None) -> JobManifest:
     """Upload video → frame set → preview trong một attempt; dừng ngay ở stage lỗi."""
     attempt, profile = _start_attempt(job_id, expected_checksum, StageId.INPUT_VALIDATE)
-    try:
-        with attempt_lease(attempt.workspace):
-            attempt.job = _execute_prepare(attempt, profile)
-            if attempt.job.status != JobStatus.RUNNING:
-                _record_benchmark(attempt)  # job dừng ở bước chuẩn bị (vd video lỗi) vẫn có số đo
-                return attempt.job
-            frames = prepared_frame_reference(attempt.job)
-            if frames is None:
-                raise ValueError("Prepare thành công nhưng thiếu frame set")
-            attempt.job = _execute_lidar_ingest(attempt)
-            if attempt.job.status != JobStatus.RUNNING:
-                _record_benchmark(attempt)  # gói LiDAR hỏng: dừng trước khi tốn GPU cho COLMAP/Brush
-                return attempt.job
-            job = _execute_preview(attempt, frames, profile)
-        return _requeue_if_exhausted(attempt) or job
-    except BaseException as error:
-        _record_runner_failure(attempt, error)
-        _requeue_if_exhausted(attempt)
-        raise
+    with job_log_context(attempt.job.job_id, _attempt_log_id(attempt.registry, attempt.job.job_id)):
+        try:
+            with attempt_lease(attempt.workspace):
+                attempt.job = _execute_prepare(attempt, profile)
+                if attempt.job.status != JobStatus.RUNNING:
+                    _record_benchmark(attempt)  # job dừng ở bước chuẩn bị (vd video lỗi) vẫn có số đo
+                    return attempt.job
+                frames = prepared_frame_reference(attempt.job)
+                if frames is None:
+                    raise ValueError("Prepare thành công nhưng thiếu frame set")
+                if awaiting_anonymization_review(attempt.job):
+                    # Không frame nào bị che thì không có gì để người dùng xem: ghi nhận tự động và chạy tiếp.
+                    accepted = accept_when_nothing_redacted(attempt.registry, attempt.job.job_id)
+                    if accepted is None:
+                        # Có frame đã che: dừng ở đây, giữ RUNNING ở bước tách frame. Chỉ khi người dùng xem và
+                        # chấp nhận bản đã che thì `run_reviewed_preview_job` mới dựng 3D (owner chốt 2026-10-09).
+                        _record_benchmark(attempt)
+                        return attempt.job
+                    attempt.job = accepted
+                attempt.job = _execute_lidar_ingest(attempt, frames)
+                if attempt.job.status != JobStatus.RUNNING:
+                    _record_benchmark(attempt)  # LiDAR ingest hoặc structural QA lỗi: dừng trước COLMAP/Brush
+                    return attempt.job
+                attempt.job = _execute_lidar_odometry(attempt)
+                if attempt.job.status != JobStatus.RUNNING:
+                    _record_benchmark(attempt)
+                    return attempt.job
+                job = _execute_preview(attempt, frames, profile)
+            return _requeue_if_exhausted(attempt) or job
+        except BaseException as error:
+            _record_runner_failure(attempt, error)
+            _requeue_if_exhausted(attempt)
+            raise
+
+
+def run_reviewed_preview_job(job_id: str, *, expected_checksum: str | None = None) -> JobManifest:
+    """Sau khi người dùng chấp nhận bản frame đã che: LiDAR ingest (nếu có) → preview, trên cùng job.
+
+    Claim bằng CAS chuyển stage FRAME_EXTRACT → CAMERA_POSE nên hai worker không cùng chạy.
+    """
+    settings = get_settings()
+    registry = get_project_registry()
+    job = registry.get_job(job_id)
+    if expected_checksum is not None and job.job_manifest_checksum != expected_checksum:
+        raise RuntimeStateConflictError("Queue candidate đã thay đổi trước dispatch")
+    if re.fullmatch(_JOB_ID_PATTERN, job_id) is None:
+        raise ValueError("Job ID không thể dùng làm worker namespace")
+    if not awaiting_reviewed_preview(job):
+        raise RuntimeStateConflictError("Job không chờ dựng preview sau khi chấp nhận bản đã che")
+    profile_path = settings.product_processing_config
+    execution = registry.execution_profile
+    if profile_path is None or execution is None:
+        raise ValueError("Worker cần execution profile đã cấu hình")
+    if job.runtime_manifest_checksum != execution.runtime_manifest_checksum or job.seed != execution.seed:
+        raise RuntimeStateConflictError("Job cần worker có execution profile tương ứng")
+    profile = resolve_job_processing(
+        job, execution, profile_path, registry.runtime_resolver, settings.product_target_frame_count
+    )
+    registry.runtime_resolver.sync_down(job_id)
+    frames = prepared_frame_reference(job)
+    if frames is None:
+        raise ValueError("Job đã chấp nhận bản đã che nhưng thiếu frame set")
+    job = registry.record_stage_progress(job, _preview_start_stage(registry, job))
+    workspace = settings.product_worker_root.expanduser().resolve() / job_id / f"attempt-{uuid4().hex}"
+    workspace.mkdir(parents=True, exist_ok=False)
+    attempt = _Attempt(registry, settings, job, workspace)
+    with job_log_context(job_id, _attempt_log_id(registry, job_id)):
+        try:
+            with attempt_lease(workspace):
+                attempt.job = _execute_lidar_ingest(attempt, frames)
+                if attempt.job.status != JobStatus.RUNNING:
+                    _record_benchmark(attempt)
+                    return attempt.job
+                attempt.job = _execute_lidar_odometry(attempt)
+                if attempt.job.status != JobStatus.RUNNING:
+                    _record_benchmark(attempt)
+                    return attempt.job
+                job = _execute_preview(attempt, frames, profile)
+            return _requeue_if_exhausted(attempt) or job
+        except BaseException as error:
+            _record_runner_failure(attempt, error)
+            _requeue_if_exhausted(attempt)
+            raise
 
 
 def _authorized_decision(attempt_registry: ProjectRegistry, job: JobManifest) -> tuple[ProductArtifactRef, str]:
@@ -768,10 +1670,13 @@ def run_finalize_job(job_id: str, *, expected_checksum: str | None = None) -> Jo
     if not awaiting_finalize(job):
         raise RuntimeStateConflictError("Job không chờ bước hoàn tất")
     confirmation, decision_checksum = _authorized_decision(registry, job)
-    profile = load_geometry_profile(settings.product_geometry_config)
+    registry.runtime_resolver.sync_down(job_id)
+    processing = load_job_config(job_id, job.config_checksum, registry.runtime_resolver)
+    profile = load_geometry_profile(
+        settings.product_geometry_config, overrides=dict(processing.geometry) if processing else None
+    )
     if settings.product_geometry_gpu_index is not None:
         profile = profile.model_copy(update={"gpu_index": settings.product_geometry_gpu_index})
-    registry.runtime_resolver.sync_down(job_id)
     if job.status == JobStatus.QUEUED:
         # Retry sau lỗi bước hoàn tất: attempt mới bắt đầu thẳng ở hình học (CAS claim).
         job = registry.transition_job(
@@ -785,59 +1690,61 @@ def run_finalize_job(job_id: str, *, expected_checksum: str | None = None) -> Jo
     workspace = settings.product_worker_root.expanduser().resolve() / job_id / attempt_id
     workspace.mkdir(parents=True, exist_ok=False)
     attempt = _Attempt(registry, settings, job, workspace)
-    try:
-        with attempt_lease(workspace):
-            request = {
-                "schema_version": "1.0",
-                "execution_scope": "product_finalize",
-                "job_id": job_id,
-                "attempt_id": attempt_id,
-                "confirmation_ref": confirmation.model_dump(mode="json"),
-                "authorized_decision_checksum": decision_checksum,
-                "geometry": profile.model_dump(mode="json"),
-            }
-            # Job có gói LiDAR (ADR 0009): bước hoàn tất gắn đám mây LiDAR vào bundle bằng căn chỉnh đã xác nhận.
-            lidar = _lidar_package_ref(registry.get_job(job_id))
-            if lidar is not None:
-                request["lidar_package_ref"] = lidar.model_dump(mode="json")
-            request_path = workspace / "finalize.request.json"
-            with request_path.open("x", encoding="utf-8") as stream:
-                json.dump(request, stream)
-            command = [
-                sys.executable,
-                "-m",
-                "src.services.reconstruction.finalize_cli",
-                "--request",
-                str(request_path),
-                "--store-root",
-                str(registry.runtime_resolver.artifact_root),
-                "--workspace",
-                str(workspace / "rec"),
-                "--progress-file",
-                str(workspace / "finalize.progress.jsonl"),
-            ]
-            exit_code, payload = _run_tool(attempt, "finalize", command, settings.product_finalize_timeout_seconds)
-            registry.runtime_resolver.sync_up(job_id)
-            if exit_code not in {0, 1}:
-                raise RuntimeError("Finalize worker không trả result hợp lệ")
-            reference = ProductArtifactRef.model_validate(payload.get("result_ref"))
-            result = load_finalize_result(reference, registry.runtime_resolver.require)
-            if result.attempt_id != attempt_id or (result.error is None) != (exit_code == 0):
-                raise ValueError("Finalize result khác attempt/exit status")
-            extra: list[StageArtifact] = []
-            if result.error is None:
-                extra = _extract_scene_stage(attempt, workspace, result.bundle_ref)
-            completed = registry.record_finalize(attempt.job, result, reference, extra)
-            # Scene consumer đã chạy xong trước durable commit; lỗi extraction vẫn giữ scratch để debug.
-            if result.error is None and extra:
-                _cleanup_attempt_workspace(attempt)
-            if completed.status == JobStatus.SUCCEEDED:
-                _cleanup_finished_job(attempt)
-        return _requeue_if_exhausted(attempt) or completed
-    except BaseException as error:
-        _record_runner_failure(attempt, error)
-        _requeue_if_exhausted(attempt)
-        raise
+    with job_log_context(job_id, _attempt_log_id(registry, job_id)):
+        try:
+            with attempt_lease(workspace):
+                request = {
+                    "schema_version": "1.0",
+                    "execution_scope": "product_finalize",
+                    "job_id": job_id,
+                    "attempt_id": attempt_id,
+                    "confirmation_ref": confirmation.model_dump(mode="json"),
+                    "authorized_decision_checksum": decision_checksum,
+                    "geometry": profile.model_dump(mode="json"),
+                }
+                # Job có gói LiDAR (ADR 0009): bước hoàn tất gắn đám mây LiDAR vào bundle bằng căn chỉnh đã xác nhận.
+                lidar = _lidar_package_ref(registry.get_job(job_id))
+                if lidar is not None:
+                    request["lidar_package_ref"] = lidar.model_dump(mode="json")
+                request_path = workspace / "finalize.request.json"
+                with request_path.open("x", encoding="utf-8") as stream:
+                    json.dump(request, stream)
+                command = [
+                    sys.executable,
+                    "-m",
+                    "src.services.reconstruction.finalize_cli",
+                    "--request",
+                    str(request_path),
+                    "--store-root",
+                    str(registry.runtime_resolver.artifact_root),
+                    "--workspace",
+                    str(workspace / "rec"),
+                    "--progress-file",
+                    str(workspace / "finalize.progress.jsonl"),
+                ]
+                exit_code, payload = _run_tool(attempt, "finalize", command, settings.product_finalize_timeout_seconds)
+                registry.runtime_resolver.sync_up(job_id)
+                if exit_code not in {0, 1}:
+                    raise RuntimeError("Finalize worker không trả result hợp lệ")
+                reference = ProductArtifactRef.model_validate(payload.get("result_ref"))
+                result = load_finalize_result(reference, registry.runtime_resolver.require)
+                if result.attempt_id != attempt_id or (result.error is None) != (exit_code == 0):
+                    raise ValueError("Finalize result khác attempt/exit status")
+                extra: list[StageArtifact] = []
+                if result.error is None:
+                    extra = _extract_scene_stage(attempt, workspace, result.bundle_ref)
+                completed = registry.record_finalize(attempt.job, result, reference, extra)
+                _record_benchmark(attempt)
+                # Scene consumer đã chạy xong trước durable commit; lỗi extraction vẫn giữ scratch để debug.
+                if result.error is None and extra:
+                    _cleanup_attempt_workspace(attempt)
+                if completed.status == JobStatus.SUCCEEDED:
+                    _cleanup_finished_job(attempt)
+            return _requeue_if_exhausted(attempt) or completed
+        except BaseException as error:
+            _record_runner_failure(attempt, error)
+            _requeue_if_exhausted(attempt)
+            raise
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -846,7 +1753,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--job-id", required=True)
     parser.add_argument("--frame-set-uri", required=True)
     args = parser.parse_args(argv)
-    logging.basicConfig(level=logging.INFO)
+    configure_worker_logging()
     previous_handler = signal.getsignal(signal.SIGTERM)
 
     def interrupt(signum: int, frame: object) -> None:

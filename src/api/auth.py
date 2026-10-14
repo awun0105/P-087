@@ -1,30 +1,38 @@
-"""Đăng nhập hai role (ADR 0003 §3): phiên cookie httpOnly, mã mời, quản lý tài khoản.
+"""Auth API: Guest signup, Editor/Reviewer invitation, phiên cookie và quản lý tài khoản.
 
 Cookie đi qua proxy `/api/v1` của Web UI nên là cookie cùng domain với UI (không bị
 chặn như cookie bên thứ ba). SameSite=Lax chặn request POST từ site khác mang cookie.
 Khi `AUTH_REQUIRED=false` (local dev/test), các dependency quyền cho qua.
 """
 
+import hashlib
+import json
 import time
 from collections import deque
 from datetime import UTC, datetime, timedelta
 from threading import Lock
-from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from src.config import Settings, get_settings
 from src.services.orchestration.auth import (
     AuditEntry,
     AuthError,
     AuthService,
+    InviteRole,
     PublicUser,
     Role,
     UserRecord,
     has_role,
-    has_unlimited_quota,
     public,
+)
+from src.services.orchestration.auth.quota import GuestQuotaExceededDetail, GuestQuotaSummary
+from src.services.orchestration.auth.quota_ledger import (
+    GuestQuotaExceededError,
+    GuestQuotaIdempotencyConflictError,
+    GuestQuotaIntent,
+    QuotaOperation,
 )
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
 
@@ -62,8 +70,10 @@ def _require(role: Role):  # noqa: ANN202 - trả dependency FastAPI
     return dependency
 
 
-#: Dependency cho route cần quyền Editor (Reviewer cũng qua) / chỉ Reviewer.
-require_editor = _require("editor")
+#: Mô hình quyền: `require_contributor` = đã đăng nhập (Guest trở lên), `require_reviewer` = quản trị/duyệt.
+#: Editor không có route riêng: khác Guest ở phạm vi sở hữu (xem `src/api/ownership.py`) và hạn mức, nên
+#: resource mutation luôn cần thêm ownership guard bên cạnh dependency này.
+require_contributor = _require("guest")
 require_reviewer = _require("reviewer")
 
 #: Hành động nhật ký cho mỗi lần xử lý GPU (scene mới hoặc thử lại) — đơn vị hạn mức.
@@ -71,8 +81,8 @@ GPU_RUN_ACTION = "gpu.run"
 
 
 def enforce_gpu_quota(user: UserRecord | None) -> None:
-    """Chặn khi Editor đã dùng hết số lần xử lý GPU trong 24 giờ; Reviewer không giới hạn."""
-    if user is None or has_unlimited_quota(user):
+    """Giữ rolling 24h quota hiện tại riêng cho Editor; Guest dùng calendar ledger."""
+    if user is None or user.role != "editor":
         return
     since = datetime.now(UTC) - timedelta(days=1)
     if auth_service().count_actions(user.user_id, GPU_RUN_ACTION, since) >= user.daily_job_quota:
@@ -80,6 +90,46 @@ def enforce_gpu_quota(user: UserRecord | None) -> None:
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=f"Đã dùng hết {user.daily_job_quota} lần xử lý GPU trong 24 giờ; nhờ Reviewer nâng hạn mức",
         )
+
+
+def guest_run_intent(
+    user: UserRecord | None,
+    operation: QuotaOperation,
+    idempotency_key: str | None,
+    payload: dict[str, object],
+) -> GuestQuotaIntent | None:
+    """Build the server-owned Guest acceptance identity for a run-producing route."""
+    if user is None or user.role != "guest":
+        return None
+    key = (idempotency_key or "").strip()
+    if not key or len(key) > 200 or any(ord(char) < 0x21 or ord(char) > 0x7E for char in key):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "idempotency_key_required", "message": "Guest run cần Idempotency-Key hợp lệ"},
+        )
+    fingerprint_payload = json.dumps(
+        {"operation": operation, "payload": payload}, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return GuestQuotaIntent(
+        actor_user_id=user.user_id,
+        operation_kind=operation,
+        idempotency_key=key,
+        request_fingerprint=hashlib.sha256(fingerprint_payload).hexdigest(),
+    )
+
+
+def quota_exceeded_http(error: GuestQuotaExceededError) -> HTTPException:
+    """Expose the stable quota code/summary instead of a message clients must parse."""
+    detail = GuestQuotaExceededDetail(quota=error.summary)
+    return HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=detail.model_dump(mode="json"))
+
+
+def idempotency_conflict_http(error: GuestQuotaIdempotencyConflictError) -> HTTPException:
+    """Stable conflict for key reuse with a different request body."""
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={"code": "idempotency_key_conflict", "message": str(error)},
+    )
 
 
 def record_gpu_run(user: UserRecord | None, target: str, details: dict[str, str]) -> None:
@@ -133,7 +183,9 @@ class MeResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     auth_required: bool
+    guest_signup_enabled: bool
     user: PublicUser | None
+    quota: GuestQuotaSummary | None = None
 
 
 class LoginRequest(BaseModel):
@@ -146,11 +198,29 @@ class LoginRequest(BaseModel):
 
 
 class RegisterRequest(BaseModel):
-    """Tạo tài khoản bằng mã mời."""
+    """Không có mã mời thì tạo Guest; mã hợp lệ cấp role của lời mời."""
 
     model_config = ConfigDict(extra="forbid")
 
-    invite_code: str = Field(min_length=4, max_length=100)
+    invite_code: str | None = Field(default=None, max_length=100)
+    email: str = Field(min_length=3, max_length=254)
+    display_name: str = Field(min_length=1, max_length=100)
+    password: str = Field(min_length=1, max_length=200)
+
+    @field_validator("invite_code")
+    @classmethod
+    def _optional_invite(cls, value: str | None) -> str | None:
+        code = value.strip() if value is not None else ""
+        if code and len(code) < 4:
+            raise ValueError("Mã mời phải có ít nhất 4 ký tự")
+        return code or None
+
+
+class GuestRegisterRequest(BaseModel):
+    """Guest signup accepts identity fields only; role and invitation are server-controlled."""
+
+    model_config = ConfigDict(extra="forbid")
+
     email: str = Field(min_length=3, max_length=254)
     display_name: str = Field(min_length=1, max_length=100)
     password: str = Field(min_length=1, max_length=200)
@@ -161,7 +231,7 @@ class InviteRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    role: Literal["editor", "reviewer"]
+    role: InviteRole
 
 
 class InviteResponse(BaseModel):
@@ -170,7 +240,7 @@ class InviteResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     code: str
-    role: Role
+    role: InviteRole
     expires_at: str
 
 
@@ -179,7 +249,7 @@ class UserUpdate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    role: Literal["editor", "reviewer"] | None = None
+    role: Role | None = None
     active: bool | None = None
     daily_job_quota: int | None = Field(default=None, ge=0, le=1000)
 
@@ -213,8 +283,14 @@ def _auth_errors(error: Exception) -> HTTPException:
 @router.get("/me", response_model=MeResponse)
 def me(request: Request) -> MeResponse:
     """UI hỏi đang đăng nhập với ai và deployment có bắt đăng nhập không."""
+    current = settings()
     user = current_user(request)
-    return MeResponse(auth_required=settings().auth_required, user=public(user) if user else None)
+    return MeResponse(
+        auth_required=current.auth_required,
+        guest_signup_enabled=current.auth_required and current.auth_guest_signup_enabled,
+        user=public(user) if user else None,
+        quota=auth_service().guest_quota_summary(user.user_id) if user is not None and user.role == "guest" else None,
+    )
 
 
 @router.post("/login", response_model=PublicUser)
@@ -239,11 +315,34 @@ def logout(request: Request, response: Response) -> None:
 
 @router.post("/register", response_model=PublicUser, status_code=status.HTTP_201_CREATED)
 def register(request: RegisterRequest, raw: Request, response: Response) -> PublicUser:
-    """Tạo tài khoản bằng mã mời rồi đăng nhập luôn."""
+    """Tạo Guest khi không có mã mời, hoặc tài khoản theo lời mời, rồi đăng nhập."""
+    if request.invite_code is None:
+        return register_guest(
+            GuestRegisterRequest(email=request.email, display_name=request.display_name, password=request.password),
+            raw,
+            response,
+        )
     client_limiter.check(_client_key(raw))
     service = auth_service()
     try:
         user = service.register(request.invite_code, request.email, request.display_name, request.password)
+        token, user = service.login(user.email, request.password)
+    except (AuthError, RuntimeStateConflictError, ValueError) as error:
+        raise _auth_errors(error) from error
+    _set_session_cookie(response, token)
+    return public(user)
+
+
+@router.post("/register/guest", response_model=PublicUser, status_code=status.HTTP_201_CREATED)
+def register_guest(request: GuestRegisterRequest, raw: Request, response: Response) -> PublicUser:
+    """Public signup creates only a Guest and can be explicitly disabled."""
+    current = settings()
+    if not current.auth_required or not current.auth_guest_signup_enabled:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Đăng ký Guest hiện chưa được mở")
+    client_limiter.check(_client_key(raw))
+    service = auth_service()
+    try:
+        user = service.register_guest(request.email, request.display_name, request.password)
         token, user = service.login(user.email, request.password)
     except (AuthError, RuntimeStateConflictError, ValueError) as error:
         raise _auth_errors(error) from error

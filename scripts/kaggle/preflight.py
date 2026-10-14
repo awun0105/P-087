@@ -52,6 +52,47 @@ def colmap() -> tuple[bool, str]:
     return ok, "chạy được" if ok else text
 
 
+def colmap_gpu() -> tuple[bool, str]:
+    """COLMAP trích đặc trưng trên GPU khi PRODUCT_COLMAP_USE_GPU bật."""
+    use_gpu_env = os.environ.get("PRODUCT_COLMAP_USE_GPU", "").lower() in {"1", "true", "yes"}
+    if not use_gpu_env:
+        return True, "bỏ qua (PRODUCT_COLMAP_USE_GPU tắt)"
+    command = _command("REC03_COLMAP_COMMAND")
+    if command is None:
+        return False, "chưa đặt REC03_COLMAP_COMMAND"
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_path = Path(tmp_dir)
+        img_dir = tmp_path / "images"
+        img_dir.mkdir()
+        for idx in (1, 2):
+            img_file = img_dir / f"img_{idx}.ppm"
+            img_file.write_bytes(b"P6\n64 64\n255\n" + (b"\x80\x80\x80" * (64 * 64)))
+        db_path = tmp_path / "database.db"
+        # COLMAP 4.x đổi tiền tố cờ thành FeatureExtraction; chọn theo help của chính binary này.
+        try:
+            help_text = subprocess.run(
+                [*command, "feature_extractor", "-h"], capture_output=True, text=True, timeout=120.0, check=False
+            )
+        except (OSError, subprocess.SubprocessError) as error:
+            return False, type(error).__name__
+        options = help_text.stdout + help_text.stderr
+        prefix = "FeatureExtraction" if "--FeatureExtraction.use_gpu" in options else "SiftExtraction"
+        cmd = [
+            *command,
+            "feature_extractor",
+            "--database_path",
+            str(db_path),
+            "--image_path",
+            str(img_dir),
+            f"--{prefix}.use_gpu",
+            "1",
+        ]
+        ok, text = _run(cmd, timeout=120.0)
+        return ok, "chạy được trên GPU" if ok else f"lỗi GPU: {text}"
+
+
 def colmap_guided() -> tuple[bool, str]:
     """Luồng video + gói LiDAR (ADR 0009) cần `pose_prior_mapper` của COLMAP 4.x; bản 3.x chỉ chạy được luồng video."""
     command = _command("REC03_COLMAP_COMMAND")
@@ -129,6 +170,7 @@ CHECKS: list[tuple[str, Callable[[], tuple[bool, str]], bool, str]] = [
     ("GPU NVIDIA", gpu, True, "không chạy được"),
     ("ffmpeg", ffmpeg, True, "không tách được frame"),
     ("COLMAP", colmap, True, "không dựng được pose camera"),
+    ("COLMAP dùng GPU", colmap_gpu, False, "đặt PRODUCT_COLMAP_USE_GPU=false"),
     ("COLMAP dựng bám quỹ đạo", colmap_guided, False, "job video + gói LiDAR sẽ dừng ở bước dựng pose"),
     ("Vulkan (GPU thật)", vulkan, True, "Brush không train được 3DGS"),
     ("Brush", brush, True, "không train được 3DGS"),

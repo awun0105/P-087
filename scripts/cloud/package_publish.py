@@ -34,13 +34,33 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Protocol
 
+from pydantic import ValidationError
+
 from scripts.studio.data_package import ACCOUNT_MODE_SCRUB, ACCOUNT_MODE_SEED, ACCOUNT_MODE_SELECTED
 from scripts.studio.data_package import PackageError as StudioPackageError
 from scripts.studio.data_package import unpack as unpack_data_package
 from scripts.studio.data_package import verify as verify_data_package
+from src.models.contracts.identity import verify_content_checksum
+from src.models.contracts.manifests import RuntimeManifest
+from src.models.contracts.validation import ValidationReport
+from src.models.contracts.validation_run import (
+    ValidationConfig,
+    ValidationRunOrigin,
+    ValidationRunRecord,
+    ValidationRunSelection,
+    ValidationRunStatus,
+)
 from src.services.orchestration.artifacts.checksum import sha256_file
 from src.services.orchestration.artifacts.remote import RemoteObject, S3ObjectStore
 from src.services.orchestration.jobs.database import LATEST_SCHEMA_VERSION, RuntimeDatabase
+from src.services.orchestration.scene.heads import (
+    PendingScenePublication,
+    SceneHeadBackfillItem,
+    SceneHeadRecord,
+    SceneHeadRepairRecord,
+    verify_backfill_item,
+    verify_scene_head,
+)
 
 PACKAGE_METADATA = PurePosixPath("data/studio_local/DATA_PACKAGE.json")
 PACKAGE_DATABASE = PurePosixPath("data/studio_local/runtime.db")
@@ -63,8 +83,32 @@ IMPORT_COLUMNS: dict[str, tuple[str, ...]] = {
     "r2s_jobs": ("job_id", "project_id", "version", "manifest_ref"),
     "r2s_job_events": ("job_id", "version", "payload"),
     "r2s_scene_requests": ("job_id", "status", "payload"),
+    "r2s_scene_heads": ("job_id", "generation", "allocation_sequence", "head_checksum", "payload"),
+    "r2s_scene_head_repairs": ("job_id", "status", "generation", "repair_checksum", "payload"),
+    "r2s_scene_head_backfill_items": ("job_id", "scene_revision", "item_checksum", "payload"),
+    "r2s_scene_publications": ("job_id", "expected_generation", "target_revision", "lease_expires_at", "payload"),
     "r2s_audit_log": ("entry_id", "at", "user_id", "action", "payload"),
     "r2s_resource_usage": ("usage_id", "job_id", "recorded_at", "payload"),
+    "r2s_validation_runs": (
+        "run_id",
+        "job_id",
+        "candidate_checksum",
+        "config_checksum",
+        "attempt",
+        "status",
+        "run_checksum",
+        "payload",
+    ),
+    "r2s_validation_selections": (
+        "job_id",
+        "candidate_checksum",
+        "config_checksum",
+        "run_id",
+        "report_checksum",
+        "generation",
+        "selection_checksum",
+        "payload",
+    ),
 }
 IMPORT_ORDER = tuple(IMPORT_COLUMNS)
 REQUIRED_SOURCE_TABLES = frozenset(IMPORT_COLUMNS)
@@ -484,6 +528,10 @@ def _validate_transient_tables(
         for job_id, status in connection.execute("SELECT job_id, status FROM r2s_scene_requests"):
             if str(status).casefold() in BUSY_STATUSES:
                 raise PackagePublishError(f"job {job_id!r} has an active scene request: {status}")
+    if "r2s_validation_runs" in tables:
+        for run_id, status in connection.execute("SELECT run_id, status FROM r2s_validation_runs"):
+            if str(status).casefold() in BUSY_STATUSES:
+                raise PackagePublishError(f"validation run {run_id!r} is still active: {status}")
     for table in ("r2s_uploads", "r2s_imports"):
         for row in rows[table]:
             payload = _read_json_object(row[-1], f"{table}[{row[0]}]")
@@ -538,6 +586,150 @@ def _validate_row_payloads(rows: Mapping[str, Sequence[tuple[Any, ...]]]) -> lis
     return references
 
 
+def _validate_scene_head_rows(rows: Mapping[str, Sequence[tuple[Any, ...]]]) -> None:
+    """Validate scene heads and retain only terminal orphan-publication diagnostics."""
+    try:
+        for row in rows["r2s_scene_heads"]:
+            head = SceneHeadRecord.model_validate_json(row[4])
+            verify_scene_head(head)
+            if tuple(row[:4]) != (
+                head.job_id,
+                head.generation,
+                head.allocation_sequence,
+                head.head_checksum,
+            ):
+                raise PackagePublishError("scene head columns do not match their checksummed payload")
+        for row in rows["r2s_scene_head_repairs"]:
+            repair = SceneHeadRepairRecord.model_validate_json(row[4])
+            verify_content_checksum(repair, "repair_checksum")
+            if tuple(row[:4]) != (repair.job_id, repair.status, repair.generation, repair.repair_checksum):
+                raise PackagePublishError("scene head repair columns do not match their checksummed payload")
+        for row in rows["r2s_scene_head_backfill_items"]:
+            item = SceneHeadBackfillItem.model_validate_json(row[3])
+            verify_backfill_item(item)
+            if tuple(row[:3]) != (item.job_id, item.scene_revision, item.item_checksum):
+                raise PackagePublishError("scene head backfill columns do not match their checksummed payload")
+        for row in rows["r2s_scene_publications"]:
+            publication = PendingScenePublication.model_validate_json(row[4])
+            verify_content_checksum(publication, "publication_checksum")
+            if tuple(row[:4]) != (
+                publication.job_id,
+                publication.expected_generation,
+                publication.target_scene_revision,
+                publication.lease_expires_at.isoformat(),
+            ):
+                raise PackagePublishError("scene publication columns do not match their checksummed payload")
+            if publication.status != "ABORTED":
+                raise PackagePublishError("package contains an active scene publication")
+    except PackagePublishError:
+        raise
+    except (ValidationError, ValueError) as error:
+        raise PackagePublishError("package contains invalid checksummed scene-head state") from error
+
+
+def _validate_validation_rows(rows: Mapping[str, Sequence[tuple[Any, ...]]], artifacts: Path) -> None:
+    """Validate validation run/selection identities before importing persistent history."""
+    runs: dict[str, ValidationRunRecord] = {}
+    try:
+        for row in rows["r2s_validation_runs"]:
+            record = ValidationRunRecord.model_validate_json(row[-1])
+            verify_content_checksum(record, "run_checksum")
+            if tuple(row[:7]) != (
+                record.run_id,
+                record.job_id,
+                record.candidate_checksum,
+                record.validation_config_checksum,
+                record.attempt,
+                record.status.value,
+                record.run_checksum,
+            ):
+                raise PackagePublishError("validation run columns do not match their checksummed payload")
+            if record.origin == ValidationRunOrigin.WORKER and record.status == ValidationRunStatus.COMPLETED:
+                raise PackagePublishError(
+                    "completed worker validation cannot cross a package boundary without an authenticated receipt"
+                )
+            if record.status in {ValidationRunStatus.QUEUED, ValidationRunStatus.RUNNING}:
+                raise PackagePublishError(f"validation run {record.run_id!r} is still active")
+            config_uri = (
+                f"artifact://jobs/{record.job_id}/validation/configs/"
+                f"{record.validation_config_checksum.removeprefix('sha256:')}/validation_config.json"
+            )
+            config_ref = record.validation_config_ref
+            if (
+                config_ref.job_id != record.job_id
+                or config_ref.artifact_type != "ValidationConfig"
+                or config_ref.artifact_uri != config_uri
+            ):
+                raise PackagePublishError("validation run config ref does not match its job/config identity")
+            config_path = _artifact_path(artifacts, record.validation_config_ref.artifact_uri)
+            config = ValidationConfig.model_validate_json(config_path.read_bytes())
+            verify_content_checksum(config, "config_checksum")
+            if config.config_checksum != record.validation_config_checksum:
+                raise PackagePublishError("validation run config identity does not match its artifact")
+            if record.status == ValidationRunStatus.COMPLETED:
+                if not record.report_ref or not record.runtime_manifest_ref or not record.execution_log_ref:
+                    raise PackagePublishError("completed validation run is missing evidence references")
+                base_uri = (
+                    f"artifact://jobs/{record.job_id}/validation/{record.candidate_checksum.removeprefix('sha256:')}/"
+                    f"{record.validation_config_checksum.removeprefix('sha256:')}/{record.run_id}"
+                )
+                expected_refs = (
+                    (record.report_ref, "ValidationReport", f"{base_uri}/validation_report.json"),
+                    (record.runtime_manifest_ref, "RuntimeManifest", f"{base_uri}/runtime_manifest.json"),
+                    (record.execution_log_ref, "ValidationExecutionLog", f"{base_uri}/execution.log"),
+                )
+                if any(
+                    reference.job_id != record.job_id
+                    or reference.artifact_type != expected_type
+                    or reference.artifact_uri != expected_uri
+                    for reference, expected_type, expected_uri in expected_refs
+                ):
+                    raise PackagePublishError("validation evidence refs do not match their run-specific identity")
+                report_path = _artifact_path(artifacts, record.report_ref.artifact_uri)
+                report = ValidationReport.model_validate_json(report_path.read_bytes())
+                verify_content_checksum(report, "report_checksum")
+                if (
+                    report.report_checksum != record.report_checksum
+                    or report.candidate_checksum != record.candidate_checksum
+                ):
+                    raise PackagePublishError("validation report does not match its run identity")
+                runtime_path = _artifact_path(artifacts, record.runtime_manifest_ref.artifact_uri)
+                runtime_manifest = RuntimeManifest.model_validate_json(runtime_path.read_bytes())
+                verify_content_checksum(runtime_manifest, "runtime_manifest_checksum")
+                for reference in (record.report_ref, record.runtime_manifest_ref, record.execution_log_ref):
+                    _artifact_path(artifacts, reference.artifact_uri)
+            runs[record.run_id] = record
+
+        for row in rows["r2s_validation_selections"]:
+            selection = ValidationRunSelection.model_validate_json(row[-1])
+            verify_content_checksum(selection, "selection_checksum")
+            if tuple(row[:7]) != (
+                selection.job_id,
+                selection.candidate_checksum,
+                selection.validation_config_checksum,
+                selection.run_id,
+                selection.report_checksum,
+                selection.generation,
+                selection.selection_checksum,
+            ):
+                raise PackagePublishError("validation selection columns do not match their checksummed payload")
+            run = runs.get(selection.run_id)
+            if (
+                run is None
+                or run.origin != ValidationRunOrigin.WORKER
+                or run.status != ValidationRunStatus.COMPLETED
+                or run.job_id != selection.job_id
+                or run.candidate_checksum != selection.candidate_checksum
+                or run.validation_config_checksum != selection.validation_config_checksum
+                or run.report_checksum != selection.report_checksum
+            ):
+                raise PackagePublishError("validation selection does not match a completed worker report")
+    except PackagePublishError:
+        raise
+    except (ValidationError, ValueError, OSError) as error:
+        raise PackagePublishError("invalid validation history in runtime package") from error
+
+
 def _validate_json_artifact_refs(files: Sequence[Path]) -> list[tuple[str, str]]:
     """Validate byte refs nested inside JSON artifacts, preserving root identity checksums."""
     references: list[tuple[str, str]] = []
@@ -585,7 +777,9 @@ def validate_staged_package(root: Path) -> StagedPackage:
         rows = _load_rows(connection, tables)
         _validate_users(connection, tables, metadata)
         _validate_transient_tables(connection, tables, rows)
+        _validate_scene_head_rows(rows)
     files = _validate_artifact_tree(artifacts)
+    _validate_validation_rows(rows, artifacts)
     _validate_job_manifests(rows, artifacts)
     refs = _validate_row_payloads(rows)
     refs.extend(_validate_json_artifact_refs(files))
@@ -717,6 +911,7 @@ def assert_target_url_empty(database_url: str) -> None:
 
 def import_rows(database: RuntimeDatabase, rows: Mapping[str, Sequence[tuple[Any, ...]]]) -> dict[str, int]:
     """Insert verified rows in one transaction into an already-migrated empty DB."""
+    _validate_scene_head_rows(rows)
     assert_target_empty(database)
     with database.transaction(write=True) as transaction:
         for table in IMPORT_ORDER:

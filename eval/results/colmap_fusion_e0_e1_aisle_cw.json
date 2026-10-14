@@ -1,0 +1,22 @@
+{
+  "registered_frames": 200,
+  "input_frames": 200,
+  "registered_percent": 100.0,
+  "path_length_m": 43.2,
+  "e1_colmap_vs_truth_as_is": {
+    "scale": 3.1202,
+    "ate_mean_m": 0.127,
+    "ate_median_m": 0.106,
+    "ate_p90_m": 0.218,
+    "ate_max_m": 0.415
+  },
+  "e0_hypothesis_traj_gt_is_os_sensor": {
+    "scale": 3.1119,
+    "ate_mean_m": 0.183,
+    "ate_median_m": 0.163,
+    "ate_p90_m": 0.306,
+    "ate_max_m": 0.578
+  },
+  "lever_arm_m": 0.178,
+  "camera_rotation_deg_from_os": 108.2
+}

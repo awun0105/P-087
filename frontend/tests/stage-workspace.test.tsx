@@ -11,7 +11,7 @@ import type { ProductArtifactRef } from "@/lib/contracts/api";
 import type { ReconstructionPreview } from "@/lib/contracts/preview";
 
 vi.mock("@/lib/api/endpoints", async (original) => ({ ...(await original<typeof import("@/lib/api/endpoints")>()), getPreview: vi.fn() }));
-vi.mock("@/features/studio/scene/PreviewScene", () => ({ PreviewScene: ({ contentUrl, title }: { contentUrl: string; title: string }) => <div aria-label={title}><Link href="/scenes/job-a?tab=progress">Về tiến trình editor</Link><output>{contentUrl}</output></div> }));
+vi.mock("@/features/studio/scene/PreviewScene", () => ({ PreviewScene: ({ contentUrl, title, jobId }: { contentUrl: string; title: string; jobId?: string }) => <div aria-label={title} data-job={jobId}><Link href="/scenes/job-a?tab=progress">Về tiến trình editor</Link><output>{contentUrl}</output></div> }));
 vi.mock("@/features/studio/StageViewer", () => ({ StageViewer: ({ stageId, fallbackStageId }: { stageId: string; fallbackStageId?: string }) => <div>Viewer: {stageId}<span>Fallback: {fallbackStageId ?? "none"}</span></div> }));
 vi.mock("@/features/studio/ObjectReviewView", () => ({ ObjectReviewView: ({ jobId }: { jobId: string }) => <div>Objects: {jobId}</div> }));
 vi.mock("@/features/studio/ModeComparisonView", () => ({ ModeComparisonView: ({ jobId }: { jobId: string }) => <div>Comparison: {jobId}</div> }));
@@ -33,6 +33,8 @@ describe("workspace scene 5–8", () => {
     const editor = await screen.findByLabelText("5. 3DGS: Kho A");
     expect(editor).toHaveTextContent("/api/v1/jobs/job-a/artifacts/content/scene.sog");
     expect(editor).toHaveTextContent("artifact_checksum=sha256%3A");
+    // Có jobId thì viewer mới lấy được quỹ đạo camera: mở đầu trong scene và có replay.
+    expect(editor).toHaveAttribute("data-job", "job-a");
     expect(screen.getByRole("link", { name: "Về tiến trình editor" })).toHaveAttribute("href", "/scenes/job-a?tab=progress");
     expect(screen.getByText(/chưa quy đổi mét/)).toBeInTheDocument();
   });

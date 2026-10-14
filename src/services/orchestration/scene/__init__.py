@@ -8,6 +8,7 @@ from src.services.orchestration.scene.errors import (
     SceneRevisionConflictError,
 )
 from src.services.orchestration.scene.models import (
+    ColliderEditCommand,
     SceneEditCommand,
     SceneEditResult,
     SceneObjectVisibility,
@@ -17,6 +18,7 @@ from src.services.orchestration.scene.models import (
 )
 
 __all__ = [
+    "ColliderEditCommand",
     "SceneEditCommand",
     "SceneEditRejectedError",
     "SceneEditResult",

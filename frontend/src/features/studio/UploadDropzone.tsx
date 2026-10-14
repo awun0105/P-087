@@ -1,28 +1,26 @@
 "use client";
 
 import { notifySuccess } from "@/components/studio/feedback";
-
-import { errorMessage } from "@/lib/ui-error";
-
-import { FileVideo, Upload, X } from "lucide-react";
-import { useEffect, useId, useRef, useState } from "react";
-
 import { Button, Notice, ProgressBar } from "@/components/studio/primitives";
+import { GAUSSIAN_ACCEPT, rejectGaussianFileName } from "@/features/studio/inputKinds";
+import { errorMessage } from "@/lib/ui-error";
 import { uploadVideo, type UploadHandle } from "@/lib/api/studio";
-import { GAUSSIAN_ACCEPT, LIDAR_ACCEPT, VIDEO_ACCEPT, rejectFileNameFor } from "@/features/studio/inputKinds";
-import { cn } from "@/lib/cn";
 import type { UploadRecord } from "@/lib/contracts/studio";
+import { cn } from "@/lib/cn";
 import { formatBytes } from "@/lib/format";
 
+import { Box, Upload, X } from "lucide-react";
+import { useEffect, useId, useRef, useState } from "react";
+
 /**
- * Chọn hoặc kéo-thả video / file 3DGS rồi tải lên backend. Máy chủ nhận diện loại
- * theo nội dung (ADR 0004); đuôi file chỉ lọc sớm. Kéo-thả chỉ là cách phụ:
- * nút chọn file luôn dùng được bằng bàn phím (WCAG 2.5.7).
+ * Upload một file 3DGS cho nhánh "Mở 3DGS có sẵn". Video và mọi sidecar đi qua khung tải input
+ * chung (`UnifiedInputFlow`), nơi có bước chuẩn bị video và nhận diện nhiều file cùng lúc.
  */
-export function UploadDropzone({ kind, onUploaded }: { kind: "video" | "gaussian" | "lidar"; onUploaded: (record: UploadRecord) => void }) {
+export function UploadDropzone({ onUploaded }: { onUploaded: (record: UploadRecord) => void }) {
   const inputId = useId();
-  const [file, setFile] = useState<File | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
+  const [progressName, setProgressName] = useState("");
+  const [progressBytes, setProgressBytes] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -32,19 +30,23 @@ export function UploadDropzone({ kind, onUploaded }: { kind: "video" | "gaussian
 
   useEffect(() => {
     mounted.current = true;
-    return () => { mounted.current = false; handle.current?.abort(); };
+    return () => {
+      mounted.current = false;
+      handle.current?.abort();
+    };
   }, []);
 
   function start(candidate: File | undefined) {
     if (!candidate) return;
-    const rejected = rejectFileNameFor(candidate.name, kind);
+    const rejected = rejectGaussianFileName(candidate.name);
     if (rejected) {
       setError(rejected);
       return;
     }
-    setFile(candidate);
-    setError(null);
     setProgress(0);
+    setProgressName(candidate.name);
+    setProgressBytes(candidate.size);
+    setError(null);
     setUploading(true);
     setVerifying(false);
     const upload = uploadVideo(candidate, setProgress, () => setVerifying(true));
@@ -93,20 +95,14 @@ export function UploadDropzone({ kind, onUploaded }: { kind: "video" | "gaussian
         <span className="grid size-12 place-items-center rounded-full bg-ember-soft text-ember-strong">
           <Upload className="size-5" aria-hidden />
         </span>
-        <span className="mt-4 text-base font-semibold text-ink">
-          {kind === "video" ? "Kéo video vào đây, hoặc bấm để chọn" : kind === "lidar" ? "Kéo gói LiDAR (.zip) vào đây, hoặc bấm để chọn" : "Kéo file 3DGS vào đây, hoặc bấm để chọn"}
-        </span>
+        <span className="mt-4 text-base font-semibold text-ink">Kéo file 3DGS vào đây, hoặc bấm để chọn</span>
         <span className="mt-1 text-sm text-ink-muted">
-          {kind === "video"
-            ? "MP4/MOV · camera di chuyển chậm, cảnh tĩnh và đủ sáng · tạo reconstruction job sau bước khai báo"
-            : kind === "lidar"
-              ? "ZIP gồm quỹ đạo + calibration + thời điểm frame, cùng các scan .pcd hoặc một đám mây đã đăng ký"
-            : "PLY hoặc ZIP gồm PLY + COLMAP · chỉ xem/chỉnh Gaussian và xuất file; không dựng collision hay phát hành"}
+          PLY/SOG hoặc ZIP gồm PLY + COLMAP · chỉ xem/chỉnh Gaussian và xuất file; không dựng collision hay phát hành
         </span>
         <input
           id={inputId}
           type="file"
-          accept={kind === "video" ? VIDEO_ACCEPT : kind === "lidar" ? LIDAR_ACCEPT : GAUSSIAN_ACCEPT}
+          accept={GAUSSIAN_ACCEPT}
           className="sr-only"
           disabled={uploading}
           onChange={(event) => {
@@ -116,21 +112,17 @@ export function UploadDropzone({ kind, onUploaded }: { kind: "video" | "gaussian
         />
       </label>
 
-      {file && progress !== null && (
+      {progress !== null && (uploading || progress >= 1) && (
         <div className="mt-4 flex items-center gap-4 rounded-xl border border-line bg-paper-raised p-4">
-          <FileVideo className="size-5 shrink-0 text-ink-muted" aria-hidden />
+          <Box className="size-5 shrink-0 text-ink-muted" aria-hidden />
           <div className="min-w-0 flex-1">
             <div className="flex items-baseline justify-between gap-3 text-sm">
-              <span className="truncate font-medium">{file.name}</span>
+              <span className="truncate font-medium">{progressName}</span>
               <span className="shrink-0 value-tech text-ink-subtle">
-                {verifying
-                  ? "Máy chủ đang kiểm tra và nhận diện file…"
-                  : progress >= 1
-                    ? "Đã tải xong"
-                    : `${Math.round(progress * 100)}% · ${formatBytes(file.size)}`}
+                {verifying ? "Máy chủ đang kiểm tra file…" : progress >= 1 ? "Đã tải xong" : `${Math.round(progress * 100)}% · ${formatBytes(progressBytes)}`}
               </span>
             </div>
-            <ProgressBar value={progress} label={`Tải lên ${file.name}`} className="mt-2" />
+            <ProgressBar value={progress} label={`Tải lên ${progressName}`} className="mt-2" />
           </div>
           {uploading && (
             <Button variant="ghost" size="icon" aria-label="Hủy tải lên" onClick={() => handle.current?.abort()}>
@@ -139,11 +131,7 @@ export function UploadDropzone({ kind, onUploaded }: { kind: "video" | "gaussian
           )}
         </div>
       )}
-      {error && (
-        <Notice tone="rust" className="mt-4">
-          {error}
-        </Notice>
-      )}
+      {error && <Notice tone="rust" className="mt-4">{error}</Notice>}
     </div>
   );
 }

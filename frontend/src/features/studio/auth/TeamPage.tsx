@@ -10,9 +10,9 @@ import { useCallback, useEffect, useState } from "react";
 
 import { Badge, Button, Card, EmptyState, Notice, buttonVariants } from "@/components/studio/primitives";
 import { useAuth } from "@/features/studio/AuthProvider";
-import { createInvite, isReviewer, listUsers, updateUser, type PublicUser, type Role } from "@/lib/api/auth";
+import { createInvite, isReviewer, listUsers, updateUser, type InviteRole, type PublicUser, type Role } from "@/lib/api/auth";
 
-/** Quản lý nhóm cho Reviewer: phát mã mời, đổi role, khóa tài khoản, chỉnh hạn mức. */
+/** Quản lý nhóm cho Reviewer: mời Editor/Reviewer, đổi ba role, khóa tài khoản, chỉnh hạn mức Editor. */
 export function TeamPage() {
   const { me } = useAuth();
   const [users, setUsers] = useState<PublicUser[] | null>(null);
@@ -78,8 +78,8 @@ export function TeamPage() {
     <main className="mx-auto max-w-4xl px-4 pt-10 pb-20 sm:px-6">
       <h1 className="text-3xl font-extrabold tracking-tight">Nhóm</h1>
       <p className="mt-2 text-[15px] text-ink-muted">
-        Editor dựng và chỉnh scene, có hạn mức số lần xử lý GPU (scene mới hoặc thử lại) mỗi 24 giờ do Reviewer chỉnh. Reviewer có
-        thêm quyền duyệt scene, quản lý thành viên và không bị giới hạn.
+        Reviewer có nhiều quyền nhất; Editor dựng và chỉnh scene với hạn mức do Reviewer chỉnh. Guest có ít quyền hơn và
+        hiện chưa được mở xử lý job.
       </p>
       <InviteCard />
       {error && (
@@ -93,7 +93,7 @@ export function TeamPage() {
             <tr>
               <th className="px-4 py-3 font-medium">Thành viên</th>
               <th className="px-4 py-3 font-medium">Role</th>
-              <th className="px-4 py-3 font-medium">Lượt GPU/24 giờ</th>
+              <th className="px-4 py-3 font-medium">Hạn mức xử lý</th>
               <th className="px-4 py-3 font-medium">Trạng thái</th>
             </tr>
           </thead>
@@ -116,13 +116,16 @@ export function TeamPage() {
                       onChange={(event) => void change(user, { role: event.target.value as Role })}
                       className="h-9 rounded-lg border border-line-strong bg-paper-raised px-2"
                     >
-                      <option value="editor">Editor</option>
                       <option value="reviewer">Reviewer</option>
+                      <option value="editor">Editor</option>
+                      <option value="guest">Guest</option>
                     </select>
                   </td>
                   <td className="px-4 py-3">
                     {user.role === "reviewer" ? (
                       <span className="text-ink-muted">Không giới hạn</span>
+                    ) : user.role === "guest" ? (
+                      <span className="text-ink-muted">Hạn mức Guest (chưa mở xử lý)</span>
                     ) : (
                     <input
                       aria-label={`Hạn mức lượt xử lý GPU mỗi 24 giờ của ${user.display_name}`}
@@ -164,8 +167,8 @@ export function TeamPage() {
 }
 
 function InviteCard() {
-  const [role, setRole] = useState<Role>("editor");
-  const [invite, setInvite] = useState<{ code: string; role: Role; expires_at: string } | null>(null);
+  const [role, setRole] = useState<InviteRole>("editor");
+  const [invite, setInvite] = useState<{ code: string; role: InviteRole; expires_at: string } | null>(null);
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -194,7 +197,7 @@ function InviteCard() {
         <select
           aria-label="Role của mã mời"
           value={role}
-          onChange={(event) => setRole(event.target.value as Role)}
+          onChange={(event) => setRole(event.target.value as InviteRole)}
           className="h-10 rounded-[10px] border border-line-strong bg-paper-raised px-3 text-sm"
         >
           <option value="editor">Editor — dựng và chỉnh scene</option>

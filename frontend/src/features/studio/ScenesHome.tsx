@@ -1,7 +1,6 @@
 "use client";
 
 import { errorMessage } from "@/lib/ui-error";
-
 import { ArrowRight, Film, LayoutGrid, List, LogIn, RefreshCw, Search } from "lucide-react";
 import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
 import { useCallback, useMemo, useState } from "react";
@@ -11,19 +10,46 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { ToggleGroup, ToggleGroupItem } from "@/components/shadcn/toggle-group";
 import { Badge, Card, EmptyState, Notice, buttonVariants } from "@/components/studio/primitives";
 import { useAuth } from "@/features/studio/AuthProvider";
-import { STATUS_FILTERS, sceneStatus, type SceneStatusGroup } from "@/features/studio/sceneStatus";
+import { STATUS_FILTERS, sceneSummaryStatus, type SceneStatusGroup } from "@/features/studio/sceneStatus";
 import { usePolling } from "@/features/studio/usePolling";
-import { canEdit } from "@/lib/api/auth";
-import { listImports, listScenes, moveImportToTrash, moveSceneToTrash } from "@/lib/api/studio";
+import { canEdit, resourceCapabilityAllowed, type Me } from "@/lib/api/auth";
+import { listScenes, moveSceneToTrash } from "@/lib/api/studio";
 import { MoveToTrashButton } from "@/features/studio/trash/MoveToTrashButton";
 import { cn } from "@/lib/cn";
-import type { ImportedScene, SceneSummary } from "@/lib/contracts/studio";
+import type { Actor, SceneSummary } from "@/lib/contracts/studio";
 import { useListState, pageSlice, ListPagination, SortControl } from "@/features/studio/ListControls";
 import { formatBytes, formatDuration } from "@/lib/format";
 import { stageMeta } from "@/features/studio/stages";
 import { progressHref } from "@/features/studio/inspection";
 
 const DATE = new Intl.DateTimeFormat("vi-VN", { dateStyle: "medium", timeStyle: "short" });
+
+const ROLE_LABELS: Record<string, string> = { editor: "Editor", reviewer: "Reviewer", guest: "Guest" };
+
+function ActorAttribution({
+  label,
+  name,
+  role,
+}: {
+  label: string;
+  name: string;
+  role?: string | null;
+}) {
+  return (
+    <span className="inline-flex min-w-0 flex-wrap items-center gap-1 text-xs">
+      <span className="text-ink-subtle">{label}: </span>
+      <Badge tone="neutral" className="max-w-36 truncate normal-case">{name}</Badge>
+      {" "}
+      <Badge tone={role ? "neutral" : "ochre"}>
+        {role ? ROLE_LABELS[role] ?? "Vai trò chưa xác định" : "Vai trò chưa xác định"}
+      </Badge>
+    </span>
+  );
+}
+
+function actorAttribution(label: string, actor: Actor) {
+  return <ActorAttribution key={`${label}-${actor.user_id}`} label={label} name={actor.display_name} role={actor.role} />;
+}
 
 /**
  * Thời gian xử lý = thời gian máy thật sự chạy các bước (backend cộng từ số đo của từng bước),
@@ -39,21 +65,14 @@ function processingTime(scene: SceneSummary): string {
 /** Màn hình Scenes: danh sách scene của người dùng (dữ liệu từ backend). Video mẫu nằm ở `/new/try-demo`. */
 export function ScenesHome() {
   const [scenes, setScenes] = useState<SceneSummary[] | null>(null);
-  const [imports, setImports] = useState<ImportedScene[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [importError, setImportError] = useState<string | null>(null);
 
   const { me } = useAuth();
   const signedIn = canEdit(me);
 
   const load = useCallback(async () => {
     // Khách không có quyền xem scene của nhóm: không gọi API, không poll lỗi 401.
-    const [sceneResult, importResult] = await Promise.all([
-      signedIn ? listScenes() : Promise.resolve(null),
-      signedIn ? listImports() : Promise.resolve(null),
-    ]);
-    if (importResult?.ok) { setImports(importResult.data.imports); setImportError(null); }
-    else if (importResult) setImportError(errorMessage(importResult.error));
+    const sceneResult = signedIn ? await listScenes() : null;
     if (sceneResult?.ok) {
       setScenes(sceneResult.data.scenes);
       setError(null);
@@ -67,7 +86,7 @@ export function ScenesHome() {
     const needle = query.trim().toLowerCase();
     return (scenes ?? []).filter(
       (scene) => {
-        const group = sceneStatus(scene.latest_job, scene.preview_ready).group;
+        const group = sceneSummaryStatus(scene).group;
         return (!needle || scene.project.name.toLowerCase().includes(needle)) &&
                (filter === "all" || group === filter || (filter === "needs_action" && (group === "action" || group === "failed")));
       }
@@ -75,25 +94,24 @@ export function ScenesHome() {
   }, [scenes, query, filter, sort]);
 
   const pagination = pageSlice(shown, params.get("page"), 12);
-  const filteredImports = imports.filter((item) => item.name.toLowerCase().includes(query.trim().toLowerCase())).sort((a, b) => sort === "name" ? a.name.localeCompare(b.name, "vi") : Date.parse(b.created_at) - Date.parse(a.created_at));
-  const importPage = pageSlice(filteredImports, params.get("importsPage"), 12);
-  const anyActive = scenes?.some((scene) => sceneStatus(scene.latest_job, scene.preview_ready).active) ?? true;
+  const anyActive = scenes?.some((scene) => sceneSummaryStatus(scene).active) ?? true;
   usePolling(load, signedIn && anyActive ? 4000 : 20000, true);
 
   return (
     <main className="mx-auto max-w-6xl px-4 pt-10 pb-20 sm:px-6">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-3xl font-extrabold tracking-tight text-ink">Scenes</h1>
+          <h1 className="text-3xl font-extrabold tracking-tight text-ink">Scenes từ video</h1>
           <p className="mt-1.5 max-w-xl text-[15px] leading-relaxed text-ink-muted">
-            Tiếp tục scene đang làm, dựng từ video hoặc mở một file 3DGS đã có.
+            Tiếp tục scene đang làm, dựng từ video hoặc xem lại lịch sử reconstruction. Để mở file 3DGS trực tiếp, xem mục{" "}
+            <Link href="/imports" className="font-medium text-ember-strong hover:underline">Scenes đã import</Link>.
           </p>
         </div>
       </div>
 
       {!signedIn && me !== null && (
         <Notice className="mt-8">
-          Scene của nhóm chỉ hiện sau khi đăng nhập. Chưa có tài khoản vẫn xem được kết quả đã xử lý sẵn ở{" "}
+            Scene của nhóm chỉ hiện sau khi đăng nhập. Người xem chưa đăng nhập vẫn có thể mở kết quả mẫu ở{" "}
           <Link href="/new/try-demo" className="font-medium text-ember-strong hover:underline">Thử mẫu</Link>.
         </Notice>
       )}
@@ -122,7 +140,7 @@ export function ScenesHome() {
               </Link>
             }
           >
-            Khách có thể thử với mẫu đã xử lý sẵn.
+            Người xem chưa đăng nhập có thể thử với mẫu đã xử lý sẵn.
           </EmptyState>
         )}
         {me === null && <p role="status" className="text-sm text-ink-muted">Đang kiểm tra quyền truy cập…</p>}
@@ -192,61 +210,33 @@ export function ScenesHome() {
           </p>
         )}
         {signedIn && shown.length > 0 && view === "grid" && (
-          <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <ul className="grid auto-rows-fr gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {pagination.items.map((scene) => (
-              <li key={scene.project.project_id} className="relative">
+              <li key={scene.project.project_id} className="relative min-w-0">
                 <SceneCard scene={scene} />
                 {/* Nằm ngoài thẻ link của card: nút trong link là HTML không hợp lệ và bấm sẽ điều hướng. */}
-                <MoveToTrashButton
-                  name={scene.project.name}
-                  move={() => moveSceneToTrash(scene.project.project_id)}
-                  onMoved={() => void load()}
-                  className="absolute top-3 left-3 shadow-sm"
-                />
+                {resourceCapabilityAllowed(me, scene.capabilities?.can_delete_project) && (
+                  <MoveToTrashButton
+                    name={scene.project.name}
+                    move={() => moveSceneToTrash(scene.project.project_id)}
+                    onMoved={() => void load()}
+                    className="absolute top-3 left-3 shadow-sm"
+                  />
+                )}
               </li>
             ))}
           </ul>
         )}
-        {signedIn && shown.length > 0 && view === "list" && <SceneTable scenes={pagination.items} onChanged={() => void load()} />}
+        {signedIn && shown.length > 0 && view === "list" && <SceneTable scenes={pagination.items} me={me} onChanged={() => void load()} />}
         {signedIn && <ListPagination {...pagination} total={shown.length} onChange={(page) => update({ page: String(page) })} />}
       </section>
-
-      {signedIn && importError && <Notice tone="rust" className="mt-6">Không tải được scene import: {importError}. Trang sẽ thử lại.</Notice>}
-      {signedIn && imports.length > 0 && (
-        <section aria-labelledby="imports-heading" className="mt-10">
-          <h2 id="imports-heading" className="label-tech mb-4 text-ink-muted">
-            Scene import · chỉ xem/chỉnh Gaussian
-          </h2>
-          <ul className={view === "list" ? "space-y-2" : "grid gap-3 sm:grid-cols-2 lg:grid-cols-3"}>
-            {importPage.items.map((item) => (
-              <li key={item.import_id} className="flex items-center gap-2">
-                <Link
-                  href={`/imports/${item.import_id}`}
-                  className="flex min-w-0 flex-1 items-center justify-between gap-3 rounded-xl border border-line bg-paper-raised p-4 text-sm transition-colors hover:border-line-strong"
-                >
-                  <span className="min-w-0">
-                    <span className="block truncate font-medium text-ink">{item.name}</span>
-                    {item.created_by_name && <span className="block truncate text-xs text-ink-subtle">Tạo bởi {item.created_by_name}</span>}
-                  </span>
-                  <span className="shrink-0 text-xs text-ink-subtle">
-                    {item.status === "READY" ? "Mở xem/chỉnh" : item.status === "FAILED" ? "Lỗi" : "Đang nén…"}
-                  </span>
-                </Link>
-                <MoveToTrashButton name={item.name} move={() => moveImportToTrash(item.import_id)} onMoved={() => void load()} />
-              </li>
-            ))}
-          </ul>
-          <ListPagination {...importPage} total={filteredImports.length} onChange={(page) => update({ importsPage: String(page) })} />
-          {filteredImports.length === 0 && <p className="text-sm text-ink-muted">Không có scene import khớp tên tìm kiếm.</p>}
-        </section>
-      )}
     </main>
   );
 }
 
 function SceneCard({ scene }: { scene: SceneSummary }) {
   const [thumbnailFailed, setThumbnailFailed] = useState(false);
-  const status = sceneStatus(scene.latest_job, scene.preview_ready);
+  const status = sceneSummaryStatus(scene);
   const job = scene.latest_job;
   const created = scene.project.created_at ? DATE.format(new Date(scene.project.created_at)) : null;
   // Frame đầu chỉ có sau khi trích frame; trước đó (hoặc ảnh lỗi) giữ icon.
@@ -258,7 +248,7 @@ function SceneCard({ scene }: { scene: SceneSummary }) {
         job && "hover:border-line-strong hover:shadow-md",
       )}
     >
-      <div className="relative aspect-video w-full bg-paper-sunken">
+      <div className="relative aspect-video w-full shrink-0 overflow-hidden bg-paper-sunken">
         {job && hasFrames && !thumbnailFailed ? (
           // eslint-disable-next-line @next/next/no-img-element -- JPEG nhỏ do API tạo, không qua next/image
           <img
@@ -267,10 +257,10 @@ function SceneCard({ scene }: { scene: SceneSummary }) {
             loading="lazy"
             decoding="async"
             onError={() => setThumbnailFailed(true)}
-            className="size-full object-cover"
+            className="absolute inset-0 size-full object-cover"
           />
         ) : (
-          <div className="grid size-full place-items-center text-ink-subtle">
+          <div className="absolute inset-0 grid size-full place-items-center text-ink-subtle">
             <Film className="size-8" aria-hidden />
           </div>
         )}
@@ -279,23 +269,23 @@ function SceneCard({ scene }: { scene: SceneSummary }) {
           {status.label}
         </Badge>
       </div>
-      <div className="flex flex-1 flex-col p-5">
+      <div className="flex min-w-0 flex-1 flex-col p-5">
         <h3 className="flex items-center gap-2 truncate text-base font-bold text-ink">
           <span className="truncate">{scene.project.name}</span>
-          {scene.project.demo_baseline && <Badge tone="ember" className="shrink-0">Bản demo</Badge>}
+          {scene.project.demo_baseline && <Badge tone="neutral" className="shrink-0" title="Scene có trạng thái đã lưu để quay lại">Đã lưu trạng thái</Badge>}
         </h3>
         <p className="mt-1 truncate text-sm text-ink-muted">
           {scene.project.input_video
             ? `${scene.project.input_video.original_name} · ${formatBytes(scene.project.input_video.size_bytes)}`
             : "Không có video"}
         </p>
-        <div className="mt-auto flex items-center justify-between pt-5 text-xs text-ink-subtle">
-          <span className="min-w-0 truncate">
-            <span className="value-tech">{created}</span>
-            {/* Nhóm dùng chung một không gian: ghi rõ scene này do ai tạo (và ai chạy lại gần nhất nếu khác người). */}
-            {scene.project.created_by && <> · tạo bởi {scene.project.created_by.display_name}</>}
-            {scene.requested_by && scene.requested_by.user_id !== scene.project.created_by?.user_id && <> · chạy bởi {scene.requested_by.display_name}</>}
-          </span>
+        <div className="mt-auto flex items-end justify-between gap-3 pt-5">
+          <div className="flex min-w-0 flex-col gap-1.5">
+            <span className="text-xs text-ink-subtle"><span className="value-tech">{created}</span></span>
+            {scene.project.created_by && actorAttribution("Tạo bởi", scene.project.created_by)}
+            {scene.requested_by && scene.requested_by.user_id !== scene.project.created_by?.user_id &&
+              actorAttribution("Chạy bởi", scene.requested_by)}
+          </div>
           {job && (
             <span className="flex items-center gap-1 font-medium text-ink-muted transition-colors group-hover:text-ember-strong">
               {scene.preview_ready ? "Mở scene" : "Xem tiến trình"}
@@ -317,7 +307,7 @@ function SceneCard({ scene }: { scene: SceneSummary }) {
   );
 }
 /** Dạng danh sách: đọc nhanh trạng thái, giai đoạn và mốc thời gian của nhiều scene. */
-function SceneTable({ scenes, onChanged }: { scenes: SceneSummary[]; onChanged: () => void }) {
+function SceneTable({ scenes, me, onChanged }: { scenes: SceneSummary[]; me: Me | null; onChanged: () => void }) {
   return (
     <div className="overflow-hidden rounded-xl border border-line">
       <Table>
@@ -334,7 +324,7 @@ function SceneTable({ scenes, onChanged }: { scenes: SceneSummary[]; onChanged: 
         </TableHeader>
         <TableBody>
           {scenes.map((scene) => {
-            const status = sceneStatus(scene.latest_job, scene.preview_ready);
+            const status = sceneSummaryStatus(scene);
             const job = scene.latest_job;
             const targetHref = job
               ? scene.preview_ready
@@ -343,22 +333,22 @@ function SceneTable({ scenes, onChanged }: { scenes: SceneSummary[]; onChanged: 
               : null;
             return (
               <TableRow key={scene.project.project_id}>
-                <TableCell className="max-w-64">
-                  {targetHref ? (
-                    <Link
-                      href={targetHref}
-                      className="block truncate font-medium hover:text-ember-strong hover:underline"
-                    >
-                      {scene.project.name}
-                    </Link>
-                  ) : (
-                    <span className="block truncate font-medium">{scene.project.name}</span>
-                  )}
-                  {scene.project.created_by && (
-                    <p className="truncate text-xs text-ink-subtle">
-                      Tạo bởi {scene.project.created_by.display_name}
-                    </p>
-                  )}
+                <TableCell className="max-w-64 whitespace-normal">
+                  <div className="min-w-0 space-y-1.5">
+                    {targetHref ? (
+                      <Link
+                        href={targetHref}
+                        className="block truncate font-medium hover:text-ember-strong hover:underline"
+                      >
+                        {scene.project.name}
+                      </Link>
+                    ) : (
+                      <span className="block truncate font-medium">{scene.project.name}</span>
+                    )}
+                    {scene.project.created_by && actorAttribution("Tạo bởi", scene.project.created_by)}
+                    {scene.requested_by && scene.requested_by.user_id !== scene.project.created_by?.user_id &&
+                      actorAttribution("Chạy bởi", scene.requested_by)}
+                  </div>
                 </TableCell>
                 <TableCell>
                   <Badge tone={status.tone}>{status.label}</Badge>
@@ -391,7 +381,9 @@ function SceneTable({ scenes, onChanged }: { scenes: SceneSummary[]; onChanged: 
                         {scene.preview_ready ? "Mở scene" : "Xem tiến trình"}
                       </Link>
                     )}
-                    <MoveToTrashButton name={scene.project.name} move={() => moveSceneToTrash(scene.project.project_id)} onMoved={onChanged} />
+                    {resourceCapabilityAllowed(me, scene.capabilities?.can_delete_project) && (
+                      <MoveToTrashButton name={scene.project.name} move={() => moveSceneToTrash(scene.project.project_id)} onMoved={onChanged} />
+                    )}
                   </div>
                 </TableCell>
               </TableRow>

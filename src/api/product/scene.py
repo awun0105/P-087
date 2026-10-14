@@ -1,26 +1,46 @@
 """SceneIR của job (PRODUCT-06/07, pipeline v2): revision, sửa transform, thao tác vật thể, danh mục asset, tách lại theo vật."""
 
 from pathlib import Path
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
 
 from src.api import schemas
-from src.api.auth import enforce_gpu_quota, record_gpu_run, require_editor
+from src.api.auth import enforce_gpu_quota, record_gpu_run, require_contributor
+from src.api.ownership import authorize_job_mutation
 from src.api.product import deps
 from src.config import Settings
-from src.services.orchestration.artifacts import ArtifactStoreError
+from src.models.contracts.object_membership import ObjectMembershipMergeCommand, ObjectMembershipReassignCommand
+from src.services.orchestration.artifacts import ArtifactNotFoundError, ArtifactStoreError
 from src.services.orchestration.auth import UserRecord
-from src.services.orchestration.scene import SceneEditCommand, SceneError, SceneRevisionConflictError, objectify_queue
+from src.services.orchestration.jobs.stage_views import job_bundle
+from src.services.orchestration.scene import (
+    ColliderEditCommand,
+    SceneEditCommand,
+    SceneError,
+    SceneRevisionConflictError,
+    objectify_queue,
+)
 from src.services.orchestration.scene.catalog import load_catalog, suggest_classes
+from src.services.orchestration.scene.collision_source_selection import select_lidar_collision_candidate
 from src.services.orchestration.scene.errors import SceneNotAvailableError
+from src.services.orchestration.scene.object_correction import merge_object_candidates, reassign_object_membership
+from src.services.orchestration.scene.objectify import ObjectifyError
 from src.services.orchestration.scene.objectify_queue import ObjectifyRequestError, ObjectifyState
 from src.services.orchestration.scene.objects import (
     OBJECT_ACTIONS,
     add_box_object,
     add_catalog_object,
     apply_object_action,
+    edit_collider,
     restore_revision,
+)
+from src.services.reconstruction.views import camera_views
+from src.services.scene.editing.membership import (
+    ObjectMembershipValidationError,
+    StaleObjectMembershipRevisionError,
+    validate_object_membership_command,
 )
 
 router = APIRouter()
@@ -41,7 +61,7 @@ def get_job_scene(job_id: str) -> schemas.SceneResponse:
     try:
         return schemas.scene_response(editor.current(job_id), editor.visual_binding(job_id))
     except SceneNotAvailableError as error:
-        raise HTTPException(status_code=404, detail=str(error)) from error
+        raise deps.scene_unavailable(error) from error
     except (ArtifactStoreError, SceneError) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
 
@@ -52,7 +72,11 @@ def get_job_scene(job_id: str) -> schemas.SceneResponse:
     status_code=status.HTTP_201_CREATED,
     responses={404: {"model": schemas.ApiErrorResponse}, 409: {"model": schemas.ApiErrorResponse}},
 )
-def edit_job_scene(job_id: str, command: SceneEditCommand) -> schemas.SceneEditResponse:
+def edit_job_scene(
+    job_id: str,
+    command: SceneEditCommand,
+    user: UserRecord | None = Depends(require_contributor),
+) -> schemas.SceneEditResponse:
     """Áp transform edit và persist thành revision mới (PRODUCT-06).
 
     `expected_scene_revision` là khoá optimistic: client sửa trên revision đã cũ
@@ -62,15 +86,81 @@ def edit_job_scene(job_id: str, command: SceneEditCommand) -> schemas.SceneEditR
     `/review`: nó nổi lên khi bytes của một revision đã niêm phong không còn khớp
     ref, tức là xung đột bất biến artifact — không phải lỗi command của client.
     """
+    registry = deps.registry()
+    authorize_job_mutation(user, registry, job_id, operation="sửa scene của")
     deps.job_or_404(job_id)
     try:
-        return schemas.scene_edit_response(deps.registry().scene.apply(job_id, command))
+        return schemas.scene_edit_response(registry.scene.apply(job_id, command))
     except SceneRevisionConflictError as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     except ArtifactStoreError as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     except SceneError as error:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)) from error
+
+
+@router.post(
+    "/jobs/{job_id}/scene/collider",
+    response_model=schemas.SceneEditResponse,
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        404: {"model": schemas.ApiErrorResponse},
+        409: {"model": schemas.ApiErrorResponse},
+        422: {"model": schemas.ApiErrorResponse},
+    },
+)
+def edit_job_collider(
+    job_id: str,
+    command: ColliderEditCommand,
+    user: UserRecord | None = Depends(require_contributor),
+) -> schemas.SceneEditResponse:
+    """Edit a supported box collider and publish one optimistic revision."""
+    registry = deps.registry()
+    authorize_job_mutation(user, registry, job_id, operation="sửa collider của")
+    deps.job_or_404(job_id)
+    return deps.scene_mutation(lambda editor: edit_collider(editor, job_id, command))
+
+
+@router.post(
+    "/jobs/{job_id}/scene/collision-source/lidar",
+    response_model=schemas.SceneEditResponse,
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        404: {"model": schemas.ApiErrorResponse},
+        409: {"model": schemas.ApiErrorResponse},
+        422: {"model": schemas.ApiErrorResponse},
+    },
+)
+def select_job_lidar_collision_source(
+    job_id: str,
+    request: schemas.LidarCollisionSourceSelectionRequest,
+    user: UserRecord | None = Depends(require_contributor),
+) -> schemas.SceneEditResponse:
+    """Select an exact published candidate; eligibility and ownership are rechecked by the domain service."""
+    registry = deps.registry()
+    authorize_job_mutation(user, registry, job_id, operation="sửa collision source của")
+    deps.job_or_404(job_id)
+    try:
+        canonical_ref = registry.authorized_artifact(job_id, request.candidate_manifest_ref)
+    except ArtifactNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+    except ArtifactStoreError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+
+    if canonical_ref.artifact_type != "LidarCollisionCandidateManifest":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Chỉ chọn được LidarCollisionCandidateManifest đã publish cho job này",
+        )
+    product_ref = schemas.ProductArtifactRef.model_validate(canonical_ref.model_dump(mode="python"))
+    return deps.scene_mutation(
+        lambda editor: select_lidar_collision_candidate(
+            editor,
+            job_id,
+            request.expected_scene_revision,
+            product_ref,
+        )
+    )
 
 
 # ── PRODUCT-07: object actions ───────────────────────────────────────────────
@@ -91,8 +181,11 @@ def object_action(
     object_id: str,
     action: str,
     request: schemas.ObjectActionRequest,
+    user: UserRecord | None = Depends(require_contributor),
 ) -> schemas.SceneEditResponse:
     """confirm/ignore ứng viên, hide/delete/rename vật thể — lệnh domain EX-SCENE, revision mới."""
+    registry = deps.registry()
+    authorize_job_mutation(user, registry, job_id, operation="sửa vật thể của")
     deps.job_or_404(job_id)
     if action not in OBJECT_ACTIONS:
         raise HTTPException(
@@ -128,8 +221,11 @@ def object_action(
 def add_object(
     job_id: str,
     request: schemas.AddObjectRequest,
+    user: UserRecord | None = Depends(require_contributor),
 ) -> schemas.SceneEditResponse:
     """Thêm vật cản hộp do người dùng đặt (PRODUCT-07A); `position_xyz` là tâm hộp (mét, world)."""
+    registry = deps.registry()
+    authorize_job_mutation(user, registry, job_id, operation="thêm vật thể vào")
     deps.job_or_404(job_id)
     if request.collider_type != "AABB" or request.origin != "user_added":
         raise HTTPException(
@@ -204,7 +300,7 @@ def get_objectify_state(job_id: str) -> ObjectifyState:
     try:
         return objectify_queue.state(deps.registry(), deps.settings(), job_id)
     except SceneNotAvailableError as error:
-        raise HTTPException(status_code=404, detail=str(error)) from error
+        raise deps.scene_unavailable(error) from error
 
 
 @router.post(
@@ -214,25 +310,192 @@ def get_objectify_state(job_id: str) -> ObjectifyState:
     responses={404: {"model": schemas.ApiErrorResponse}, 409: {"model": schemas.ApiErrorResponse}},
 )
 def request_objectify(
-    job_id: str, request: schemas.ObjectifyRequest, user: UserRecord | None = Depends(require_editor)
+    job_id: str, request: schemas.ObjectifyRequest, user: UserRecord | None = Depends(require_contributor)
 ) -> ObjectifyState:
     """Xếp hàng chạy lại tách theo vật (hoặc dùng hộp ứng viên); worker thực hiện, ghi revision SceneIR kế tiếp.
 
     Tập vật mới là ứng viên mới: xác nhận/nhãn của revision hiện tại không mang sang (vẫn hoàn tác được).
-    Đây là một lần xử lý GPU nên tính vào hạn mức của Editor.
+    Thao tác này vẫn chịu worker/resource admission. Guest objectify không trừ
+    quota ba job dựng scene mỗi ngày; Editor giữ rolling quota 24 giờ hiện tại.
     """
+    registry = deps.registry()
+    authorize_job_mutation(user, registry, job_id, operation="tách lại vật thể của")
     deps.job_or_404(job_id)
     enforce_gpu_quota(user)
     try:
         result = objectify_queue.request(
-            deps.registry(), deps.settings(), job_id, request.expected_scene_revision, request.mode
+            registry, deps.settings(), job_id, request.expected_scene_revision, request.mode
         )
     except SceneNotAvailableError as error:
-        raise HTTPException(status_code=404, detail=str(error)) from error
+        raise deps.scene_unavailable(error) from error
     except (ObjectifyRequestError, SceneRevisionConflictError) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     record_gpu_run(user, job_id, {"kind": f"scene.{request.mode}"})
     return result
+
+
+def _membership_correction(
+    job_id: str,
+    request: ObjectMembershipMergeCommand | ObjectMembershipReassignCommand,
+    user: UserRecord | None,
+    *,
+    operation: str,
+) -> schemas.SceneEditResponse:
+    """Run a revision-bound membership correction and return the newly published SceneIR."""
+    registry = deps.registry()
+    authorize_job_mutation(user, registry, job_id, operation="sửa membership vật thể của")
+    job = deps.job_or_404(job_id)
+    editor = registry.scene
+
+    # Fail with a useful revision/membership reason before reporting a missing local runtime.
+    # The domain service repeats this validation immediately before reading source artifacts.
+    try:
+        validate_object_membership_command(editor.current(job_id).scene, request)
+    except StaleObjectMembershipRevisionError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+    except ObjectMembershipValidationError as error:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)) from error
+    except SceneNotAvailableError as error:
+        raise deps.scene_unavailable(error) from error
+    except (ArtifactStoreError, SceneError) as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+
+    settings = deps.settings()
+    runtime_python = settings.product_scene_runtime_python
+    if runtime_python is None or not runtime_python.expanduser().is_file():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Runtime local cho hiệu chỉnh Gaussian chưa được cấu hình",
+        )
+
+    view_requests: list[dict[str, object]] = []
+    if isinstance(request, ObjectMembershipReassignCommand):
+        bundle = job_bundle(registry, job)
+        if bundle is None or not bundle.camera_pose_refs or not bundle.rgb_frame_refs:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Thiếu bundle hoặc camera view của reconstruction để dựng lại nền sau khi chuyển vùng",
+            )
+        try:
+            views = camera_views(bundle.camera_pose_refs[0], bundle.rgb_frame_refs, registry.runtime_resolver.require)
+            view_requests = [
+                {
+                    **view.model_dump(mode="json", exclude={"image"}),
+                    "image_path": str(registry.runtime_resolver.require(view.image)),
+                }
+                for view in views
+            ]
+        except (ArtifactStoreError, ValueError) as error:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+        if not view_requests:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Không có camera view hợp lệ để dựng lại nền sau khi chuyển vùng",
+            )
+
+    enforce_gpu_quota(user)
+    workspace = settings.product_worker_root.expanduser().resolve() / job_id / "membership-correction" / uuid4().hex
+    # Count the accepted GPU correction before publication so an audit/database failure cannot
+    # return an HTTP error after the canonical SceneIR has already changed.
+    record_gpu_run(user, job_id, {"kind": f"scene.membership_{operation}"})
+    try:
+        if isinstance(request, ObjectMembershipMergeCommand):
+            result = merge_object_candidates(
+                editor,
+                job_id,
+                request,
+                actor_id=user.user_id if user is not None else "local",
+                runtime_python=runtime_python.expanduser().resolve(),
+                workspace=workspace,
+                timeout_seconds=settings.product_scene_timeout_seconds,
+            )
+        else:
+            result = reassign_object_membership(
+                editor,
+                job_id,
+                request,
+                actor_id=user.user_id if user is not None else "local",
+                runtime_python=runtime_python.expanduser().resolve(),
+                workspace=workspace,
+                timeout_seconds=settings.product_scene_timeout_seconds,
+                view_requests=view_requests,
+                lama_checkpoint=settings.product_lama_checkpoint,
+                gpu_index=settings.product_geometry_gpu_index,
+            )
+    except StaleObjectMembershipRevisionError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+    except SceneRevisionConflictError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+    except ArtifactStoreError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+    except SceneNotAvailableError as error:
+        raise deps.scene_unavailable(error) from error
+    except ObjectifyError as error:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(error)) from error
+    except (ObjectMembershipValidationError, SceneError) as error:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)) from error
+
+    return schemas.scene_edit_response(result)
+
+
+@router.post(
+    "/jobs/{job_id}/scene/corrections/merge",
+    response_model=schemas.SceneEditResponse,
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        404: {"model": schemas.ApiErrorResponse},
+        409: {"model": schemas.ApiErrorResponse},
+        422: {"model": schemas.ApiErrorResponse},
+        502: {"model": schemas.ApiErrorResponse},
+        503: {"model": schemas.ApiErrorResponse},
+    },
+)
+def merge_scene_membership(
+    job_id: str,
+    request: ObjectMembershipMergeCommand,
+    user: UserRecord | None = Depends(require_contributor),
+) -> schemas.SceneEditResponse:
+    """Merge selected reconstructed candidates and publish regenerated SceneIR artifacts."""
+    return _membership_correction(job_id, request, user, operation="merge")
+
+
+@router.post(
+    "/jobs/{job_id}/scene/corrections/reassign",
+    response_model=schemas.SceneEditResponse,
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        404: {"model": schemas.ApiErrorResponse},
+        409: {"model": schemas.ApiErrorResponse},
+        422: {"model": schemas.ApiErrorResponse},
+        502: {"model": schemas.ApiErrorResponse},
+        503: {"model": schemas.ApiErrorResponse},
+    },
+)
+def reassign_scene_membership(
+    job_id: str,
+    request: ObjectMembershipReassignCommand,
+    user: UserRecord | None = Depends(require_contributor),
+) -> schemas.SceneEditResponse:
+    """Transfer source Gaussian and collision ownership inside the submitted canonical ROI."""
+    return _membership_correction(job_id, request, user, operation="reassign")
+
+
+@router.post(
+    "/jobs/{job_id}/scene/objectify/cancel",
+    response_model=ObjectifyState,
+    responses={404: {"model": schemas.ApiErrorResponse}, 409: {"model": schemas.ApiErrorResponse}},
+)
+def cancel_objectify(job_id: str, user: UserRecord | None = Depends(require_contributor)) -> ObjectifyState:
+    """Cancel queued objectify immediately or request child-process shutdown for a running attempt."""
+    registry = deps.registry()
+    authorize_job_mutation(user, registry, job_id, operation="hủy yêu cầu dựng lại vật thể của")
+    deps.job_or_404(job_id)
+    try:
+        return objectify_queue.cancel(registry, deps.settings(), job_id)
+    except SceneNotAvailableError as error:
+        raise deps.scene_unavailable(error) from error
+    except ObjectifyRequestError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
 
 
 @router.get(
@@ -246,7 +509,7 @@ def get_label_suggestions(job_id: str, object_id: str) -> schemas.LabelSuggestio
     try:
         scene = deps.registry().scene.current(job_id).scene
     except SceneNotAvailableError as error:
-        raise HTTPException(status_code=404, detail=str(error)) from error
+        raise deps.scene_unavailable(error) from error
     target = next((item for item in scene.objects if item.id == object_id), None)
     dimensions = target and (
         target.primitive_dimensions_xyz_m or (target.collider.dimensions_xyz_m if target.collider else None)
@@ -270,8 +533,14 @@ def get_label_suggestions(job_id: str, object_id: str) -> schemas.LabelSuggestio
         422: {"model": schemas.ApiErrorResponse},
     },
 )
-def add_catalog_scene_object(job_id: str, request: schemas.AddCatalogObjectRequest) -> schemas.SceneEditResponse:
+def add_catalog_scene_object(
+    job_id: str,
+    request: schemas.AddCatalogObjectRequest,
+    user: UserRecord | None = Depends(require_contributor),
+) -> schemas.SceneEditResponse:
     """Thêm một vật từ danh mục asset Isaac: nhãn + vật lý mặc định, revision mới."""
+    registry = deps.registry()
+    authorize_job_mutation(user, registry, job_id, operation="thêm asset vào")
     deps.job_or_404(job_id)
     return deps.scene_mutation(
         lambda editor: add_catalog_object(
@@ -290,8 +559,14 @@ def add_catalog_scene_object(job_id: str, request: schemas.AddCatalogObjectReque
         422: {"model": schemas.ApiErrorResponse},
     },
 )
-def restore_scene_revision(job_id: str, request: schemas.RestoreRevisionRequest) -> schemas.SceneEditResponse:
+def restore_scene_revision(
+    job_id: str,
+    request: schemas.RestoreRevisionRequest,
+    user: UserRecord | None = Depends(require_contributor),
+) -> schemas.SceneEditResponse:
     """Hoàn tác: nội dung revision cũ thành revision kế tiếp; lịch sử không bị xoá."""
+    registry = deps.registry()
+    authorize_job_mutation(user, registry, job_id, operation="khôi phục revision của")
     deps.job_or_404(job_id)
     return deps.scene_mutation(
         lambda editor: restore_revision(editor, job_id, request.expected_scene_revision, request.target_revision)

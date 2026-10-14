@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, Box, ChevronsUpDown, Clapperboard, LayoutDashboard, Loader2, LogIn, LogOut, PanelLeftClose, PanelLeftOpen, PlusCircle, Trash2, Users, UserRound } from "lucide-react";
+import { ArrowLeft, Box, ChevronsUpDown, Clapperboard, FolderDown, LayoutDashboard, Loader2, LogIn, LogOut, PanelLeftClose, PanelLeftOpen, PlusCircle, Trash2, Users, UserRound } from "lucide-react";
 import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -39,6 +39,7 @@ import { backHref, Breadcrumbs, PageTitleProvider } from "@/features/shell/Bread
 import { PaletteMenu } from "@/features/shell/PaletteMenu";
 import { ThemeToggle } from "@/features/shell/ThemeToggle";
 import { useAuth } from "@/features/studio/AuthProvider";
+import { GuestQuotaStatus } from "@/features/studio/auth/GuestQuotaStatus";
 import { canEdit, isReviewer } from "@/lib/api/auth";
 import { APP_HOME } from "@/lib/routes";
 
@@ -49,7 +50,8 @@ const NAV = [
   ] },
   { heading: "Công việc", items: [
     { href: "/new", label: "Tạo scene mới", icon: PlusCircle, reviewerOnly: false },
-    { href: "/scenes", label: "Scenes", icon: Clapperboard, reviewerOnly: false },
+    { href: "/scenes", label: "Scenes từ video", icon: Clapperboard, reviewerOnly: false },
+    { href: "/imports", label: "Scenes đã import", icon: FolderDown, reviewerOnly: false },
     { href: "/trash", label: "Thùng rác", icon: Trash2, reviewerOnly: false },
   ] },
   { heading: "Quản lý", items: [
@@ -69,7 +71,8 @@ export function isGuestAllowedRoute(pathname: string): boolean {
 
 export function isActive(pathname: string, href: string): boolean {
   if (href === "/new") return pathname === "/new" || pathname.startsWith("/new/");
-  if (href === "/scenes") return pathname === "/scenes" || ["/scenes/", "/imports/", "/samples/"].some((route) => pathname.startsWith(route));
+  if (href === "/scenes") return pathname === "/scenes" || ["/scenes/", "/samples/"].some((route) => pathname.startsWith(route));
+  if (href === "/imports") return pathname === "/imports" || pathname.startsWith("/imports/");
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
@@ -272,7 +275,7 @@ function AccountMenu({ pathname }: { pathname: string }) {
     );
   }
   const user = me.user;
-  const role = user.role === "reviewer" ? "Reviewer" : "Editor";
+  const role = user.role === "reviewer" ? "Reviewer" : user.role === "editor" ? "Editor" : "Guest";
   return (
     <SidebarMenu>
       <SidebarMenuItem>
@@ -295,8 +298,13 @@ function AccountMenu({ pathname }: { pathname: string }) {
               <p className="text-xs text-muted-foreground">{user.email}</p>
               <p className="mt-1 text-xs text-muted-foreground">
                 {role}
-                {user.role === "editor" ? ` · hạn mức ${user.daily_job_quota} lần xử lý/ngày` : " · không giới hạn lần xử lý"}
+                {user.role === "guest"
+                  ? " · tối đa 3 lượt chạy/ngày"
+                  : user.role === "editor"
+                    ? ` · hạn mức ${user.daily_job_quota} lần xử lý/ngày`
+                    : " · không giới hạn lần xử lý"}
               </p>
+              {user.role === "guest" && <GuestQuotaStatus quota={me.quota} className="mt-2" />}
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem asChild><Link href="/account"><UserRound aria-hidden />Tài khoản của tôi</Link></DropdownMenuItem>

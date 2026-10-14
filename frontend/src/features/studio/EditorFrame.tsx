@@ -183,10 +183,10 @@ function WebGlViewer({
               {description && <p className="mt-1.5 mb-2.5 text-xs text-ink-muted leading-relaxed">{description}</p>}
 
               <HelpDetails title="Vì sao chỉ xem?">
-                <p>Editor yêu cầu WebGPU để hoạt động. Vui lòng kiểm tra các cài đặt sau:</p>
+                <p>Bản xem scene dùng WebGL2. Chỉ editor chỉnh Gaussian mới cần WebGPU; trình duyệt hiện chưa cung cấp adapter WebGPU nên đang mở chế độ chỉ xem.</p>
                 <ul className="mt-2 ml-4 list-disc space-y-1">
                   <li>Bật <b>Hardware Acceleration</b> trong cài đặt trình duyệt.</li>
-                  <li>Trên Chrome/Edge, copy đoạn này dán vào thanh địa chỉ: <code className="bg-paper-sunken px-1 rounded font-mono select-all text-ember-strong">chrome://flags/#enable-unsafe-webgpu</code>, chuyển sang <b>Enabled</b> rồi khởi động lại.</li>
+                  <li>Nếu muốn chỉnh Gaussian, dùng trình duyệt hỗ trợ WebGPU và truy cập qua HTTPS hoặc localhost.</li>
                 </ul>
               </HelpDetails>
             </div>
@@ -208,7 +208,7 @@ function WebGlViewer({
       {failed ? (
         <div className="grid size-full place-items-center p-6 text-center text-sm text-on-dark/80" role="alert">
           {capability === "unavailable"
-            ? "Không render được 3DGS: trình duyệt cần WebGL2 hoặc WebGPU và đủ bộ nhớ GPU."
+            ? "Không render được bản xem 3DGS: trình duyệt cần WebGL2 và đủ bộ nhớ GPU."
             : "Không thể tải mô hình 3DGS (lỗi tải file hoặc dữ liệu không hợp lệ)."}
         </div>
       ) : (

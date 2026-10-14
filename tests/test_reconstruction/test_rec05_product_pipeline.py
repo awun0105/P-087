@@ -66,10 +66,19 @@ def test_product_pipeline_success(tmp_path: Path) -> None:
     assert result.geometry_ref.source_provenance["evidence_kind"] == "synthetic_fixture"
     assert result.metadata_ref.artifact_type == "VoxelMetadata"
     assert result.metadata_ref.producer_stage == StageId.RGB_GEOMETRY
+    cleanup = result.geometry.cleanup_evidence
+    assert cleanup is not None
+    assert cleanup.config_checksum == cfg.checksum()
+    assert cleanup.source_checksum == result.geometry.source_master_checksum
+    assert cleanup.collision_mesh_checksum == result.geometry_ref.artifact_checksum
+    assert cleanup.input_gaussian_count == result.report["gaussian_counts"]["input"]
+    assert cleanup.retained_gaussian_count == result.report["gaussian_counts"]["cluster"]
+    assert cleanup.removed_gaussian_count == cleanup.input_gaussian_count - cleanup.retained_gaussian_count
     resolver = GeometryResolver(canonicalizer.deps.visuals.resolve)
     assert resolver.require(result.geometry_ref).is_file()
     meta = resolver.load_metadata(result.metadata_ref)
     assert meta["version"] == "1.1"
+    assert resolver.load(result.manifest_ref).geometry.cleanup_evidence == cleanup
 
 
 def test_product_default_rejects_synthetic_confirmation(tmp_path: Path) -> None:

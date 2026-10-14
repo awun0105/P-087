@@ -15,12 +15,23 @@ from src.config import Settings, get_settings
 from src.models.contracts.manifests import ExecutionError, JobManifest, JobStatus, StageId
 from src.models.contracts.retryability import classify_retryability
 from src.services.orchestration.jobs.admission import ResourceAdmission
-from src.services.orchestration.jobs.database import RuntimeStateConflictError
+from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
 from src.services.orchestration.jobs.dispatch import load_prepared_profile, prepared_frame_reference, require_profile
+from src.services.orchestration.jobs.log_context import configure_worker_logging, job_log_context
 from src.services.orchestration.jobs.models import TransitionRequest
-from src.services.orchestration.jobs.progress import awaiting_finalize
+from src.services.orchestration.jobs.progress import (
+    awaiting_anonymization_review,
+    awaiting_finalize,
+    awaiting_reviewed_preview,
+)
 from src.services.orchestration.jobs.queue import fair_order, waiting_jobs
-from src.services.orchestration.jobs.runner import run_finalize_job, run_prepared_job, run_video_job
+from src.services.orchestration.jobs.registration_worker import RegistrationOperationWorker
+from src.services.orchestration.jobs.runner import (
+    run_finalize_job,
+    run_prepared_job,
+    run_reviewed_preview_job,
+    run_video_job,
+)
 from src.services.orchestration.jobs.workspace import attempt_in_use, job_attempts, job_root
 from src.services.orchestration.processing import is_presets_file, load_presets
 from src.services.orchestration.processing.capability import probe as probe_capability
@@ -28,7 +39,10 @@ from src.services.orchestration.processing.capability import record as record_ca
 from src.services.orchestration.projects.errors import PrivacyGateBlockedError
 from src.services.orchestration.projects.privacy import require_project_dispatch
 from src.services.orchestration.projects.registry import ProjectRegistry, get_project_registry
+from src.services.orchestration.review.validation_worker import IsaacValidationWorker
 from src.services.orchestration.scene.objectify_queue import process_next, recover_interrupted
+from src.services.orchestration.storage import runtime_resolver
+from src.services.orchestration.uploads.scene_imports import ImportService
 
 logger = logging.getLogger(__name__)
 
@@ -132,6 +146,9 @@ def recover_interrupted_jobs(registry: ProjectRegistry, settings: Settings) -> i
             continue
         if job.status != JobStatus.RUNNING:
             continue
+        if awaiting_anonymization_review(job) or awaiting_reviewed_preview(job):
+            # Job dừng có chủ ý sau bước che frame, chờ người dùng xem hoặc chờ worker nhận: không phải tiến trình chết.
+            continue
         if awaiting_finalize(job):
             # Nếu đang ở REC-06 chờ finalize, kiểm tra xem có workspace finalize đang chạy dở hay chưa
             # Nếu chỉ đang chờ người dùng xác nhận metric (chưa có confirmation_stage) thì không coi là chết
@@ -186,6 +203,7 @@ def dispatch_next(
     video_runner: VideoRunner = run_video_job,
     finalize_runner: VideoRunner = run_finalize_job,
     admission: ResourceAdmission | None = None,
+    reviewed_runner: VideoRunner = run_reviewed_preview_job,
 ) -> bool:
     """Xử lý tối đa một job mỗi lượt; skip input chưa chuẩn bị/profile khác.
 
@@ -199,7 +217,7 @@ def dispatch_next(
     if registry.persistence is None or registry.execution_profile is None:
         raise ValueError("Queue consumer cần durable registry và execution profile")
     try:
-        return _dispatch(registry, runner, video_runner, finalize_runner, admission)
+        return _dispatch(registry, runner, video_runner, finalize_runner, admission, reviewed_runner)
     finally:
         # Giữ chỗ chỉ sống trong lúc worker chạy job; kể cả khi runner ném lỗi hoặc worker bị ngắt.
         if admission is not None:
@@ -212,6 +230,7 @@ def _dispatch(
     video_runner: VideoRunner,
     finalize_runner: VideoRunner,
     admission: ResourceAdmission | None,
+    reviewed_runner: VideoRunner = run_reviewed_preview_job,
 ) -> bool:
     """Một lượt quét hàng đợi của `dispatch_next`."""
     if registry.persistence is None:
@@ -219,45 +238,59 @@ def _dispatch(
     # Thứ tự xoay vòng theo người yêu cầu (jobs/queue.py): cũng là thứ tự UI báo cho người dùng.
     for job_id in [item.job_id for item in fair_order(waiting_jobs(registry))]:
         job: JobManifest | None = None
+        attempt_context_id = "-"
         try:
             candidate = registry.get_job(job_id)
-            if awaiting_finalize(candidate):
-                # Người dùng đã xác nhận tỉ lệ (job RUNNING, hoặc QUEUED khi retry): chạy
-                # tiếp REC-05/REC-10 trên cùng job; vẫn qua cổng privacy của project.
-                require_project_dispatch(registry.get_project(candidate.project_id))
-                if admission is not None and not admission(candidate, "finalize"):
-                    continue
-                try:
-                    finalize_runner(job_id, expected_checksum=candidate.job_manifest_checksum)
-                except RuntimeStateConflictError:
-                    raise
-                except Exception as error:
-                    logger.error("Finalize dispatch failed job=%s cause=%s", job_id, type(error).__name__)
-                    _record_finalize_failure(registry, candidate, error)
-                return True
-            require_profile(candidate, registry.execution_profile)
-            project = registry.get_project(candidate.project_id)
-            require_project_dispatch(project)
-            job = candidate
-            frames = prepared_frame_reference(job)
-            if frames is not None:
+            history = registry.list_job_attempts(job_id)
+            attempt_context_id = str(history[-1].attempt) if history else "-"
+            with job_log_context(job_id, attempt_context_id):
+                if awaiting_finalize(candidate):
+                    # Người dùng đã xác nhận tỉ lệ (job RUNNING, hoặc QUEUED khi retry): chạy
+                    # tiếp REC-05/REC-10 trên cùng job; vẫn qua cổng privacy của project.
+                    require_project_dispatch(registry.get_project(candidate.project_id))
+                    if admission is not None and not admission(candidate, "finalize"):
+                        continue
+                    try:
+                        finalize_runner(job_id, expected_checksum=candidate.job_manifest_checksum)
+                    except RuntimeStateConflictError:
+                        raise
+                    except Exception as error:
+                        logger.error("Finalize dispatch failed job=%s cause=%s", job_id, type(error).__name__)
+                        _record_finalize_failure(registry, candidate, error)
+                    return True
+                if awaiting_anonymization_review(candidate):
+                    continue  # Bản đã che chưa được người dùng chấp nhận: không dựng 3D từ nó.
+                if awaiting_reviewed_preview(candidate):
+                    # Người dùng đã chấp nhận bản đã che (job RUNNING ở bước tách frame): dựng preview trên cùng job.
+                    require_project_dispatch(registry.get_project(candidate.project_id))
+                    if admission is not None and not admission(candidate):
+                        continue
+                    reviewed_runner(job_id, expected_checksum=candidate.job_manifest_checksum)
+                    return True
+                require_profile(candidate, registry.execution_profile)
+                project = registry.get_project(candidate.project_id)
+                require_project_dispatch(project)
+                job = candidate
+                frames = prepared_frame_reference(job)
+                if frames is not None:
+                    if admission is not None and not admission(job):
+                        continue
+                    runner(job_id, frames.artifact_uri, expected_checksum=job.job_manifest_checksum)
+                    return True
+                if project.input_manifest_ref is None:
+                    continue  # Chưa có input để chuẩn bị (ví dụ project dataset chưa publish frames).
                 if admission is not None and not admission(job):
                     continue
-                runner(job_id, frames.artifact_uri, expected_checksum=job.job_manifest_checksum)
+                video_runner(job_id, expected_checksum=job.job_manifest_checksum)
                 return True
-            if project.input_manifest_ref is None:
-                continue  # Chưa có input để chuẩn bị (ví dụ project dataset chưa publish frames).
-            if admission is not None and not admission(job):
-                continue
-            video_runner(job_id, expected_checksum=job.job_manifest_checksum)
-            return True
         except (RuntimeStateConflictError, PrivacyGateBlockedError):
             continue  # Job không eligible hoặc runner khác đã claim; không auto retry.
         except Exception as error:
-            logger.error("Prepared queue dispatch failed job=%s cause=%s", job_id, type(error).__name__)
-            if job is not None:
-                _record_dispatch_failure(registry, job, error)
-                return True
+            with job_log_context(job_id, attempt_context_id):
+                logger.error("Prepared queue dispatch failed job=%s cause=%s", job_id, type(error).__name__)
+                if job is not None:
+                    _record_dispatch_failure(registry, job, error)
+                    return True
     return False
 
 
@@ -285,6 +318,9 @@ def _start_capability_heartbeat(
                     idle = admission.machine_idle() if admission is not None else False
                     previous = probe_capability(worker_root, idle=idle, previous=previous)
                     record_capability(database, previous)
+                    from src.services.orchestration.uploads.temporary import TemporaryUploadService
+
+                    TemporaryUploadService(database, registry.runtime_resolver).purge_expired()
                     if admission is not None:
                         admission.touch()
             except Exception as error:  # noqa: BLE001 - luồng nền: lỗi đo/DB không được làm chết heartbeat
@@ -301,7 +337,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Consume durable prepared RGB jobs")
     parser.add_argument("--once", action="store_true", help="Process at most one eligible job, then exit")
     args = parser.parse_args(argv)
-    logging.basicConfig(level=logging.INFO)
+    configure_worker_logging()
     settings = get_settings()
     registry = get_project_registry()
     if registry.execution_profile is None or settings.product_processing_config is None:
@@ -312,6 +348,16 @@ def main(argv: list[str] | None = None) -> int:
     else:
         load_prepared_profile(settings.product_processing_config, registry.execution_profile)
     admission = ResourceAdmission(registry, settings)
+    import_service = ImportService(
+        RuntimeDatabase(settings.database_url),
+        runtime_resolver(settings),
+        settings.product_worker_root.expanduser().resolve() / "imports",
+        max_uncompressed_bytes=settings.product_upload_max_bytes * 2,
+    )
+    registration_worker = RegistrationOperationWorker(registry, settings, admission)
+    validation_worker = IsaacValidationWorker(registry, settings, admission)
+    if admission.discard_leftover_reservation():
+        logger.warning("Đã xoá giữ chỗ tài nguyên còn sót của lần chạy trước worker=%s", admission.worker_id)
     heartbeat = _start_capability_heartbeat(registry, settings.product_worker_root, admission)
     previous = signal.getsignal(signal.SIGTERM)
 
@@ -324,9 +370,16 @@ def main(argv: list[str] | None = None) -> int:
     try:
         recover_interrupted_jobs(registry, settings)
         recover_interrupted(settings)
+        import_service.recover_legacy_packaging()
         while True:
             # Job trong hàng đợi đi trước; rảnh mới nhận yêu cầu chạy lại tách theo vật (cùng dùng GPU).
-            handled = dispatch_next(registry, admission=admission) or process_next(registry, settings)
+            handled = (
+                dispatch_next(registry, admission=admission)
+                or registration_worker.process_next()
+                or validation_worker.process_next()
+                or process_next(registry, settings)
+                or import_service.process_next(admission=admission)
+            )
             if args.once:
                 return 0
             if not handled:

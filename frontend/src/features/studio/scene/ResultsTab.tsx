@@ -71,7 +71,7 @@ export function ResultsTab({ jobId, preview, revision, onOpenGaussian, onOpenRev
         icon={<Pencil aria-hidden />}
         title="Bản làm việc 3DGS"
         badge={<Badge tone="neutral">Chưa quy đổi mét · chưa duyệt</Badge>}
-        body="Bản xem Brush (SOG) dùng để xem/chỉnh. Muốn xuất PLY/SOG đã chỉnh, mở Studio › Chỉnh Gaussian › File › Export."
+        body={onOpenGaussian ? "Bản xem Brush (SOG) dùng để xem/chỉnh. Muốn xuất PLY/SOG đã chỉnh, mở Studio › Chỉnh Gaussian › File › Export." : "Bản xem Brush (SOG) của scene. Tải file để dùng ở công cụ khác."}
         action={<>
           {onOpenGaussian && <Button size="sm" variant="secondary" onClick={onOpenGaussian}>Chỉnh Gaussian</Button>}
           <a href={preview.url} download={preview.filename} className={buttonVariants({ variant: "secondary", size: "sm" })}>

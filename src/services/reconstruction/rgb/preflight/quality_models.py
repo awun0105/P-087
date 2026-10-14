@@ -28,6 +28,9 @@ class RGBQualityProfile(ContractModel):
     profile_id: Identifier
     measurement_width: int = Field(gt=0)
     measurement_height: int = Field(gt=0)
+    measurement_orientation: Literal["fit_oriented_bounds"] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     blur_exclude_gt: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     active_transition_px_gt: float = Field(ge=0, allow_inf_nan=False)
     warn_active_ratio_lt: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)

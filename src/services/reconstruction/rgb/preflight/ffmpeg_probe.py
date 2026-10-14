@@ -126,6 +126,14 @@ class FFmpegRGBProbe:
 
     @staticmethod
     def _filter_prefix(profile: RGBQualityProfile) -> str:
+        if profile.measurement_orientation == "fit_oriented_bounds":
+            return (
+                "scale=w='if(gte(dar,1),min(iw,"
+                f"{profile.measurement_width}),min(iw,{profile.measurement_height}))':"
+                "h='if(gte(dar,1),min(ih,"
+                f"{profile.measurement_height}),min(ih,{profile.measurement_width}))':"
+                "force_original_aspect_ratio=decrease:force_divisible_by=2:flags=bicubic"
+            )
         return f"scale={profile.measurement_width}:{profile.measurement_height}:flags=bicubic"
 
     def _command(self, pattern: Path, filt: str) -> list[str]:

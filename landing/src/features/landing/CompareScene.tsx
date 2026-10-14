@@ -1,4 +1,5 @@
 import { PROBLEM } from "@/features/landing/content";
+import type { Language } from "@/lib/i18n";
 
 /**
  * Hai sơ đồ mặt bằng cạnh nhau: bản dựng từ video (một khối điểm liền) và scene robot cần
@@ -46,12 +47,29 @@ function Dots({ faded = false }: { faded?: boolean }) {
   );
 }
 
-export function CompareScene() {
-  const { have, need } = PROBLEM.analogy;
+export function CompareScene({
+  analogy = PROBLEM.analogy,
+  lang = "vi",
+}: {
+  analogy?: typeof PROBLEM.analogy;
+  lang?: Language;
+}) {
+  const { have, need } = analogy;
+  const rackLabel = lang === "en" ? "Rack" : "Kệ";
+  const palletLabel = "Pallet";
+  const scanAria =
+    lang === "en"
+      ? "Raw 3D from video: aisle is an unstructured monolithic point cloud, cannot distinguish racks or pallets."
+      : "Bản dựng từ video: cả lối đi là một đám điểm liền, không phân biệt kệ hay pallet.";
+  const simAria =
+    lang === "en"
+      ? "Scene required by robots: each rack and pallet has dedicated collision hull, with 1-meter ruler."
+      : "Scene robot cần: từng kệ và pallet là một vật riêng có hộp va chạm, kèm thước một mét.";
+
   return (
     <div className="grid gap-4 md:grid-cols-2">
       <figure className="lp-compare">
-        <svg viewBox="0 0 320 180" className="block h-auto w-full" role="img" aria-label="Bản dựng từ video: cả lối đi là một đám điểm liền, không phân biệt kệ hay pallet.">
+        <svg viewBox="0 0 320 180" className="block h-auto w-full" role="img" aria-label={scanAria}>
           <Dots />
         </svg>
         <figcaption className="lp-compare-caption">
@@ -61,7 +79,7 @@ export function CompareScene() {
       </figure>
 
       <figure className="lp-compare">
-        <svg viewBox="0 0 320 180" className="block h-auto w-full" role="img" aria-label="Scene robot cần: từng kệ và pallet là một vật riêng có hộp va chạm, kèm thước một mét.">
+        <svg viewBox="0 0 320 180" className="block h-auto w-full" role="img" aria-label={simAria}>
           <Dots faded />
           <g fill="none" stroke="var(--studio-ochre)" strokeWidth="1.5">
             {RACKS.map((x) => (
@@ -72,8 +90,8 @@ export function CompareScene() {
             ))}
             <rect x="168" y="74" width="46" height="34" rx="2" strokeDasharray="4 3" />
           </g>
-          <text x="28" y="20" className="lp-svg-label" fill="var(--studio-on-dark)">Kệ</text>
-          <text x="222" y="94" className="lp-svg-label" fill="var(--studio-ochre)">Pallet</text>
+          <text x="28" y="20" className="lp-svg-label" fill="var(--studio-on-dark)">{rackLabel}</text>
+          <text x="222" y="94" className="lp-svg-label" fill="var(--studio-ochre)">{palletLabel}</text>
           <g stroke="var(--studio-on-dark)" strokeOpacity="0.8">
             <line x1="24" y1="168" x2="56" y2="168" />
             <line x1="24" y1="164" x2="24" y2="172" />

@@ -165,6 +165,27 @@ def view_references(registry: ProjectRegistry, job: JobManifest) -> list[Product
     if bundle is not None:
         references.extend(bundle.camera_pose_refs)
         references.extend(
-            ref for ref in (bundle.visual_artifact_ref, bundle.rgb_geometry_ref, bundle.canonical_geometry_ref) if ref
+            ref
+            for ref in (
+                bundle.visual_artifact_ref,
+                bundle.rgb_geometry_ref,
+                bundle.lidar_geometry_ref,
+                bundle.canonical_geometry_ref,
+            )
+            if ref
         )
+        if bundle.alignment_record is not None:
+            alignment = bundle.alignment_record
+            references.append(
+                ProductArtifactRef(
+                    artifact_type=alignment.artifact_type,
+                    schema_version=alignment.schema_version,
+                    artifact_uri=alignment.artifact_uri,
+                    artifact_checksum=alignment.artifact_checksum,
+                    data_class="derived",
+                    producer_stage=alignment.producer_stage,
+                    job_id=alignment.job_id,
+                    source_provenance=alignment.provenance,
+                )
+            )
     return references

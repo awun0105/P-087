@@ -1,3 +1,7 @@
+"use client";
+
+import { useSyncExternalStore } from "react";
+
 import { LandingAnchors } from "@/features/landing/LandingAnchors";
 import { LandingHeader } from "@/features/landing/LandingHeader";
 import { LandingSamples } from "@/features/landing/LandingSamples";
@@ -5,18 +9,12 @@ import { CompareScene } from "@/features/landing/CompareScene";
 import { HeroScene } from "@/features/landing/HeroScene";
 import { StatusTag } from "@/features/landing/StatusTag";
 import {
-  CONTEXT,
-  FOOTER,
-  HERO,
-  PROBLEM,
-  PROGRESS,
-  ROADMAP,
-  SOLUTION,
-  START,
-  WORKFLOW,
+  getContent,
+  getUiLabels,
   type TrackState,
 } from "@/features/landing/content";
 import { STUDIO_LOGIN_URL, STUDIO_URL } from "@/lib/api";
+import { currentLanguage, subscribeLanguage, type Language } from "@/lib/i18n";
 
 const LOGIN_HREF = STUDIO_LOGIN_URL;
 
@@ -32,17 +30,36 @@ const TRACK_TAG: Record<TrackState, string> = {
 };
 const TRY_DEMO_HREF = `${STUDIO_URL}/new/try-demo`;
 
+const serverLang = (): Language => "vi";
+
 /**
  * Landing Real2Sim Studio, theo mạch Homematch:
  * Bối cảnh → Bài toán → Giải pháp → Quy trình → Tiến độ (bằng chứng) → Dùng ở đâu → Bắt đầu.
- * Chữ nằm ở `content.ts`. Trang render phía server; chỉ header (menu mobile)
- * và danh sách scene mẫu (gọi API) là client component.
+ * Chữ nằm ở `content.ts`, hỗ trợ song ngữ Tiếng Việt và Tiếng Anh.
  */
 export function LandingPage() {
+  const lang = useSyncExternalStore(subscribeLanguage, currentLanguage, serverLang);
+  const content = getContent(lang);
+  const ui = getUiLabels(lang);
+
+  const {
+    CONTEXT,
+    FOOTER,
+    HERO,
+    HERO_CHAIN,
+    PROBLEM,
+    PROGRESS,
+    ROADMAP,
+    SOLUTION,
+    START,
+    WORKFLOW,
+    STATUS_LABEL,
+  } = content;
+
   return (
     <main id="landing-top" className="landing-page">
       <LandingAnchors />
-      <LandingHeader tryDemoHref={TRY_DEMO_HREF} />
+      <LandingHeader tryDemoHref={TRY_DEMO_HREF} studioHref={LOGIN_HREF} />
 
       {/* ── HERO ── */}
       <section className="lp-hero">
@@ -58,10 +75,10 @@ export function LandingPage() {
 
             <div className="mt-9 flex flex-wrap gap-3">
               <a href={TRY_DEMO_HREF} className="lp-btn lp-btn-primary">
-                Thử scene mẫu
+                {ui.tryDemo}
               </a>
               <a href={LOGIN_HREF} className="lp-btn lp-btn-ghost">
-                Đăng nhập Studio
+                {ui.loginStudio}
               </a>
             </div>
 
@@ -75,7 +92,7 @@ export function LandingPage() {
             </ul>
           </div>
 
-          <HeroScene />
+          <HeroScene hero={HERO} heroChain={HERO_CHAIN} lang={lang} />
         </div>
       </section>
 
@@ -114,7 +131,7 @@ export function LandingPage() {
 
           <h3 className="mt-14 text-lg font-bold text-ink">{PROBLEM.analogy.title}</h3>
           <div className="mt-4">
-            <CompareScene />
+            <CompareScene analogy={PROBLEM.analogy} lang={lang} />
           </div>
 
           <h3 className="mt-14 text-lg font-bold text-ink">{PROBLEM.issuesTitle}</h3>
@@ -125,7 +142,7 @@ export function LandingPage() {
                 <h4 className="mt-1 text-[16px] font-bold text-ink">{c.title}</h4>
                 <p className="mt-1.5 text-[14px] leading-relaxed text-ink-muted">{c.body}</p>
                 <p className="mt-3 text-[14px] leading-snug text-ink">
-                  <span className="text-ink-muted">Hậu quả: </span>
+                  <span className="text-ink-muted">{ui.consequence}</span>
                   {c.effect}
                 </p>
               </li>
@@ -178,7 +195,7 @@ export function LandingPage() {
                 <span aria-hidden className="lp-map-arrow" />
                 <p className="text-[15px] leading-snug text-ink">{m.answer}</p>
                 <div className="lp-map-status">
-                  <StatusTag status={m.status} />
+                  <StatusTag status={m.status} label={STATUS_LABEL[m.status]} />
                 </div>
               </li>
             ))}
@@ -221,9 +238,9 @@ export function LandingPage() {
           {/* Ba lớp biểu diễn: xếp chồng như các lớp của một scene */}
           <div className="mt-16 grid gap-10 rounded-2xl bg-viewport p-6 text-on-dark sm:p-10 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:items-center">
             <div>
-              <h3 className="text-2xl font-extrabold tracking-tight">Một vật, ba lớp, một transform.</h3>
+              <h3 className="text-2xl font-extrabold tracking-tight">{ui.oneObjectThreeLayers}</h3>
               <p className="mt-3 max-w-md text-[15px] leading-relaxed text-on-dark/70">{SOLUTION.layersNote}</p>
-              <p className="mt-8 text-[13px] text-on-dark/60">Những chỗ con người quyết định</p>
+              <p className="mt-8 text-[13px] text-on-dark/60">{ui.humanDecisions}</p>
               <ul className="mt-3 flex flex-wrap gap-2">
                 {SOLUTION.checkpoints.map((c) => (
                   <li key={c} className="rounded-md border border-line-dark px-3 py-1.5 text-[13px] font-medium">
@@ -259,16 +276,16 @@ export function LandingPage() {
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
                       <h3 className="text-lg font-bold tracking-tight text-ink">{s.title}</h3>
                       <span className="font-mono text-[12px] text-ink-muted">{s.actor}</span>
-                      <StatusTag status={s.status} />
+                      <StatusTag status={s.status} label={STATUS_LABEL[s.status]} />
                     </div>
                     <p className="mt-2 max-w-2xl text-[15px] leading-relaxed text-ink-muted">{s.body}</p>
                     {s.image ? (
                       // eslint-disable-next-line @next/next/no-img-element -- ảnh tĩnh, trang có thể xuất static
-                      <img src={s.image} alt={`Studio, bước ${s.title}`} loading="lazy" className="mt-4 w-full max-w-2xl rounded-lg border border-line" />
+                      <img src={s.image} alt={`Studio, ${ui.step} ${s.title}`} loading="lazy" className="mt-4 w-full max-w-2xl rounded-lg border border-line" />
                     ) : null}
                   </div>
                   <div className="md:border-l md:border-line md:pl-5">
-                    <p className="text-[12px] text-ink-muted">Kết quả</p>
+                    <p className="text-[12px] text-ink-muted">{ui.result}</p>
                     <p className="mt-0.5 text-[15px] font-semibold text-ink">{s.output}</p>
                   </div>
                 </div>
@@ -286,7 +303,7 @@ export function LandingPage() {
           <div className="mt-14 grid gap-px overflow-hidden rounded-xl border border-line bg-line lg:grid-cols-3">
             {PROGRESS.tiers.map((t) => (
               <div key={t.title} className="bg-paper-raised p-7 sm:p-8">
-                <StatusTag status={t.status} />
+                <StatusTag status={t.status} label={STATUS_LABEL[t.status]} />
                 <h3 className="mt-4 text-xl font-bold tracking-tight text-ink">{t.title}</h3>
                 <ul className="mt-4 space-y-2.5">
                   {t.items.map((it) => (
@@ -313,7 +330,12 @@ export function LandingPage() {
             <p className="mt-5 text-[13px] text-ink-muted">{PROGRESS.metricsNote}</p>
           </div>
 
-          <LandingSamples title={PROGRESS.samplesTitle} lead={PROGRESS.samplesLead} studioUrl={STUDIO_URL} />
+          <LandingSamples
+            title={PROGRESS.samplesTitle}
+            lead={PROGRESS.samplesLead}
+            studioUrl={STUDIO_URL}
+            openLabel={ui.openSample}
+          />
         </div>
       </section>
 
@@ -357,10 +379,10 @@ export function LandingPage() {
             </h2>
             <div className="mt-8 flex flex-wrap gap-3">
               <a href={TRY_DEMO_HREF} className="lp-btn lp-btn-primary">
-                Thử scene mẫu
+                {ui.tryDemo}
               </a>
               <a href={LOGIN_HREF} className="lp-btn lp-btn-ghost-dark">
-                Đăng nhập Studio
+                {ui.loginStudio}
               </a>
             </div>
           </div>
@@ -388,7 +410,7 @@ export function LandingPage() {
           </div>
           <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-[14px] text-ink-muted">
             <a href={FOOTER.github} target="_blank" rel="noreferrer" className="lp-link">
-              Mã nguồn trên GitHub
+              {ui.sourceOnGithub}
             </a>
             <span>{FOOTER.license}</span>
           </div>

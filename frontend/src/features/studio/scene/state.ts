@@ -6,6 +6,12 @@ import type { JobProgress } from "@/lib/contracts/studio";
 export type Tab = "progress" | "studio" | "review" | "results";
 export type StudioMode = "scene" | "metric" | "gaussian";
 
+/**
+ * Chỉnh Gaussian (editor SuperSplat nhúng) tạm ẩn ở mọi nơi theo owner 2026-10-09: vào không dùng được và làm trang
+ * rất lag. Đặt lại `true` để mở lại nút, đường dẫn `?mode=gaussian` và các câu mô tả liên quan.
+ */
+export const GAUSSIAN_EDIT_ENABLED = false;
+
 export interface SceneInfo {
   name: string;
   videoName: string | null;
@@ -56,7 +62,7 @@ export function useNow(active: boolean): number {
 export function isJobStale(progress: JobProgress | null, now: number, thresholdMs: number = 180_000): boolean {
   if (!progress || progress.status !== "RUNNING") return false;
   // Nếu đang chờ tương tác của người dùng thì không phải stale
-  if (progress.waiting_for === "metric_confirmation") return false;
+  if (progress.waiting_for === "metric_confirmation" || progress.waiting_for === "anonymization_review") return false;
   const updated = Date.parse(progress.updated_at);
   if (Number.isNaN(updated)) return false;
   return now - updated > thresholdMs;

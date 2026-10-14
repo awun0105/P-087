@@ -63,6 +63,102 @@
   --studio-on-accent: #ffffff;
 }
 
+.dark {
+  --studio-paper: #1b1714;
+  --studio-paper-raised: #25201c;
+  --studio-paper-sunken: #141110;
+  --studio-line: rgb(245 239 230 / 0.12);
+  --studio-line-strong: rgb(245 239 230 / 0.26);
+  --studio-ink: #f5efe6;
+  --studio-ink-muted: #b8ab9b;
+  --studio-ink-subtle: #9a8d7e;
+  --studio-ember-strong: #f0935f;
+  --studio-ember-soft: #3d2518;
+  --studio-geometry: #5aa9d1;
+  --studio-viewport: #110f0d;
+  --studio-viewport-deep: #0b0a09;
+  --studio-media-preview-surface: #000000;
+  --studio-sage: #8fb891;
+  --studio-sage-soft: #1f2b20;
+  --studio-ochre: #d9a94a;
+  --studio-ochre-soft: #33290f;
+  --studio-rust: #e88771;
+  --studio-rust-soft: #3a1d16;
+  --studio-scrollbar: #4a4038;
+  --studio-shadow: rgb(0 0 0 / 0.3);
+  --studio-ember: #e8743b;
+  --studio-line-dark: rgb(245 239 230 / 0.12);
+  --studio-on-dark: #f5efe6;
+  --studio-on-accent: #ffffff;
+}
+
+.theme-gruvbox {
+  --studio-paper: #fbf1c7;
+  --studio-paper-raised: #f4e8be;
+  --studio-paper-sunken: #e5d5ad;
+  --studio-line: #ddccab;
+  --studio-line-strong: #bdae93;
+  --studio-line-dark: #504945;
+  --studio-ink: #3c3836;
+  --studio-ink-muted: #504945;
+  --studio-ink-subtle: #665c54;
+  --studio-ember: #d65d0e;
+  --studio-ember-strong: #af3a03;
+  --studio-ember-soft: #f5d9a9;
+  --studio-geometry: #076678;
+  --studio-viewport: #1d2021;
+  --studio-viewport-deep: #141617;
+  --studio-media-preview-surface: #000000;
+  --studio-viewport-raised: #3c3836;
+  --studio-sage: #79740e;
+  --studio-sage-soft: #dee2b6;
+  --studio-ochre: #b57614;
+  --studio-ochre-soft: #fae7b3;
+  --studio-rust: #9d0006;
+  --studio-rust-soft: #f1d9b5;
+  --studio-scrollbar: #bdae93;
+  --studio-scrollbar-hover: #a89984;
+  --studio-on-dark: #ebdbb2;
+  --studio-on-accent: #fbf1c7;
+  --studio-destructive-fill: #9d0006;
+}
+
+.theme-gruvbox.dark {
+  --studio-paper: #282828;
+  --studio-paper-raised: #32302f;
+  --studio-paper-sunken: #45403d;
+  --studio-line: #504945;
+  --studio-line-strong: #665c54;
+  --studio-line-dark: #504945;
+  --studio-ink: #ebdbb2;
+  --studio-ink-muted: #d5c4a1;
+  --studio-ink-subtle: #a89984;
+  --studio-ember: #fe8019;
+  --studio-ember-strong: #fe8019;
+  --studio-ember-soft: #533a25;
+  --studio-geometry: #83a598;
+  --studio-viewport: #1d2021;
+  --studio-viewport-deep: #141617;
+  --studio-media-preview-surface: #000000;
+  --studio-viewport-raised: #504945;
+  --studio-sage: #b8bb26;
+  --studio-sage-soft: #3b4439;
+  --studio-ochre: #fabd2f;
+  --studio-ochre-soft: #4f422e;
+  --studio-rust: #fb4934;
+  --studio-rust-soft: #4c3432;
+  --studio-scrollbar: #5a524c;
+  --studio-scrollbar-hover: #7c6f64;
+  --studio-on-dark: #ebdbb2;
+  --studio-on-accent: #282828;
+  --studio-destructive-fill: #fb4934;
+}
+
+.dark .landing-page,
+.theme-gruvbox.dark .landing-page {
+  color-scheme: dark;
+}
+
 body {
   background-color: var(--studio-paper);
   color: var(--studio-ink);

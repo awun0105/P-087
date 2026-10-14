@@ -8,6 +8,7 @@ import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from uuid import uuid4
 
 from src.models.contracts.artifacts import ProductArtifactRef
 from src.models.contracts.manifests import StageArtifact, StageId, StageStatus
@@ -129,18 +130,45 @@ class BrushAdapter:
         checkpointing, key = None, None
         if resume is not None and request.resume_key is not None and process.settings.checkpoint_every > 0:
             key = content_key(request.resume_key, request.config.checksum(), process.settings.runtime_identity)
-            latest = resume.latest_checkpoint(key, total)
-            if latest is not None:
-                # Brush lấy `init.ply` trong dataset làm điểm bắt đầu. Trạng thái optimizer không được lưu
-                # nên train tiếp không trùng từng bit với train liền mạch.
-                shutil.copyfile(latest[1], request.workspace / "training" / "init.ply")
-            checkpointing = Checkpointing(
-                resume.checkpoint_dir(key),
-                checkpoint_interval(total, process.settings.checkpoint_every),
-                latest[0] if latest is not None else 0,
-            )
+            try:
+                latest = resume.latest_checkpoint(key, total)
+                checkpoint_dir = resume.checkpoint_dir(key)
+                if latest is not None:
+                    # Publish atomically: a failed cache read must leave the cold-start init PLY intact.
+                    init_path = request.workspace / "training" / "init.ply"
+                    temporary = init_path.with_name(f".{init_path.name}.{uuid4().hex}.tmp")
+                    try:
+                        shutil.copyfile(latest[1], temporary)
+                        temporary.replace(init_path)
+                    finally:
+                        try:
+                            temporary.unlink(missing_ok=True)
+                        except OSError as error:
+                            logging.getLogger(__name__).warning(
+                                "REC-04 không dọn được file tạm resume cause=%s", type(error).__name__
+                            )
+                checkpointing = Checkpointing(
+                    checkpoint_dir,
+                    checkpoint_interval(total, process.settings.checkpoint_every),
+                    latest[0] if latest is not None else 0,
+                )
+            except OSError as error:
+                # Resume is an optimization. If its storage is unavailable, run Brush from the original inputs.
+                logging.getLogger(__name__).warning("REC-04 bỏ qua Brush resume cache cause=%s", type(error).__name__)
+                key = None
         arguments = brush_command(request.config, request.workspace, process.iteration_flag, checkpointing)
-        log = process.run(Invocation("brush-train", process.settings.command, arguments), request.workspace)
+        before = resume.checkpoint_fingerprints(key) if resume is not None and key is not None else {}
+        try:
+            log = process.run(Invocation("brush-train", process.settings.command, arguments), request.workspace)
+        finally:
+            if resume is not None and key is not None:
+                # Child process đã kết thúc (kể cả lỗi/hủy); chỉ checkpoint mới/đổi và đủ byte mới được attested.
+                try:
+                    resume.attest_checkpoints(key, before)
+                except OSError as error:
+                    logging.getLogger(__name__).warning(
+                        "REC-04 bỏ qua lỗi đọc Brush checkpoint sau child exit cause=%s", type(error).__name__
+                    )
         if checkpointing is None or resume is None or key is None:
             return log
         final = resume.checkpoints(key).get(total)
