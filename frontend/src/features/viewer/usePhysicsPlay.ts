@@ -143,7 +143,7 @@ export function usePhysicsPlay({ app, overlay, walking, collisionUrl, objects, o
   objects: readonly PhysicsObjectInput[];
   overlayObjects: readonly OverlayObject[];
   onObjectCollision?: (collision: CollisionQuery | null) => void;
-}): { status: PhysicsStatus; reset: () => void } {
+}): { status: PhysicsStatus; reset: () => void; setPose: (id: string, position: Vec3, rotation: [number, number, number, number]) => void } {
   const [prepared, setPrepared] = useState<PreparedScene | null>(null);
   const [failure, setFailure] = useState<{ identity: string; message: string } | null>(null);
   const physicsRef = useRef<ScenePhysics | null>(null);
@@ -211,8 +211,7 @@ export function usePhysicsPlay({ app, overlay, walking, collisionUrl, objects, o
   }, [enabled, collisionUrl, key, identity, request]);
 
   useEffect(() => {
-    if (!data) return;
-    onObjectCollision?.(data.camera);
+    onObjectCollision?.(data?.camera ?? null);
     return () => onObjectCollision?.(null);
   }, [data, onObjectCollision]);
   useEffect(() => () => { data?.camera.clear(); }, [data]);
@@ -254,5 +253,8 @@ export function usePhysicsPlay({ app, overlay, walking, collisionUrl, objects, o
   }, [overlay, data]);
   const status: PhysicsStatus = !enabled ? { state: "off" } : failure?.identity === identity
     ? { state: "failed", message: failure.message } : data ? { state: "ready", objects: data.objects.length } : { state: "loading" };
-  return { status, reset };
+  const setPose = useCallback((id: string, position: Vec3, rotation: [number, number, number, number]) => {
+    data?.camera.setPose(id, {position, rotation_xyzw: rotation});
+  }, [data]);
+  return { status, reset, setPose };
 }

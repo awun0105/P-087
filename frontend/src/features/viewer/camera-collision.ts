@@ -5,6 +5,7 @@ import { joinMeshParts, type TriangleMesh } from "@/features/viewer/glb-mesh";
 import type { PhysicsObjectSpec, Pose } from "@/features/viewer/scene-physics";
 
 export class CombinedCollision implements CollisionQuery {
+  readonly preventUnsupportedWalk = true;
   private readonly push = { x: 0, y: 0, z: 0 };
   constructor(private readonly members: () => readonly CollisionQuery[], public voxelResolution = .05) {}
   queryRay(ox:number,oy:number,oz:number,dx:number,dy:number,dz:number,maxDist:number) {

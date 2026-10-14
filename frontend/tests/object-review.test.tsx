@@ -1016,7 +1016,7 @@ describe("ObjectReviewView", () => {
     await waitFor(() => expect(screen.getByTestId("splats")).toHaveTextContent("candidate-001:ply:true"));
   });
 
-  it("Pending preview binds Gaussian to the editable object at B without creating independent physics", async () => {
+  it("Pending preview binds Gaussian and static Studio collision to the editable object at B without confirming it", async () => {
     const base = scene("rev-001", "CANDIDATE");
     base.objects[0] = { ...base.objects[0], visual_ref: { ...ref, artifact_type: "ObjectGaussians" } } as (typeof base.objects)[0];
     const pose = { ...base.objects[0].transform, translation_xyz: [8, 9, 10] };
@@ -1027,7 +1027,7 @@ describe("ObjectReviewView", () => {
     expect(objects.filter((item: { url: string | null }) => item.url)).toHaveLength(1);
     expect(objects).toHaveLength(1);
     expect(objects[0]).toMatchObject({ id: "candidate-001", position: base.objects[0].transform.translation_xyz, visible: true });
-    expect(JSON.parse(view.dataset.physicsObjects!)).toHaveLength(0);
+    expect(JSON.parse(view.dataset.physicsObjects!)).toMatchObject([{id: "candidate-001", dynamic: false}]);
     fireEvent.click(screen.getByText("Vật thể 1"));
     fireEvent.click(screen.getByRole("button", { name: "Ẩn trên màn hình" }));
     expect(JSON.parse(view.dataset.objects!)[0].visible).toBe(false);
@@ -1079,7 +1079,7 @@ describe("ObjectReviewView", () => {
     expect(await screen.findByRole("button", { name: "Xác nhận Vật thể 1" })).toBeInTheDocument();
     const request = calls("/objects/candidate-001/restore")[0][1] as RequestInit;
     expect(JSON.parse(request.body as string)).toEqual({ expected_scene_revision: "rev-001" });
-    expect(JSON.parse(screen.getByTestId("metric-scene").dataset.physicsObjects!)).toHaveLength(0);
+    expect(JSON.parse(screen.getByTestId("metric-scene").dataset.physicsObjects!)).toMatchObject([{id: "candidate-001", dynamic: false}]);
   });
 
   it("restore simulation-disabled object sends active=true while viewport restore stays local", async () => {
@@ -1172,7 +1172,7 @@ describe("ObjectReviewView", () => {
     expect(objects()[0].rotation_xyzw).toEqual(rotation);
     expect(boxes()[0]).toMatchObject({ id: "candidate-001", center: [7, 8, 9], rotation_xyzw: rotation });
     expect(objects().some((item: { id: string }) => item.id.startsWith("source:"))).toBe(false);
-    expect(JSON.parse(canvas.dataset.physicsObjects!)).toHaveLength(0);
+    expect(JSON.parse(canvas.dataset.physicsObjects!)).toMatchObject([{id: "candidate-001", position: [7,8,9], dynamic: false}]);
     const transformRequest = JSON.parse((calls("/scene/edits")[0][1] as RequestInit).body as string);
     expect(transformRequest).toMatchObject({ expected_scene_revision: "rev-001", edits: [{ object_id: "candidate-001", translation_xyz: [7, 8, 9], rotation_quaternion_xyzw: rotation }] });
     const requests = vi.mocked(fetch).mock.calls.length;

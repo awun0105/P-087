@@ -26,10 +26,14 @@ import {
 } from "@/features/viewer/source-frame";
 import { jobArtifactContentUrl, jobLidarOverlayUrl, jobWalkCollisionUrl } from "@/lib/api/endpoints";
 import type { CollisionQuery } from "@playcanvas/supersplat-viewer/viewer";
+import { rotateVector, multiplyQuaternions } from "@/features/viewer/layers";
+import type { CollisionSurfacePlane } from "@/lib/api/studio";
+import { themeColor } from "@/lib/theme";
 import { cn } from "@/lib/cn";
 
 const EMPTY_OBJECTS: readonly OverlayObject[] = [];
 const NO_PHYSICS: readonly PhysicsObjectInput[] = [];
+const NO_SURFACES: readonly CollisionSurfacePlane[] = [];
 
 interface Ref {
   artifact_uri: string;
@@ -45,6 +49,7 @@ export function MetricSceneView({
   visual,
   collision,
   sceneRevision,
+  collisionPreview = false,
   cameras,
   boxes = [],
   objects = EMPTY_OBJECTS,
@@ -65,11 +70,16 @@ export function MetricSceneView({
   onToggleVisibility,
   onDelete,
   onDeselect,
+  surfacePlanes = NO_SURFACES,
+  onMarkSurface,
+  onRemoveSurface,
+  onFillSurface,
 }: {
   jobId: string;
   visual: Ref;
   collision?: Ref;
   sceneRevision?: string;
+  collisionPreview?: boolean;
   cameras: readonly CameraMarkerLike[];
   boxes?: readonly OverlayBox[];
   /** Scene theo vật (pipeline v2): mỗi vật một khối Gaussian riêng, transform lấy từ SceneIR. */
@@ -113,18 +123,36 @@ export function MetricSceneView({
   onDelete?: () => void;
   /** Bỏ chọn vật. */
   onDeselect?: () => void;
+  surfacePlanes?: readonly CollisionSurfacePlane[];
+  onMarkSurface?: (kind: "floor" | "wall", points: CollisionSurfacePlane["points"]) => void;
+  onRemoveSurface?: (id: string) => void;
+  onFillSurface?: (id: string) => void;
 }) {
   const [capability, setCapability] = usePlayCanvasCapability();
   const fail = useCallback(() => setCapability("failed"), [setCapability]);
   const [overlay, setOverlay] = useState<SceneOverlay | null>(null);
-  const [layers, setLayers] = useState({ ...defaultLayers, lidar: false });
+  const [surfaceTool, setSurfaceTool] = useState<"floor" | "wall" | null>(null);
+  const [surfacePickError, setSurfacePickError] = useState<string | null>(null);
+  const [layers, setLayers] = useState({ ...defaultLayers, lidar: false, triangles: false });
   const [, setLidarState] = useState<{ points?: number; error?: string } | null>(null);
   const lidarUrl = lidarOverlay ? jobLidarOverlayUrl(jobId, lidarOverlay) : null;
   const [collisionState, setCollisionState] = useState<{ triangles?: number; error?: string } | null>(null);
   const initialCamera = useMemo(() => recordingCameraPose("z_up", cameras), [cameras]);
   const contentUrl = jobArtifactContentUrl(jobId, visual);
-  const collisionUrl = collision ? (sceneRevision ? jobWalkCollisionUrl(jobId, collision, [], sceneRevision, "canonical") : jobArtifactContentUrl(jobId, collision)) : null;
-  const walkCollisionUrl = collision ? jobWalkCollisionUrl(jobId, collision, [], sceneRevision) : null;
+  const collisionUrl = collision ? (sceneRevision ? jobWalkCollisionUrl(jobId, collision, [], sceneRevision, "canonical", collisionPreview) : jobArtifactContentUrl(jobId, collision)) : null;
+  const walkCollisionUrl = collision ? jobWalkCollisionUrl(jobId, collision, [], sceneRevision, "display", collisionPreview) : null;
+  const colliderBoxes = useMemo<OverlayBox[]>(() => physicsObjects.flatMap((item) => {
+    if (!item.dimensions && !item.colliderUrl) return [];
+    const local = item.colliderLocalTransform;
+    const offset = local ? rotateVector(item.rotation_xyzw, local.translation_xyz) : [0, 0, 0];
+    return [{
+      id: item.id,
+      center: [item.position[0] + offset[0], item.position[1] + offset[1], item.position[2] + offset[2]],
+      rotation_xyzw: local ? multiplyQuaternions(item.rotation_xyzw, local.rotation_quaternion_xyzw) : item.rotation_xyzw,
+      dimensions: item.dimensions ?? [1, 1, 1], // GLB uses its geometry; dimensions are unused for mesh colliders.
+      color: themeColor("--studio-geometry", "#2f7ea8"), emphasized: false, shapeUrl: item.colliderUrl, colliderLocalTransform: local,
+    }];
+  }), [physicsObjects]);
   const physicsBlocker = browserPhysicsBlocker(physicsObjects);
   const physicsIdentity = JSON.stringify([physicsObjects, walkCollisionUrl]);
   const [physicsFailure, setPhysicsFailure] = useState<{ identity: string; message: string } | null>(null);
@@ -198,6 +226,14 @@ export function MetricSceneView({
     const point = canvasPoint(event);
     if (!start || !overlay || !point) return;
     if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > 5 || event.timeStamp - start.time > 400) return;
+    if (surfaceTool && onMarkSurface) {
+      const triangle = overlay.pickCollisionTriangle(point[0], point[1], collisionUrl ?? undefined);
+      if (!triangle) { setSurfacePickError("Chưa chọn trúng tam giác môi trường. Bấm vào mặt sàn hoặc tường."); return; }
+      onMarkSurface(surfaceTool, triangle);
+      setSurfaceTool(null);
+      setSurfacePickError(null);
+      return;
+    }
     if (placement) {
       // Đang đặt vật: bấm vào sàn thì đặt tại đó; trượt sàn (trời/xa) thì bỏ qua, vẫn ở chế độ đặt.
       if (event.button !== 0) return;
@@ -267,6 +303,8 @@ export function MetricSceneView({
     onObjectCollision: useCallback((collision: CollisionQuery | null) => viewerControls?.setObjectCollision(collision), [viewerControls]),
   });
 
+  const setPreviewPose = physics.setPose;
+
   // Lớp LiDAR chỉ tải khi người dùng bật (vài MB); tắt thì giải phóng GPU, bật lại lấy từ cache của trình duyệt.
   useEffect(() => {
     if (physics.status.state !== "failed") return;
@@ -319,6 +357,7 @@ export function MetricSceneView({
         controls.current?.setCameraMode("fly");
         controls.current?.setInputEnabled(false);
       },
+      onMove: (id, position, rotation) => setPreviewPose(id, position, rotation),
       onEnd: (id, position, rotation) => {
         controls.current?.setInputEnabled(true);
         transformed.current?.(id, position, rotation);
@@ -329,15 +368,24 @@ export function MetricSceneView({
       controls.current?.setInputEnabled(true);
     };
     // `objects` trong deps: gizmo gắn lại sau khi vật được tạo/đổi revision.
-  }, [overlay, gizmoId, gizmoMode, objects]);
+  }, [overlay, gizmoId, gizmoMode, objects, setPreviewPose]);
 
   useEffect(() => {
-    if (!overlay) return;
-    overlay.setSplatVisible(layers.splat);
-    // Không có 3DGS phía sau thì mesh đục cho dễ đọc hình khối.
-    overlay.setCollision(layers.collision, layers.splat ? 0.3 : 1);
-    overlay.setBoxes(layers.boxes ? boxes : []);
-  }, [overlay, layers, boxes, collisionState]);
+    overlay?.setSplatVisible(layers.splat);
+  }, [overlay, layers.splat]);
+  useEffect(() => {
+    // Environment loading must not recreate object layers from their authored pose during a drag.
+    overlay?.setCollision(layers.collision, layers.splat ? 0.3 : 1, layers.triangles);
+  }, [overlay, layers.collision, layers.splat, layers.triangles, collisionState]);
+  useEffect(() => {
+    overlay?.setColliders(colliderBoxes, layers.collision, layers.triangles);
+  }, [overlay, colliderBoxes, layers.collision, layers.triangles]);
+  useEffect(() => {
+    overlay?.setBoxes(layers.boxes ? boxes : []);
+  }, [overlay, boxes, layers.boxes]);
+  useEffect(() => {
+    overlay?.setSurfaceMarkers(surfacePlanes,layers.collision);
+  }, [overlay,surfacePlanes,layers.collision]);
 
   if (capability === "failed" || capability === "unavailable") {
     return <Notice tone="rust">{playCanvasErrorMessage(capability)}</Notice>;
@@ -604,10 +652,32 @@ export function MetricSceneView({
       <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 flex max-w-[calc(100%-1.5rem)] flex-col items-center gap-2 pointer-events-none">
         <div className="pointer-events-auto flex flex-wrap gap-3 rounded-md border border-line-dark bg-viewport-deep/85 px-3 py-1.5 text-xs text-on-dark/90 backdrop-blur-md shadow-lg">
           {toggle("splat", "3DGS màu")}
-          {toggle("collision", "Collision mesh", !collisionUrl)}
+          {toggle("collision", "Collision mesh", !collisionUrl && !colliderBoxes.length)}
+          {toggle("triangles", "Cạnh tam giác mesh", !layers.collision)}
           {toggle("boxes", "Khung vật thể", !boxes.length)}
           {lidarUrl && toggle("lidar", "Đám mây LiDAR")}
+          {onMarkSurface && (["floor","wall"] as const).map(kind => (
+            <button key={kind} type="button" aria-pressed={surfaceTool === kind} onClick={() => {
+              setSurfaceTool(surfaceTool === kind ? null : kind);
+              setSurfacePickError(null);
+              onTool?.("none");
+              setLayers(previous => ({...previous,collision:true}));
+              controls.current?.setCameraMode("fly");
+            }}>{kind === "floor" ? "Đánh dấu sàn" : "Đánh dấu tường"}</button>
+          ))}
+          {surfacePlanes.map((plane,index) => <span key={plane.id} className="flex items-center gap-2">
+            <button type="button" onClick={() => onRemoveSurface?.(plane.id)} aria-label={`Xóa mặt phẳng ${plane.kind === "floor" ? "sàn" : "tường"} ${index+1}`}>
+              {plane.kind === "floor" ? "Sàn" : "Tường"} {index+1} ×
+            </button>
+            {!plane.fill_regions && <button type="button" onClick={() => onFillSurface?.(plane.id)} aria-label={`Lấp theo mặt phẳng ${plane.kind === "floor" ? "sàn" : "tường"} ${index+1}`}>Lấp theo mặt phẳng</button>}
+            {plane.fill_regions && <span>Đã lấp theo mặt phẳng</span>}
+          </span>)}
         </div>
+        {collisionPreview && <div className="rounded-md bg-viewport-deep/90 px-3 py-1 text-xs text-on-dark">Walk kiểm tra bố trí hiện tại, gồm cả vật chưa xác nhận. Tam giác đã đánh dấu có viền màu.</div>}
+        {(surfaceTool || surfacePickError) && <div role="status" className="pointer-events-auto rounded-md bg-viewport-deep/90 px-3 py-2 text-xs text-on-dark">
+          {surfacePickError ?? `Bấm một tam giác ${surfaceTool === "floor" ? "sàn" : "tường"} để lưu mặt phẳng dùng vá lỗ trong vùng vật thể.`}
+          <button type="button" className="ml-3" onClick={() => {setSurfaceTool(null);setSurfacePickError(null);}}>Hủy đánh dấu</button>
+        </div>}
         {walking && physics.status.state !== "off" && (
           <div className="pointer-events-auto flex flex-wrap items-center gap-2 rounded-md border border-line-dark bg-viewport-deep/85 px-3 py-1.5 text-xs text-on-dark/90 backdrop-blur-md shadow-lg" role="status">
             {physics.status.state === "loading" && "Đang nạp collider vật thể…"}

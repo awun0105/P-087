@@ -24,6 +24,7 @@ from src.services.orchestration.scene import (
 )
 from src.services.orchestration.scene.catalog import load_catalog, suggest_classes
 from src.services.orchestration.scene.collision_source_selection import select_lidar_collision_candidate
+from src.services.orchestration.scene.collision_surfaces import CollisionSurfaceCommand, publish_collision_surface
 from src.services.orchestration.scene.errors import SceneNotAvailableError
 from src.services.orchestration.scene.object_correction import merge_object_candidates, reassign_object_membership
 from src.services.orchestration.scene.objectify import ObjectifyError
@@ -571,3 +572,20 @@ def restore_scene_revision(
     return deps.scene_mutation(
         lambda editor: restore_revision(editor, job_id, request.expected_scene_revision, request.target_revision)
     )
+
+
+@router.post("/jobs/{job_id}/scene/collision-surfaces", response_model=schemas.SceneEditResponse, status_code=201)
+def mark_collision_surface(
+    job_id: str,
+    command: CollisionSurfaceCommand,
+    user: UserRecord | None = Depends(require_contributor),
+) -> schemas.SceneEditResponse:
+    registry = deps.registry()
+    authorize_job_mutation(user, registry, job_id, operation="đánh dấu mặt collision của")
+    deps.job_or_404(job_id)
+    try:
+        return schemas.scene_edit_response(publish_collision_surface(registry.scene, job_id, command))
+    except SceneRevisionConflictError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except (SceneError, ArtifactStoreError, ValueError) as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error

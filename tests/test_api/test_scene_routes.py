@@ -441,3 +441,45 @@ async def test_legacy_scene_with_invalid_artifacts_is_a_conflict_with_a_user_mes
     assert response.status_code == 409
     assert response.json()["detail"] == "Dữ liệu scene này không qua được bước kiểm tra. Nhờ quản trị kiểm tra scene."
     assert "scene_head" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_collision_surface_mark_fill_remove_and_stale_revision(client) -> None:
+    current = await _scene(client)
+    checksum = current["scene"]["environment"]["geometry_ref"]["artifact_checksum"]
+    body = {
+        "expected_scene_revision": current["scene_revision"],
+        "source_checksum": checksum,
+        "kind": "floor",
+        "points": [[0, 0, 0], [1, 0, 0], [0, 1, 0]],
+    }
+    marked = await client.post(f"{_JOB}/scene/collision-surfaces", json=body)
+    assert marked.status_code == 201, marked.text
+    value = marked.json()
+    plane = value["scene"]["provenance"]["collision_surface_planes"][0]
+    assert plane["origin"] == "user_authored" and plane["frame"] == "world"
+    stale = await client.post(f"{_JOB}/scene/collision-surfaces", json=body)
+    assert stale.status_code == 409
+    filled = await client.post(
+        f"{_JOB}/scene/collision-surfaces",
+        json={
+            "expected_scene_revision": value["scene_revision"],
+            "source_checksum": checksum,
+            "action": "fill",
+            "plane_id": plane["id"],
+        },
+    )
+    assert filled.status_code == 201, filled.text
+    value = filled.json()
+    assert value["scene"]["provenance"]["collision_surface_planes"][0]["fill_regions"] is True
+    removed = await client.post(
+        f"{_JOB}/scene/collision-surfaces",
+        json={
+            "expected_scene_revision": value["scene_revision"],
+            "source_checksum": checksum,
+            "action": "remove",
+            "plane_id": plane["id"],
+        },
+    )
+    assert removed.status_code == 201, removed.text
+    assert removed.json()["scene"]["provenance"]["collision_surface_planes"] == []

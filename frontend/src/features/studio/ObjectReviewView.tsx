@@ -37,6 +37,8 @@ import {
   applyObjectAction,
   catalogPreviewUrl,
   editCollider,
+  editCollisionSurface,
+  type CollisionSurfacePlane,
   getJobScene,
   getSceneCatalog,
   getStageViews,
@@ -428,12 +430,12 @@ export function ObjectReviewView({
   const physicsObjects = useMemo<PhysicsObjectInput[]>(
     () =>
       (scene?.objects ?? [])
-        .filter((object) => object.state === "CONFIRMED" && object.active && !isIgnored(object))
+        .filter((object) => !isIgnored(object) && (object.state === "CANDIDATE" || (object.state === "CONFIRMED" && object.active)))
         .map((object) => {
           const collider = colliderWithPreview(object, colliderDraft?.sceneRevision === scene?.scene_revision ? colliderDraft : null);
           return {
             id: object.id,
-            dynamic: object.physics?.dynamic ?? false,
+            dynamic: object.state === "CONFIRMED" && (object.physics?.dynamic ?? false),
             colliderType: collider?.collider_type,
             position: object.transform.translation_xyz,
             rotation_xyzw: object.transform.rotation_quaternion_xyzw,
@@ -441,7 +443,7 @@ export function ObjectReviewView({
             colliderLocalTransform: collider?.local_transform ?? null,
             dimensions: collider?.dimensions_xyz_m ?? object.primitive_dimensions_xyz_m ?? null,
             mass_kg: object.physics?.mass_kg ?? null,
-            friction: (object.physics?.dynamic ? object.physics.dynamic_friction : object.physics?.static_friction) ?? 0.5,
+            friction: (object.state === "CONFIRMED" && object.physics?.dynamic ? object.physics.dynamic_friction : object.physics?.static_friction) ?? 0.5,
             restitution: object.physics?.restitution ?? 0,
           };
         }),
@@ -669,6 +671,20 @@ export function ObjectReviewView({
             visual={scene.environment.visual_ref}
             collision={scene.environment.collision_source_ref ?? scene.environment.geometry_ref}
             sceneRevision={scene.scene_revision}
+            collisionPreview
+            surfacePlanes={(scene.provenance.collision_surface_planes ?? []) as CollisionSurfacePlane[]}
+            onMarkSurface={(kind, points) => run(revision => editCollisionSurface(jobId, {
+              expected_scene_revision: revision, source_checksum: (scene.environment.collision_source_ref ?? scene.environment.geometry_ref).artifact_checksum,
+              action: "mark", kind, points,
+            }))}
+            onFillSurface={plane_id => run(revision => editCollisionSurface(jobId, {
+              expected_scene_revision: revision, source_checksum: (scene.environment.collision_source_ref ?? scene.environment.geometry_ref).artifact_checksum,
+              action: "fill", plane_id,
+            }))}
+            onRemoveSurface={plane_id => run(revision => editCollisionSurface(jobId, {
+              expected_scene_revision: revision, source_checksum: (scene.environment.collision_source_ref ?? scene.environment.geometry_ref).artifact_checksum,
+              action: "remove", plane_id,
+            }))}
             cameras={cameras}
             boxes={boxes}
             objects={splats}

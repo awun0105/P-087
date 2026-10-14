@@ -17,8 +17,10 @@ import {
   Mesh,
   MeshInstance as PcMeshInstance,
   PRIMITIVE_POINTS,
+  PRIMITIVE_TRIANGLES,
   Quat,
   RENDERSTYLE_WIREFRAME,
+  RENDERSTYLE_SOLID,
   RotateGizmo,
   StandardMaterial,
   TranslateGizmo,
@@ -30,6 +32,7 @@ import {
   type MeshInstance,
 } from "playcanvas";
 
+import type { CollisionSurfacePlane } from "@/lib/api/studio";
 import { rotateVector, multiplyQuaternions } from "@/features/viewer/layers";
 import { DISPLAY_EULER, type Vec3 } from "@/features/viewer/source-frame";
 import { themeColor } from "@/lib/theme";
@@ -111,8 +114,8 @@ export interface OverlayBox {
   color: string;
   emphasized: boolean;
   /**
-   * GLB hình dáng của vật trong khung cục bộ của vật (collider phân rã lồi). Có thì vật được vẽ và
-   * bắt chọn theo đúng hình này; hộp chỉ hiện trong lúc GLB đang tải hoặc khi tải lỗi.
+   * GLB trong collider-local frame. Vẽ và bắt chọn khung theo hình vật,
+   * đồng thời cung cấp hình học cho lớp collider độc lập.
    */
   shapeUrl?: string | null;
   colliderLocalTransform?: { translation_xyz: Vec3; rotation_quaternion_xyzw: [number, number, number, number] } | null;
@@ -146,10 +149,8 @@ function paint(entity: Entity, fill: StandardMaterial, wire: boolean): void {
   for (const render of entity.findComponents("render") as unknown as RenderLike[]) {
     for (const instance of render.meshInstances) {
       instance.material = fill;
-      if (wire) {
-        instance.mesh.generateWireframe();
-        instance.renderStyle = RENDERSTYLE_WIREFRAME;
-      }
+      if (wire && !instance.mesh.primitive[RENDERSTYLE_WIREFRAME]) instance.mesh.generateWireframe();
+      instance.renderStyle = wire ? RENDERSTYLE_WIREFRAME : RENDERSTYLE_SOLID;
     }
   }
 }
@@ -158,8 +159,8 @@ function paint(entity: Entity, fill: StandardMaterial, wire: boolean): void {
  * Gộp mọi mesh của GLB thành một lưới trong khung gốc của GLB (đã áp transform của node), để tia
  * chọn vật thử trên đúng hình đang vẽ. Null khi GLB không có tam giác.
  */
-function shapeGeometry(container: ContainerResource): ShapeGeometry | null {
-  const entity = container.instantiateRenderEntity();
+function shapeGeometry(container: ContainerResource, rendered?: Entity): ShapeGeometry | null {
+  const entity = rendered ?? container.instantiateRenderEntity();
   const positions: number[] = [];
   const indices: number[] = [];
   const point = new PcVec3();
@@ -178,7 +179,7 @@ function shapeGeometry(container: ContainerResource): ShapeGeometry | null {
       for (const index of order) indices.push(index + base);
     }
   }
-  entity.destroy();
+  if (!rendered) entity.destroy();
   return indices.length >= 3 ? { positions: new Float32Array(positions), indices: new Uint32Array(indices) } : null;
 }
 
@@ -211,6 +212,7 @@ export interface OverlayObject {
 export type GizmoMode = "translate" | "rotate";
 
 export interface GizmoHandlers {
+  onMove?(id: string, position: Vec3, rotation_xyzw: [number, number, number, number]): void;
   onStart(): void;
   /** Transform cục bộ của vật (hệ canonical Z-up, mét) khi người dùng thả gizmo. */
   onEnd(id: string, position: Vec3, rotation_xyzw: [number, number, number, number]): void;
@@ -221,9 +223,20 @@ export class SceneOverlay {
   private readonly root: Entity;
   private readonly boxRoot: Entity;
   private readonly materials: StandardMaterial[] = [];
+  private readonly surfaceRoot: Entity;
+  private readonly surfaceMeshes: Mesh[] = [];
+  private readonly surfaceMaterials: StandardMaterial[] = [];
+  private surfaceInputs: readonly CollisionSurfacePlane[] | null = null;
+  private readonly colliderRoot: Entity;
+  private readonly colliderMaterials: StandardMaterial[] = [];
+  private colliderOutlines: Outline[] = [];
+  private colliderWire = false;
+  private colliderInputs: readonly OverlayBox[] | null = null;
   private collisionGeneration = 0;
   private collisionAsset: Asset | null = null;
   private collisionEntity: Entity | null = null;
+  private collisionGeometry: ShapeGeometry | null = null;
+  private collisionGeometryUrl: string | null = null;
   private collisionMaterial: StandardMaterial | null = null;
   private outlines: Outline[] = [];
   private readonly shapes = new Map<string, ShapeRecord>();
@@ -252,6 +265,10 @@ export class SceneOverlay {
     this.root.setLocalEulerAngles(x, y, z);
     this.boxRoot = new Entity("r2s-boxes", this.app);
     this.root.addChild(this.boxRoot);
+    this.colliderRoot = new Entity("r2s-colliders", this.app);
+    this.root.addChild(this.colliderRoot);
+    this.surfaceRoot = new Entity("r2s-surface-marks", this.app);
+    this.root.addChild(this.surfaceRoot);
     this.objectRoot = new Entity("r2s-objects", this.app);
     this.root.addChild(this.objectRoot);
     // Splat không cần đèn; đèn này chỉ để mesh collision có khối (bóng theo mặt) khi nhìn.
@@ -267,7 +284,7 @@ export class SceneOverlay {
     this.releaseCollision();
     const generation = this.collisionGeneration;
     return new Promise((resolve, reject) => {
-      const asset = new Asset(`r2s-collision-${url}`, "container", { url });
+      const asset = new Asset(`r2s-collision-${url}`, "container", { url, filename: "collision.glb" });
       this.collisionAsset = asset;
       asset.once("load", () => {
         if (this.destroyed || generation !== this.collisionGeneration) return resolve(0);
@@ -280,6 +297,8 @@ export class SceneOverlay {
             triangles += (instance.mesh.primitive[0]?.count ?? 0) / 3;
           }
         }
+        this.collisionGeometry = shapeGeometry(asset.resource as ContainerResource, entity);
+        this.collisionGeometryUrl = url;
         this.collisionEntity = entity;
         this.root.addChild(entity);
         this.redraw();
@@ -298,6 +317,8 @@ export class SceneOverlay {
     this.collisionGeneration += 1;
     this.collisionEntity?.destroy();
     this.collisionEntity = null;
+    this.collisionGeometry = null;
+    this.collisionGeometryUrl = null;
     this.collisionMaterial?.destroy();
     this.collisionMaterial = null;
     if (this.collisionAsset) {
@@ -363,14 +384,15 @@ export class SceneOverlay {
     return result.length ? new Float32Array(result) : null;
   }
 
-  setCollision(visible: boolean, opacity: number): void {
+  setCollision(visible: boolean, opacity: number, wire = false): void {
     if (!this.alive) return;
     if (this.collisionEntity) this.collisionEntity.enabled = visible;
     const current = this.collisionMaterial;
     if (!current) return this.redraw();
-    current.opacity = opacity;
-    current.blendType = opacity < 1 ? BLEND_NORMAL : BLEND_NONE;
-    current.depthWrite = opacity >= 1;
+    if (this.collisionEntity) paint(this.collisionEntity, current, wire);
+    current.opacity = wire ? 1 : opacity;
+    current.blendType = current.opacity < 1 ? BLEND_NORMAL : BLEND_NONE;
+    current.depthWrite = current.opacity >= 1;
     current.update();
     this.redraw();
   }
@@ -384,8 +406,7 @@ export class SceneOverlay {
   }
 
   /**
-   * Vẽ lại khung của mọi vật; vật được nhấn mạnh đậm hơn và có thêm nét viền. Vật có `shapeUrl` hiện
-   * theo đúng hình dáng (collider) của nó, hộp chỉ là hình lùi trong lúc chờ tải.
+   * Vẽ khung theo hình GLB của vật; dùng hộp khi không có GLB hoặc đang chờ tải.
    */
   setBoxes(boxes: readonly OverlayBox[]): void {
     if (!this.alive) return;
@@ -399,9 +420,15 @@ export class SceneOverlay {
       root.setLocalRotation(new Quat(...box.rotation_xyzw));
       this.boxRoot.addChild(root);
       const outline: Outline = { localTransform: box.colliderLocalTransform, id: box.id, root, box: null, shape: null };
+      const current = this.objects.get(box.id)?.entity;
+      if (current) {
+        const position = current.getLocalPosition();
+        const rotation = current.getLocalRotation();
+        this.setOutlinePose(outline, [position.x, position.y, position.z], [rotation.x, rotation.y, rotation.z, rotation.w]);
+      }
       const record = box.shapeUrl ? this.shape(box.shapeUrl) : null;
       if (record?.geometry) {
-        this.showShape(outline, record, fill, box.emphasized);
+        this.showSelectionShape(outline, record, fill, box.emphasized);
       } else {
         const fallback = new Entity(`r2s-box-fill-${box.id}`, this.app);
         fallback.addComponent("render", { type: "box", material: fill });
@@ -414,10 +441,98 @@ export class SceneOverlay {
             if (!this.alive || !this.outlines.includes(outline) || !record.geometry) return;
             fallback.destroy();
             outline.box = null;
-            this.showShape(outline, record, fill, box.emphasized);
+            this.showSelectionShape(outline, record, fill, box.emphasized);
             this.redraw();
           });
         }
+      }
+      return outline;
+    });
+    this.redraw();
+  }
+
+  /** Show the selected source triangle: green floor, purple wall, fixed in canonical world. */
+  setSurfaceMarkers(planes: readonly CollisionSurfacePlane[], visible: boolean): void {
+    if (!this.alive) return;
+    this.surfaceRoot.enabled = visible;
+    if (planes === this.surfaceInputs) { this.redraw(); return; }
+    this.surfaceInputs = planes;
+    this.releaseSurfaceMarkers();
+    for (const plane of planes) {
+      const mesh = new Mesh(this.app.graphicsDevice);
+      this.surfaceMeshes.push(mesh);
+      mesh.setPositions(plane.points.flat());
+      mesh.setIndices([0,1,2]);
+      mesh.update(PRIMITIVE_TRIANGLES);
+      const fill = material(plane.kind === "floor" ? themeColor("--studio-marker-floor", "#66e666") : themeColor("--studio-marker-check", "#e666e6"), 1, false);
+      this.surfaceMaterials.push(fill);
+      fill.depthTest = false;
+      fill.depthWrite = false;
+      fill.update();
+      const entity = new Entity(`r2s-surface-${plane.id}`, this.app);
+      entity.addComponent("render", {meshInstances:[new PcMeshInstance(mesh,fill)],castShadows:false});
+      paint(entity,fill,true);
+      this.surfaceRoot.addChild(entity);
+    }
+    this.redraw();
+  }
+
+  private releaseSurfaceMarkers(): void {
+    for (const child of [...this.surfaceRoot.children]) child.destroy();
+    for (const mesh of this.surfaceMeshes.splice(0)) mesh.destroy();
+    for (const fill of this.surfaceMaterials.splice(0)) fill.destroy();
+  }
+
+  /** Active physics colliders are independent of selection frames and viewport Gaussian visibility. */
+  setColliders(boxes: readonly OverlayBox[], visible: boolean, wire = false): void {
+    if (!this.alive) return;
+    this.colliderWire = wire;
+    this.colliderRoot.enabled = visible;
+    // Display toggles must preserve the pose currently supplied by the Walk simulation.
+    if (this.colliderInputs === boxes) {
+      this.colliderOutlines.forEach((outline, index) => {
+        const fill = this.colliderMaterials[index];
+        fill.opacity = wire ? 1 : 0.3;
+        fill.blendType = wire ? BLEND_NONE : BLEND_NORMAL;
+        fill.depthWrite = wire;
+        fill.update();
+        paint(outline.root, fill, wire);
+      });
+      this.redraw();
+      return;
+    }
+    this.colliderInputs = boxes;
+    for (const child of [...this.colliderRoot.children]) child.destroy();
+    for (const fill of this.colliderMaterials.splice(0)) fill.destroy();
+    this.colliderOutlines = boxes.map((box) => {
+      const fill = material(themeColor("--studio-geometry", "#2f7ea8"), wire ? 1 : 0.3, false);
+      this.colliderMaterials.push(fill);
+      const root = new Entity(`r2s-collider-${box.id}`, this.app);
+      root.setLocalPosition(...box.center);
+      root.setLocalRotation(new Quat(...box.rotation_xyzw));
+      this.colliderRoot.addChild(root);
+      const outline: Outline = { localTransform: box.colliderLocalTransform, id: box.id, root, box: null, shape: null };
+      const current = this.objects.get(box.id)?.entity;
+      if (current) {
+        const position = current.getLocalPosition();
+        const rotation = current.getLocalRotation();
+        this.setOutlinePose(outline, [position.x, position.y, position.z], [rotation.x, rotation.y, rotation.z, rotation.w]);
+      }
+      if (box.shapeUrl) {
+        const record = this.shape(box.shapeUrl);
+        if (record.geometry) this.showShape(outline, record, fill);
+        else if (!record.failed) record.asset.once("load", () => {
+          if (!this.alive || !this.colliderOutlines.includes(outline) || !record.geometry) return;
+          this.showShape(outline, record, fill);
+          this.redraw();
+        });
+      } else {
+        const entity = new Entity(`r2s-collider-fill-${box.id}`, this.app);
+        entity.addComponent("render", { type: "box", material: fill });
+        entity.setLocalScale(...box.dimensions);
+        paint(entity, fill, wire);
+        root.addChild(entity);
+        outline.box = entity;
       }
       return outline;
     });
@@ -437,14 +552,14 @@ export class SceneOverlay {
       record.failed = record.geometry === null;
     });
     asset.once("error", () => {
-      record.failed = true; // Giữ hộp lùi; không làm hỏng lớp phủ vì một collider tải lỗi.
+      record.failed = true; // Selection keeps its box; do not render a substitute for failed collider geometry.
     });
     this.app.assets.add(asset);
     this.app.assets.load(asset);
     return record;
   }
 
-  private showShape(outline: Outline, record: ShapeRecord, fill: StandardMaterial, emphasized: boolean): void {
+  private showSelectionShape(outline: Outline, record: ShapeRecord, fill: StandardMaterial, emphasized: boolean): void {
     const container = record.asset.resource as ContainerResource;
     const solid = container.instantiateRenderEntity();
     paint(solid, fill, false);
@@ -456,6 +571,14 @@ export class SceneOverlay {
       paint(wire, edge, true);
       outline.root.addChild(wire);
     }
+    outline.shape = record.geometry;
+  }
+
+  private showShape(outline: Outline, record: ShapeRecord, fill: StandardMaterial): void {
+    const container = record.asset.resource as ContainerResource;
+    const solid = container.instantiateRenderEntity();
+    paint(solid, fill, this.colliderWire);
+    outline.root.addChild(solid);
     outline.shape = record.geometry;
   }
 
@@ -496,8 +619,7 @@ export class SceneOverlay {
           this.app.assets.load(asset);
         }
       }
-      record.entity.setLocalPosition(...item.position);
-      record.entity.setLocalRotation(new Quat(...item.rotation_xyzw));
+      this.setObjectPose(item.id, item.position, item.rotation_xyzw);
       record.entity.enabled = item.visible;
     }
     this.redraw();
@@ -506,12 +628,12 @@ export class SceneOverlay {
   /** Đặt pose (hệ canonical, như SceneIR) cho một vật đang vẽ — dùng khi vật lý phía trình duyệt dời vật. */
   setObjectPose(id: string, position: Vec3, rotation_xyzw: [number, number, number, number]): void {
     const record = this.alive ? this.objects.get(id) : undefined;
-    if (!record) return;
-    record.entity.setLocalPosition(...position);
-    record.entity.setLocalRotation(new Quat(...rotation_xyzw));
-    const outline = this.outlines.find((item) => item.id === id);
-    if (outline) {
-      this.setOutlinePose(outline, position, rotation_xyzw);
+    if (record) {
+      record.entity.setLocalPosition(...position);
+      record.entity.setLocalRotation(new Quat(...rotation_xyzw));
+    }
+    for (const outline of [...this.outlines, ...this.colliderOutlines]) {
+      if (outline.id === id) this.setOutlinePose(outline, position, rotation_xyzw);
     }
     this.redraw();
   }
@@ -538,12 +660,15 @@ export class SceneOverlay {
     gizmo.on("transform:start", () => handlers.onStart());
     gizmo.on("transform:move", () => {
       // Khung của vật đi theo trong lúc kéo để người dùng thấy collider sẽ nằm ở đâu.
-      for (const outline of this.outlines) {
+      for (const outline of [...this.outlines, ...this.colliderOutlines]) {
         if (outline.id !== id) continue;
         const p = target.getLocalPosition();
         const q = target.getLocalRotation();
         this.setOutlinePose(outline, [p.x, p.y, p.z], [q.x, q.y, q.z, q.w]);
       }
+      const p = target.getLocalPosition();
+      const q = target.getLocalRotation();
+      handlers.onMove?.(id, [p.x, p.y, p.z], [q.x, q.y, q.z, q.w]);
       this.redraw();
     });
     gizmo.on("transform:end", () => {
@@ -717,6 +842,29 @@ export class SceneOverlay {
    * `CameraComponent.screenToWorld`). Chỉ xét khung đang vẽ; vật đã có hình dáng thì thử theo lưới
    * của nó (bấm vào khoảng trống trong hộp bao không chọn vật), còn lại thử theo hộp.
    */
+  /** Pick a rendered environment triangle in canonical coordinates for a user-authored plane. */
+  pickCollisionTriangle(x: number, y: number, expectedUrl?: string): [Vec3, Vec3, Vec3] | null {
+    if (!this.alive || !this.collisionGeometry || (expectedUrl && this.collisionGeometryUrl !== expectedUrl)) return null;
+    const camera = this.app.root.findComponents("camera")[0] as CameraComponent | undefined;
+    if (!camera) return null;
+    const worldOrigin = camera.entity.getPosition().clone();
+    const worldDirection = camera.screenToWorld(x, y, camera.farClip, new PcVec3()).sub(worldOrigin).normalize();
+    const inverse = this.root.getWorldTransform().clone().invert();
+    const origin = inverse.transformPoint(worldOrigin, new PcVec3());
+    const direction = inverse.transformVector(worldDirection, new PcVec3());
+    const {positions,indices} = this.collisionGeometry;
+    let best = -1, nearest = Infinity;
+    for (let i = 0; i < indices.length; i += 3) {
+      const hit = rayTriangles([origin.x,origin.y,origin.z], [direction.x,direction.y,direction.z], positions, indices.subarray(i,i+3));
+      if (hit !== null && hit < nearest) {nearest=hit;best=i;}
+    }
+    if (best < 0) return null;
+    return [0,1,2].map(corner => {
+      const index = indices[best+corner]*3;
+      return [positions[index],positions[index+1],positions[index+2]] as Vec3;
+    }) as [Vec3,Vec3,Vec3];
+  }
+
   pick(x: number, y: number): string | null {
     if (!this.alive) return null;
     const camera = this.app.root.findComponents("camera")[0] as CameraComponent | undefined;
@@ -751,7 +899,10 @@ export class SceneOverlay {
     for (const record of this.objects.values()) this.releaseObject(record);
     this.objects.clear();
     this.outlines = [];
+    this.colliderOutlines = [];
+    for (const fill of this.colliderMaterials.splice(0)) fill.destroy();
     this.releasePoints();
+    this.releaseSurfaceMarkers();
     this.releaseCollision();
     this.root.destroy();
     for (const record of this.shapes.values()) {

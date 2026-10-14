@@ -88,3 +88,30 @@ export declare function createMeshCollision(positions: Float32Array, indices: Ui
 type ViewerHandle = {
     setCollisionProvider(provider: ((environment: CollisionQuery | null) => CollisionQuery | null) | null): void;`],
 ], "REAL2SIM_OBJECT_COLLISION");
+
+patch("dist/viewer.js", [
+  ["        // ground probe: cast a ray downward to find the terrain surface", `        // REAL2SIM_WALK_SUPPORT: no stepping into missing collision behind a removed object.
+        const previousX = this._position.x, previousY = this._position.y, previousZ = this._position.z;
+        // ground probe: cast a ray downward to find the terrain surface`],
+  ["        const hasGround = groundY !== null;", "        const hasGround = groundY !== null;\n        if (hasGround) this._hostWalkGround = groundY;"],
+  ["        this._checkCollision(this._position, d);", `        this._checkCollision(this._position, d);
+        if (this.collision?.preventUnsupportedWalk && this._hostWalkGround !== undefined &&
+            !isWalkStepSupported(this.collision, this._position.x, this._hostWalkGround, this._position.z, this.capsuleRadius)) {
+            this._position.set(previousX, previousY, previousZ);
+            this._velocity.set(0, 0, 0);
+        }`],
+  ["        this._jumpHeld = false;\n        this._pendingMove[0] = 0;", "        this._jumpHeld = false;\n        this._hostWalkGround = undefined;\n        this._pendingMove[0] = 0;"],
+  ["export { createViewer };", `/** Check the capsule footprint against existing surfaces within a 25cm step, never invent a floor. */
+export function isWalkStepSupported(collision, x, groundY, z, radius) {
+    for (const [dx, dz] of [[0,0],[radius,0],[-radius,0],[0,radius],[0,-radius]]) {
+        const hit = collision.queryRay(x+dx, groundY+0.25, z+dz, 0,-1,0,0.5);
+        if (!hit) return false;
+    }
+    return true;
+}
+export { createViewer };`],
+], "REAL2SIM_WALK_SUPPORT");
+patch("dist/viewer.d.ts", [
+  ["    voxelResolution: number;", "    /** REAL2SIM_WALK_SUPPORT: block walking into unsupported footprints. */\n    preventUnsupportedWalk?: boolean;\n    voxelResolution: number;"],
+  ["export declare function createMeshCollision", "export declare function isWalkStepSupported(collision: CollisionQuery, x: number, groundY: number, z: number, radius: number): boolean;\nexport declare function createMeshCollision"],
+], "REAL2SIM_WALK_SUPPORT");

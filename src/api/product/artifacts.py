@@ -117,6 +117,7 @@ def get_walk_collision(
     dynamic: list[str] = Query(default=[]),
     scene_revision: str | None = Query(default=None),
     frame: Literal["display", "canonical"] = Query(default="display"),
+    preview: bool = Query(default=False),
 ) -> Response:
     """Shared effective environment for SceneIR consumers; raw preview only before scene review.
 
@@ -140,16 +141,22 @@ def get_walk_collision(
         source_path = registry.resolve_artifact(job_id, reference)
         identity = artifact_checksum
         shared = 0
+        floor = 0
+        repaired = 0
         if scene_revision is not None:
-            scene, background = effective_collision_for_revision(registry, job_id, scene_revision)
+            scene, background = effective_collision_for_revision(
+                registry, job_id, scene_revision, preview_pending=preview is True
+            )
             selected = scene.environment.collision_source_ref or scene.environment.geometry_ref
             if (artifact_uri, artifact_checksum) != (selected.artifact_uri, selected.artifact_checksum):
                 raise SourceCollisionOwnershipError("collision URL does not bind the selected SceneIR source")
             payload = effective_collision_bytes(background, display=frame == "display")
             identity = background.identity
             shared = background.retained_shared_triangles
+            floor = background.protected_surface_triangles
+            repaired = background.repaired_triangles
         else:
-            if dynamic:
+            if dynamic or preview is True:
                 raise SourceCollisionOwnershipError("object collision composition requires scene_revision")
             # Reconstruction-stage preview has no SceneIR lifecycle yet.
             raw = source_path.read_bytes()
@@ -172,6 +179,13 @@ def get_walk_collision(
             "X-Scene-Revision": scene_revision or "source-preview",
             "X-Collision-Composition": identity,
             "X-Retained-Shared-Triangles": str(shared),
+            "X-Protected-Surface-Triangles": str(floor),
+            "X-Repaired-Surface-Triangles": str(repaired),
+            "X-Collision-Mode": "studio-preview"
+            if preview is True
+            else "confirmed"
+            if scene_revision
+            else "source-preview",
             "ETag": '"' + identity.removeprefix("sha256:") + ":" + frame + '"',
         },
     )

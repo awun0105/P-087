@@ -18,14 +18,20 @@ from src.services.scene.effective_collision import CarvedBackground
 
 
 def effective_collision_for_revision(
-    registry: ProjectRegistry, job_id: str, revision: str
+    registry: ProjectRegistry, job_id: str, revision: str, *, preview_pending: bool = False
 ) -> tuple[SceneIR, CarvedBackground]:
     scene = registry.scene.current(job_id).scene
     if scene.scene_revision != revision:
         raise SceneRevisionConflictError("collision request does not match current SceneIR revision")
     scene, _ = _recover_legacy_source_ownership(registry, job_id, scene)
     controls = _job_simulation_config(registry, job_id)
-    return scene, effective_environment(registry, scene, margin_m=controls["carve_margin_m"])
+    return scene, effective_environment(
+        registry,
+        scene,
+        margin_m=controls["carve_margin_m"],
+        preview_pending=preview_pending,
+        repair_surfaces=preview_pending,
+    )
 
 
 @lru_cache(maxsize=8)

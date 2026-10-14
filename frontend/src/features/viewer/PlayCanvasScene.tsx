@@ -425,7 +425,7 @@ export function PlayCanvasScene({
               return true;
             },
             setObjectCollision: (objectCollision) => {
-              if (!disposed) viewer.setCollisionProvider(objectCollision ? (environment) => environment ? new CombinedCollision(() => [environment, objectCollision], environment.voxelResolution) : null : null);
+              if (!disposed) viewer.setCollisionProvider((environment) => environment ? new CombinedCollision(() => objectCollision ? [environment, objectCollision] : [environment], environment.voxelResolution) : null);
             },
             setInputEnabled: (enabled) => {
               if (!disposed) viewer.state.inputEnabled = enabled;

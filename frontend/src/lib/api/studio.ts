@@ -1476,3 +1476,20 @@ export async function getJobEvaluation(jobId: string, signal?: AbortSignal): Pro
 export function evaluationReportUrl(jobId: string): string {
   return `${API}/jobs/${encodeURIComponent(jobId)}/evaluation/report.md`;
 }
+
+
+export interface CollisionSurfacePlane {
+  id: string;
+  kind: "floor" | "wall";
+  source_checksum: string;
+  fill_regions?: boolean;
+  points: [[number,number,number],[number,number,number],[number,number,number]];
+}
+export function editCollisionSurface(jobId: string, command: {
+  expected_scene_revision: string; source_checksum: string; action: "mark" | "remove" | "fill";
+  kind?: "floor" | "wall"; points?: CollisionSurfacePlane["points"]; plane_id?: string;
+}): Promise<SceneEditResponse> {
+  return apiFetch<SceneEditResponse>(`${API}/jobs/${encodeURIComponent(jobId)}/scene/collision-surfaces`, {
+    method: "POST", body: JSON.stringify(command),
+  });
+}

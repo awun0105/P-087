@@ -36,8 +36,14 @@ def fixture(tmp_path: Path):
         owner, blob = _owner(id_, ref, _membership_ref(job.job_id, id_), indices)
         blobs[owner.region_ref.artifact_uri] = blob
         objects.append(scene.objects[0].model_copy(update={"id": id_, "source_collision": owner}, deep=True))
+    # This synthetic geometry replaces the original scene source: its old floor-fit evidence is not a measurement of this fixture.
+    provenance = {key: value for key, value in scene.provenance.items() if key != "floor_fit"}
     scene = scene.model_copy(
-        update={"objects": objects, "environment": scene.environment.model_copy(update={"geometry_ref": ref})},
+        update={
+            "objects": objects,
+            "environment": scene.environment.model_copy(update={"geometry_ref": ref}),
+            "provenance": provenance,
+        },
         deep=True,
     )
 

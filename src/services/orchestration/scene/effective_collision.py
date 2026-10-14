@@ -220,11 +220,22 @@ def _selected_collision_source(registry: ProjectRegistry, scene: SceneIR) -> tup
 
 
 def effective_environment(
-    registry: ProjectRegistry, scene: SceneIR, *, margin_m: float = COLLISION_CARVE_MARGIN_M
+    registry: ProjectRegistry,
+    scene: SceneIR,
+    *,
+    margin_m: float = COLLISION_CARVE_MARGIN_M,
+    preview_pending: bool = False,
+    repair_surfaces: bool = False,
 ) -> CarvedBackground:
     source_ref, glb = _selected_collision_source(registry, scene)
     return compose_effective_collision(
-        scene, source_ref, glb, lambda ref: registry.runtime_resolver.require(ref).read_bytes(), margin_m=margin_m
+        scene,
+        source_ref,
+        glb,
+        lambda ref: registry.runtime_resolver.require(ref).read_bytes(),
+        margin_m=margin_m,
+        preview_pending=preview_pending,
+        repair_surfaces=repair_surfaces or bool(scene.provenance.get("collision_surface_planes")),
     )
 
 
