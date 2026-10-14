@@ -125,6 +125,7 @@ export function fallbackColliderHull(
 }
 
 interface PreparedScene {
+  request: string;
   identity: string;
   ammo: AmmoModule;
   environment: TriangleMesh;
@@ -150,11 +151,14 @@ export function usePhysicsPlay({ app, overlay, walking, collisionUrl, objects, o
   const enabled = objects.length > 0 && app !== null && overlay !== null && collisionUrl !== null;
   const key = JSON.stringify(objects);
   const identity = JSON.stringify([collisionUrl, key]);
-  const data = prepared?.identity === identity ? prepared : null;
+  const request = JSON.stringify([enabled, identity]);
+  // Reset preparation synchronously on input/activation changes, so Restore cannot reuse a cleared old scene.
+  if (prepared && prepared.request !== request) setPrepared(null);
+  const data = prepared?.request === request ? prepared : null;
 
   // Prepare camera collision before permitting Walk. This allocates no native Ammo world outside Walk.
   useEffect(() => {
-    if (!enabled || !collisionUrl) return;
+    if (!enabled || !collisionUrl) { cache.current.clear(); return; }
     const controller = new AbortController();
     const specs: PhysicsObjectInput[] = JSON.parse(key);
     const urls = new Set(specs.filter(item => item.colliderUrl).map(item => `${item.colliderType ?? "CONVEX_HULL"}:${item.colliderUrl}`));
@@ -196,13 +200,13 @@ export function usePhysicsPlay({ app, overlay, walking, collisionUrl, objects, o
         }));
         const camera = new ObjectCameraCollision(bodies);
         setFailure(null);
-        setPrepared({ identity, ammo, environment, objects: bodies, camera });
+        setPrepared({ request, identity, ammo, environment, objects: bodies, camera });
       } catch (error: unknown) {
         if (!controller.signal.aborted) setFailure({ identity, message: error instanceof Error ? error.message : String(error) });
       }
     })();
     return () => controller.abort();
-  }, [enabled, collisionUrl, key, identity]);
+  }, [enabled, collisionUrl, key, identity, request]);
 
   useEffect(() => {
     if (!data) return;

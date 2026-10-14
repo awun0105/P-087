@@ -9,6 +9,7 @@ import { usePhysicsPlay, type PhysicsObjectInput } from "@/features/viewer/usePh
 import { BOX_POINTS, colliderGlb, type GlbFixtureDocument } from "./helpers/collider-glb";
 
 const constructed = vi.hoisted(() => vi.fn());
+const destructed = vi.hoisted(() => vi.fn());
 vi.mock("@/features/viewer/scene-physics", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/features/viewer/scene-physics")>();
   return {
@@ -16,7 +17,7 @@ vi.mock("@/features/viewer/scene-physics", async (importOriginal) => {
     loadAmmo: vi.fn().mockResolvedValue({}),
     ScenePhysics: vi.fn(function (_ammo: unknown, environment: TriangleMesh, objects: PhysicsObjectSpec[]) {
       constructed(environment, objects);
-      return { destroy: vi.fn(), reset: vi.fn() };
+      return { destroy: destructed, reset: vi.fn() };
     }),
   };
 });
@@ -45,7 +46,7 @@ function stubMeshes(object: ArrayBuffer | number) {
   }));
 }
 
-beforeEach(() => constructed.mockClear());
+beforeEach(() => { constructed.mockClear(); destructed.mockClear(); });
 afterEach(() => vi.unstubAllGlobals());
 
 describe("physics mesh frames through the loading hook", () => {
@@ -138,7 +139,7 @@ it("prepares camera before Walk, preserves physics for viewport hide, rebuilds m
   rerender({walking:false,objects:[moved],visible:false});expect(callbacks.size).toBe(0);
   rerender({walking:false,objects:[],visible:false});expect(result.current.status.state).toBe("off");expect(sink.mock.lastCall![0]).toBeNull();
   rerender({walking:true,objects:[moved],visible:true});await waitFor(()=>expect(constructed).toHaveBeenCalledTimes(3));
-  unmount();expect(callbacks.size).toBe(0);
+  unmount();expect(callbacks.size).toBe(0);expect(destructed).toHaveBeenCalledTimes(3);
 });
 
 it("an old collider response cannot resurrect an object deleted before loading finishes", async()=>{

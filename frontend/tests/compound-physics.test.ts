@@ -121,3 +121,17 @@ it("repeated native world teardown balances tracked allocations and stabilizes W
   expect(allocations).toBe(releases);expect(after).toBe(before);
   console.log("PR04 native allocation metrics",JSON.stringify({cycles:55,allocations,releases,live:live.size,heapBefore:before,heapAfter:after,measuredCycles:50,durationMs:duration}));
 });
+
+it("rejecting invalid dynamic geometry also releases the partially constructed native world",()=>{
+  const live=new Set<number>();
+  const tracked=new Proxy(A,{get:(target,key)=>{
+    if(key==="destroy")return(object:AmmoModule)=>{expect(live.delete(A.getPointer(object))).toBe(true);target.destroy(object);};
+    const value=target[key];
+    if(typeof key==="string"&&key.startsWith("bt")&&typeof value==="function")return function(...args:unknown[]){const object=new value(...args);live.add(A.getPointer(object));return object;};
+    return value;
+  }});
+  expect(()=>new ScenePhysics(tracked,null,[item({dynamic:true,mass_kg:0})])).toThrow(/authored mass/);
+  expect(live.size).toBe(0);
+  expect(()=>new ScenePhysics(tracked,null,[item({parts:[{positions:new Float32Array([0,0,0,1,0,0,0,1,0,1,1,0]),indices:new Uint32Array()}]})])).toThrow(/degenerate/);
+  expect(live.size).toBe(0);
+});

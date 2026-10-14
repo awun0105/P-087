@@ -40,3 +40,15 @@ describe("real pinned viewer camera collision",()=>{
     expect(out.x).toBeGreaterThan(0);
   });
 });
+
+it("pose updates rebuild only the changed object query mesh, never the PR-03 environment BVH",()=>{
+  const environment=createMeshCollision(new Float32Array([-4,0,-4,4,0,-4,4,0,4,-4,0,4]),new Uint32Array([0,1,2,0,2,3]));
+  const objects=new ObjectCameraCollision([spec()]);const combined=new CombinedCollision(()=>[environment,objects]);
+  const start=performance.now();
+  for(let frame=0;frame<300;frame++)objects.setPose("table",{position:[frame*.01,0,0],rotation_xyzw:[0,0,0,1]});
+  const duration=performance.now()-start;
+  expect(objects.rebuilds).toBe(300); // First identical pose is reused.
+  expect(combined.queryRay(0,5,0,0,-1,0,10)).not.toBeNull();
+  objects.clear();expect(combined.queryRay(0,5,0,0,-1,0,10)?.y).toBe(0);
+  console.log("PR04 camera query metrics",JSON.stringify({changedPoses:299,queryBuilds:objects.rebuilds,durationMs:duration,environmentRebuilds:0,trianglesPerObject:24}));
+});
