@@ -18,7 +18,8 @@ import {
   Undo2,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode, useSyncExternalStore } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode, useSyncExternalStore } from "react";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/shadcn/alert-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/shadcn/tabs";
 import { subscribeTheme, themeColor, themeKey } from "@/lib/theme";
 
@@ -219,11 +220,28 @@ export type SaveState =
 
 type Filter = "all" | "pending" | "confirmed" | "ignored";
 
-const FILTERS: { value: Filter; label: string; match: (object: SceneObject) => boolean }[] = [
-  { value: "all", label: "Chưa loại", match: (object) => !isIgnored(object) },
-  { value: "pending", label: "Chờ xác nhận", match: (object) => object.state === "CANDIDATE" && !isIgnored(object) },
-  { value: "confirmed", label: "Đã xác nhận", match: (object) => object.state === "CONFIRMED" },
-  { value: "ignored", label: "Đã loại/xoá/gộp", match: isIgnored },
+type ArchiveCategory = "ignored" | "deleted" | "merged" | "viewport_hidden" | "simulation_disabled";
+const ARCHIVE_CATEGORIES: { value: ArchiveCategory; label: string }[] = [
+  { value: "ignored", label: "Đã loại" },
+  { value: "deleted", label: "Đã xoá" },
+  { value: "merged", label: "Đã gộp" },
+  { value: "viewport_hidden", label: "Ẩn trên màn hình" },
+  { value: "simulation_disabled", label: "Tắt trong mô phỏng" },
+];
+
+function archiveCategory(object: SceneObject, hiddenIds: ReadonlySet<string>): ArchiveCategory | null {
+  if (object.provenance.review === "IGNORED") return "ignored";
+  if (object.provenance.review === "DELETED") return "deleted";
+  if (object.provenance.review === "MERGED") return "merged";
+  if (object.state === "CONFIRMED" && !object.active) return "simulation_disabled";
+  return hiddenIds.has(object.id) ? "viewport_hidden" : null;
+}
+
+const FILTERS: { value: Filter; label: string; match: (object: SceneObject, hiddenIds: ReadonlySet<string>) => boolean }[] = [
+  { value: "all", label: "Chưa loại", match: (object, hidden) => !archiveCategory(object, hidden) },
+  { value: "pending", label: "Chờ xác nhận", match: (object, hidden) => object.state === "CANDIDATE" && !archiveCategory(object, hidden) },
+  { value: "confirmed", label: "Đã xác nhận", match: (object, hidden) => object.state === "CONFIRMED" && !archiveCategory(object, hidden) },
+  { value: "ignored", label: "Đã loại/xoá/gộp/ẩn", match: (object, hidden) => Boolean(archiveCategory(object, hidden)) },
 ];
 
 /**
@@ -259,6 +277,7 @@ export function ObjectReviewView({
     setViewportHidden((previous) => ({ jobId, ids: new Set(previous.jobId === jobId ? [...previous.ids].filter((id) => retained.has(id)) : []) }));
   };
   const toggleViewportVisibility = (id: string) => {
+    const hiding = !hiddenIds.has(id);
     setViewportHidden((previous) => {
       const ids = new Set(previous.jobId === jobId ? previous.ids : []);
       if (ids.has(id)) ids.delete(id);
@@ -266,7 +285,10 @@ export function ObjectReviewView({
       return { jobId, ids };
     });
     if (id === selected) setTool("none");
+    setLeftTab("objects");
+    setFilter(hiding ? "ignored" : "all");
   };
+  const [mergeRestoreTarget, setMergeRestoreTarget] = useState<string | null>(null);
   const [correctionPanelOpen, setCorrectionPanelOpen] = useState(false);
   const [collisionSourcePanelOpen, setCollisionSourcePanelOpen] = useState(false);
   const [collisionCandidates, setCollisionCandidates] = useState<ProductArtifactRef[]>([]);
@@ -424,19 +446,23 @@ export function ObjectReviewView({
   );
 
   const counts = useMemo(
-    () => Object.fromEntries(FILTERS.map((item) => [item.value, scene?.objects.filter(item.match).length ?? 0])) as Record<Filter, number>,
-    [scene],
+    () => Object.fromEntries(FILTERS.map((item) => [item.value, scene?.objects.filter((object) => item.match(object, hiddenIds)).length ?? 0])) as Record<Filter, number>,
+    [scene, hiddenIds],
   );
   const visibleObjects = useMemo(() => {
     const match = FILTERS.find((item) => item.value === filter)!.match;
-    return scene?.objects.filter(match) ?? [];
-  }, [scene, filter]);
+    const objects = scene?.objects.filter((object) => match(object, hiddenIds)) ?? [];
+    if (filter === "ignored") objects.sort((a, b) =>
+      ARCHIVE_CATEGORIES.findIndex((item) => item.value === archiveCategory(a, hiddenIds)) -
+      ARCHIVE_CATEGORIES.findIndex((item) => item.value === archiveCategory(b, hiddenIds)));
+    return objects;
+  }, [scene, filter, hiddenIds]);
   const theme = useSyncExternalStore(subscribeTheme, themeKey, () => "light:default");
   const visibleCollisionCandidates = collisionCandidatesLoadedFor === jobId ? collisionCandidates : [];
   const currentColliderDraft = colliderDraft?.sceneRevision === scene?.scene_revision ? colliderDraft : null;
   const boxes = useMemo<OverlayBox[]>(
     () =>
-      visibleObjects
+      (scene?.objects ?? [])
         .flatMap((object) => {
           if (!isPlaced(object) || hiddenIds.has(object.id)) return [];
           const collider = colliderWithPreview(object, currentColliderDraft);
@@ -455,11 +481,11 @@ export function ObjectReviewView({
           };
         }),
     // `theme` trong deps: đổi chế độ/bảng màu thì khung vật vẽ lại bằng màu mới.
-    [visibleObjects, selected, jobId, theme, currentColliderDraft, hiddenIds], // eslint-disable-line react-hooks/exhaustive-deps
+    [scene, selected, jobId, theme, currentColliderDraft, hiddenIds], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   async function run(mutate: (revision: string) => Promise<{ scene: SceneIR; representations?: ObjectRepresentation[] }>) {
-    if (!scene || mutationInFlight.current) return;
+    if (!scene || mutationInFlight.current) return false;
     mutationInFlight.current = true;
     const revision = scene.scene_revision;
     setBusy(true);
@@ -472,6 +498,7 @@ export function ObjectReviewView({
       const next = response.scene;
       acceptScene(next, response.representations);
       onSaveState?.({ status: "saved", revision: next.scene_revision });
+      return true;
     } catch (cause: unknown) {
       // 409: scene đã đổi ở lượt khác — phải tải revision mới trước khi ghi (§S06 recovery).
       const conflict = cause instanceof ApiError && cause.status === 409;
@@ -489,6 +516,7 @@ export function ObjectReviewView({
         message,
         retry: conflict ? () => setReload((value) => value + 1) : () => void run(mutate),
       });
+      return false;
     } finally {
       mutationInFlight.current = false;
       setBusy(false);
@@ -518,6 +546,30 @@ export function ObjectReviewView({
 
   const act = (object: SceneObject, action: ObjectAction, extra?: ActionExtra) =>
     run((revision) => applyObjectAction(jobId, object.id, action, revision, extra));
+
+  async function restoreListedObject(object: SceneObject, confirmedMerge = false) {
+    if (object.provenance.review === "MERGED" && !confirmedMerge) {
+      setMergeRestoreTarget(object.id);
+      return;
+    }
+    if (isIgnored(object) || (object.state === "CANDIDATE" && object.active) || (object.state === "CONFIRMED" && !object.active)) {
+      const success = await run((revision) => applyObjectAction(jobId, object.id,
+        isIgnored(object) || object.state === "CANDIDATE" ? "restore" : "hide", revision,
+        object.state === "CONFIRMED" && !isIgnored(object) ? { active: true } : undefined));
+      if (!success) return;
+    }
+    setViewportHidden((previous) => ({ ...previous, ids: new Set([...previous.ids].filter((id) => id !== object.id)) }));
+    setFilter("all");
+    setLeftTab("objects");
+  }
+
+  function openMerge(object: SceneObject) {
+    setLeftTab("objects");
+    setCorrectionPanelOpen(true);
+    setMergeCandidateIds([object.id]);
+    setMergePrimaryId(object.id);
+    setSemanticSourceId("");
+  }
 
   function toggleMergeCandidate(objectId: string) {
     const nextIds = mergeCandidateIds.includes(objectId)
@@ -588,6 +640,23 @@ export function ObjectReviewView({
 
   return (
     <div className="relative size-full overflow-hidden bg-viewport">
+      <AlertDialog open={mergeRestoreTarget !== null} onOpenChange={(open) => { if (!open) setMergeRestoreTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Khôi phục nhóm trước khi gộp?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Các phần trong nhóm sẽ trở lại thành những vật riêng trước lần gộp. Những vật khác giữ nguyên. Nếu nhóm đã được chỉnh sửa sau khi gộp, thao tác sẽ bị chặn để bảo vệ chỉnh sửa đó.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Hủy</AlertDialogCancel>
+            <AlertDialogAction disabled={busy} onClick={() => {
+              const object = scene.objects.find((item) => item.id === mergeRestoreTarget);
+              if (object) void restoreListedObject(object, true);
+            }}>Khôi phục cả nhóm</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       {/* Viewport 3D chiếm toàn bộ không gian khung nhìn */}
       <div className="size-full">
         {scene.environment.visual_ref ? (
@@ -649,7 +718,7 @@ export function ObjectReviewView({
           />
         ) : (
             <CollisionMeshCanvas url={jobArtifactContentUrl(jobId, scene.environment.geometry_ref)}>
-            {visibleObjects.filter((object) => isPlaced(object) && !hiddenIds.has(object.id)).map((object) => (
+            {scene.objects.filter((object) => isPlaced(object) && !hiddenIds.has(object.id)).map((object) => (
               <ObjectBox
                 key={object.id}
                 object={object}
@@ -732,7 +801,7 @@ export function ObjectReviewView({
               <TabsContent value="objects" forceMount hidden={Boolean(sceneStateControls) && leftTab !== "objects"} className="m-0 flex min-h-0 flex-col data-[state=inactive]:hidden">
               <div className="space-y-2 border-b border-line-dark px-3 py-2.5">
               <p className="text-xs font-semibold text-on-dark">
-                {scene.objects.length} vật thể · {counts.pending} chờ xác nhận
+                {scene.objects.length} vật thể · {scene.objects.filter((object) => object.state === "CANDIDATE" && !isIgnored(object)).length} chờ xác nhận
               </p>
               <div className="flex flex-wrap gap-1" role="group" aria-label="Lọc vật thể">
                 {FILTERS.map((item) => (
@@ -826,7 +895,7 @@ export function ObjectReviewView({
                 onClick={() => setCorrectionPanelOpen((open) => !open)}
                 className="flex w-full items-center justify-between rounded px-1 py-1 text-left text-xs font-semibold text-on-dark hover:bg-on-dark/10 disabled:opacity-50"
               >
-                <span>Sửa nhóm Gaussian</span>
+                <span>Gộp ứng viên / Sửa nhóm Gaussian</span>
                 <span className="font-normal text-on-dark/60">{membership ? `${eligibleCorrections.length} ứng viên khả dụng` : "chưa có membership"}</span>
               </button>
               {correctionPanelOpen && (
@@ -837,6 +906,9 @@ export function ObjectReviewView({
                     </p>
                   ) : (
                     <>
+                      <p className="text-on-dark/70">
+                        Gộp dùng khi một vật bị tách nhầm thành nhiều ứng viên. Chọn từ hai phần trở lên: Gaussian và ownership được hợp nhất, giữ ID của ứng viên chính.
+                      </p>
                       <p className="text-on-dark/70">
                         Lệnh gắn với revision {scene.scene_revision}. Vùng nhập theo tọa độ canonical world, đơn vị mét.
                       </p>
@@ -970,7 +1042,13 @@ export function ObjectReviewView({
                   Không có vật nào trong nhóm này.
                 </li>
               )}
-              {visibleObjects.map((object) => (
+              {visibleObjects.map((object, index) => (
+                <Fragment key={object.id}>
+                  {filter === "ignored" && (index === 0 || archiveCategory(object, hiddenIds) !== archiveCategory(visibleObjects[index - 1], hiddenIds)) && (
+                    <li className="bg-viewport-deep/60 px-3 py-2">
+                      <h3 className="text-xs font-semibold text-on-dark">{ARCHIVE_CATEGORIES.find((item) => item.value === archiveCategory(object, hiddenIds))?.label} · {visibleObjects.filter((item) => archiveCategory(item, hiddenIds) === archiveCategory(object, hiddenIds)).length}</h3>
+                    </li>
+                  )}
                 <li
                   key={object.id}
                   id={`object-${object.id}`}
@@ -989,7 +1067,14 @@ export function ObjectReviewView({
                     <span className="size-2.5 shrink-0 rounded-sm" style={{ background: stateColor(object) }} aria-hidden />
                     <span className="truncate text-sm text-on-dark">{object.name}</span>
                   </button>
-                  {object.state === "CANDIDATE" && !isIgnored(object) ? (
+                  {archiveCategory(object, hiddenIds) ? (
+                    <span className="flex shrink-0 items-center gap-1">
+                      {hiddenIds.has(object.id) ? <Badge>Ẩn màn hình</Badge> : <StateBadge object={object} />}
+                      <Button size="sm" variant="secondary" disabled={busy} aria-label={`Khôi phục ${object.name}`} title="Khôi phục" onClick={() => void restoreListedObject(object)} className="size-7 p-0">
+                        <Undo2 className="size-3.5" aria-hidden />
+                      </Button>
+                    </span>
+                  ) : object.state === "CANDIDATE" && !isIgnored(object) ? (
                     <span className="flex shrink-0 gap-1">
                       <Button
                         size="sm"
@@ -1018,6 +1103,7 @@ export function ObjectReviewView({
                     <StateBadge object={object} />
                   )}
                 </li>
+                </Fragment>
               ))}
             </ul>
               </TabsContent>
@@ -1078,7 +1164,15 @@ export function ObjectReviewView({
               <ObjectifyNotice jobId={jobId} revision={scene.scene_revision} onRevision={() => setReload((value) => value + 1)} />
               {missingSourcePolicies.length > 0 && <Notice tone="rust" className="m-3">SOURCE_POLICY_MISSING: Không có metadata nguồn để đặt Gaussian của {missingSourcePolicies.map((item) => item.id).join(", ")}. Hãy tải lại scene.</Notice>}
               {representations.some((item) => item.readiness_blockers.length) && (
-                <Notice tone="rust" className="m-3">Representation chưa đầy đủ: {representations.flatMap((item) => item.readiness_blockers.map((code) => `${item.object_id}: ${code}`)).join(", ")}</Notice>
+                <Notice tone="rust" className="m-3">
+                  Representation chưa đầy đủ: {representations.flatMap((item) => item.readiness_blockers.map((code) => `${item.object_id}: ${code}`)).join(", ")}
+                  {scene.objects.filter((object) => object.state === "CANDIDATE" && object.active && !isIgnored(object)).map((object) => (
+                    <div key={object.id} className="mt-2 space-y-1">
+                      <p>{object.name} đã bị bật mô phỏng từ phiên bản cũ. Khôi phục để đưa về ứng viên chờ xác nhận, giữ nguyên hình học và vị trí.</p>
+                      <Button size="sm" variant="secondary" disabled={busy} onClick={() => void restoreListedObject(object)}>Khôi phục trạng thái {object.id}</Button>
+                    </div>
+                  ))}
+                </Notice>
               )}
               {error && (
                 <Notice tone="rust" className="m-3">
@@ -1091,6 +1185,8 @@ export function ObjectReviewView({
                   object={current}
                   viewportHidden={hiddenIds.has(current.id)}
                   onToggleVisibility={() => toggleViewportVisibility(current.id)}
+                  onRestore={() => void restoreListedObject(current)}
+                  onMerge={() => openMerge(current)}
                   busy={busy}
                   catalog={catalog}
                   sceneRevision={scene.scene_revision}
@@ -1179,6 +1275,8 @@ function Inspector({
   object,
   viewportHidden,
   onToggleVisibility,
+  onRestore,
+  onMerge,
   busy,
   catalog,
   sceneRevision,
@@ -1192,6 +1290,8 @@ function Inspector({
   object: SceneObject;
   viewportHidden: boolean;
   onToggleVisibility: () => void;
+  onRestore: () => void;
+  onMerge: () => void;
   busy: boolean;
   catalog: SceneCatalog | null;
   sceneRevision: string;
@@ -1235,6 +1335,7 @@ function Inspector({
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <StateBadge object={object} />
+        {viewportHidden && <Badge>Ẩn trên màn hình</Badge>}
         <Badge tone="neutral">{object.origin === "reconstructed" ? "Tách từ scene" : "Người dùng thêm"}</Badge>
       </div>
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
@@ -1280,15 +1381,16 @@ function Inspector({
             </Button>
           </>
         )}
-        {removed && !merged && (
-          <Button size="sm" variant="secondary" disabled={busy} onClick={() => onAct("restore")} className="border-line-dark bg-viewport-deep/80 text-on-dark hover:bg-viewport-deep">
+        {(removed || viewportHidden || (object.state === "CONFIRMED" && !object.active)) && (
+          <Button size="sm" variant="secondary" disabled={busy} onClick={onRestore} className="border-line-dark bg-viewport-deep/80 text-on-dark hover:bg-viewport-deep">
             <Undo2 aria-hidden /> Khôi phục
           </Button>
         )}
       </div>
+      {object.state === "CANDIDATE" && !removed && <Button size="sm" variant="secondary" disabled={busy} onClick={onMerge}>Gộp với ứng viên khác</Button>}
       {merged && (
         <Notice>
-          Vật này đã được gộp vào {mergedInto ?? "một vật khác"}. Để hoàn tác, hãy khôi phục revision trước khi gộp.
+          Vật này đã được gộp vào {mergedInto ?? "một vật khác"}. Khôi phục sẽ trả lại cả nhóm trước lần gộp.
         </Notice>
       )}
       {catalog && !removed && (
@@ -1638,7 +1740,7 @@ function StateBadge({ object }: { object: SceneObject }) {
   if (object.provenance.review === "DELETED") return <Badge>Đã xoá</Badge>;
   if (isIgnored(object)) return <Badge>Đã loại</Badge>;
   if (object.state === "CANDIDATE") return <Badge tone="ochre">Ứng viên</Badge>;
-  return object.active ? <Badge tone="sage">Đã xác nhận</Badge> : <Badge>Đang ẩn</Badge>;
+  return object.active ? <Badge tone="sage">Đã xác nhận</Badge> : <Badge>Tắt trong mô phỏng</Badge>;
 }
 
 /** Hộp khung dây trong khung Z-up của collision mesh; màu theo trạng thái review. */

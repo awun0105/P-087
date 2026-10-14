@@ -444,7 +444,7 @@ describe("ObjectReviewView", () => {
     render(<ObjectReviewView jobId="job-a" />);
     expect(await screen.findByText("1 vật thể · 0 chờ xác nhận")).toBeInTheDocument();
     expect(screen.queryByText("Vật thể 1")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Đã loại/xoá/gộp · 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Đã loại/xoá/gộp/ẩn · 1" }));
     expect(screen.getByText("Vật thể 1")).toBeInTheDocument();
     expect(screen.getByText("Đã loại")).toBeInTheDocument();
   });
@@ -744,11 +744,11 @@ describe("ObjectReviewView", () => {
     render(<ObjectReviewView jobId="job-a" />);
 
     expect(await screen.findByText("1 vật thể · 0 chờ xác nhận")).toBeInTheDocument();
-    fireEvent.click(await screen.findByRole("button", { name: "Đã loại/xoá/gộp · 1" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Đã loại/xoá/gộp/ẩn · 1" }));
     fireEvent.click(screen.getByRole("button", { name: "Chọn Vật thể 1" }));
 
     expect(screen.getAllByText("Đã gộp vào candidate-002").length).toBeGreaterThan(0);
-    expect(screen.queryByRole("button", { name: "Khôi phục Vật thể 1" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Khôi phục Vật thể 1" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Đổi tên" })).toBeNull();
   });
 
@@ -1037,6 +1037,104 @@ describe("ObjectReviewView", () => {
     expect(await screen.findByText(/SOURCE_POLICY_MISSING/)).toBeInTheDocument();
     const objects = JSON.parse(screen.getByTestId("metric-scene").dataset.objects!);
     expect(objects.every((item: { url: string | null }) => item.url === null)).toBe(true);
+  });
+
+  it("archive separates Ignore, Delete, Merge, viewport Hide and simulation disable", async () => {
+    const base = scene("rev-001", "CANDIDATE");
+    base.objects = [
+      scene("rev-001", "CANDIDATE", "IGNORED").objects[0],
+      scene("rev-001", "CANDIDATE", "DELETED").objects[0],
+      scene("rev-001", "CANDIDATE", "MERGED", "candidate-005").objects[0],
+      { ...scene("rev-001", "CONFIRMED", "CONFIRMED").objects[0], active: false },
+      base.objects[0],
+    ].map((object, index) => ({ ...object, id: `candidate-00${index + 1}`, name: `Vật thể ${index + 1}` }));
+    routeFetch({ "/scene": [reply({ scene: base })] });
+    render(<ObjectReviewView jobId="job-a" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Chọn Vật thể 5" }));
+    const requests = vi.mocked(fetch).mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: "Ẩn trên màn hình" }));
+    expect(screen.getByRole("button", { name: "Đã loại/xoá/gộp/ẩn · 5" })).toHaveAttribute("aria-pressed", "true");
+    for (const name of ["Đã loại · 1", "Đã xoá · 1", "Đã gộp · 1", "Ẩn trên màn hình · 1", "Tắt trong mô phỏng · 1"]) {
+      expect(screen.getByRole("heading", { name })).toBeInTheDocument();
+    }
+    for (let index = 1; index <= 5; index += 1) expect(screen.getByRole("button", { name: `Khôi phục Vật thể ${index}` })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Khôi phục Vật thể 5" }));
+    expect(screen.getByRole("button", { name: "Chưa loại · 1" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Chọn Vật thể 5" })).toBeInTheDocument();
+    expect(vi.mocked(fetch).mock.calls).toHaveLength(requests);
+  });
+
+  it.each(["IGNORED", "DELETED"])("restore %s returns Candidate without implicitly confirming it", async (review) => {
+    routeFetch({
+      "/objects/candidate-001/restore": [reply({ scene: scene("rev-002", "CANDIDATE") })],
+      "/scene": [reply({ scene: scene("rev-001", "CANDIDATE", review) })],
+    });
+    render(<ObjectReviewView jobId="job-a" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Đã loại/xoá/gộp/ẩn · 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Khôi phục Vật thể 1" }));
+    expect(await screen.findByRole("button", { name: "Xác nhận Vật thể 1" })).toBeInTheDocument();
+    const request = calls("/objects/candidate-001/restore")[0][1] as RequestInit;
+    expect(JSON.parse(request.body as string)).toEqual({ expected_scene_revision: "rev-001" });
+    expect(JSON.parse(screen.getByTestId("metric-scene").dataset.physicsObjects!)).toHaveLength(0);
+  });
+
+  it("restore simulation-disabled object sends active=true while viewport restore stays local", async () => {
+    const base = scene("rev-001", "CONFIRMED", "CONFIRMED");
+    base.objects[0].active = false;
+    routeFetch({
+      "/objects/candidate-001/hide": [reply({ scene: scene("rev-002", "CONFIRMED", "CONFIRMED") })],
+      "/scene": [reply({ scene: base })],
+    });
+    render(<ObjectReviewView jobId="job-a" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Đã loại/xoá/gộp/ẩn · 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Khôi phục Vật thể 1" }));
+    expect(await screen.findByRole("button", { name: "Chưa loại · 1" })).toHaveAttribute("aria-pressed", "true");
+    expect(JSON.parse((calls("/objects/candidate-001/hide")[0][1] as RequestInit).body as string)).toEqual({ expected_scene_revision: "rev-001", active: true });
+  });
+
+  it("merged restore explains group restoration and requires explicit confirmation", async () => {
+    routeFetch({
+      "/objects/candidate-001/restore": [reply({ scene: scene("rev-002", "CANDIDATE") })],
+      "/scene": [reply({ scene: scene("rev-001", "CANDIDATE", "MERGED", "candidate-002") })],
+    });
+    render(<ObjectReviewView jobId="job-a" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Đã loại/xoá/gộp/ẩn · 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Khôi phục Vật thể 1" }));
+    expect(screen.getByRole("alertdialog")).toHaveTextContent("Khôi phục nhóm trước khi gộp?");
+    expect(calls("/objects/candidate-001/restore")).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Hủy" }));
+    expect(calls("/objects/candidate-001/restore")).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Khôi phục Vật thể 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Khôi phục cả nhóm" }));
+    expect(await screen.findByRole("button", { name: "Xác nhận Vật thể 1" })).toBeInTheDocument();
+    expect(calls("/objects/candidate-001/restore")).toHaveLength(1);
+  });
+
+  it("legacy INVALID_OBJECT_ACTIVATION offers a Candidate repair instead of automatic confirmation", async () => {
+    const base = scene("rev-001", "CANDIDATE");
+    base.objects[0].active = true;
+    const policy = { object_id: "candidate-001", visual_policy: "source", source_visual_required: false, source_transform: null, readiness_blockers: ["INVALID_OBJECT_ACTIVATION"] };
+    routeFetch({
+      "/objects/candidate-001/restore": [reply({ scene: scene("rev-002", "CANDIDATE"), representations: [{ ...policy, readiness_blockers: [] }] })],
+      "/scene": [reply({ scene: base, representations: [policy] })],
+    });
+    render(<ObjectReviewView jobId="job-a" />);
+    const repair = await screen.findByRole("button", { name: "Khôi phục trạng thái candidate-001" });
+    expect(calls("/objects/candidate-001/restore")).toHaveLength(0);
+    fireEvent.click(repair);
+    await waitFor(() => expect(screen.queryByText(/INVALID_OBJECT_ACTIVATION/)).toBeNull());
+    expect(screen.getByRole("button", { name: "Xác nhận Vật thể 1" })).toBeInTheDocument();
+    expect(calls("/objects/candidate-001/confirm")).toHaveLength(0);
+  });
+
+  it("Candidate inspector exposes Merge and explains that it joins parts of one object", async () => {
+    routeFetch({ "/scene": [reply({ scene: membershipScene() })] });
+    render(<ObjectReviewView jobId="job-a" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Chọn Vật thể 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Gộp với ứng viên khác" }));
+    expect(screen.getByRole("button", { name: /Gộp ứng viên \/ Sửa nhóm Gaussian/ })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText(/một vật bị tách nhầm thành nhiều ứng viên/)).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Chọn để gộp Vật thể 1" })).toBeChecked();
   });
 
 });
