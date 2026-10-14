@@ -1,0 +1,86 @@
+// @vitest-environment node
+import { createRequire } from "node:module";
+import path from "node:path";
+import { beforeAll, describe, expect, it } from "vitest";
+import { ScenePhysics, convexHullVertices, type AmmoModule, type PhysicsObjectSpec } from "@/features/viewer/scene-physics";
+import { parseGlbCollider } from "@/features/viewer/glb-mesh";
+import { BOX_POINTS, colliderGlb } from "./helpers/collider-glb";
+
+let A: AmmoModule;
+beforeAll(async()=>{
+  const dir=path.resolve(__dirname,"../public/vendor/ammo");
+  A=await createRequire(import.meta.url)(path.join(dir,"ammo.wasm.js"))({locateFile:(file:string)=>path.join(dir,file)});
+});
+function item(overrides:Partial<PhysicsObjectSpec>={}):PhysicsObjectSpec {
+  const left=BOX_POINTS.map(([x,y,z])=>[x-2,y,z+2] as [number,number,number]);
+  const right=BOX_POINTS.map(([x,y,z])=>[x+2,y,z+2] as [number,number,number]);
+  return {id:"table",dynamic:false,colliderType:"CONVEX_DECOMPOSITION",position:[0,0,0],rotation_xyzw:[0,0,0,1],parts:parseGlbCollider(colliderGlb({parts:[left,right]})).parts,hull:null,dimensions:null,mass_kg:12,friction:.6,restitution:.2,...overrides};
+}
+function body(physics:ScenePhysics):AmmoModule {
+  return (physics as unknown as {bodies:Map<string,{body:AmmoModule}>}).bodies.get("table")!.body;
+}
+function ray(physics:ScenePhysics,from:number[],to:number[]):number[]|null {
+  const a=new A.btVector3(...from),b=new A.btVector3(...to),callback=new A.ClosestRayResultCallback(a,b);
+  try {
+    (physics as unknown as {world:AmmoModule}).world.rayTest(a,b,callback);
+    if(!callback.hasHit())return null;
+    const p=callback.get_m_hitPointWorld();return[p.x(),p.y(),p.z()];
+  }finally{A.destroy(callback);A.destroy(a);A.destroy(b);}
+}
+
+describe("real Ammo multipart/static colliders",()=>{
+  it("hits each part, misses the gap and creates one static object body",()=>{
+    const p=new ScenePhysics(A,null,[item()]);
+    try{
+      expect(p.statistics.objectBodies).toBe(1);
+      expect(A.castObject(body(p).getCollisionShape(), A.btCompoundShape).getNumChildShapes()).toBe(2);
+      expect(ray(p,[-2,0,5],[-2,0,.2])).not.toBeNull();
+      expect(ray(p,[2,0,5],[2,0,.2])).not.toBeNull();
+      expect(ray(p,[0,0,5],[0,0,.2])).toBeNull();
+      expect(body(p).isStaticObject()).toBe(true);
+      const force=new A.btVector3(100,0,0);body(p).applyCentralImpulse(force);A.destroy(force);
+      let pose=p.step(0,null).get("table")!;
+      for(let i=0;i<300;i++)pose=p.step(1/60,null).get("table")!;
+      expect(pose.position).toEqual([0,0,0]);
+    }finally{p.destroy();}
+    expect(p.statistics).toEqual({objectBodies:0,worldBodies:0,ownedAllocations:0});
+    p.destroy();
+  });
+
+  it("uses one dynamic body with authored mass and finite compound inertia",()=>{
+    const constructions:{mass:number;inertia:number[]}[]=[];
+    const tracked=new Proxy(A,{get:(target,key)=>key==="btRigidBodyConstructionInfo"?function(mass:number,motion:AmmoModule,shape:AmmoModule,inertia:AmmoModule){
+      constructions.push({mass,inertia:[inertia.x(),inertia.y(),inertia.z()]});
+      return new target.btRigidBodyConstructionInfo(mass,motion,shape,inertia);
+    }:target[key]});
+    const p=new ScenePhysics(tracked,null,[item({dynamic:true,position:[0,0,5]})]);
+    try{
+      expect(p.statistics.objectBodies).toBe(1);
+      const info=constructions.find(v=>v.mass>0)!;
+      expect(info.mass).toBe(12);expect(info.inertia.every(v=>Number.isFinite(v)&&v>0)).toBe(true);
+      const initial=p.step(0,null).get("table")!.position[2];
+      const after=p.step(.1,null).get("table")!.position[2];expect(after).toBeLessThan(initial);
+      expect(body(p).getFriction()).toBeCloseTo(.6);expect(body(p).getRestitution()).toBeCloseTo(.2);
+      expect(A.castObject(body(p).getCollisionShape(), A.btCompoundShape).getNumChildShapes()).toBe(2);
+    }finally{p.destroy();}
+  });
+
+  it("supports static triangle meshes and refuses dynamic concave meshes",()=>{
+    const p=new ScenePhysics(A,null,[item({colliderType:"SIMPLIFIED_MESH"})]);
+    try{expect(ray(p,[-2,0,5],[-2,0,.2])).not.toBeNull();expect(ray(p,[0,0,5],[0,0,.2])).toBeNull();}finally{p.destroy();}
+    expect(()=>new ScenePhysics(A,null,[item({colliderType:"SIMPLIFIED_MESH",dynamic:true})])).toThrow(/dynamic concave/);
+  });
+
+  it("deduplicates only exact vertices and retains more than 256 boundary points",()=>{
+    const sphere:number[]=[];
+    for(let i=0;i<1024;i++){
+      const z=1-2*(i+.5)/1024;const angle=i*Math.PI*(3-Math.sqrt(5));const r=Math.sqrt(1-z*z);
+      sphere.push(r*Math.cos(angle),r*Math.sin(angle),z);
+    }
+    const points=convexHullVertices(new Float32Array([...sphere,...sphere]));expect(points.length/3).toBe(1024);
+    const p=new ScenePhysics(A,null,[item({colliderType:"CONVEX_HULL",parts:[{positions:points,indices:new Uint32Array()}]})]);
+    try{expect(A.castObject(body(p).getCollisionShape(), A.btCompoundShape).getNumChildShapes()).toBe(1);expect(ray(p,[0,0,2],[0,0,.2])).not.toBeNull();}finally{p.destroy();}
+    expect(()=>convexHullVertices(new Float32Array([0,0,0,1,0,0,0,1,0,1,1,0]))).toThrow(/degenerate/);
+    expect(()=>convexHullVertices(new Float32Array([0,0,0,1,0,0,0,1,0,0,0,NaN]))).toThrow(/finite/);
+  });
+});

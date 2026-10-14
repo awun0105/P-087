@@ -12,7 +12,7 @@
  */
 
 import type { Vec3 } from "@/features/viewer/source-frame";
-import type { TriangleMesh } from "@/features/viewer/glb-mesh";
+import type { ColliderMeshPart, TriangleMesh } from "@/features/viewer/glb-mesh";
 
 type Quat = [number, number, number, number];
 
@@ -24,6 +24,10 @@ type AmmoObject = any;
 
 export interface PhysicsObjectSpec {
   id: string;
+  dynamic?: boolean;
+  colliderType?: string;
+  parts?: readonly ColliderMeshPart[];
+  colliderLocalTransform?: { translation_xyz: Vec3; rotation_quaternion_xyzw: Quat } | null;
   /** Pose ở hệ canonical (như `SceneObject.transform`). */
   position: Vec3;
   rotation_xyzw: Quat;
@@ -102,6 +106,8 @@ export class ScenePhysics {
   private readonly world: AmmoObject;
   private readonly owned: AmmoObject[] = [];
   private readonly bodies = new Map<string, { body: AmmoObject; initial: Pose }>();
+  private readonly worldBodies: AmmoObject[] = [];
+  private destroyed = false;
   private readonly character: AmmoObject;
   private readonly scratch: AmmoObject;
   private readonly vector: AmmoObject;
@@ -111,6 +117,7 @@ export class ScenePhysics {
   constructor(ammo: AmmoModule, environment: TriangleMesh | null, objects: readonly PhysicsObjectSpec[]) {
     const A = ammo;
     this.A = A;
+    try {
     const config = this.keep(new A.btDefaultCollisionConfiguration());
     const dispatcher = this.keep(new A.btCollisionDispatcher(config));
     const broadphase = this.keep(new A.btDbvtBroadphase());
@@ -137,12 +144,17 @@ export class ScenePhysics {
         this.addStatic(this.keep(new A.btBvhTriangleMeshShape(mesh, true, true)));
       }
     }
-    for (const item of objects) this.addDynamic(item);
+    if (new Set(objects.map(item => item.id)).size !== objects.length) throw new Error("Duplicate physics object IDs");
+    for (const item of objects) this.addObject(item);
     const capsule = this.keep(new A.btCapsuleShapeZ(CHARACTER_RADIUS_M, CHARACTER_HEIGHT_M - 2 * CHARACTER_RADIUS_M));
     this.character = this.body(0, capsule, { position: [0, 0, -100], rotation_xyzw: [0, 0, 0, 1] });
     this.character.setCollisionFlags(this.character.getCollisionFlags() | CF_KINEMATIC_OBJECT);
     this.character.setActivationState(DISABLE_DEACTIVATION);
-    this.world.addRigidBody(this.character);
+    this.registerBody(this.character);
+    } catch (error: unknown) {
+      this.destroy();
+      throw error;
+    }
   }
 
   /**
@@ -186,7 +198,15 @@ export class ScenePhysics {
     }
   }
 
+  get statistics(): { objectBodies: number; worldBodies: number; ownedAllocations: number } {
+    return { objectBodies: this.bodies.size, worldBodies: this.worldBodies.length, ownedAllocations: this.owned.length };
+  }
+
   destroy(): void {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    for (const body of this.worldBodies) this.world.removeRigidBody(body);
+    this.worldBodies.length = 0;
     for (const item of this.owned.reverse()) this.A.destroy(item);
     this.owned.length = 0;
     this.bodies.clear();
@@ -218,35 +238,76 @@ export class ScenePhysics {
   private addStatic(shape: AmmoObject): void {
     const body = this.body(0, shape, { position: [0, 0, 0], rotation_xyzw: [0, 0, 0, 1] });
     body.setFriction(0.8);
-    this.world.addRigidBody(body);
+    this.registerBody(body);
   }
 
-  private addDynamic(item: PhysicsObjectSpec): void {
-    const A = this.A;
-    let shape: AmmoObject;
-    if (item.hull && item.hull.length >= 12) {
-      shape = this.keep(new A.btConvexHullShape());
-      const point = this.keep(new A.btVector3());
-      const hull = sampleHull(item.hull);
-      for (let i = 0; i < hull.length; i += 3) {
-        point.setValue(hull[i], hull[i + 1], hull[i + 2]);
-        shape.addPoint(point, i + 3 >= hull.length);
-      }
-    } else if (item.dimensions) {
-      const [x, y, z] = item.dimensions;
-      shape = this.keep(new A.btBoxShape(this.keep(new A.btVector3(x / 2, y / 2, z / 2))));
-    } else {
-      return;
+  private registerBody(body: AmmoObject): void {
+    this.world.addRigidBody(body);
+    this.worldBodies.push(body);
+  }
+
+  private convex(points: Float32Array): AmmoObject {
+    const vertices = convexHullVertices(points);
+    const shape = this.keep(new this.A.btConvexHullShape());
+    const point = this.keep(new this.A.btVector3());
+    for (let i = 0; i < vertices.length; i += 3) {
+      point.setValue(vertices[i], vertices[i+1], vertices[i+2]);
+      shape.addPoint(point, i+3 === vertices.length);
     }
     shape.setMargin(0.01);
+    return shape;
+  }
+
+  private triangleShape(meshes: readonly ColliderMeshPart[]): AmmoObject {
+    const mesh = this.keep(new this.A.btTriangleMesh(true, true));
+    const vectors = [0,1,2].map(() => this.keep(new this.A.btVector3()));
+    for (const part of meshes) {
+      validateTriangleMesh(part);
+      for (let i = 0; i < part.indices.length; i += 3) {
+        for (let corner = 0; corner < 3; corner += 1) {
+          const index = part.indices[i+corner]*3;
+          vectors[corner].setValue(part.positions[index], part.positions[index+1], part.positions[index+2]);
+        }
+        mesh.addTriangle(...vectors, false);
+      }
+    }
+    return this.keep(new this.A.btBvhTriangleMeshShape(mesh, true, true));
+  }
+
+  private addObject(item: PhysicsObjectSpec): void {
+    const dynamic = item.dynamic !== false;
+    if (dynamic && (!Number.isFinite(item.mass_kg) || item.mass_kg <= 0)) throw new Error(`${item.id}: dynamic body requires positive authored mass`);
+    const type = item.colliderType ?? (item.parts?.length || item.hull ? "CONVEX_HULL" : "AABB");
+    let children: AmmoObject[];
+    if (type === "AABB" || type === "OBB") {
+      if (!item.dimensions || item.dimensions.some(value => !Number.isFinite(value) || value <= 0)) throw new Error(`${item.id}: box dimensions are invalid`);
+      const half = this.keep(new this.A.btVector3(...item.dimensions.map(value => value/2)));
+      const box = this.keep(new this.A.btBoxShape(half));
+      box.setMargin(0.01);
+      children = [box];
+    } else if (type === "SIMPLIFIED_MESH") {
+      if (dynamic) throw new Error(`${item.id}: dynamic concave triangle mesh is unsupported`);
+      if (!item.parts?.length) throw new Error(`${item.id}: triangle collider has no parts`);
+      children = [this.triangleShape(item.parts)];
+    } else if (type === "CONVEX_HULL" || type === "CONVEX_DECOMPOSITION") {
+      const parts = item.parts ?? (item.hull ? [{ positions: item.hull, indices: new Uint32Array() }] : []);
+      if (!parts.length || (type === "CONVEX_HULL" && parts.length !== 1)) throw new Error(`${item.id}: collider part count does not match ${type}`);
+      children = parts.map(part => this.convex(part.positions));
+    } else throw new Error(`${item.id}: unsupported collider type ${type}`);
+    // Compound created after its children so reverse teardown destroys parent before child shapes.
+    const compound = this.keep(new this.A.btCompoundShape());
+    const local = item.colliderLocalTransform;
+    const childTransform = this.transform({ position: local?.translation_xyz ?? [0,0,0], rotation_xyzw: local?.rotation_quaternion_xyzw ?? [0,0,0,1] });
+    for (const child of children) compound.addChildShape(childTransform, child);
     const initial: Pose = { position: item.position, rotation_xyzw: item.rotation_xyzw };
-    const body = this.body(Math.max(item.mass_kg, 0.1), shape, initial);
+    const body = this.body(dynamic ? item.mass_kg : 0, compound, initial);
     body.setFriction(item.friction);
     body.setRestitution(item.restitution);
-    body.setDamping(0.05, 0.2);
-    this.world.addRigidBody(body);
+    if (dynamic) body.setDamping(0.05, 0.2);
+    this.registerBody(body);
     this.bodies.set(item.id, { body, initial });
   }
+
 }
 
 let loading: Promise<AmmoModule> | null = null;
@@ -269,4 +330,39 @@ export function loadAmmo(base = "/vendor/ammo/"): Promise<AmmoModule> {
     throw error;
   });
   return loading;
+}
+
+/** Exact float32 duplicate removal, tolerance 0 metres; never subsample the boundary. */
+export function convexHullVertices(points: Float32Array): Float32Array {
+  if (points.length % 3 || !points.length) throw new Error("Convex part requires xyz vertices");
+  const unique = new Map<string, number[]>();
+  for (let i = 0; i < points.length; i += 3) {
+    const p = [points[i], points[i+1], points[i+2]];
+    if (!p.every(Number.isFinite)) throw new Error("Convex part has non-finite vertices");
+    unique.set(p.join(","), p);
+  }
+  const vertices = [...unique.values()];
+  if (vertices.length < 4) throw new Error("Convex part has fewer than four unique vertices");
+  const p = vertices[0];
+  const edges = vertices.slice(1).map(v => v.map((value, axis) => value-p[axis]));
+  const length = (e: number[]) => Math.hypot(...e);
+  const edge = edges.reduce((a,b) => length(a)>length(b)?a:b);
+  const cross = (a: number[], b: number[]) => [a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+  const normal = edges.map(e=>cross(edge,e)).reduce((a,b)=>length(a)>length(b)?a:b);
+  const volume = Math.max(...edges.map(e=>Math.abs(e.reduce((sum,v,axis)=>sum+v*normal[axis],0))));
+  if (volume <= Math.pow(length(edge),3)*1e-10) throw new Error("Convex part is degenerate/coplanar");
+  return new Float32Array(vertices.flat());
+}
+
+function validateTriangleMesh(mesh: ColliderMeshPart): void {
+  const {positions,indices}=mesh;
+  if (!positions.length || positions.length%3 || !indices.length || indices.length%3 || !positions.every(Number.isFinite)) throw new Error("Invalid triangle mesh arrays");
+  for(let i=0;i<indices.length;i+=3) {
+    const [a,b,c]=[indices[i],indices[i+1],indices[i+2]];
+    if ([a,b,c].some(index=>index>=positions.length/3) || a===b || a===c || b===c) throw new Error("Invalid triangle mesh indices");
+    const e1=[0,1,2].map(axis=>positions[b*3+axis]-positions[a*3+axis]);
+    const e2=[0,1,2].map(axis=>positions[c*3+axis]-positions[a*3+axis]);
+    const area=Math.hypot(e1[1]*e2[2]-e1[2]*e2[1],e1[2]*e2[0]-e1[0]*e2[2],e1[0]*e2[1]-e1[1]*e2[0]);
+    if(!Number.isFinite(area)||area===0) throw new Error("Degenerate triangle mesh face");
+  }
 }
