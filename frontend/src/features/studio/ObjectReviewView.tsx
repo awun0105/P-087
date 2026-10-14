@@ -388,37 +388,38 @@ export function ObjectReviewView({
   }, []);
 
   const previews = useMemo(() => new Set((catalog?.entries ?? []).filter((item) => item.has_preview).map((item) => item.family)), [catalog]);
-  // SOURCE giữ extraction pose; OBJECT dùng pose đã chỉnh. Visibility viewport độc lập lifecycle.
+  // Editor previews Pending at its edited pose; Ignored retains its source pose. Hide applies to the same entity.
   const missingSourcePolicies = (scene?.objects ?? []).filter((object) =>
     object.state === "CANDIDATE" && object.visual_ref?.artifact_type === "ObjectGaussians" &&
     !["DELETED", "MERGED"].includes(String(object.provenance.review)) &&
     !representations.some((item) => item.object_id === object.id));
   const splats = useMemo<OverlayObject[]>(
-    () => (scene?.objects ?? []).flatMap((object) => {
+    () => (scene?.objects ?? []).map((object) => {
       const policy = representations.find((item) => item.object_id === object.id);
-      const visible = !hiddenIds.has(object.id);
-      const editingRoot: OverlayObject = {
+      const shown = !hiddenIds.has(object.id);
+      const overlay: OverlayObject = {
         id: object.id,
         ...objectVisual(jobId, object, previews),
         position: object.transform.translation_xyz,
         rotation_xyzw: object.transform.rotation_quaternion_xyzw,
-        visible: visible && (policy ? policy.visual_policy === "object" : isPlaced(object)),
+        visible: shown && isPlaced(object),
       };
       if (!policy && object.state === "CANDIDATE" && object.visual_ref?.artifact_type === "ObjectGaussians") {
-        editingRoot.url = null;
-        return [editingRoot];
+        overlay.url = null;
+      } else if (policy?.visual_policy === "source" && policy.source_visual_required) {
+        if (!policy.source_transform || policy.readiness_blockers.length) {
+          overlay.url = null;
+        } else if (object.provenance.review === "IGNORED") {
+          overlay.position = policy.source_transform.translation_xyz;
+          overlay.rotation_xyzw = policy.source_transform.rotation_quaternion_xyzw;
+          overlay.visible = shown;
+        }
+        // Pending is an editable visual preview: Gaussian, outline and gizmo share this ID and pose.
+        // SOURCE conservation at extraction pose is applied by the exporter, not the editor preview.
+      } else if (policy?.visual_policy === "omit") {
+        overlay.visible = false;
       }
-      if (policy?.visual_policy !== "source" || !policy.source_visual_required) return [editingRoot];
-      editingRoot.url = null;
-      editingRoot.visible = visible && isPlaced(object);
-      if (!policy.source_transform || policy.readiness_blockers.length) return [editingRoot];
-      return [editingRoot, {
-        id: `source:${object.id}`,
-        ...objectVisual(jobId, object, previews),
-        position: policy.source_transform.translation_xyz,
-        rotation_xyzw: policy.source_transform.rotation_quaternion_xyzw,
-        visible,
-      }];
+      return overlay;
     }),
     [scene, representations, jobId, previews, hiddenIds],
   );

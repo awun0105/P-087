@@ -65,6 +65,8 @@ vi.mock("playcanvas", async (importOriginal) => {
   };
 });
 
+import { Asset, Entity, Quat, type AppBase } from "playcanvas";
+
 import { SceneOverlay } from "@/features/viewer/scene-overlay";
 import type { ViewerAppLike } from "@/features/viewer/PlayCanvasScene";
 
@@ -242,6 +244,74 @@ describe("SceneOverlay - cách ly cử chỉ kéo Gizmo khỏi xoay camera", () 
     const remainingCaptureDown = listeners["pointerdown"]?.filter((l) => l.capture);
     expect(remainingCaptureDown?.length ?? 0).toBe(0);
 
+    overlay.destroy();
+  });
+});
+
+
+describe("SceneOverlay - Gaussian and collider attachment", () => {
+  it.each(["translate", "rotate"] as const)("%s targets the loaded Gaussian entity and keeps its outline synchronized", (mode) => {
+    const canvas = document.createElement("canvas");
+    const componentAssets = new Map<Entity, Asset>();
+    let overlayRoot: Entity | null = null;
+    const app = {
+      root: {
+        addChild: (entity: Entity) => { sceneRoot.addChild(entity); overlayRoot = entity; },
+        findComponents: (type: string) => type === "camera" ? [{ system: { app: { graphicsDevice: { canvas } } } }] : [],
+      },
+      graphicsDevice: { canvas },
+      renderNextFrame: false,
+      scene: { layers: { insert: vi.fn(), layerList: [] } },
+      systems: {
+        light: { addComponent: vi.fn() },
+        render: { addComponent: vi.fn() },
+        gsplat: { addComponent: (entity: Entity, data: { asset: Asset }) => componentAssets.set(entity, data.asset) },
+      },
+      assets: {
+        add: vi.fn(),
+        load: vi.fn((asset: Asset) => {
+          asset.resource = { destroy: vi.fn() };
+          asset.fire("load", asset);
+        }),
+        remove: vi.fn(),
+      },
+    };
+    const sceneRoot = new Entity("scene-root", app as unknown as AppBase);
+    // AppBase enables its root at startup; this fixture stubs graphics systems, not entity hierarchy.
+    (sceneRoot as unknown as { _notifyHierarchyStateChanged(node: Entity, enabled: boolean): void })._notifyHierarchyStateChanged(sceneRoot, true);
+    const overlay = new SceneOverlay(app as unknown as ViewerAppLike);
+    const input = { id: "candidate-006", url: "/object.ply", position: [1, 2, 3] as [number, number, number], rotation_xyzw: [0, 0, 0, 1] as [number, number, number, number], visible: true };
+    overlay.setObjects([input]);
+    overlay.setBoxes([{ id: input.id, center: input.position, rotation_xyzw: input.rotation_xyzw, dimensions: [1, 2, 3], color: "#ff9900", emphasized: false }]);
+    const root = overlayRoot as unknown as Entity;
+    const gaussianEntity = root.findByName(`r2s-object-${input.id}`) as Entity;
+    const outline = root.findByName(`r2s-box-${input.id}`) as Entity;
+    expect(componentAssets.get(gaussianEntity)?.getFileUrl()).toBe(input.url);
+    const handlers = { onStart: vi.fn(), onEnd: vi.fn() };
+    overlay.attachGizmo(input.id, mode, handlers);
+    const gizmo = (overlay as unknown as { gizmo: { attach: ReturnType<typeof vi.fn>; fire(event: string): void } }).gizmo;
+    expect(gizmo.attach).toHaveBeenCalledWith([gaussianEntity]);
+    const quaternion = new Quat(0, 0, Math.SQRT1_2, Math.SQRT1_2);
+    gaussianEntity.setLocalPosition(7, 8, 9);
+    gaussianEntity.setLocalRotation(quaternion);
+    gizmo.fire("transform:move");
+    expect(outline.getLocalPosition().toArray()).toEqual([7, 8, 9]);
+    expect(outline.getLocalRotation().equals(gaussianEntity.getLocalRotation())).toBe(true);
+    gizmo.fire("transform:end");
+    expect(handlers.onEnd).toHaveBeenCalledWith(input.id, [7, 8, 9], [0, 0, Math.SQRT1_2, Math.SQRT1_2]);
+    const moved = { ...input, position: [7, 8, 9] as [number, number, number], rotation_xyzw: [0, 0, Math.SQRT1_2, Math.SQRT1_2] as [number, number, number, number] };
+    overlay.setObjects([{ ...moved, visible: false }]);
+    overlay.setBoxes([]);
+    expect(gaussianEntity.enabled).toBe(false);
+    expect(root.findByName(`r2s-box-${input.id}`)).toBeNull();
+    overlay.setObjects([moved]);
+    expect(gaussianEntity.enabled).toBe(true);
+    expect(gaussianEntity.getLocalPosition().toArray()).toEqual([7, 8, 9]);
+    expect(app.assets.load).toHaveBeenCalledTimes(1);
+    overlay.setObjects([]);
+    expect(root.findByName(`r2s-object-${input.id}`)).toBeNull();
+    expect(app.assets.remove).toHaveBeenCalledWith(componentAssets.get(gaussianEntity));
+    expect(app.renderNextFrame).toBe(true);
     overlay.destroy();
   });
 });

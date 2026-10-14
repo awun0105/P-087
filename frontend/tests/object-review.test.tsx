@@ -20,6 +20,7 @@ vi.mock("@/features/studio/MetricSceneView", () => ({
     gizmo,
     onTool,
     onDelete,
+    onTransform,
   }: {
     boxes: {
       id: string;
@@ -38,6 +39,7 @@ vi.mock("@/features/studio/MetricSceneView", () => ({
     gizmo?: { id: string; mode: string } | null;
     onTool?: (tool: "translate" | "rotate" | "none") => void;
     onDelete?: () => void;
+    onTransform?: (id: string, position: [number, number, number], rotation: [number, number, number, number]) => void;
   }) => (
     <div data-testid="metric-scene" data-objects={JSON.stringify(objects)} data-boxes={JSON.stringify(boxes)} data-physics-objects={JSON.stringify(physicsObjects)}>
       {boxes.map((box) => `${box.id}:${box.color}`).join(",")}
@@ -45,6 +47,7 @@ vi.mock("@/features/studio/MetricSceneView", () => ({
       <span data-testid="gizmo">{gizmo ? `${gizmo.id}:${gizmo.mode}` : "none"}</span>
       {onTool && <button type="button" onClick={() => onTool("translate")}>Dịch</button>}
       {onDelete && <button type="button" onClick={onDelete}>Xoá</button>}
+      {onTransform && gizmo && <button type="button" onClick={() => onTransform(gizmo.id, [7, 8, 9], [0, 0, Math.SQRT1_2, Math.SQRT1_2])}>Áp pose kiểm tra</button>}
     </div>
   ),
 }));
@@ -1013,7 +1016,7 @@ describe("ObjectReviewView", () => {
     await waitFor(() => expect(screen.getByTestId("splats")).toHaveTextContent("candidate-001:ply:true"));
   });
 
-  it("Candidate moved B keeps one source Gaussian at A and no independent physics", async () => {
+  it("Pending preview binds Gaussian to the editable object at B without creating independent physics", async () => {
     const base = scene("rev-001", "CANDIDATE");
     base.objects[0] = { ...base.objects[0], visual_ref: { ...ref, artifact_type: "ObjectGaussians" } } as (typeof base.objects)[0];
     const pose = { ...base.objects[0].transform, translation_xyz: [8, 9, 10] };
@@ -1022,11 +1025,12 @@ describe("ObjectReviewView", () => {
     const view = await screen.findByTestId("metric-scene");
     const objects = JSON.parse(view.dataset.objects!);
     expect(objects.filter((item: { url: string | null }) => item.url)).toHaveLength(1);
-    expect(objects[1]).toMatchObject({ id: "source:candidate-001", position: [8, 9, 10], visible: true });
+    expect(objects).toHaveLength(1);
+    expect(objects[0]).toMatchObject({ id: "candidate-001", position: base.objects[0].transform.translation_xyz, visible: true });
     expect(JSON.parse(view.dataset.physicsObjects!)).toHaveLength(0);
     fireEvent.click(screen.getByText("Vật thể 1"));
     fireEvent.click(screen.getByRole("button", { name: "Ẩn trên màn hình" }));
-    expect(JSON.parse(view.dataset.objects!)[1].visible).toBe(false);
+    expect(JSON.parse(view.dataset.objects!)[0].visible).toBe(false);
   });
 
   it("missing SOURCE metadata cannot silently place a moved Candidate at current pose", async () => {
@@ -1135,6 +1139,85 @@ describe("ObjectReviewView", () => {
     expect(screen.getByRole("button", { name: /Gộp ứng viên \/ Sửa nhóm Gaussian/ })).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText(/một vật bị tách nhầm thành nhiều ứng viên/)).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "Chọn để gộp Vật thể 1" })).toBeChecked();
+  });
+
+  it("Candidate Move/Rotate, Hide/Show, Delete/Restore keep Gaussian, collider and gizmo bound to one object", async () => {
+    const initial = scene("rev-001", "CANDIDATE");
+    const gaussian = { ...ref, artifact_type: "ObjectGaussians", artifact_uri: "artifact://jobs/job-a/scene/object.ply" };
+    initial.objects[0] = { ...initial.objects[0], visual_ref: gaussian } as (typeof initial.objects)[0];
+    const rotation = [0, 0, Math.SQRT1_2, Math.SQRT1_2];
+    const moved = { ...initial, scene_revision: "rev-002", objects: [{ ...initial.objects[0], transform: { ...initial.objects[0].transform, translation_xyz: [7, 8, 9], rotation_quaternion_xyzw: rotation } }] };
+    const deleted = { ...moved, scene_revision: "rev-003", objects: [{ ...moved.objects[0], provenance: { review: "DELETED" } }] };
+    const restored = { ...moved, scene_revision: "rev-004" };
+    const policy = { object_id: "candidate-001", visual_policy: "source", source_visual_required: true, source_transform: initial.objects[0].transform, readiness_blockers: [] };
+    routeFetch({
+      "/scene/edits": [reply({ scene: moved, representations: [policy] })],
+      "/objects/candidate-001/delete": [reply({ scene: deleted, representations: [{ ...policy, visual_policy: "omit", source_visual_required: false }] })],
+      "/objects/candidate-001/restore": [reply({ scene: restored, representations: [policy] })],
+      "/scene": [reply({ scene: initial, representations: [policy] })],
+    });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<ObjectReviewView jobId="job-a" />);
+    const canvas = await screen.findByTestId("metric-scene");
+    const objects = () => JSON.parse(canvas.dataset.objects!);
+    const boxes = () => JSON.parse(canvas.dataset.boxes!);
+    expect(objects()).toHaveLength(1);
+    expect(objects()[0]).toMatchObject({ id: "candidate-001", visible: true });
+    expect(objects()[0].url).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Chọn Vật thể 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Dịch" }));
+    expect(screen.getByTestId("gizmo")).toHaveTextContent("candidate-001:translate");
+    fireEvent.click(screen.getByRole("button", { name: "Áp pose kiểm tra" }));
+    await waitFor(() => expect(objects()[0].position).toEqual([7, 8, 9]));
+    expect(objects()[0].rotation_xyzw).toEqual(rotation);
+    expect(boxes()[0]).toMatchObject({ id: "candidate-001", center: [7, 8, 9], rotation_xyzw: rotation });
+    expect(objects().some((item: { id: string }) => item.id.startsWith("source:"))).toBe(false);
+    expect(JSON.parse(canvas.dataset.physicsObjects!)).toHaveLength(0);
+    const transformRequest = JSON.parse((calls("/scene/edits")[0][1] as RequestInit).body as string);
+    expect(transformRequest).toMatchObject({ expected_scene_revision: "rev-001", edits: [{ object_id: "candidate-001", translation_xyz: [7, 8, 9], rotation_quaternion_xyzw: rotation }] });
+    const requests = vi.mocked(fetch).mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: "Ẩn trên màn hình" }));
+    expect(objects()[0].visible).toBe(false);
+    expect(boxes()).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Khôi phục Vật thể 1" }));
+    expect(objects()[0]).toMatchObject({ id: "candidate-001", position: [7, 8, 9], rotation_xyzw: rotation, visible: true });
+    expect(vi.mocked(fetch).mock.calls).toHaveLength(requests);
+    fireEvent.click(screen.getByRole("button", { name: "Xoá" }));
+    await waitFor(() => expect(objects()[0].visible).toBe(false));
+    expect(boxes()).toHaveLength(0);
+    expect(objects()).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Đã loại/xoá/gộp/ẩn · 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Khôi phục Vật thể 1" }));
+    await waitFor(() => expect(objects()[0].visible).toBe(true));
+    expect(objects()[0]).toMatchObject({ id: "candidate-001", position: [7, 8, 9], rotation_xyzw: rotation });
+    expect(boxes()[0]).toMatchObject({ id: "candidate-001", center: [7, 8, 9], rotation_xyzw: rotation });
+    expect(calls("/objects/candidate-001/delete")).toHaveLength(1);
+    expect(calls("/objects/candidate-001/restore")).toHaveLength(1);
+  });
+
+  it("Ignore retains only the source observation at A; Restore rebinds the editable visual at B", async () => {
+    const base = scene("rev-001", "CANDIDATE");
+    const gaussian = { ...ref, artifact_type: "ObjectGaussians" };
+    base.objects[0] = { ...base.objects[0], visual_ref: gaussian } as (typeof base.objects)[0];
+    const policy = { object_id: "candidate-001", visual_policy: "source", source_visual_required: true, source_transform: { ...base.objects[0].transform, translation_xyz: [8, 9, 10] }, readiness_blockers: [] };
+    const ignored = { ...base, scene_revision: "rev-002", objects: [{ ...base.objects[0], provenance: { review: "IGNORED" } }] };
+    routeFetch({
+      "/objects/candidate-001/ignore": [reply({ scene: ignored, representations: [policy] })],
+      "/objects/candidate-001/restore": [reply({ scene: { ...base, scene_revision: "rev-003" }, representations: [policy] })],
+      "/scene": [reply({ scene: base, representations: [policy] })],
+    });
+    render(<ObjectReviewView jobId="job-a" />);
+    const canvas = await screen.findByTestId("metric-scene");
+    const objects = () => JSON.parse(canvas.dataset.objects!);
+    fireEvent.click(screen.getByRole("button", { name: "Loại Vật thể 1" }));
+    await waitFor(() => expect(objects()[0].position).toEqual([8, 9, 10]));
+    expect(objects()).toHaveLength(1);
+    expect(objects()[0]).toMatchObject({ id: "candidate-001", visible: true });
+    expect(JSON.parse(canvas.dataset.boxes!)).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Đã loại/xoá/gộp/ẩn · 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Khôi phục Vật thể 1" }));
+    await waitFor(() => expect(objects()[0].position).toEqual(base.objects[0].transform.translation_xyz));
+    expect(JSON.parse(canvas.dataset.boxes!)).toHaveLength(1);
   });
 
 });
