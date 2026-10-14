@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from src.models.contracts.scene import MassSource, ObjectPhysics, SceneIR
+from src.models.contracts.scene import MassSource, ObjectPhysics, SceneIR, SceneObjectOrigin
 from src.services.scene.editing.commands import (
     delete_object,
     duplicate_object,
