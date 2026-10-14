@@ -134,3 +134,20 @@ verify floor and wall remain, old tabletop no longer blocks, unselected object r
 contact cells survive. This does not establish real Room or unseen support recovery acceptance.
 Source map integrity, stale/corrupt rejection, Pending/Ignore and Confirm->Move composition are tested.
 Ruff lint/format and diff checks PASS; Graphify AST update in progress. No PR-05 push.
+
+## Checkpoint: reproducible inputs and cancellation
+
+The prepared-input implementation now lives in the scene service, with a thin CLI. Worker integration calls
+the service directly and propagates its cancellation Event to the actual training/export process groups;
+it does not launch an extra detached Python controller which could orphan a GPU grandchild when cancelled.
+The CLI handles SIGTERM so child cleanup also runs for standalone termination. A real long-running fixture
+training process was cancelled and reaped (no surviving PID or successful result file); this tests process
+control without claiming real GPU training.
+
+The source dataset (calibrated RGB, categorical masks, anchors, cameras, label map) is archived separately
+from the neural checkpoint. ObjectSurfaceManifest now requires source_dataset_ref as well as checkpoint.
+This preserves re-export inputs after worker scratch cleanup. Runtime probe records Python/Torch/CUDA/
+custom gsplat/Open3D/GPU versions and verifies that gsplat imports from the pinned isolated checkout.
+CUDA/compiler/GLM roots can be configured separately, avoiding application/Brush/SAM2 mutation. GLM pin:
+bf71a834948186f4097caa076cd2663c69a10e1e (0.9.9.8). ObjectGS extension cache is isolated per invocation.
+Ten CPU adapter/process tests PASS; model and dataset refs remain distinct. GPU acceptance still pending.

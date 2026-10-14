@@ -18,6 +18,7 @@ class ObjectSurfaceManifest(ContractModel):
     objectgs_label_id: int = Field(ge=1, le=255, strict=True)
     surface_mesh_ref: ProductArtifactRef
     source_checkpoint_ref: ProductArtifactRef
+    source_dataset_ref: ProductArtifactRef
     source_membership: ObjectMembershipArtifact
     upstream_commit: Commit
     canonical_world_from_training: Transform
@@ -33,9 +34,16 @@ class ObjectSurfaceManifest(ContractModel):
             raise ValueError("surface receipt requires ObjectSurfaceMesh")
         if self.source_checkpoint_ref.artifact_type != "ObjectGSCheckpoint":
             raise ValueError("surface receipt requires ObjectGSCheckpoint")
+        if self.source_dataset_ref.artifact_type != "ObjectGSDataset":
+            raise ValueError("surface receipt requires its calibrated image/mask/anchor dataset")
         if self.object_id not in self.source_membership.label_to_object_id.values():
             raise ValueError("surface object is absent from source membership")
-        refs = (self.surface_mesh_ref, self.source_checkpoint_ref, self.source_membership.source_visual_ref)
+        refs = (
+            self.surface_mesh_ref,
+            self.source_checkpoint_ref,
+            self.source_dataset_ref,
+            self.source_membership.source_visual_ref,
+        )
         if len({ref.job_id for ref in refs}) != 1 or refs[0].job_id is None:
             raise ValueError("surface receipt refs must belong to the same job")
         return self

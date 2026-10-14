@@ -60,6 +60,7 @@ def test_surface_receipt_requires_real_checkpoint_label_and_membership() -> None
         objectgs_label_id=1,
         surface_mesh_ref=ref.model_copy(update={"artifact_type": "ObjectSurfaceMesh"}),
         source_checkpoint_ref=ref.model_copy(update={"artifact_type": "ObjectGSCheckpoint"}),
+        source_dataset_ref=ref.model_copy(update={"artifact_type": "ObjectGSDataset"}),
         source_membership=members,
         upstream_commit="a" * 40,
         canonical_world_from_training=value.objects[0].transform,

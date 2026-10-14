@@ -111,6 +111,9 @@ def test_runner_contract_calls_train_then_each_numeric_label_never_minus_one(tmp
 
     def process(command, **kwargs):
         calls.append((command, kwargs))
+        if command[1] == "-c":
+            Path(command[-2]).write_text(json.dumps({"fixture_runtime": True}))
+            return 0
         model = kwargs["cwd"] / "outputs/p087/objectgs/job-test/run"
         if "--scene-name" in command:
             model.mkdir(parents=True)
@@ -128,7 +131,10 @@ def test_runner_contract_calls_train_then_each_numeric_label_never_minus_one(tmp
 
     monkeypatch.setattr(objectgs, "run_cancellable_process", process)
     receipt = objectgs.run_objectgs(runtime, dataset, tmp_path / "work")
-    assert [call[0][call[0].index("--query_label_id") + 1] for call in calls[1:]] == ["1", "2"]
+    assert [call[0][call[0].index("--query_label_id") + 1] for call in calls if "--query_label_id" in call[0]] == [
+        "1",
+        "2",
+    ]
     assert all(call[1]["environment"]["CUDA_VISIBLE_DEVICES"] == "3" for call in calls)
     assert set(receipt["objects"]) == {"chair", "table"}
     assert receipt["coordinate_frame"] == "world"
@@ -209,9 +215,69 @@ def test_prepared_stage_converts_world_mesh_to_rotated_object_local_once(tmp_pat
             "distance_unit": "m",
         }
 
-    monkeypatch.setattr(cli, "run_objectgs", trained)
+    monkeypatch.setattr(objectgs, "run_objectgs", trained)
     result = cli.run(request)
     local = trimesh.load(result["objects"][object_id]["path"], force="mesh", process=False)
     np.testing.assert_allclose(local.bounds, [[-0.5, -1, -1.5], [0.5, 1, 1.5]], atol=1e-6)
     assert result["coordinate_frame"] == "object_local"
     assert Path(result["checkpoint_path"]).is_file()
+
+
+def test_cancellation_kills_real_training_process_without_orphaning(tmp_path, monkeypatch):
+    import os
+    import threading
+    import time
+
+    from src.services.process_control import run_cancellable_process
+
+    python = Path(__file__).parents[2] / "data/scene_runtime/bin/python"
+    if not python.is_file():
+        pytest.skip("isolated subprocess runtime is not installed")
+    repo = tmp_path / "upstream"
+    config = repo / "config/objectgs/2d/lerf_mask/config.yaml"
+    config.parent.mkdir(parents=True)
+    config.write_text(yaml.safe_dump({"model_params": {}, "optim_params": {}, "pipeline_params": {}}))
+    marker = tmp_path / "training.pid"
+    # Match only the import-time GPU prelude, then execute a genuine long-running child process.
+    prelude = """import subprocess
+cmd = 'nvidia-smi -q -d Memory |grep -A4 GPU|grep Used'
+result = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE).stdout.decode().split('\\n')
+os.environ['CUDA_VISIBLE_DEVICES']=str(np.argmin([int(x.split()[2]) for x in result[:-1]]))"""
+    (repo / "train.py").write_text(
+        "import os,time\n" + prelude + f'\nopen({str(marker)!r},"w").write(str(os.getpid()))\ntime.sleep(60)\n'
+    )
+    gsplat = tmp_path / "gsplat"
+    gsplat.mkdir()
+    dataset = tmp_path / "data/job-test"
+    objectgs.prepare_dataset(*inputs(tmp_path), dataset)
+    runtime = objectgs.ObjectGSRuntime(python=python, repository=repo, gsplat_repository=gsplat, timeout_seconds=10)
+    monkeypatch.setattr(
+        objectgs, "_revision", lambda p: objectgs.OBJECTGS_COMMIT if p == repo else objectgs.GSPLAT_COMMIT
+    )
+
+    def process(command, **kwargs):
+        if command[1] == "-c":
+            Path(command[-2]).write_text("{}")
+            return 0
+        return run_cancellable_process(command, **kwargs)
+
+    monkeypatch.setattr(objectgs, "run_cancellable_process", process)
+    event = Event()
+
+    def cancel_started_process():
+        deadline = time.monotonic() + 5
+        while not marker.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        event.set()
+
+    thread = threading.Thread(target=cancel_started_process)
+    thread.start()
+    try:
+        with pytest.raises(ProcessCancelledError):
+            objectgs.run_objectgs(runtime, dataset, tmp_path / "work", cancel_event=event)
+    finally:
+        thread.join(timeout=6)
+    assert marker.exists()
+    with pytest.raises(ProcessLookupError):
+        os.kill(int(marker.read_text()), 0)
+    assert not (tmp_path / "work/result.json").exists()

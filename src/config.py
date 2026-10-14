@@ -76,6 +76,15 @@ class Settings(BaseSettings):
     product_geometry_gpu_index: int | None = Field(default=None, ge=0)
     #: Runtime SAM2 cho tách vật thể (ADR 0006); thiếu thì dùng fallback hình học.
     product_scene_runtime_python: Path | None = None
+    #: ObjectGS runs in its own pinned runtime; never install its gsplat into scene/Brush environments.
+    product_objectgs_runtime_python: Path | None = None
+    product_objectgs_repository: Path | None = None
+    product_objectgs_gsplat_repository: Path | None = None
+    product_objectgs_timeout_seconds: float = Field(default=14400, gt=0, allow_inf_nan=False)
+    product_objectgs_gpu_device: int = Field(default=0, ge=0)
+    product_objectgs_cuda_home: Path | None = None
+    product_objectgs_cxx: Path | None = None
+    product_objectgs_glm_repository: Path | None = None
     #: Che khuôn mặt/biển số trên frame trước khi dựng 3D (AUD-18). Cần `product_scene_runtime_python` và
     #: `product_egoblur_weights`; bật mà thiếu thì job lỗi ở bước tách frame, không chạy trên frame gốc.
     product_anonymize_input: bool = False

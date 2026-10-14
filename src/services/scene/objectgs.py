@@ -2,8 +2,10 @@
 
 import hashlib
 import json
+import os
 import subprocess
 import sys
+import tarfile
 from collections.abc import Callable
 from pathlib import Path
 from threading import Event
@@ -15,13 +17,17 @@ import yaml
 from PIL import Image
 from pydantic import Field, FiniteFloat
 
-from src.models.contracts.artifacts import ContractModel
+from src.models.contracts.artifacts import ContractModel, Identifier
+from src.models.contracts.coordinates import Transform
+from src.models.contracts.object_membership import ObjectMembershipArtifact
 from src.services.process_control import ProcessCancelledError, run_cancellable_process
-from src.services.scene.decomposition.gaussian_split import positions
+from src.services.scene.decomposition.gaussian_split import positions, read_gaussian_ply
+from src.services.scene.editing.membership import decode_gaussian_membership_labels
 from src.services.simulation.colliders.carve import _rotation
 
 OBJECTGS_COMMIT = "0f6842b0fa80b9bfe151c31b70c306cbc5eab788"
 GSPLAT_COMMIT = "68a61a4485cfc2967703391a3e1cfb59981f8fc7"
+GLM_COMMIT = "bf71a834948186f4097caa076cd2663c69a10e1e"
 
 
 class ObjectGSView(ContractModel):
@@ -41,6 +47,9 @@ class ObjectGSRuntime(ContractModel):
     python: Path
     repository: Path
     gsplat_repository: Path
+    cuda_home: Path | None = None
+    cxx: Path | None = None
+    glm_repository: Path | None = None
     gpu_device: int = Field(default=0, ge=0, strict=True)
     iterations: int = Field(default=30000, ge=1, strict=True)
     timeout_seconds: FiniteFloat = Field(default=14400, gt=0)
@@ -159,6 +168,8 @@ def run_objectgs(
         raise ProcessCancelledError("ObjectGS operation cancelled before start")
     if _revision(runtime.repository) != OBJECTGS_COMMIT or _revision(runtime.gsplat_repository) != GSPLAT_COMMIT:
         raise ValueError("ObjectGS and custom gsplat checkouts must match pinned revisions")
+    if runtime.glm_repository and _revision(runtime.glm_repository) != GLM_COMMIT:
+        raise ValueError("GLM headers must match the pinned runtime revision")
     if not runtime.python.is_file():
         raise ValueError("isolated ObjectGS Python is missing")
     if runtime.python.absolute().parent.parent.resolve() == Path(sys.prefix).resolve():
@@ -186,7 +197,22 @@ def run_objectgs(
     config_path = workspace / "config.yaml"
     config_path.write_text(yaml.safe_dump(config))
     entry = Path(__file__).resolve().parents[3] / "scripts/scene/objectgs_entry.py"
-    environment = {"CUDA_VISIBLE_DEVICES": str(runtime.gpu_device), "PYTHONPATH": str(runtime.gsplat_repository)}
+    environment = {
+        "CUDA_VISIBLE_DEVICES": str(runtime.gpu_device),
+        "PYTHONPATH": str(runtime.gsplat_repository),
+        "TORCH_EXTENSIONS_DIR": str(workspace / "torch-extensions"),
+        "MAX_JOBS": "2",
+    }
+    if runtime.cuda_home:
+        environment.update(
+            CUDA_HOME=str(runtime.cuda_home.resolve()),
+            PATH=str(runtime.cuda_home.resolve() / "bin") + os.pathsep + os.environ.get("PATH", ""),
+        )
+    if runtime.cxx:
+        environment["CXX"] = str(runtime.cxx.absolute())
+        environment["CC"] = str(runtime.cxx.absolute())
+    if runtime.glm_repository:
+        environment["CPLUS_INCLUDE_PATH"] = str(runtime.glm_repository.resolve())
 
     def execute(command: list[str], stage: str) -> None:
         if progress:
@@ -203,6 +229,18 @@ def run_objectgs(
         if status:
             raise RuntimeError(f"ObjectGS {stage} failed (exit {status}); see {stage}.log")
 
+    metadata_path = workspace / "runtime.json"
+    probe = """import json, os, sys, torch, gsplat, open3d
+if not torch.cuda.is_available(): raise RuntimeError('ObjectGS requires a usable CUDA GPU')
+if os.path.commonpath([os.path.realpath(gsplat.__file__), os.path.realpath(sys.argv[2])]) != os.path.realpath(sys.argv[2]):
+ raise RuntimeError('custom pinned gsplat was not imported from its isolated checkout')
+with open(sys.argv[1], 'w') as f:
+ json.dump(dict(python=sys.version,torch=torch.__version__,cuda=torch.version.cuda,gsplat=gsplat.__version__,open3d=open3d.__version__,gpu=torch.cuda.get_device_name(0)),f)
+"""
+    execute(
+        [str(runtime.python), "-c", probe, str(metadata_path), str(runtime.gsplat_repository.resolve())],
+        "runtime-check",
+    )
     execute(
         [
             str(runtime.python),
@@ -265,6 +303,90 @@ def run_objectgs(
         "coordinate_frame": "world",
         "distance_unit": "m",
         "source_dataset": str(dataset),
+        "runtime": json.loads(metadata_path.read_text()),
+        "config_checksum": "sha256:" + hashlib.sha256(config_path.read_bytes()).hexdigest(),
     }
     (workspace / "result.json").write_text(json.dumps(receipt, sort_keys=True))
+    return receipt
+
+
+class PreparedObjectGSRequest(ContractModel):
+    job_id: Identifier
+    source_ply: Path
+    source_labels: Path
+    membership: ObjectMembershipArtifact
+    source_poses: dict[str, Transform]
+    views: list[ObjectGSView]
+    runtime: ObjectGSRuntime
+    workspace: Path
+
+
+def run_prepared_objectgs(
+    request: PreparedObjectGSRequest,
+    *,
+    cancel_event: Event | None = None,
+    progress: Callable[[str], None] | None = None,
+) -> dict[str, object]:
+    if Path(request.job_id).name != request.job_id or request.membership.source_visual_ref.job_id != request.job_id:
+        raise ValueError("ObjectGS job ID and immutable membership source must agree")
+    if set(request.source_poses) != set(request.membership.label_to_object_id.values()):
+        raise ValueError("source poses must cover exactly the objects in immutable membership")
+    for object_id, pose in request.source_poses.items():
+        if pose.parent_frame != "world" or pose.local_frame != object_id:
+            raise ValueError("source pose must explicitly map object-local coordinates to canonical world")
+        if not np.isfinite(pose.translation_xyz).all():
+            raise ValueError("source pose translation must be finite")
+    payload = request.source_ply.read_bytes()
+    if "sha256:" + hashlib.sha256(payload).hexdigest() != request.membership.source_visual_ref.artifact_checksum:
+        raise ValueError("source Gaussian PLY checksum mismatch")
+    rows = read_gaussian_ply(payload)
+    labels = decode_gaussian_membership_labels(request.source_labels.read_bytes(), request.membership)
+    request.workspace.mkdir(parents=True, exist_ok=False)
+    dataset = request.workspace / "data" / request.job_id
+    prepare_dataset(rows, labels, request.membership.label_to_object_id, request.views, dataset)
+    receipt = run_objectgs(
+        request.runtime,
+        dataset,
+        request.workspace / "runtime",
+        progress=progress,
+        cancel_event=cancel_event,
+    )
+    model = Path(receipt["model"])
+    checkpoint = request.workspace / "objectgs-checkpoint.tar.gz"
+    with tarfile.open(checkpoint, "w:gz") as archive:
+        archive.add(model / "config.yaml", arcname="config.yaml")
+        archive.add(
+            model / f"point_cloud/iteration_{request.runtime.iterations}",
+            arcname=f"point_cloud/iteration_{request.runtime.iterations}",
+        )
+    dataset_archive = request.workspace / "objectgs-dataset.tar.gz"
+    with tarfile.open(dataset_archive, "w:gz") as archive:
+        archive.add(dataset, arcname=request.job_id)
+    surface_dir = request.workspace / "surfaces"
+    surface_dir.mkdir()
+    for object_id, item in receipt["objects"].items():
+        mesh = trimesh.load(item["path"], force="mesh", process=False)
+        pose = request.source_poses[object_id]
+        mesh.vertices = (np.asarray(mesh.vertices) - np.asarray(pose.translation_xyz)) @ _rotation(
+            pose.rotation_quaternion_xyzw
+        )
+        path = surface_dir / f"label-{item['label']}.glb"
+        payload = mesh.export(file_type="glb")
+        path.write_bytes(payload)
+        item.update(
+            path=str(path),
+            checksum="sha256:" + hashlib.sha256(payload).hexdigest(),
+            vertex_count=len(mesh.vertices),
+            triangle_count=len(mesh.faces),
+            watertight=bool(mesh.is_watertight),
+        )
+    receipt.update(
+        coordinate_frame="object_local",
+        source_membership=request.membership.model_dump(mode="json"),
+        source_poses={key: pose.model_dump(mode="json") for key, pose in request.source_poses.items()},
+        checkpoint_path=str(checkpoint),
+        checkpoint_checksum="sha256:" + hashlib.sha256(checkpoint.read_bytes()).hexdigest(),
+        dataset_path=str(dataset_archive),
+        dataset_checksum="sha256:" + hashlib.sha256(dataset_archive.read_bytes()).hexdigest(),
+    )
     return receipt
