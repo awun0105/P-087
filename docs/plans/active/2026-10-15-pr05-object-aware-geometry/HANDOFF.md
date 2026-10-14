@@ -63,3 +63,23 @@ at this checkpoint. Browser/Isaac/ObjectGS GPU E2E UNVERIFIED. Graphify update r
 AC-01–AC-14: NOT COMPLETE. Contracts and compatibility audit are preliminary work, not a working ObjectGS
 pipeline. Room smoke, real train/checkpoint -> mesh, CoACD mesh path, voxel ownership, producer publication,
 consumer integration, correction invalidation and full regressions remain outstanding.
+
+## Checkpoint: strict surface mesh -> CoACD
+
+Existing convex_runner accepts an explicit object-local metre surface input + checksum, validates finite
+triangles and closed components, then invokes actual CoACD separately per connected component.
+No Gaussian voxelization, hull fallback, dropping invalid parts or merging parts to meet a budget is
+allowed on this path. Exceeding the total part budget fails. Failed regeneration removes stale output.
+Legacy Gaussian input retains prior behavior. Trimesh split explicitly uses repair=False; the first
+negative test exposed that its default silently fills small holes, and that behavior was disabled.
+
+Real isolated data/scene_runtime CoACD tests: 6 PASS (4.12 s), no skips. Two 0.3 x 0.5 x 2 m legs at
+x=-1/+1 yield two distinct watertight convex parts, exact off-center bounds and 0.6 m3 total volume;
+no part crosses the gap. Failure injection, wrong checksum/frame, open mesh and budget overflow all
+reject without stale/fallback GLB. This is real CPU CoACD evidence on a synthetic surface, NOT ObjectGS
+train/export or browser/Isaac evidence. Initial test import failed because the standalone runtime does
+not install application/Pydantic dependencies; the test now loads the same standalone runner file directly.
+Full contract suite: 238 PASS. Contract mirror, frontend tsc/scoped lint PASS.
+
+Pre-flight: CodeGraph convex_parts/build_one callers inspected; source change affects only explicit
+surface_mesh requests and reuses existing CoACD/GLB serialization. Ruff scoped lint/format PASS.

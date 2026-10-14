@@ -11,6 +11,7 @@ Mỗi vật ghi một GLB chứa các khối lồi (mỗi khối một mesh), to
 """
 
 import argparse
+import hashlib
 import json
 import os
 from concurrent.futures import ProcessPoolExecutor
@@ -63,7 +64,7 @@ def _limit(hulls: list[trimesh.Trimesh], limit: int) -> list[trimesh.Trimesh]:
     return [*ordered[: limit - 1], rest]
 
 
-def convex_parts(mesh: trimesh.Trimesh, config: dict) -> list[trimesh.Trimesh]:
+def convex_parts(mesh: trimesh.Trimesh, config: dict, *, strict: bool = False) -> list[trimesh.Trimesh]:
     """CoACD; lỗi hoặc mesh suy biến → một convex hull (vẫn hợp lệ cho Isaac)."""
     limit = int(config.get("max_convex_hull", 8))
     try:
@@ -75,20 +76,71 @@ def convex_parts(mesh: trimesh.Trimesh, config: dict) -> list[trimesh.Trimesh]:
             seed=0,
         )
         hulls = [trimesh.Trimesh(vertices, faces, process=True) for vertices, faces in parts]
-        hulls = [hull for hull in hulls if len(hull.faces) >= 4 and hull.volume > 0]
+        valid = [
+            hull for hull in hulls if len(hull.faces) >= 4 and hull.volume > 0 and np.isfinite(hull.vertices).all()
+        ]
+        if strict and len(valid) != len(hulls):
+            raise ValueError("CoACD returned invalid convex parts")
+        hulls = valid
     except (RuntimeError, ValueError):
+        if strict:
+            raise
         hulls = []
+    if strict:
+        if not hulls or len(hulls) > limit:
+            raise ValueError("CoACD returned no parts or exceeded the part budget; hull fallback is forbidden")
+        return hulls
     return _limit(hulls, limit) or [mesh.convex_hull]
+
+
+def surface_parts(item: dict, config: dict) -> list[trimesh.Trimesh]:
+    """Decompose verified object-local metre surface components without bridging their gaps."""
+    if item.get("coordinate_frame") != "object_local" or item.get("distance_unit") != "m":
+        raise ValueError("surface mesh input requires explicit object_local frame and metre units")
+    path = Path(item["surface_mesh"])
+    payload = path.read_bytes()
+    if item.get("surface_checksum") != f"sha256:{hashlib.sha256(payload).hexdigest()}":
+        raise ValueError("surface mesh checksum mismatch")
+    mesh = trimesh.load(path, force="mesh", process=False)
+    if not len(mesh.vertices) or not len(mesh.faces) or not np.isfinite(mesh.vertices).all():
+        raise ValueError("surface mesh must contain finite vertices and triangles")
+    mesh.update_faces(mesh.nondegenerate_faces())
+    mesh.merge_vertices()
+    mesh.remove_unreferenced_vertices()
+    components = mesh.split(only_watertight=False, repair=False)
+    if not len(components) or any(not component.is_watertight for component in components):
+        raise ValueError("surface mesh requires controlled repair before CoACD; open components are unsupported")
+    hulls: list[trimesh.Trimesh] = []
+    for component in components:
+        if component.volume < 0:
+            component.invert()
+        if component.volume <= 0:
+            raise ValueError("surface component has no positive volume")
+        hulls.extend(convex_parts(component, config, strict=True))
+    if len(hulls) > int(config.get("max_convex_hull", 8)):
+        raise ValueError("surface parts exceed budget; merging disconnected components is forbidden")
+    return hulls
 
 
 def build_one(item: dict, config: dict) -> dict:
     """Collider của một vật; lỗi của một vật không làm hỏng cả lượt."""
     coacd.set_log_level("error")
     entry: dict = {"id": item["id"], "parts": 0, "volume_m3": 0.0}
-    points = object_points(Path(item["gaussians_ply"]), float(config.get("min_opacity", 0.3)))
-    if len(points) < int(config.get("min_points", 30)):
-        return {**entry, "error": "too_few_points"}
-    hulls = convex_parts(occupancy_mesh(points, float(config.get("voxel_m", 0.04))), config)
+    if "surface_mesh" in item:
+        if "gaussians_ply" in item:
+            return {**entry, "error": "ambiguous surface and Gaussian collider inputs"}
+        if Path(item["surface_mesh"]).resolve() == Path(item["output_glb"]).resolve():
+            return {**entry, "error": "surface input and collider output paths must differ"}
+        Path(item["output_glb"]).unlink(missing_ok=True)
+        try:
+            hulls = surface_parts(item, config)
+        except (ValueError, RuntimeError, OSError) as error:
+            return {**entry, "error": str(error), "source": "surface_mesh"}
+    else:
+        points = object_points(Path(item["gaussians_ply"]), float(config.get("min_opacity", 0.3)))
+        if len(points) < int(config.get("min_points", 30)):
+            return {**entry, "error": "too_few_points"}
+        hulls = convex_parts(occupancy_mesh(points, float(config.get("voxel_m", 0.04))), config)
     scene = trimesh.Scene()
     for number, hull in enumerate(hulls):
         scene.add_geometry(hull, geom_name=f"part_{number:03d}")
