@@ -98,3 +98,42 @@ def test_invalid_surface_never_publishes_a_fallback_or_stale_collider(tmp_path, 
     assert result["error"]
     assert result["parts"] == 0
     assert not output.exists()
+
+
+def test_real_coacd_preserves_void_under_connected_concave_table(tmp_path):
+    from scipy.spatial import ConvexHull
+
+    from src.services.scene.object_aware_geometry import build_background_collision
+
+    cells = []
+    for x in range(-10, 10):
+        for y in range(-2, 3):
+            for z in range(23):
+                if x < -7 or x >= 7 or z >= 20:
+                    cells.append([x, y, z])
+    points = (np.asarray(cells) + 0.5) * 0.1
+    surface = build_background_collision(points, np.zeros(len(points), dtype=np.int32), set(), voxel_m=0.1)
+    mesh = trimesh.Trimesh(surface.vertices, surface.faces, process=False)
+    assert mesh.is_watertight
+    payload = mesh.export(file_type="glb")
+    source = tmp_path / "concave.glb"
+    source.write_bytes(payload)
+    item = dict(
+        id="connected-table",
+        surface_mesh=str(source),
+        surface_checksum="sha256:" + hashlib.sha256(payload).hexdigest(),
+        coordinate_frame="object_local",
+        distance_unit="m",
+        output_glb=str(tmp_path / "table.glb"),
+    )
+    result = run(tmp_path, item, dict(threshold=0.02, max_convex_hull=8))
+    assert "error" not in result and result["parts"] >= 2
+    scene = trimesh.load(item["output_glb"], force="scene", process=False)
+    equations = [ConvexHull(hull.vertices).equations for hull in scene.geometry.values()]
+
+    def collides(point):
+        return any(np.all(eq[:, :3] @ point + eq[:, 3] <= 1e-6) for eq in equations)
+
+    assert all(not collides(np.array([0, 0.05, z])) for z in [0.5, 1, 1.7])
+    assert collides(np.array([-0.85, 0.05, 1])) and collides(np.array([0.85, 0.05, 1]))
+    assert collides(np.array([0, 0.05, 2.15]))

@@ -7,8 +7,8 @@
 
 Mọi đầu ra publish thành artifact bất biến theo nội dung; module trả phần `SceneEnvironment` +
 `SceneObject` để nơi gọi ghi revision SceneIR (revision đầu của job mới, hoặc revision kế tiếp khi
-chạy lại cho job cũ). Thiếu runtime hoặc một provider lỗi → ném `ObjectifyError`; nơi gọi lùi về
-đường hộp (ADR 0006) nên job không hỏng.
+chạy lại cho job cũ). Legacy failures await a user choice; explicitly selected ObjectGS failures
+propagate and cannot publish a legacy success. ObjectGS runs in its own runtime before strict mesh CoACD.
 """
 
 import hashlib
@@ -19,9 +19,11 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Event
+from typing import Literal
 
 import numpy as np
 import trimesh
+from PIL import Image
 from pydantic import Field, FiniteFloat
 
 from src.config import Settings
@@ -29,6 +31,7 @@ from src.models.contracts.artifacts import ArtifactDataClass, ContractModel, Jso
 from src.models.contracts.coordinates import CoordinateSystem, Transform
 from src.models.contracts.floor_model import FloorModel
 from src.models.contracts.manifests import JobManifest, StageId
+from src.models.contracts.object_geometry import ObjectAwareEnvironmentManifest, ObjectSurfaceManifest
 from src.models.contracts.object_membership import ObjectMembershipArtifact
 from src.models.contracts.reconstruction import ReconstructionBundle
 from src.models.contracts.scene import (
@@ -54,6 +57,8 @@ from src.services.scene.editing.membership import (
 )
 from src.services.scene.floor_model import fit_canonical_floor_model, point_cloud_checksum
 from src.services.scene.geometric import GeometricConfig, box_from_points
+from src.services.scene.object_aware_geometry import build_background_collision
+from src.services.scene.objectgs import OBJECTGS_COMMIT, ObjectGSRuntime, PreparedObjectGSRequest, run_prepared_objectgs
 from src.services.scene.sampro3d.consolidate import Sampro3dConfig, segment
 from src.services.scene.sampro3d.pipeline import CameraFrame, Sam2Runtime, Sampro3dInputError, run_sam2
 
@@ -83,6 +88,9 @@ class SceneObjectifyConfig(ContractModel):
     max_area: FiniteFloat = Field(default=0.35, gt=0, le=1)
     box_margin_m: FiniteFloat = Field(default=0.15, ge=0)
     sam_batch: int = Field(default=32, ge=1, strict=True)
+    geometry_method: Literal["legacy", "objectgs"] = "legacy"
+    objectgs_iterations: int = Field(default=30000, ge=1, strict=True)
+    objectgs_background_voxel_m: FiniteFloat = Field(default=0.04, gt=0)
 
 
 class CoacdObjectifyConfig(ContractModel):
@@ -237,6 +245,28 @@ def objectify(
 ) -> ObjectifyResult:
     """Chạy toàn bộ chặng 4–7 cho một bundle hệ mét; publish artifact và trả phần SceneIR."""
     config = ObjectifyConfig.model_validate({} if scene_config is None else scene_config)
+    objectgs_runtime = None
+    if config.scene.geometry_method == "objectgs":
+        paths = (
+            settings.product_objectgs_runtime_python,
+            settings.product_objectgs_repository,
+            settings.product_objectgs_gsplat_repository,
+        )
+        if any(path is None for path in paths):
+            raise ObjectifyError(
+                "ObjectGS was selected but its isolated runtime/checkouts are not configured", retryable=False
+            )
+        objectgs_runtime = ObjectGSRuntime(
+            python=paths[0].absolute(),
+            repository=paths[1].resolve(),
+            gsplat_repository=paths[2].resolve(),
+            iterations=config.scene.objectgs_iterations,
+            timeout_seconds=settings.product_objectgs_timeout_seconds,
+            gpu_device=settings.product_objectgs_gpu_device,
+            cuda_home=settings.product_objectgs_cuda_home,
+            cxx=settings.product_objectgs_cxx,
+            glm_repository=settings.product_objectgs_glm_repository,
+        )
     python, checkpoint = settings.product_scene_runtime_python, settings.product_sam2_checkpoint
     if python is None or checkpoint is None:
         raise ObjectifyError("chưa cấu hình runtime scene (PRODUCT_SCENE_RUNTIME_PYTHON / PRODUCT_SAM2_CHECKPOINT)")
@@ -293,7 +323,15 @@ def objectify(
             "sam2_checkpoint": str(checkpoint.resolve()),
             "output_npz": str(workspace / "labels.npz"),
             "views": view_requests,
-            "config": config.scene.model_dump(exclude={"max_objects"}, exclude_unset=True),
+            "config": config.scene.model_dump(
+                exclude={"max_objects", "geometry_method", "objectgs_iterations", "objectgs_background_voxel_m"},
+                exclude_unset=True,
+            ),
+            **(
+                {"objectgs_observations_dir": str((workspace / "objectgs-observations").resolve())}
+                if objectgs_runtime
+                else {}
+            ),
         },
         workspace,
         "lift",
@@ -313,6 +351,91 @@ def objectify(
     for part in parts:
         (workspace / f"object_{part.index:03d}.ply").write_bytes(gaussian_split.write_gaussian_ply(part.rows))
 
+    job_id = job.job_id
+    label_to_object_id = {str(part.index): f"candidate-{number:03d}" for number, part in enumerate(parts, start=1)}
+    membership_labels = membership_labels_for_parts(labels, [part.index for part in parts])
+    membership_payload = encode_gaussian_membership_labels(
+        membership_labels,
+        gaussian_count=len(rows),
+        label_to_object_id=label_to_object_id,
+    )
+
+    def publish_membership() -> ObjectMembershipArtifact:
+        membership_labels_ref = publish(
+            _reference(
+                job_id,
+                "objects/membership/{digest}.i32le",
+                "ObjectMembershipLabels",
+                StageId.SCENE_DECOMPOSE,
+                membership_payload,
+            ),
+            membership_payload,
+        )
+        return ObjectMembershipArtifact(
+            source_visual_ref=source_visual_ref,
+            source_geometry_ref=bundle.canonical_geometry_ref,
+            extraction_revision=extraction_revision,
+            coordinate_system=CoordinateSystem(),
+            gaussian_count=len(rows),
+            labels_ref=membership_labels_ref,
+            label_to_object_id=label_to_object_id,
+        )
+
+    membership = publish_membership() if objectgs_runtime else None
+    objectgs_receipt = None
+    if objectgs_runtime is not None:
+        mapped_views = []
+        compact = {object_id: index + 1 for index, object_id in enumerate(sorted(label_to_object_id.values()))}
+        for index, view in enumerate(lift.get("objectgs_views", [])):
+            raw = np.load(view["mask_path"], allow_pickle=False)
+            mask = np.zeros(raw.shape, dtype=np.uint8)
+            for source_label, object_id in label_to_object_id.items():
+                mask[raw == int(source_label)] = compact[object_id]
+            path = (workspace / f"objectgs-mask-{index:06d}.png").resolve()
+            Image.fromarray(mask).save(path)
+            mapped_views.append({**view, "mask_path": str(path)})
+        source_labels_path = (workspace / "source-membership.i32le").resolve()
+        source_labels_path.write_bytes(membership_payload)
+        source_poses = {
+            label_to_object_id[str(part.index)]: Transform(
+                parent_frame="world",
+                local_frame=label_to_object_id[str(part.index)],
+                translation_xyz=part.center,
+                rotation_quaternion_xyzw=_IDENTITY,
+            ).model_dump(mode="json")
+            for part in parts
+        }
+        try:
+            prepared = PreparedObjectGSRequest.model_validate(
+                {
+                    "job_id": job_id,
+                    "source_ply": str(master.resolve()),
+                    "source_labels": str(source_labels_path),
+                    "membership": membership.model_dump(mode="json"),
+                    "source_poses": source_poses,
+                    "views": mapped_views,
+                    "runtime": objectgs_runtime.model_dump(mode="json"),
+                    "workspace": str((workspace / "objectgs-producer").resolve()),
+                }
+            )
+            objectgs_receipt = run_prepared_objectgs(
+                prepared,
+                cancel_event=cancel_event,
+                progress=lambda stage: logger.info("ObjectGS stage=%s job=%s", stage, job_id),
+            )
+        except (RuntimeError, ValueError, OSError) as error:
+            if isinstance(error, ProcessCancelledError):
+                raise
+            raise ObjectifyError(f"ObjectGS required stage failed: {error}", retryable=False) from error
+        if (
+            objectgs_receipt.get("coordinate_frame") != "object_local"
+            or objectgs_receipt.get("distance_unit") != "m"
+            or objectgs_receipt.get("source_membership") != membership.model_dump(mode="json")
+            or objectgs_receipt.get("source_poses") != source_poses
+            or set(objectgs_receipt.get("objects", {})) != set(label_to_object_id.values())
+        ):
+            raise ObjectifyError("ObjectGS output frame/membership/source-pose receipt mismatch", retryable=False)
+
     # Collider chỉ dùng CPU, vá nền chỉ dùng GPU, và hai bước không đọc kết quả của nhau → chạy song song.
     convex_request = {
         "objects": [
@@ -325,6 +448,18 @@ def objectify(
         ],
         "config": config.coacd.model_dump(exclude_unset=True),
     }
+    if objectgs_receipt is not None:
+        convex_request["objects"] = [
+            {
+                "id": str(part.index),
+                "surface_mesh": objectgs_receipt["objects"][label_to_object_id[str(part.index)]]["path"],
+                "surface_checksum": objectgs_receipt["objects"][label_to_object_id[str(part.index)]]["checksum"],
+                "coordinate_frame": "object_local",
+                "distance_unit": "m",
+                "output_glb": str(workspace / f"object_{part.index:03d}.glb"),
+            }
+            for part in parts
+        ]
     inpaint_request = {
         "background_ply": str(workspace / "background.ply"),
         "objects_ply": str(workspace / "objects_world.ply"),
@@ -356,6 +491,15 @@ def objectify(
         )
         convex, inpaint = convex_job.result(), inpaint_job.result()
     colliders = {int(item["id"]): item for item in convex["objects"]}
+    if objectgs_receipt is not None and any(
+        not colliders.get(part.index, {}).get("parts")
+        or colliders.get(part.index, {}).get("error")
+        or not (workspace / f"object_{part.index:03d}.glb").is_file()
+        for part in parts
+    ):
+        raise ObjectifyError(
+            "ObjectGS surface collider generation failed; Gaussian/OBB fallback is forbidden", retryable=False
+        )
     try:
         sog = package_splat(
             workspace / "background_inpainted.ply",
@@ -366,33 +510,8 @@ def objectify(
     except (ValueError, OSError) as error:
         raise ObjectifyError(f"nén SOG nền lỗi: {error}") from error
 
-    job_id = job.job_id
-    label_to_object_id = {str(part.index): f"candidate-{number:03d}" for number, part in enumerate(parts, start=1)}
-    membership_labels = membership_labels_for_parts(labels, [part.index for part in parts])
-    membership_payload = encode_gaussian_membership_labels(
-        membership_labels,
-        gaussian_count=len(rows),
-        label_to_object_id=label_to_object_id,
-    )
-    membership_labels_ref = publish(
-        _reference(
-            job_id,
-            "objects/membership/{digest}.i32le",
-            "ObjectMembershipLabels",
-            StageId.SCENE_DECOMPOSE,
-            membership_payload,
-        ),
-        membership_payload,
-    )
-    membership = ObjectMembershipArtifact(
-        source_visual_ref=source_visual_ref,
-        source_geometry_ref=bundle.canonical_geometry_ref,
-        extraction_revision=extraction_revision,
-        coordinate_system=CoordinateSystem(),
-        gaussian_count=len(rows),
-        labels_ref=membership_labels_ref,
-        label_to_object_id=label_to_object_id,
-    )
+    if membership is None:
+        membership = publish_membership()
     _ensure_not_cancelled(cancel_event)
     background_payload = (workspace / "background_inpainted.ply").read_bytes()
     master_ref = publish(
@@ -408,6 +527,75 @@ def objectify(
         ),
         sog_payload,
     )
+
+    surface_refs: dict[str, ProductArtifactRef] = {}
+    surface_manifests: dict[str, ProductArtifactRef] = {}
+    if objectgs_receipt is not None:
+        checkpoint_payload = Path(objectgs_receipt["checkpoint_path"]).read_bytes()
+        if f"sha256:{hashlib.sha256(checkpoint_payload).hexdigest()}" != objectgs_receipt["checkpoint_checksum"]:
+            raise ObjectifyError("ObjectGS checkpoint checksum mismatch", retryable=False)
+        checkpoint_ref = publish(
+            _reference(
+                job_id,
+                "objectgs/{digest}/checkpoint.tar.gz",
+                "ObjectGSCheckpoint",
+                StageId.SCENE_DECOMPOSE,
+                checkpoint_payload,
+            ),
+            checkpoint_payload,
+        )
+        dataset_payload = Path(objectgs_receipt["dataset_path"]).read_bytes()
+        if f"sha256:{hashlib.sha256(dataset_payload).hexdigest()}" != objectgs_receipt["dataset_checksum"]:
+            raise ObjectifyError("ObjectGS dataset checksum mismatch", retryable=False)
+        dataset_ref = publish(
+            _reference(
+                job_id, "objectgs/{digest}/dataset.tar.gz", "ObjectGSDataset", StageId.SCENE_DECOMPOSE, dataset_payload
+            ),
+            dataset_payload,
+        )
+        for object_id, info in objectgs_receipt["objects"].items():
+            surface_payload = Path(info["path"]).read_bytes()
+            if f"sha256:{hashlib.sha256(surface_payload).hexdigest()}" != info["checksum"]:
+                raise ObjectifyError("ObjectGS surface checksum mismatch", retryable=False)
+            surface_refs[object_id] = publish(
+                _reference(
+                    job_id,
+                    "objectgs/surfaces/{digest}.glb",
+                    "ObjectSurfaceMesh",
+                    StageId.SCENE_DECOMPOSE,
+                    surface_payload,
+                ),
+                surface_payload,
+            )
+            manifest = ObjectSurfaceManifest(
+                object_id=object_id,
+                objectgs_label_id=info["label"],
+                surface_mesh_ref=surface_refs[object_id],
+                source_checkpoint_ref=checkpoint_ref,
+                source_dataset_ref=dataset_ref,
+                source_membership=membership,
+                upstream_commit=OBJECTGS_COMMIT,
+                canonical_world_from_training=Transform(
+                    parent_frame="world",
+                    local_frame="objectgs_training",
+                    translation_xyz=(0, 0, 0),
+                    rotation_quaternion_xyzw=_IDENTITY,
+                ),
+                vertex_count=info["vertex_count"],
+                triangle_count=info["triangle_count"],
+                quality={"watertight": info["watertight"]},
+            )
+            manifest_payload = manifest.model_dump_json().encode()
+            surface_manifests[object_id] = publish(
+                _reference(
+                    job_id,
+                    "objectgs/surfaces/{digest}.json",
+                    "ObjectSurfaceManifest",
+                    StageId.SCENE_DECOMPOSE,
+                    manifest_payload,
+                ),
+                manifest_payload,
+            )
 
     objects: list[SceneObject] = []
     for number, part in enumerate(parts, start=1):
@@ -446,6 +634,7 @@ def objectify(
                 ),
                 visual_ref=visual,
                 geometry_ref=geometry,
+                surface_mesh_ref=surface_refs.get(object_id),
                 primitive_dimensions_xyz_m=part.dimensions,
                 collider=ColliderSpec(
                     collider_id=f"{object_id}-collider",
@@ -462,7 +651,18 @@ def objectify(
                         "parts": int(collider_info.get("parts", 1)),
                         "volume_m3": float(collider_info.get("volume_m3", 0.0)),
                     },
-                    provenance={"generator": "coacd" if collider_type == ColliderType.CONVEX_DECOMPOSITION else "aabb"},
+                    provenance={
+                        "generator": "coacd" if collider_type == ColliderType.CONVEX_DECOMPOSITION else "aabb",
+                        **(
+                            {
+                                "surface_mesh_ref": surface_refs[object_id].model_dump(mode="json"),
+                                "coacd_config": config.coacd.model_dump(),
+                                "strict_surface_input": True,
+                            }
+                            if object_id in surface_refs
+                            else {}
+                        ),
+                    },
                 ),
                 tags=["objectify_v1"],
                 provenance={
@@ -471,6 +671,11 @@ def objectify(
                     "seed_gaussians": int(len(seeds[part.index])),
                     "masks": int(lift["masks_per_object"][part.index]),
                     "note": "ứng viên, cần người xác nhận",
+                    **(
+                        {"surface_manifest_ref": surface_manifests[object_id].model_dump(mode="json")}
+                        if object_id in surface_manifests
+                        else {}
+                    ),
                 },
             )
         )
@@ -494,7 +699,87 @@ def objectify(
         visual_master_ref=master_ref,
         membership=membership,
     )
+    if objectgs_receipt is not None:
+        voxel = config.scene.objectgs_background_voxel_m
+        support = []
+        # Inferred support never comes from inpaint rows or a current edited object pose.
+        if floor_model.status in {"supported", "confirmed_prior_fallback"}:
+            normal = np.asarray(floor_model.plane_normal_world)
+            for part in parts:
+                low = np.asarray(part.center) - np.asarray(part.dimensions) / 2
+                high = np.asarray(part.center) + np.asarray(part.dimensions) / 2
+                base = np.array([part.center[0], part.center[1], low[2]])
+                if abs(float(normal @ base + floor_model.plane_offset_m)) > floor_model.floor_band_m + 2 * voxel:
+                    continue
+                xs = np.arange(low[0], high[0] + voxel, voxel)
+                ys = np.arange(low[1], high[1] + voxel, voxel)
+                if len(xs) * len(ys) > 1_000_000:
+                    raise ObjectifyError("inferred support exceeds the geometry budget", retryable=False)
+                for x in xs:
+                    for y in ys:
+                        z = -(normal[0] * x + normal[1] * y + floor_model.plane_offset_m) / normal[2]
+                        support.append([x, y, z])
+        background_mesh = build_background_collision(
+            source_points,
+            membership_labels,
+            {int(label) for label in label_to_object_id},
+            voxel_m=voxel,
+            unknown=membership_labels < 0,
+            inferred_support_points=np.asarray(support).reshape(-1, 3),
+        )
+        mesh = trimesh.Trimesh(background_mesh.vertices, background_mesh.faces, process=False)
+        collision_payload = mesh.export(file_type="glb")
+        active_ref = publish(
+            _reference(
+                job_id,
+                "objectgs/environment/{digest}.glb",
+                "ObjectAwareEnvironmentCollision",
+                StageId.COLLIDER,
+                collision_payload,
+            ),
+            collision_payload,
+        )
+        manifest = ObjectAwareEnvironmentManifest(
+            source_geometry_ref=bundle.canonical_geometry_ref,
+            collision_ref=active_ref,
+            source_membership=membership,
+            removed_object_ids=sorted(label_to_object_id.values()),
+            occupancy_checksum=background_mesh.occupancy_checksum,
+            provenance={
+                "statistics": background_mesh.statistics,
+                "voxel_m": voxel,
+                "support_origin": "inferred_floor_plane_under_source_contact_footprints",
+                "floor_fit": floor_fit,
+                "watertight": bool(mesh.is_watertight),
+                "inpaint_used_for_physics": False,
+            },
+        )
+        manifest_payload = manifest.model_dump_json().encode()
+        manifest_ref = publish(
+            _reference(
+                job_id,
+                "objectgs/environment/{digest}.json",
+                "ObjectAwareEnvironmentManifest",
+                StageId.COLLIDER,
+                manifest_payload,
+            ),
+            manifest_payload,
+        )
+        environment = environment.model_copy(
+            update={"collider_ref": active_ref, "object_aware_collision_ref": manifest_ref}
+        )
+        provenance.update(
+            geometry_method="objectgs",
+            objectgs_commit=OBJECTGS_COMMIT,
+            object_extraction="objectify_v1(sam2+objectgs+object_aware_occupancy+coacd+seed_inpaint)",
+        )
     return ObjectifyResult(environment=environment, objects=objects, provenance=provenance)
+
+
+def job_requires_objectgs(registry: ProjectRegistry, job: JobManifest) -> bool:
+    """Read the sealed job choice so required ObjectGS failures cannot become a legacy success."""
+    processing = load_job_config(job.job_id, job.config_checksum, registry.runtime_resolver)
+    return processing is not None and processing.scene.get("geometry_method") == "objectgs"
 
 
 def objectify_with_retry(
@@ -508,6 +793,7 @@ def objectify_with_retry(
     extraction_revision: str = "rev-001",
     cancel_event: Event | None = None,
     scene_config: dict[str, object] | None = None,
+    geometry_method: Literal["legacy", "objectgs"] | None = None,
 ) -> ObjectifyResult:
     """Thử `objectify` tối đa `product_objectify_attempts` lần, mỗi lần một workspace riêng (giữ log từng lần).
 
@@ -522,6 +808,12 @@ def objectify_with_retry(
                 group, name = key.split("_", 1) if key.startswith(("coacd_", "inpaint_")) else ("scene", key)
                 groups[group][name] = value
             scene_config = ObjectifyConfig.model_validate(groups).model_dump(exclude_unset=True)
+    if geometry_method is not None:
+        values = {} if scene_config is None else dict(scene_config)
+        scene_values = dict(values.get("scene", {}))
+        scene_values["geometry_method"] = geometry_method
+        values["scene"] = scene_values
+        scene_config = ObjectifyConfig.model_validate(values).model_dump(exclude_unset=True)
     attempts = settings.product_objectify_attempts
     last: Exception | None = None
     for number in range(1, attempts + 1):
@@ -561,6 +853,7 @@ def reobjectify(
     expected_revision: str | None = None,
     commit_guard: Callable[[RuntimeTransaction], bool] | None = None,
     cancel_event: Event | None = None,
+    geometry_method: Literal["legacy", "objectgs"] | None = None,
 ) -> str:
     """Chạy lại tách theo vật cho job đã có SceneIR; ghi **revision kế tiếp** (không sửa revision cũ).
 
@@ -594,6 +887,8 @@ def reobjectify(
         return store.publish(reference, payload)
 
     arguments = {"cancel_event": cancel_event} if cancel_event is not None else {}
+    if geometry_method is not None:
+        arguments["geometry_method"] = geometry_method
     result = objectify_with_retry(
         registry,
         job,
@@ -610,7 +905,12 @@ def reobjectify(
         update={
             "environment": result.environment,
             "objects": objects,
-            "provenance": {**base_scene.provenance, **result.provenance, "note": "chạy lại tách theo vật"},
+            "provenance": {
+                **base_scene.provenance,
+                **result.provenance,
+                "note": "chạy lại tách theo vật",
+                **({"geometry_method_override": geometry_method} if geometry_method is not None else {}),
+            },
         }
     )
     published = registry.scene.publish_next(

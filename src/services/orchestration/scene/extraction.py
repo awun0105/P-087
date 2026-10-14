@@ -27,7 +27,13 @@ from src.services.orchestration.jobs.progress import metric_confirmation_stage
 from src.services.orchestration.projects.registry import ProjectRegistry
 from src.services.orchestration.scene.errors import SceneRevisionConflictError
 from src.services.orchestration.scene.floor_evidence import publish_floor_fit_evidence, scene_floor_fit_summary
-from src.services.orchestration.scene.objectify import AWAITING_CHOICE, ObjectifyError, Publish, objectify_with_retry
+from src.services.orchestration.scene.objectify import (
+    AWAITING_CHOICE,
+    ObjectifyError,
+    Publish,
+    job_requires_objectgs,
+    objectify_with_retry,
+)
 from src.services.orchestration.scene.objectify import METHOD as OBJECTIFY_METHOD
 from src.services.process_control import ProcessCancelledError
 from src.services.reconstruction import camera_views, confirmation_summary, metric_gaussian_points
@@ -179,12 +185,19 @@ def extract_scene(
     runtime = _sam2_runtime(settings)
     objects: list[SceneObject] = []
     environment, extra = None, {}
+    objectgs_required = job_requires_objectgs(registry, job)
+    if objectgs_required and not (settings.product_objectify and runtime is not None and runtime.available()):
+        raise ObjectifyError(
+            "ObjectGS job requires the configured SAM2/objectify runtime; legacy fallback is forbidden", retryable=False
+        )
     if settings.product_objectify and runtime is not None and runtime.available():
         try:
             result = objectify_with_retry(registry, job, bundle, settings, workspace / "objectify", publish)
             objects, environment, extra = result.objects, result.environment, result.provenance
             method, note = OBJECTIFY_METHOD, ""
         except ObjectifyError as error:
+            if objectgs_required:
+                raise
             # Không tự lùi về hộp (owner quyết 2026-10-01): scene chỉ có môi trường, chờ người dùng chọn.
             method, note = AWAITING_CHOICE, f"{error}; chọn chạy lại hoặc dùng hộp ứng viên"
             extra["objectify_retryable"] = error.retryable

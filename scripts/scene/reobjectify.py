@@ -25,10 +25,23 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("job_id")
     parser.add_argument("--workspace", type=Path, help="thư mục làm việc (giữ log/kết quả trung gian)")
+    parser.add_argument(
+        "--geometry-method",
+        choices=["legacy", "objectgs"],
+        help="explicit audited producer choice for this scene operation",
+    )
+    parser.add_argument("--expected-revision", help="refuse to replace a scene edited since this revision")
     args = parser.parse_args()
     workspace = args.workspace or Path(tempfile.mkdtemp(prefix=f"reobjectify-{args.job_id}-"))
     try:
-        revision = reobjectify(get_project_registry(), args.job_id, get_settings(), workspace)
+        revision = reobjectify(
+            get_project_registry(),
+            args.job_id,
+            get_settings(),
+            workspace,
+            expected_revision=args.expected_revision,
+            geometry_method=args.geometry_method,
+        )
     except ObjectifyError as error:
         print(f"[!] Tách theo vật lỗi: {error} (log trong {workspace})", file=sys.stderr)
         return 1

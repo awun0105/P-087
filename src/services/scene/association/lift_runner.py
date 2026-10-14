@@ -146,6 +146,8 @@ def run(request: dict) -> dict:
     # không có mask của k (điểm ảnh của k bị coi là nền) không kéo Gaussian của k về nền.
     seen_with = torch.zeros((count, objects), dtype=torch.float32)
     masks_per_object = np.zeros(objects, dtype=np.int32)
+    objectgs_views: list[dict] = []
+    observations_dir = Path(request["objectgs_observations_dir"]) if request.get("objectgs_observations_dir") else None
     views = request["views"][:: max(1, int(config.get("view_step", 1)))]
     debug_dir = Path(request["debug_dir"]) if request.get("debug_dir") else None
     depth_color = torch.zeros((count, 1), device=device)
@@ -226,6 +228,32 @@ def run(request: dict) -> dict:
         for index, mask in accepted:
             label_image[mask] = index
             masks_per_object[index] += 1
+        if observations_dir is not None:
+            observations_dir.mkdir(parents=True, exist_ok=True)
+            image_path = observations_dir / f"view-{number:06d}.png"
+            mask_path = observations_dir / f"view-{number:06d}.labels.npy"
+            if not cv2.imwrite(str(image_path), image[..., ::-1]):
+                raise RuntimeError("could not persist calibrated ObjectGS observation")
+            np.save(mask_path, label_image, allow_pickle=False)
+            objectgs_views.append(
+                {
+                    "image_path": str(image_path),
+                    "mask_path": str(mask_path),
+                    "width": w,
+                    "height": h,
+                    "center": view["center"],
+                    "rotation_xyzw": view["rotation_xyzw"],
+                    "parameters": [
+                        float(intrinsics_np[0, 0]),
+                        float(intrinsics_np[1, 1]),
+                        float(intrinsics_np[0, 2]),
+                        float(intrinsics_np[1, 2]),
+                    ],
+                    "camera_model": "PINHOLE",
+                    "coordinate_frame": "world",
+                    "distance_unit": "m",
+                }
+            )
         present = sorted({index for index, _ in accepted})
         label_tensor = torch.from_numpy(label_image).to(device)
         for start in range(0, len(present), _CHUNK):
@@ -276,6 +304,7 @@ def run(request: dict) -> dict:
         "views": len(views),
         "masks_per_object": masks_per_object.tolist(),
         "per_object": np.bincount(labels[labels >= 0], minlength=objects).tolist(),
+        "objectgs_views": objectgs_views,
     }
 
 

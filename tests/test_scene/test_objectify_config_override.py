@@ -121,7 +121,13 @@ def test_defaults_match_provider_fallbacks() -> None:
     config = module.ObjectifyConfig()
     assert config.scene.max_objects == 60
     assert config.scene.model_dump(exclude={"max_objects"}) == dict(
-        min_score=0.6, max_area=0.35, box_margin_m=0.15, sam_batch=32
+        min_score=0.6,
+        max_area=0.35,
+        box_margin_m=0.15,
+        sam_batch=32,
+        geometry_method="legacy",
+        objectgs_iterations=30000,
+        objectgs_background_voxel_m=0.04,
     )
     assert config.coacd.model_dump() == dict(threshold=0.08, max_convex_hull=8, preprocess_resolution=30, voxel_m=0.04)
     assert config.inpaint.model_dump() == dict(max_new_gaussians=400_000, behind_object_m=0.05)

@@ -47,7 +47,12 @@ def build_background_collision(
     unknown = np.asarray(unknown)
     if unknown.shape != labels.shape or unknown.dtype != np.bool_:
         raise ValueError("unknown ownership must be an explicit boolean source-row mask")
-    cells = np.floor(points / voxel_m).astype(np.int64)
+    scaled = points / voxel_m
+    if not np.isfinite(scaled).all() or np.max(np.abs(scaled)) > 2**52:
+        raise ValueError("source coordinates exceed the exact occupancy grid range")
+    if np.any(labels < -1):
+        raise ValueError("unknown membership needs an explicit unknown-row mask")
+    cells = np.floor(scaled).astype(np.int64)
     removed = np.isin(labels, list(removed_labels)) & ~unknown
     background = {tuple(row) for row in cells[~removed]}
     owned = {tuple(row) for row in cells[removed]}

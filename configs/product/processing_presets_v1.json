@@ -407,6 +407,44 @@
       "max": 0.5,
       "step": 0.01,
       "unit": "m"
+    },
+    {
+      "key": "scene.geometry_method",
+      "group": "scene",
+      "label": "Hình học theo vật",
+      "description": "ObjectGS cần runtime riêng; lỗi không tự chuyển sang collider cũ.",
+      "kind": "choice",
+      "choices": [
+        {
+          "value": "legacy",
+          "label": "Legacy"
+        },
+        {
+          "value": "objectgs",
+          "label": "ObjectGS"
+        }
+      ]
+    },
+    {
+      "key": "scene.objectgs_iterations",
+      "group": "scene",
+      "label": "Vòng huấn luyện ObjectGS",
+      "description": "Số vòng tạo checkpoint ObjectGS trước khi xuất surface mesh.",
+      "kind": "integer",
+      "min": 1,
+      "max": 100000,
+      "step": 1000
+    },
+    {
+      "key": "scene.objectgs_background_voxel_m",
+      "group": "scene",
+      "label": "Voxel môi trường theo vật",
+      "description": "Độ phân giải occupancy nền trước bước tạo mesh môi trường.",
+      "kind": "number",
+      "min": 0.01,
+      "max": 0.2,
+      "step": 0.01,
+      "unit": "m"
     }
   ],
   "presets": {
@@ -445,7 +483,10 @@
       "simulation.static_friction": 0.5,
       "simulation.dynamic_friction": 0.4,
       "simulation.restitution": 0,
-      "simulation.carve_margin_m": 0.05
+      "simulation.carve_margin_m": 0.05,
+      "scene.geometry_method": "legacy",
+      "scene.objectgs_iterations": 30000,
+      "scene.objectgs_background_voxel_m": 0.04
     },
     "maximum": {
       "sampling.sample_fps": 6,
@@ -482,7 +523,10 @@
       "simulation.static_friction": 0.5,
       "simulation.dynamic_friction": 0.4,
       "simulation.restitution": 0,
-      "simulation.carve_margin_m": 0.05
+      "simulation.carve_margin_m": 0.05,
+      "scene.geometry_method": "legacy",
+      "scene.objectgs_iterations": 30000,
+      "scene.objectgs_background_voxel_m": 0.04
     },
     "video_indoor_walkthrough": {
       "sampling.sample_fps": 3,
@@ -519,7 +563,10 @@
       "simulation.static_friction": 0.5,
       "simulation.dynamic_friction": 0.4,
       "simulation.restitution": 0,
-      "simulation.carve_margin_m": 0.05
+      "simulation.carve_margin_m": 0.05,
+      "scene.geometry_method": "legacy",
+      "scene.objectgs_iterations": 30000,
+      "scene.objectgs_background_voxel_m": 0.04
     },
     "video_indoor_orbital_360": {
       "sampling.sample_fps": 3,
@@ -556,7 +603,10 @@
       "simulation.static_friction": 0.5,
       "simulation.dynamic_friction": 0.4,
       "simulation.restitution": 0,
-      "simulation.carve_margin_m": 0.05
+      "simulation.carve_margin_m": 0.05,
+      "scene.geometry_method": "legacy",
+      "scene.objectgs_iterations": 30000,
+      "scene.objectgs_background_voxel_m": 0.04
     },
     "video_single_object": {
       "sampling.sample_fps": 3,
@@ -593,7 +643,10 @@
       "simulation.static_friction": 0.5,
       "simulation.dynamic_friction": 0.4,
       "simulation.restitution": 0,
-      "simulation.carve_margin_m": 0.05
+      "simulation.carve_margin_m": 0.05,
+      "scene.geometry_method": "legacy",
+      "scene.objectgs_iterations": 30000,
+      "scene.objectgs_background_voxel_m": 0.04
     },
     "video_outdoor_forward": {
       "sampling.sample_fps": 3,
@@ -630,7 +683,10 @@
       "simulation.static_friction": 0.5,
       "simulation.dynamic_friction": 0.4,
       "simulation.restitution": 0,
-      "simulation.carve_margin_m": 0.05
+      "simulation.carve_margin_m": 0.05,
+      "scene.geometry_method": "legacy",
+      "scene.objectgs_iterations": 30000,
+      "scene.objectgs_background_voxel_m": 0.04
     },
     "photo_collection_indoor": {
       "sampling.sample_fps": 3,
@@ -667,7 +723,10 @@
       "simulation.static_friction": 0.5,
       "simulation.dynamic_friction": 0.4,
       "simulation.restitution": 0,
-      "simulation.carve_margin_m": 0.05
+      "simulation.carve_margin_m": 0.05,
+      "scene.geometry_method": "legacy",
+      "scene.objectgs_iterations": 30000,
+      "scene.objectgs_background_voxel_m": 0.04
     },
     "photo_collection_outdoor": {
       "sampling.sample_fps": 3,
@@ -704,7 +763,10 @@
       "simulation.static_friction": 0.5,
       "simulation.dynamic_friction": 0.4,
       "simulation.restitution": 0,
-      "simulation.carve_margin_m": 0.05
+      "simulation.carve_margin_m": 0.05,
+      "scene.geometry_method": "legacy",
+      "scene.objectgs_iterations": 30000,
+      "scene.objectgs_background_voxel_m": 0.04
     }
   },
   "fixed": {
