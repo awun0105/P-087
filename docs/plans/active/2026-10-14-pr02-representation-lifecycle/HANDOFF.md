@@ -1,5 +1,7 @@
 # PR-02 — Representation Lifecycle, Visual Conservation & Hide/Show Correctness
 
+> Delivery update — 2026-10-14: The user subsequently authorized committing/pushing all current changes, returning to the original checkout, and removing the isolated worktree. PR-01 was committed as `29f8791e`; all seven PR-02 commits were preserved and integrated into `codex/browser-collider-frame-correctness` by local merge `a90c233f`. The original checkout `/home/lqaq/PROJECT/AI20K/P-087` now contains both implementations. The combined tree passed 579 frontend tests across 67 files, 193 focused backend tests, TypeScript typecheck, scoped ESLint, full Python Ruff lint/format (613 files), and diff whitespace checks. Delivery targets `origin/codex/browser-collider-frame-correctness`; verify its current SHA with `git ls-remote origin refs/heads/codex/browser-collider-frame-correctness`. No main/master or GitHub PR merge is involved. Runtime services were not restarted as part of Git delivery; browser/Isaac acceptance remains UNVERIFIED. Statements below about “no push” and “PR-02 does not contain PR-01” describe the original standalone review snapshot.
+
 Date: 2026-10-14. Status: implementation and automated verification complete locally; browser/Isaac acceptance **UNVERIFIED**. No push, remote branch, GitHub PR, merge, or master update.
 
 ## Baseline and scope
