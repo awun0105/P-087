@@ -10,7 +10,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "next typegen && tsc --noEmit",
-    "build:editor": "cd vendor/supersplat && npm ci --no-audit --no-fund && BASE_HREF=/editor/ npm run build && rm -rf ../../public/editor && mkdir -p ../../public && cp -r dist ../../public/editor"
+    "build:editor": "cd vendor/supersplat && npm ci --no-audit --no-fund && BASE_HREF=/editor/ npm run build && rm -rf ../../public/editor && mkdir -p ../../public && cp -r dist ../../public/editor",
+    "postinstall": "node scripts/patch-viewer-collision.mjs"
   },
   "dependencies": {
     "@noble/hashes": "2.4.0",

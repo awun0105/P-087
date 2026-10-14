@@ -60,15 +60,14 @@ describe("physics mesh frames through the loading hook", () => {
     expect(objects[0].rotation_xyzw).toEqual(input.rotation_xyzw);
   });
 
-  it("applies the rotated/off-center child collider once after reading all baked GLB parts", async () => {
-    const other = BOX_POINTS.map(([x, y, z]) => [x + 4, y - 2, z + 1] as [number, number, number]);
-    stubMeshes(colliderGlb({ parts: [BOX_POINTS, other] }));
+  it("applies the rotated/off-center child collider once to a supported single part", async () => {
+    stubMeshes(colliderGlb());
     const { result } = start({ ...input, colliderLocalTransform: {
       translation_xyz: [2, -1, 0.5], rotation_quaternion_xyzw: [0, 0, Math.SQRT1_2, Math.SQRT1_2],
     } });
     await waitFor(() => expect(result.current.status.state).toBe("ready"));
     const [, objects] = constructed.mock.calls[0] as [TriangleMesh, PhysicsObjectSpec[]];
-    const expected = [...BOX_POINTS, ...other].flatMap(([x, y, z]) => [2 - y, -1 + x, 0.5 + z]);
+    const expected = BOX_POINTS.flatMap(([x, y, z]) => [2 - y, -1 + x, 0.5 + z]);
     Array.from(objects[0].hull!).forEach((value, index) => expect(value).toBeCloseTo(expected[index], 5));
     expect(objects[0].position).toEqual(input.position);
     expect(objects[0].rotation_xyzw).toEqual(input.rotation_xyzw);
@@ -85,13 +84,27 @@ describe("physics mesh frames through the loading hook", () => {
     expect(constructed).not.toHaveBeenCalled();
   });
 
-  it("preserves the existing HTTP-error box fallback and its child transform", async () => {
+  it("blocks unavailable collider bytes instead of replacing geometry with a box", async () => {
     stubMeshes(404);
-    const { result } = start({ ...input, colliderLocalTransform: {
-      translation_xyz: [2, -1, 0.5], rotation_quaternion_xyzw: [0, 0, 0, 1],
-    } });
-    await waitFor(() => expect(result.current.status.state).toBe("ready"));
-    const [, objects] = constructed.mock.calls[0] as [TriangleMesh, PhysicsObjectSpec[]];
-    expect(Array.from(objects[0].hull!)).toEqual(BOX_POINTS.flatMap(([x, y, z]) => [x + 2, y - 1, z + 0.5]));
+    const { result } = start();
+    await waitFor(() => expect(result.current.status.state).toBe("failed"));
+    expect(constructed).not.toHaveBeenCalled();
+  });
+
+  it("reports multipart rather than building a convex hull across all parts", async () => {
+    const other = BOX_POINTS.map(([x, y, z]) => [x + 4, y, z] as [number, number, number]);
+    stubMeshes(colliderGlb({ parts: [BOX_POINTS, other] }));
+    const { result } = start();
+    await waitFor(() => expect(result.current.status).toMatchObject({ state: "failed", message: expect.stringContaining("BLOCKED BY PR-04") }));
+    expect(constructed).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { dynamic: false }, { colliderType: "CONVEX_DECOMPOSITION" }, { colliderType: "SIMPLIFIED_MESH" },
+  ])("explicitly blocks unsupported physics %j", async (flags) => {
+    stubMeshes(colliderGlb());
+    const { result } = start({ ...input, ...flags });
+    await waitFor(() => expect(result.current.status).toMatchObject({ state: "failed", message: expect.stringContaining("BLOCKED BY PR-04") }));
+    expect(constructed).not.toHaveBeenCalled();
   });
 });

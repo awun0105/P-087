@@ -428,19 +428,21 @@ export function ObjectReviewView({
   const physicsObjects = useMemo<PhysicsObjectInput[]>(
     () =>
       (scene?.objects ?? [])
-        .filter((object) => object.state === "CONFIRMED" && object.physics?.dynamic && object.active && !isIgnored(object))
+        .filter((object) => object.state === "CONFIRMED" && object.active && !isIgnored(object))
         .map((object) => {
           const collider = colliderWithPreview(object, colliderDraft?.sceneRevision === scene?.scene_revision ? colliderDraft : null);
           return {
             id: object.id,
+            dynamic: object.physics?.dynamic ?? false,
+            colliderType: collider?.collider_type,
             position: object.transform.translation_xyz,
             rotation_xyzw: object.transform.rotation_quaternion_xyzw,
             colliderUrl: colliderShapeUrl(jobId, collider),
             colliderLocalTransform: collider?.local_transform ?? null,
             dimensions: collider?.dimensions_xyz_m ?? object.primitive_dimensions_xyz_m ?? null,
-            mass_kg: object.physics!.mass_kg ?? 10,
-            friction: object.physics!.dynamic_friction,
-            restitution: object.physics!.restitution,
+            mass_kg: object.physics?.mass_kg ?? 10,
+            friction: object.physics?.dynamic_friction ?? 0.5,
+            restitution: object.physics?.restitution ?? 0,
           };
         }),
     [scene, jobId, colliderDraft],
@@ -479,6 +481,7 @@ export function ObjectReviewView({
             emphasized: object.id === selected,
             // Collider phân rã lồi bám theo hình vật; vật chỉ có hộp (thêm tay, asset thư viện) thì vẽ hộp.
             shapeUrl: colliderShapeUrl(jobId, collider),
+            colliderLocalTransform: collider?.local_transform ?? null,
           };
         }),
     // `theme` trong deps: đổi chế độ/bảng màu thì khung vật vẽ lại bằng màu mới.
@@ -664,7 +667,8 @@ export function ObjectReviewView({
           <MetricSceneView
             jobId={jobId}
             visual={scene.environment.visual_ref}
-            collision={scene.environment.geometry_ref}
+            collision={scene.environment.collision_source_ref ?? scene.environment.geometry_ref}
+            sceneRevision={scene.scene_revision}
             cameras={cameras}
             boxes={boxes}
             objects={splats}

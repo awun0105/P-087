@@ -282,7 +282,8 @@ describe("SceneOverlay - Gaussian and collider attachment", () => {
     const overlay = new SceneOverlay(app as unknown as ViewerAppLike);
     const input = { id: "candidate-006", url: "/object.ply", position: [1, 2, 3] as [number, number, number], rotation_xyzw: [0, 0, 0, 1] as [number, number, number, number], visible: true };
     overlay.setObjects([input]);
-    overlay.setBoxes([{ id: input.id, center: input.position, rotation_xyzw: input.rotation_xyzw, dimensions: [1, 2, 3], color: "#ff9900", emphasized: false }]);
+    const child = { translation_xyz: [2, -1, 0.5] as [number, number, number], rotation_quaternion_xyzw: [0, 0, Math.SQRT1_2, Math.SQRT1_2] as [number, number, number, number] };
+    overlay.setBoxes([{ id: input.id, center: [3, 1, 3.5], rotation_xyzw: child.rotation_quaternion_xyzw, dimensions: [1, 2, 3], color: "#ff9900", emphasized: false, colliderLocalTransform: child }]);
     const root = overlayRoot as unknown as Entity;
     const gaussianEntity = root.findByName(`r2s-object-${input.id}`) as Entity;
     const outline = root.findByName(`r2s-box-${input.id}`) as Entity;
@@ -295,8 +296,12 @@ describe("SceneOverlay - Gaussian and collider attachment", () => {
     gaussianEntity.setLocalPosition(7, 8, 9);
     gaussianEntity.setLocalRotation(quaternion);
     gizmo.fire("transform:move");
-    expect(outline.getLocalPosition().toArray()).toEqual([7, 8, 9]);
-    expect(outline.getLocalRotation().equals(gaussianEntity.getLocalRotation())).toBe(true);
+    outline.getLocalPosition().toArray().forEach((value, axis) => expect(value).toBeCloseTo([8, 10, 9.5][axis], 5));
+    outline.getLocalRotation().toArray().forEach((value, axis) => expect(value).toBeCloseTo([0, 0, 1, 0][axis], 5));
+    overlay.setObjectPose(input.id, [10, 20, 3], [0, 0, Math.SQRT1_2, Math.SQRT1_2]);
+    outline.getLocalPosition().toArray().forEach((value, axis) => expect(value).toBeCloseTo([11, 22, 3.5][axis], 5));
+    gaussianEntity.setLocalPosition(7, 8, 9);
+    gizmo.fire("transform:move");
     gizmo.fire("transform:end");
     expect(handlers.onEnd).toHaveBeenCalledWith(input.id, [7, 8, 9], [0, 0, Math.SQRT1_2, Math.SQRT1_2]);
     const moved = { ...input, position: [7, 8, 9] as [number, number, number], rotation_xyzw: [0, 0, Math.SQRT1_2, Math.SQRT1_2] as [number, number, number, number] };
@@ -314,4 +319,33 @@ describe("SceneOverlay - Gaussian and collider attachment", () => {
     expect(app.renderNextFrame).toBe(true);
     overlay.destroy();
   });
+});
+
+it("replaces environment assets, rejects late loads, and releases the previous collision entity", async () => {
+  const app = {
+    graphicsDevice: { canvas: document.createElement("canvas") },
+    root: { addChild: vi.fn() },
+    systems: { light: { addComponent: vi.fn() }, render: { addComponent: vi.fn() } },
+    assets: { add: vi.fn(), load: vi.fn(), remove: vi.fn() },
+  };
+  const overlay = new SceneOverlay(app as unknown as ViewerAppLike);
+  const old = overlay.loadCollision("/old.glb", .3);
+  const oldAsset = app.assets.add.mock.lastCall![0] as Asset;
+  const current = overlay.loadCollision("/current.glb", .3);
+  const currentAsset = app.assets.add.mock.lastCall![0] as Asset;
+  expect(app.assets.remove).toHaveBeenCalledWith(oldAsset);
+  const entity = new Entity("effective-environment", app as unknown as AppBase);
+  currentAsset.resource = { instantiateRenderEntity: () => entity, destroy: vi.fn() };
+  currentAsset.fire("load");
+  await expect(current).resolves.toBe(0);
+  const instantiateStale = vi.fn();
+  oldAsset.resource = { instantiateRenderEntity: instantiateStale, destroy: vi.fn() };
+  oldAsset.fire("load");
+  await expect(old).resolves.toBe(0);
+  expect(instantiateStale).not.toHaveBeenCalled();
+  const destroy = vi.spyOn(entity, "destroy");
+  void overlay.loadCollision("/third.glb", .3);
+  expect(destroy).toHaveBeenCalledOnce();
+  expect(app.assets.remove).toHaveBeenCalledWith(currentAsset);
+  overlay.destroy();
 });

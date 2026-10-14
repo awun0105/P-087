@@ -13,13 +13,15 @@ import type { AppBase, Entity } from "playcanvas";
 
 import { GlbMeshError, parseGlbMesh, type TriangleMesh } from "@/features/viewer/glb-mesh";
 import type { OverlayObject, SceneOverlay } from "@/features/viewer/scene-overlay";
-import { ScenePhysics, displayToCanonical, loadAmmo, type PhysicsObjectSpec } from "@/features/viewer/scene-physics";
+import { ScenePhysics, displayToCanonical, loadAmmo, MAX_HULL_POINTS, type PhysicsObjectSpec } from "@/features/viewer/scene-physics";
 import type { Vec3 } from "@/features/viewer/source-frame";
 import { WALK_EYE_HEIGHT_M } from "@/features/viewer/third-person";
 
 /** Một vật động như SceneIR mô tả, kèm URL collider để dựng bao lồi. */
 export interface PhysicsObjectInput {
   id: string;
+  dynamic?: boolean;
+  colliderType?: string;
   position: Vec3;
   rotation_xyzw: [number, number, number, number];
   /** GLB đã bake trong collider-local frame canonical; không phải display-space GLB. */
@@ -40,6 +42,18 @@ export type PhysicsStatus =
   | { state: "loading" }
   | { state: "ready"; objects: number }
   | { state: "failed"; message: string };
+
+export function browserPhysicsBlocker(objects: readonly PhysicsObjectInput[]): string | null {
+  for (const item of objects) {
+    if (item.dynamic === false) return `${item.id}: static object collider — BLOCKED BY PR-04`;
+    if (item.colliderType && !["AABB", "OBB", "CONVEX_HULL"].includes(item.colliderType)) {
+      return `${item.id}: ${item.colliderType} collider — BLOCKED BY PR-04`;
+    }
+    if (item.colliderType === "CONVEX_HULL" && !item.colliderUrl) return `${item.id}: thiếu convex collider artifact`;
+    if (!item.colliderUrl && !item.dimensions) return `${item.id}: thiếu collider geometry/kích thước`;
+  }
+  return null;
+}
 
 async function fetchMesh(url: string, signal: AbortSignal, frame: "display_world" | "canonical_collider_local"): Promise<TriangleMesh> {
   const response = await fetch(url, { signal });
@@ -151,21 +165,21 @@ export function usePhysicsPlay({
     queueMicrotask(() => { if (!controller.signal.aborted) setStatus({ state: "loading" }); });
     void (async () => {
       try {
+        const blocker = browserPhysicsBlocker(specs);
+        if (blocker) throw new Error(blocker);
         const [ammo, environment, hulls] = await Promise.all([
           loadAmmo(),
           fetchMesh(collisionUrl, controller.signal, "display_world"),
           Promise.all(
             specs.map((item) => {
-              const fallback = fallbackColliderHull(item.dimensions, item.colliderLocalTransform);
-              return item.colliderUrl
-                ? fetchMesh(item.colliderUrl, controller.signal, "canonical_collider_local").then(
-                    (mesh) => transformColliderHullToObjectFrame(mesh.positions, item.colliderLocalTransform),
-                    (error: unknown) => {
-                      if (error instanceof GlbMeshError) throw new GlbMeshError(`${item.id}: ${error.message}`);
-                      return fallback;
-                    },
-                  )
-                : Promise.resolve(fallback);
+              if (!item.colliderUrl) return Promise.resolve(fallbackColliderHull(item.dimensions, item.colliderLocalTransform));
+              return fetchMesh(item.colliderUrl, controller.signal, "canonical_collider_local").then((mesh) => {
+                if ((mesh.partCount ?? 1) !== 1) throw new GlbMeshError(`${item.id}: multipart collider — BLOCKED BY PR-04`);
+                if (mesh.positions.length / 3 > MAX_HULL_POINTS) throw new GlbMeshError(`${item.id}: collider requires hull subsampling — BLOCKED BY PR-04`);
+                return transformColliderHullToObjectFrame(mesh.positions, item.colliderLocalTransform);
+              }).catch((error: unknown) => {
+                throw new Error(`${item.id}: ${error instanceof Error ? error.message : String(error)}`);
+              });
             }),
           ),
         ]);

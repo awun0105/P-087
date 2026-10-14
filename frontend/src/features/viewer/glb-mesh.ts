@@ -87,6 +87,7 @@ function accessorRange(document: Document, index: number, binLength: number, ele
 
 export interface TriangleMesh {
   /** xyz liên tiếp. */
+  partCount?: number;
   positions: Float32Array;
   /** Ba chỉ số một tam giác, trỏ vào `positions`. */
   indices: Uint32Array;
@@ -149,5 +150,5 @@ function readBakedMesh(buffer: ArrayBuffer): TriangleMesh {
     }
   }
   requireLayout(indices.length > 0, "không có tam giác");
-  return { positions: new Float32Array(positions), indices: new Uint32Array(indices) };
+  return { positions: new Float32Array(positions), indices: new Uint32Array(indices), partCount: (document.meshes ?? []).reduce((count, mesh) => count + mesh.primitives.length, 0) };
 }

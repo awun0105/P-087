@@ -16,7 +16,7 @@ import {
 } from "@/features/viewer/PlayCanvasScene";
 import { SceneOverlay, type GizmoMode, type OverlayBox, type OverlayObject } from "@/features/viewer/scene-overlay";
 import { ThirdPersonRig } from "@/features/viewer/third-person";
-import { usePhysicsPlay, type PhysicsObjectInput } from "@/features/viewer/usePhysicsPlay";
+import { browserPhysicsBlocker, usePhysicsPlay, type PhysicsObjectInput } from "@/features/viewer/usePhysicsPlay";
 import {
   objectViewPose,
   recordingCameraPose,
@@ -43,6 +43,7 @@ export function MetricSceneView({
   jobId,
   visual,
   collision,
+  sceneRevision,
   cameras,
   boxes = [],
   objects = EMPTY_OBJECTS,
@@ -67,6 +68,7 @@ export function MetricSceneView({
   jobId: string;
   visual: Ref;
   collision?: Ref;
+  sceneRevision?: string;
   cameras: readonly CameraMarkerLike[];
   boxes?: readonly OverlayBox[];
   /** Scene theo vật (pipeline v2): mỗi vật một khối Gaussian riêng, transform lấy từ SceneIR. */
@@ -120,16 +122,12 @@ export function MetricSceneView({
   const [collisionState, setCollisionState] = useState<{ triangles?: number; error?: string } | null>(null);
   const initialCamera = useMemo(() => recordingCameraPose("z_up", cameras), [cameras]);
   const contentUrl = jobArtifactContentUrl(jobId, visual);
-  const collisionUrl = collision ? jobArtifactContentUrl(jobId, collision) : null;
-  // Viewer đọc toạ độ đỉnh thô của lưới va chạm, nên chế độ đi bộ dùng bản đã xoay sang không gian hiển thị.
-  // Vùng gốc của vật động được khoét khỏi lưới đi bộ. URL này nằm trong deps tạo viewer, nên chốt theo tập vật
-  // động lúc mở scene: xác nhận/loại/ẩn/nhân bản vật không đổi URL (đổi = tải lại cả 3DGS). Tập mới áp dụng ở lần mở sau.
-  const [initialCollision] = useState(collision);
-  const [initialDynamic] = useState(() => physicsObjects.map((item) => item.id).sort());
-  const walkCollisionUrl = useMemo(
-    () => (initialCollision ? jobWalkCollisionUrl(jobId, initialCollision, initialDynamic) : null),
-    [jobId, initialCollision, initialDynamic],
-  );
+  const collisionUrl = collision ? (sceneRevision ? jobWalkCollisionUrl(jobId, collision, [], sceneRevision, "canonical") : jobArtifactContentUrl(jobId, collision)) : null;
+  const walkCollisionUrl = collision ? jobWalkCollisionUrl(jobId, collision, [], sceneRevision) : null;
+  const physicsBlocker = browserPhysicsBlocker(physicsObjects);
+  const physicsIdentity = JSON.stringify([physicsObjects, walkCollisionUrl]);
+  const [physicsFailure, setPhysicsFailure] = useState<{ identity: string; message: string } | null>(null);
+  const [walkCollisionError, setWalkCollisionError] = useState<string | null>(null);
   const [runtime, setRuntime] = useState(INITIAL_RUNTIME);
   const [viewerControls, setViewerControls] = useState<ViewerControls | null>(null);
   const sourceFrame: SourceFrame = "z_up";
@@ -235,6 +233,8 @@ export function MetricSceneView({
   useEffect(() => {
     if (!overlay || !collisionUrl) return;
     let active = true;
+    rig?.setCollision(null);
+    queueMicrotask(() => { if (active) setCollisionState(null); });
     overlay.loadCollision(collisionUrl, 0.3).then(
       (triangles) => active && setCollisionState({ triangles }),
       (error: unknown) => active && setCollisionState({ error: error instanceof Error ? error.message : String(error) }),
@@ -242,7 +242,7 @@ export function MetricSceneView({
     return () => {
       active = false;
     };
-  }, [overlay, collisionUrl]);
+  }, [overlay, collisionUrl, rig]);
 
   // Góc nhìn thứ ba chỉ có nghĩa khi đang đi bộ; lưới va chạm (nạp xong mới có) giữ camera không lùi xuyên tường.
   const walking = runtime.cameraMode === "walk";
@@ -266,6 +266,13 @@ export function MetricSceneView({
   });
 
   // Lớp LiDAR chỉ tải khi người dùng bật (vài MB); tắt thì giải phóng GPU, bật lại lấy từ cache của trình duyệt.
+  useEffect(() => {
+    if (physics.status.state !== "failed") return;
+    const message = physics.status.message;
+    queueMicrotask(() => setPhysicsFailure({ identity: physicsIdentity, message }));
+  }, [physics.status, physicsIdentity]);
+  const walkBlocker = physicsBlocker ?? (physicsFailure?.identity === physicsIdentity ? physicsFailure.message : null);
+
   const lidarWanted = layers.lidar && lidarUrl !== null;
   useEffect(() => {
     if (!overlay || !lidarWanted || !lidarUrl) return;
@@ -348,6 +355,7 @@ export function MetricSceneView({
       onPointerMove={onPointerMove}
       onPointerLeave={onPointerLeave}
     >
+      {(walkBlocker || walkCollisionError) && <Notice tone="rust">Không thể dùng Walk: {walkBlocker ?? walkCollisionError}</Notice>}
       {placement && (
         <div
           role="status"
@@ -380,7 +388,8 @@ export function MetricSceneView({
         initialCameraMode="fly"
         annotations={annotations}
         onApp={onApp}
-        collisionUrl={walkCollisionUrl}
+        collisionUrl={walkBlocker || physics.status.state === "failed" ? null : walkCollisionUrl}
+        onCollisionError={setWalkCollisionError}
         onRuntime={setRuntime}
         wheelFactor={wheelFactor}
         extraControls={

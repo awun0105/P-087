@@ -30,6 +30,7 @@ import {
   type MeshInstance,
 } from "playcanvas";
 
+import { rotateVector, multiplyQuaternions } from "@/features/viewer/layers";
 import { DISPLAY_EULER, type Vec3 } from "@/features/viewer/source-frame";
 import { themeColor } from "@/lib/theme";
 import type { ViewerAppLike } from "@/features/viewer/PlayCanvasScene";
@@ -114,6 +115,7 @@ export interface OverlayBox {
    * bắt chọn theo đúng hình này; hộp chỉ hiện trong lúc GLB đang tải hoặc khi tải lỗi.
    */
   shapeUrl?: string | null;
+  colliderLocalTransform?: { translation_xyz: Vec3; rotation_quaternion_xyzw: [number, number, number, number] } | null;
 }
 
 /** Lưới của một hình dáng vật trong khung cục bộ của vật, dùng cho bắt chọn. */
@@ -130,6 +132,7 @@ interface ShapeRecord {
 
 /** Một vật đang vẽ: `root` mang transform của vật; `box` là hộp lùi (đã scale) khi chưa có hình. */
 interface Outline {
+  localTransform?: OverlayBox["colliderLocalTransform"];
   id: string;
   root: Entity;
   box: Entity | null;
@@ -218,6 +221,7 @@ export class SceneOverlay {
   private readonly root: Entity;
   private readonly boxRoot: Entity;
   private readonly materials: StandardMaterial[] = [];
+  private collisionGeneration = 0;
   private collisionAsset: Asset | null = null;
   private collisionEntity: Entity | null = null;
   private collisionMaterial: StandardMaterial | null = null;
@@ -260,11 +264,13 @@ export class SceneOverlay {
 
   /** Nạp collision GLB (một lần); `opacity` < 1 để vẫn thấy 3DGS phía sau. */
   loadCollision(url: string, opacity: number): Promise<number> {
+    this.releaseCollision();
+    const generation = this.collisionGeneration;
     return new Promise((resolve, reject) => {
       const asset = new Asset(`r2s-collision-${url}`, "container", { url });
       this.collisionAsset = asset;
       asset.once("load", () => {
-        if (this.destroyed) return resolve(0);
+        if (this.destroyed || generation !== this.collisionGeneration) return resolve(0);
         const entity = (asset.resource as ContainerResource).instantiateRenderEntity();
         this.collisionMaterial = material(themeColor("--studio-geometry", "#2f7ea8"), opacity, true);
         let triangles = 0;
@@ -279,10 +285,26 @@ export class SceneOverlay {
         this.redraw();
         resolve(triangles);
       });
-      asset.once("error", (error: unknown) => reject(new Error(String(error))));
+      asset.once("error", (error: unknown) => {
+        if (generation === this.collisionGeneration) this.releaseCollision();
+        reject(new Error(String(error)));
+      });
       this.app.assets.add(asset);
       this.app.assets.load(asset);
     });
+  }
+
+  private releaseCollision(): void {
+    this.collisionGeneration += 1;
+    this.collisionEntity?.destroy();
+    this.collisionEntity = null;
+    this.collisionMaterial?.destroy();
+    this.collisionMaterial = null;
+    if (this.collisionAsset) {
+      this.app.assets?.remove(this.collisionAsset);
+      this.collisionAsset.unload();
+      this.collisionAsset = null;
+    }
   }
 
   /**
@@ -376,7 +398,7 @@ export class SceneOverlay {
       root.setLocalPosition(...box.center);
       root.setLocalRotation(new Quat(...box.rotation_xyzw));
       this.boxRoot.addChild(root);
-      const outline: Outline = { id: box.id, root, box: null, shape: null };
+      const outline: Outline = { localTransform: box.colliderLocalTransform, id: box.id, root, box: null, shape: null };
       const record = box.shapeUrl ? this.shape(box.shapeUrl) : null;
       if (record?.geometry) {
         this.showShape(outline, record, fill, box.emphasized);
@@ -489,10 +511,16 @@ export class SceneOverlay {
     record.entity.setLocalRotation(new Quat(...rotation_xyzw));
     const outline = this.outlines.find((item) => item.id === id);
     if (outline) {
-      outline.root.setLocalPosition(...position);
-      outline.root.setLocalRotation(new Quat(...rotation_xyzw));
+      this.setOutlinePose(outline, position, rotation_xyzw);
     }
     this.redraw();
+  }
+
+  private setOutlinePose(outline: Outline, position: Vec3, rotation: [number, number, number, number]): void {
+    const local = outline.localTransform;
+    const offset = local ? rotateVector(rotation, local.translation_xyz) : [0, 0, 0];
+    outline.root.setLocalPosition(position[0] + offset[0], position[1] + offset[1], position[2] + offset[2]);
+    outline.root.setLocalRotation(new Quat(...(local ? multiplyQuaternions(rotation, local.rotation_quaternion_xyzw) : rotation)));
   }
 
   private gizmoTarget: string | null = null;
@@ -512,8 +540,9 @@ export class SceneOverlay {
       // Khung của vật đi theo trong lúc kéo để người dùng thấy collider sẽ nằm ở đâu.
       for (const outline of this.outlines) {
         if (outline.id !== id) continue;
-        outline.root.setLocalPosition(target.getLocalPosition());
-        outline.root.setLocalRotation(target.getLocalRotation());
+        const p = target.getLocalPosition();
+        const q = target.getLocalRotation();
+        this.setOutlinePose(outline, [p.x, p.y, p.z], [q.x, q.y, q.z, q.w]);
       }
       this.redraw();
     });
@@ -723,6 +752,7 @@ export class SceneOverlay {
     this.objects.clear();
     this.outlines = [];
     this.releasePoints();
+    this.releaseCollision();
     this.root.destroy();
     for (const record of this.shapes.values()) {
       this.app.assets?.remove(record.asset);
@@ -730,11 +760,6 @@ export class SceneOverlay {
     }
     this.shapes.clear();
     this.releaseMaterials();
-    this.collisionMaterial?.destroy();
-    if (this.collisionAsset) {
-      this.app.assets?.remove(this.collisionAsset);
-      this.collisionAsset.unload();
-    }
   }
 
   /**

@@ -82,11 +82,14 @@ export function jobWalkCollisionUrl(
   jobId: string,
   ref: { artifact_uri: string; artifact_checksum: string },
   dynamic: readonly string[] = [],
+  sceneRevision?: string,
+  frame: "canonical" | "display" = "display",
 ): string {
   const filename = ref.artifact_uri.split("/").pop();
   return apiUrl(`/api/v1/jobs/${encodeURIComponent(jobId)}/walk-collision/${encodeURIComponent(filename ?? "collision.glb")}`, {
     artifact_uri: ref.artifact_uri,
     artifact_checksum: ref.artifact_checksum,
+    ...(sceneRevision ? { scene_revision: sceneRevision, frame } : {}),
     ...(dynamic.length ? { dynamic: [...dynamic].sort() } : {}),
   });
 }

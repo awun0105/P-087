@@ -27,6 +27,7 @@ function fixture() {
   const viewer = {
     app: { root: { findComponent: () => camera }, graphicsDevice: { deviceType: "webgl" } },
     state, events, annotations,
+    setCollisionMesh: vi.fn(),
     selectAnnotation: vi.fn(), frameScene: vi.fn(), resetCamera: vi.fn(), seek: vi.fn(), destroy: vi.fn(),
   };
   mocks.createViewer.mockImplementation(async (options) => {
@@ -93,4 +94,31 @@ describe("PlayCanvas camera bridge", () => {
     controls!.select(0);
     expect(viewer.selectAnnotation).toHaveBeenLastCalledWith(0);
   });
+});
+
+it("replaces collision without recreating the viewer or reloading 3DGS and rejects stale loads", async () => {
+  const { colliderGlb } = await import("./helpers/collider-glb");
+  const viewer = fixture();
+  let releaseOld: ((value: object) => void) | undefined;
+  const fetcher = vi.fn((url: string) => {
+    if (url === "/collision-rev-1.glb") return new Promise((resolve) => { releaseOld = resolve; });
+    return Promise.resolve({ ok: true, arrayBuffer: async () => colliderGlb({ frame: "display" }) });
+  });
+  vi.stubGlobal("fetch", fetcher);
+  const failed = vi.fn();
+  const collisionError = vi.fn();
+  try {
+    const { rerender, unmount } = render(<PlayCanvasScene contentUrl="/scene.sog" collisionUrl="/collision-rev-1.glb" capability="ready" mode="VISUAL" onFailed={failed} onCollisionError={collisionError} />);
+    await waitFor(() => expect(fetcher).toHaveBeenCalledWith("/collision-rev-1.glb", expect.anything()));
+    rerender(<PlayCanvasScene contentUrl="/scene.sog" collisionUrl="/collision-rev-2.glb" capability="ready" mode="VISUAL" onFailed={failed} onCollisionError={collisionError} />);
+    await waitFor(() => expect(viewer.setCollisionMesh).toHaveBeenCalledWith(expect.any(Float32Array), expect.any(Uint32Array)));
+    expect(mocks.createViewer).toHaveBeenCalledTimes(1);
+    const count = viewer.setCollisionMesh.mock.calls.length;
+    await act(async () => { releaseOld?.({ ok: true, arrayBuffer: async () => colliderGlb() }); });
+    expect(viewer.setCollisionMesh).toHaveBeenCalledTimes(count);
+    expect(viewer.destroy).not.toHaveBeenCalled();
+    expect(failed).not.toHaveBeenCalled();
+    unmount();
+    expect(viewer.destroy).toHaveBeenCalledOnce();
+  } finally { vi.unstubAllGlobals(); }
 });

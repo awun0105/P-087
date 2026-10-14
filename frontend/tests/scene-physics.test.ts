@@ -154,3 +154,28 @@ describe("dữ liệu cho vật lý", () => {
     expect(nearbyTriangles(mesh, [crate()], 6)).toEqual([0]);
   });
 });
+
+it("real Ammo ray probes find the child collider at edited world pose and no body at extraction pose", () => {
+  const local = { translation_xyz: [2, -1, 0.5] as [number, number, number], rotation_quaternion_xyzw: [0, 0, Math.SQRT1_2, Math.SQRT1_2] as [number, number, number, number] };
+  const hull = transformColliderHullToObjectFrame(parseGlbMesh(colliderGlb()).positions, local);
+  const physics = new ScenePhysics(Ammo, null, [crate({ position: [10, 20, 3], rotation_xyzw: [0, 0, Math.SQRT1_2, Math.SQRT1_2], hull, dimensions: null })]);
+  function probe(from: number[], to: number[]): number[] | null {
+    const a = new Ammo.btVector3(...from);
+    const b = new Ammo.btVector3(...to);
+    const callback = new Ammo.ClosestRayResultCallback(a, b);
+    try {
+      (physics as unknown as { world: AmmoModule }).world.rayTest(a, b, callback);
+      if (!callback.hasHit()) return null;
+      const point = callback.get_m_hitPointWorld();
+      return [point.x(), point.y(), point.z()];
+    } finally { Ammo.destroy(callback); Ammo.destroy(a); Ammo.destroy(b); }
+  }
+  try {
+    const hit = probe([7, 22, 3.5], [15, 22, 3.5]);
+    expect(hit).not.toBeNull();
+    expect(hit![0]).toBeCloseTo(10.5, 1); // Robject*child offset => center (11,22,3.5), yaw 180.
+    expect(hit![1]).toBeCloseTo(22, 4);
+    expect(hit![2]).toBeCloseTo(3.5, 4);
+    expect(probe([-3, 2, 3], [5, 2, 3])).toBeNull();
+  } finally { physics.destroy(); }
+});
