@@ -327,6 +327,8 @@ export interface SceneObject {
   physics?: ObjectPhysics | null;
   /** Quyền sở hữu collision trên geometry nguồn tại revision này; vắng mặt ở SceneIR legacy. */
   source_collision?: SourceCollisionRegion | null;
+  /** Object surface geometry is separate from the physics collider. */
+  surface_mesh_ref?: ProductArtifactRef | null;
 }
 
 /** Source pose/region gốc dùng để rebuild collision sau các thao tác edit. */
@@ -369,6 +371,8 @@ export interface SceneEnvironment {
   visual_master_ref?: ArtifactRef | null;
   /** Membership is absent in legacy scenes; present only when objectify persisted the row map. */
   membership?: ObjectMembershipArtifact | null;
+  /** Producer manifest binding the separately authored active environment collider. */
+  object_aware_collision_ref?: ProductArtifactRef | null;
 }
 
 export interface SceneIR {

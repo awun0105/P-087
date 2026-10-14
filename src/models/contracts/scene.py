@@ -163,6 +163,7 @@ class SceneObject(ContractModel):
     provenance: JsonObject
     physics: ObjectPhysics | None = Field(default=None, exclude_if=_absent)
     source_collision: SourceCollisionRegion | None = Field(default=None, exclude_if=_absent)
+    surface_mesh_ref: ProductArtifactRef | None = Field(default=None, exclude_if=_absent)
 
     @model_validator(mode="after")
     def _validate_representation_binding(self) -> Self:
@@ -170,6 +171,11 @@ class SceneObject(ContractModel):
             raise ValueError("SceneObject.local_frame must match transform.local_frame")
         if self.collider is not None and self.collider.local_transform.parent_frame != self.local_frame:
             raise ValueError("collider local offset must be parented to SceneObject.local_frame")
+        if self.surface_mesh_ref is not None:
+            if self.surface_mesh_ref.artifact_type != "ObjectSurfaceMesh":
+                raise ValueError("surface_mesh_ref must reference ObjectSurfaceMesh, not a collider")
+            if _artifact_job_id(self.surface_mesh_ref) != _artifact_job_id(self.geometry_ref):
+                raise ValueError("surface mesh and object geometry must belong to the same job")
         if self.source_collision is not None:
             if self.source_collision.object_id != self.id:
                 raise ValueError("source collision ownership object_id must match SceneObject.id")
@@ -194,9 +200,19 @@ class SceneEnvironment(ContractModel):
     visual_master_ref: ProductArtifactRef | None = Field(default=None, exclude_if=_absent)
     # Row ownership is optional for legacy scenes and embedded so each SceneIR revision binds its exact map.
     membership: ObjectMembershipArtifact | None = Field(default=None, exclude_if=_absent)
+    object_aware_collision_ref: ProductArtifactRef | None = Field(default=None, exclude_if=_absent)
 
     @model_validator(mode="after")
     def _validate_collision_selection_binding(self) -> Self:
+        if self.object_aware_collision_ref is not None:
+            if self.object_aware_collision_ref.artifact_type != "ObjectAwareEnvironmentManifest":
+                raise ValueError("object_aware_collision_ref requires ObjectAwareEnvironmentManifest")
+            if self.membership is None or self.collider_ref is None:
+                raise ValueError("object-aware environment requires membership and active collider_ref")
+            if self.collision_source_ref is not None or self.collision_selection_ref is not None:
+                raise ValueError("object-aware geometry cannot also select a legacy collision source")
+            if _artifact_job_id(self.object_aware_collision_ref) != _artifact_job_id(self.geometry_ref):
+                raise ValueError("object-aware manifest must belong to the SceneIR job")
         source_ref = self.collision_source_ref
         selection_ref = self.collision_selection_ref
         if source_ref is None and selection_ref is None:
