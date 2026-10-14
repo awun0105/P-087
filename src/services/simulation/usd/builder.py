@@ -95,6 +95,8 @@ def _collect_scene_refs(
         if not obj.active:
             continue
         geometry.append(obj.geometry_ref)
+        if obj.surface_mesh_ref is not None:
+            geometry.append(obj.surface_mesh_ref)
         if obj.asset_ref is not None:
             assets.append(obj.asset_ref)
         if obj.collider is not None and obj.collider.geometry_ref is not None:
@@ -169,6 +171,8 @@ def build_candidate_package(req: CandidateBuildRequest) -> CandidatePackage:
     ordered_refs = [entrypoint_usd, *assets, *geometry, *colliders]
     if req.scene.environment.collision_selection_ref is not None:
         ordered_refs.append(req.scene.environment.collision_selection_ref)
+    if req.scene.environment.object_aware_collision_ref is not None:
+        ordered_refs.append(req.scene.environment.object_aware_collision_ref)
     artifact_checksums = [ref.artifact_checksum for ref in ordered_refs]
 
     obj_transforms = [
@@ -189,6 +193,7 @@ def build_candidate_package(req: CandidateBuildRequest) -> CandidatePackage:
         build_config_checksum=_compute_config_checksum(req.build_config),
         collision_source_ref=req.scene.environment.collision_source_ref,
         collision_selection_ref=req.scene.environment.collision_selection_ref,
+        object_aware_collision_ref=req.scene.environment.object_aware_collision_ref,
     )
 
     temp_pkg = CandidatePackage(

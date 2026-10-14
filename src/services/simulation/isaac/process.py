@@ -242,6 +242,8 @@ class IsaacValidationProcess:
                 *candidate.colliders,
             ):
                 resolver.require(reference)
+            if candidate.candidate_manifest.object_aware_collision_ref is not None:
+                resolver.require(candidate.candidate_manifest.object_aware_collision_ref)
             robot_path = resolver.require(profile.robot_asset_ref)
             if not robot_path.is_file():
                 raise ValueError("configured robot asset is missing")

@@ -100,11 +100,17 @@ class CandidateManifest(ContractModel):
     build_config_checksum: Checksum
     collision_source_ref: ProductArtifactRef | None = Field(default=None, exclude_if=lambda value: value is None)
     collision_selection_ref: ProductArtifactRef | None = Field(default=None, exclude_if=lambda value: value is None)
+    object_aware_collision_ref: ProductArtifactRef | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @model_validator(mode="after")
     def _validate_collision_source_pair(self) -> Self:
         source_ref = self.collision_source_ref
         selection_ref = self.collision_selection_ref
+        if self.object_aware_collision_ref is not None:
+            if self.object_aware_collision_ref.artifact_type != "ObjectAwareEnvironmentManifest":
+                raise ValueError("candidate object_aware_collision_ref must reference ObjectAwareEnvironmentManifest")
+            if source_ref is not None or selection_ref is not None:
+                raise ValueError("candidate object-aware and legacy collision selection are mutually exclusive")
         if source_ref is None and selection_ref is None:
             return self
         if source_ref is None or selection_ref is None:

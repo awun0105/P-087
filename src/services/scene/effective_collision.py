@@ -90,12 +90,10 @@ def _object_aware_environment(
     if reference is None:
         raise SourceCollisionOwnershipError("object-aware manifest is missing")
     manifest = ObjectAwareEnvironmentManifest.model_validate_json(read(reference))
-    if (
-        manifest.source_geometry_ref != source_ref
-        or manifest.source_membership != scene.environment.membership
-        or manifest.collision_ref != scene.environment.collider_ref
-    ):
+    if manifest.source_geometry_ref != source_ref or manifest.source_membership != scene.environment.membership:
         raise SourceCollisionOwnershipError("object-aware geometry is stale; regenerate from current membership")
+    # collider_ref may be a derived USD layer after physics enrichment. The sealed
+    # manifest owns the immutable GLB baseline; never re-carve a derived layer.
     if set(manifest.removed_object_ids) != set(manifest.source_membership.label_to_object_id.values()):
         raise SourceCollisionOwnershipError("object-aware baseline must separate every source object")
     # Read the sealed source map too: a manifest must not attest to corrupt/missing membership bytes.

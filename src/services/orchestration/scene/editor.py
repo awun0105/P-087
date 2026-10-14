@@ -240,7 +240,11 @@ class SceneEditor:
         references = [scene.environment.geometry_ref]
         if scene.environment.collider_ref is not None:
             references.append(scene.environment.collider_ref)
-        for reference in (scene.environment.collision_source_ref, scene.environment.collision_selection_ref):
+        for reference in (
+            scene.environment.collision_source_ref,
+            scene.environment.collision_selection_ref,
+            scene.environment.object_aware_collision_ref,
+        ):
             if reference is not None and reference not in references:
                 references.append(reference)
         if scene.environment.visual_ref is not None:
@@ -257,6 +261,8 @@ class SceneEditor:
                     references.append(reference)
         for item in scene.objects:
             references.append(item.geometry_ref)
+            if item.surface_mesh_ref is not None:
+                references.append(item.surface_mesh_ref)
             # Scene theo vật (pipeline v2): Gaussian riêng của từng vật cho viewer.
             if item.visual_ref is not None:
                 references.append(item.visual_ref)

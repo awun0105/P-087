@@ -19,6 +19,7 @@ from tests.test_scene.test_effective_collision import fixture
 
 def case(tmp_path):
     scene, _, ref, source, blobs = fixture(tmp_path)
+    blobs[ref.artifact_uri] = source
 
     def bound(payload, kind, name):
         item = ref.model_copy(
@@ -134,3 +135,50 @@ def test_stale_membership_or_corrupt_authored_geometry_cannot_fall_back_to_globa
     blobs[active.artifact_uri] = b"corrupt"
     with pytest.raises(SourceCollisionOwnershipError, match="checksum"):
         compose(scene)
+
+
+def test_usd_enrichment_keeps_manifest_baseline_instead_of_reading_derived_layer(tmp_path):
+    from src.models.contracts.identity import canonical_content_checksum
+    from src.services.simulation.enrichment.service import enrich_scene_physics
+
+    scene, compose, _ = case(tmp_path)
+    baseline = compose(scene, True)
+    scene = scene.model_copy(update={"scene_ir_checksum": canonical_content_checksum(scene, "scene_ir_checksum")})
+    derived = scene.environment.collider_ref.model_copy(
+        update={"artifact_type": "ColliderGeometry", "artifact_uri": "artifact://jobs/test/derived.usda"}
+    )
+    enriched = enrich_scene_physics(scene, environment_collider_ref=derived, add_ground_plane=False)
+    assert enriched.environment.collider_ref == derived
+    assert enriched.environment.object_aware_collision_ref == scene.environment.object_aware_collision_ref
+    result = compose(enriched, True)
+    assert result.identity == baseline.identity
+    np.testing.assert_array_equal(result.vertices[result.faces], baseline.vertices[baseline.faces])
+
+
+def test_source_restoration_composes_parent_and_offcenter_child_rotation_once(tmp_path):
+    scene, compose, _ = case(tmp_path)
+    item = scene.objects[0]
+    root = Transform(
+        parent_frame="world",
+        local_frame="A",
+        translation_xyz=(1, 2, 3),
+        rotation_quaternion_xyzw=(0, 0, np.sqrt(0.5), np.sqrt(0.5)),
+    )
+    child = Transform(
+        parent_frame="A",
+        local_frame="A-collider",
+        translation_xyz=(-2, 1, 0.5),
+        rotation_quaternion_xyzw=(0, 0, np.sqrt(0.5), np.sqrt(0.5)),
+    )
+    item = item.model_copy(
+        update={
+            "transform": root,
+            "source_collision": item.source_collision.model_copy(update={"source_transform": root}),
+            "collider": item.collider.model_copy(update={"local_transform": child}),
+        }
+    )
+    scene = scene.model_copy(update={"objects": [item, scene.objects[1]]})
+    result = compose(scene)
+    source_triangles = result.vertices[result.faces[24:36]]
+    np.testing.assert_allclose(source_triangles.reshape(-1, 3).min(axis=0), [-0.5, -1, 2], atol=1e-6)
+    np.testing.assert_allclose(source_triangles.reshape(-1, 3).max(axis=0), [0.5, 1, 5], atol=1e-6)

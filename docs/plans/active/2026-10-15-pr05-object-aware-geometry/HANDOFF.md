@@ -151,3 +151,47 @@ custom gsplat/Open3D/GPU versions and verifies that gsplat imports from the pinn
 CUDA/compiler/GLM roots can be configured separately, avoiding application/Brush/SAM2 mutation. GLM pin:
 bf71a834948186f4097caa076cd2663c69a10e1e (0.9.9.8). ObjectGS extension cache is isolated per invocation.
 Ten CPU adapter/process tests PASS; model and dataset refs remain distinct. GPU acceptance still pending.
+
+## Checkpoint: worker producer, USD inventory and Studio diagnostics
+
+The sealed processing configuration now offers `scene.geometry_method=objectgs` (default remains legacy).
+The render-lift stage persists calibrated undistorted images and categorical seed observations. The worker
+maps these to explicit compact ObjectGS labels, calls the isolated training/export service with cancellation,
+publishes dataset/checkpoint/surface receipts, feeds verified surfaces to strict CoACD, then authors a separate
+background occupancy collision manifest. Required ObjectGS errors propagate; they do not produce a successful
+legacy/box scene. Inpaint remains visual-only. Floor-prior support under immutable source contact footprints
+is explicitly marked inferred. Unknown/shared source cells remain conservative; missing observed geometry is
+not claimed recovered. A manual `reobjectify.py --geometry-method objectgs --expected-revision ...` override
+preserves other sealed producer controls and records the override. It replaces candidates; do not run blindly
+on a reviewed Room scene.
+
+Object-aware membership merge/reassign currently reject with `OBJECTGS_RETRAIN_REQUIRED` before mutation or
+legacy regeneration. This prevents stale artifacts; it does NOT implement corrected-mask rebuilding, a queued
+correction revision or retraining. Milestone E / AC-10 remain incomplete. The UI states this limitation.
+
+The candidate inventory binds the object-aware manifest checksum and keeps distinct surface and collider refs.
+Scene artifact authorization includes the new refs. Physics enrichment may replace `environment.collider_ref`
+with a derived USD layer; the effective compositor always reads the immutable GLB from the sealed manifest,
+preventing double carving or accidentally loading a USD derivative as its source mesh.
+
+Actual OpenUSD fixture: separately authored floor/wall (24 faces), two object colliders, moved/rotated 1x2x3 m
+object plus rotated/off-center child collider, Z-up/metres, no backup ground plane: PASS. World bounds are
+[8.5,1,1]..[9.5,3,4], matching independent parent/child transform expectations. Surface inventory and changed
+manifest checksum rejection PASS. This is not Isaac Sim physics acceptance.
+
+Studio diagnostics expose Legacy/Object-aware, revision, environment triangle count, object collider count,
+selected convex parts and baseline artifact checksum; existing wireframe remains available. Actual logged-in
+browser renders these diagnostics on Room rev-100 (Legacy, 56,020 environment faces, 60 colliders). That API
+process still has older code loaded and returns the prior holed preview; this is UI rendering evidence only,
+not acceptance of repaired legacy geometry or ObjectGS physics. No Room revision was changed for this check.
+
+Verification checkpoint: 719 backend tests PASS in 52.23 s (contracts, scene, simulation including actual
+CPU CoACD/OpenUSD, focused orchestration and scene APIs). Focused new USD/inventory suite 19 PASS. Full frontend
+suite 630 PASS / 73 files; tsc and scoped ESLint PASS. Ruff src/tests PASS; format check PASS (633 files at run).
+Seven surface CoACD cases include a connected concave fixture with independent void/contact probes.
+Objectify integration tests intentionally fake ObjectGS GPU output while running real CoACD; they do not
+prove training. Real ObjectGS training/export and real Room/browser Walk/Isaac acceptance remain unverified.
+
+Pre-flight gates: CodeGraph producer/lift/extraction/correction/enrichment/candidate inventory/editor callers
+inspected before changes; Graphify queried; reuse existing process control, artifacts, membership, compositor,
+Ammo and USD runners. No new physics engine. Source changes are opt-in and legacy defaults stay compatible.
