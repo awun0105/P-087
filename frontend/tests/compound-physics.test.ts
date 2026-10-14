@@ -113,7 +113,8 @@ it("repeated native world teardown balances tracked allocations and stabilizes W
     if(typeof key==="string"&&key.startsWith("bt")&&typeof value==="function")return function(...args:unknown[]){const object=new value(...args);live.add(A.getPointer(object));allocations++;return object;};
     return value;
   }});
-  const run=()=>{const p=new ScenePhysics(tracked,null,[item(),item({id:"dynamic",dynamic:true,position:[5,0,4]})]);for(let frame=0;frame<30;frame++)p.step(1/60,null);p.reset();p.destroy();expect(p.statistics.ownedAllocations).toBe(0);expect(live.size).toBe(0);};
+  const environment={positions:new Float32Array([-10,-10,0,10,-10,0,10,10,0,-10,10,0]),indices:new Uint32Array([0,1,2,0,2,3])};
+  const run=()=>{const p=new ScenePhysics(tracked,environment,[item(),item({id:"dynamic",dynamic:true,position:[5,0,4]})]);for(let frame=0;frame<30;frame++)p.step(1/60,null);p.reset();p.destroy();expect(p.statistics.ownedAllocations).toBe(0);expect(live.size).toBe(0);};
   for(let i=0;i<5;i++)run();
   const before=A.HEAP8.byteLength,start=performance.now();
   for(let i=0;i<50;i++)run();
