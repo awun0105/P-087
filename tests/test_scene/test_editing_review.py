@@ -38,3 +38,50 @@ def test_ignore_refuses_confirmed_object() -> None:
     scene = _candidate_scene()
     with pytest.raises(ValueError):
         ignore_object(scene, scene.objects[1].id)
+
+
+def test_simulation_activation_is_distinct_from_viewport_hide_and_delete() -> None:
+    from src.models.contracts.identity import verify_content_checksum
+    from src.services.scene.editing.commands import set_object_active
+
+    scene = _candidate_scene()
+    object_id = scene.objects[0].id
+    confirmed = confirm_object(scene, object_id)
+    disabled = set_object_active(confirmed, object_id, False)
+    assert disabled.objects[0].provenance["review"] == "CONFIRMED"
+    assert disabled.provenance["last_scene_operation"] == "deactivate_simulation"
+    assert not disabled.objects[0].active
+    enabled = set_object_active(disabled, object_id, True)
+    assert enabled.objects[0].active
+    assert enabled.provenance["last_scene_operation"] == "activate_simulation"
+    verify_content_checksum(enabled, "scene_ir_checksum")
+
+
+@pytest.mark.parametrize("review", [None, "IGNORED", "DELETED", "MERGED"])
+def test_candidate_or_removed_object_cannot_be_activated(review: str | None) -> None:
+    from src.services.scene.editing.commands import set_object_active
+
+    scene = _candidate_scene()
+    first = scene.objects[0].model_copy(update={"provenance": {"review": review}})
+    scene = scene.model_copy(update={"objects": [first]})
+    with pytest.raises(ValueError):
+        set_object_active(scene, first.id, True)
+
+
+@pytest.mark.parametrize("active", [None, 0, 1, "true", "false"])
+def test_activation_body_requires_a_boolean(active: object) -> None:
+    from types import SimpleNamespace
+
+    from pydantic import ValidationError
+
+    from src.api.schemas import ObjectActionRequest
+    from src.services.orchestration.scene.errors import SceneEditRejectedError
+    from src.services.orchestration.scene.objects import apply_object_action
+
+    scene = confirm_object(_candidate_scene(), _candidate_scene().objects[0].id)
+    editor = SimpleNamespace(current=lambda _job: SimpleNamespace(scene=scene))
+    with pytest.raises(SceneEditRejectedError, match="explicit boolean"):
+        apply_object_action(editor, "job-fixture-001", scene.objects[0].id, "hide", scene.scene_revision, active=active)
+    if active is not None:
+        with pytest.raises(ValidationError):
+            ObjectActionRequest(expected_scene_revision=scene.scene_revision, active=active)

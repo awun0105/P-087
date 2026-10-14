@@ -48,7 +48,7 @@ import {
   type SceneCatalog,
 } from "@/lib/api/studio";
 import { cn } from "@/lib/cn";
-import type { ColliderEditCommand, ProductArtifactRef, SceneIR, SceneObject } from "@/lib/contracts/api";
+import type { ColliderEditCommand, ObjectRepresentation, ProductArtifactRef, SceneIR, SceneObject } from "@/lib/contracts/api";
 import type { StageView } from "@/lib/contracts/studio";
 
 // Chỉ dùng khi scene không có 3DGS: tải three.js theo nhu cầu, không kéo vào mọi lần mở Studio.
@@ -244,11 +244,29 @@ export function ObjectReviewView({
   onSaveState?: (state: SaveState) => void;
   sceneStateControls?: ReactNode;
 }) {
+  const [representations, setRepresentations] = useState<ObjectRepresentation[]>([]);
   const [scene, setScene] = useState<SceneIR | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [missing, setMissing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
+  const [viewportHidden, setViewportHidden] = useState({ jobId, ids: new Set<string>() });
+  const hiddenIds = useMemo(() => viewportHidden.jobId === jobId ? viewportHidden.ids : new Set<string>(), [viewportHidden, jobId]);
+  const acceptScene = (next: SceneIR, policies: ObjectRepresentation[] = []) => {
+    setRepresentations(policies);
+    setScene(next);
+    const retained = new Set(next.objects.filter((item) => !["DELETED", "MERGED"].includes(String(item.provenance.review))).map((item) => item.id));
+    setViewportHidden((previous) => ({ jobId, ids: new Set(previous.jobId === jobId ? [...previous.ids].filter((id) => retained.has(id)) : []) }));
+  };
+  const toggleViewportVisibility = (id: string) => {
+    setViewportHidden((previous) => {
+      const ids = new Set(previous.jobId === jobId ? previous.ids : []);
+      if (ids.has(id)) ids.delete(id);
+      else ids.add(id);
+      return { jobId, ids };
+    });
+    if (id === selected) setTool("none");
+  };
   const [correctionPanelOpen, setCorrectionPanelOpen] = useState(false);
   const [collisionSourcePanelOpen, setCollisionSourcePanelOpen] = useState(false);
   const [collisionCandidates, setCollisionCandidates] = useState<ProductArtifactRef[]>([]);
@@ -316,7 +334,7 @@ export function ObjectReviewView({
     getJobScene(jobId, controller.signal).then((result) => {
       if (controller.signal.aborted) return;
       if (result.ok) {
-        setScene(result.data.scene);
+        acceptScene(result.data.scene, result.data.representations);
         if (keepErrorAfterReload.current) keepErrorAfterReload.current = false;
         else setError(null);
         setMissing(false);
@@ -349,23 +367,45 @@ export function ObjectReviewView({
 
   const previews = useMemo(() => new Set((catalog?.entries ?? []).filter((item) => item.has_preview).map((item) => item.family)), [catalog]);
   // Scene theo vật (pipeline v2): mỗi vật có Gaussian riêng. Vật đã loại/xoá hoặc đang ẩn không vẽ.
+  const missingSourcePolicies = (scene?.objects ?? []).filter((object) =>
+    object.state === "CANDIDATE" && object.visual_ref?.artifact_type === "ObjectGaussians" &&
+    !["DELETED", "MERGED"].includes(String(object.provenance.review)) &&
+    !representations.some((item) => item.object_id === object.id));
   const splats = useMemo<OverlayObject[]>(
-    () =>
-      (scene?.objects ?? []).map((object) => ({
+    () => (scene?.objects ?? []).flatMap((object) => {
+      const policy = representations.find((item) => item.object_id === object.id);
+      const visible = !hiddenIds.has(object.id);
+      const editingRoot: OverlayObject = {
         id: object.id,
         ...objectVisual(jobId, object, previews),
         position: object.transform.translation_xyz,
         rotation_xyzw: object.transform.rotation_quaternion_xyzw,
-        visible: isPlaced(object),
-      })),
-    [scene, jobId, previews],
+        visible: visible && (policy ? policy.visual_policy === "object" : isPlaced(object)),
+      };
+      if (!policy && object.state === "CANDIDATE" && object.visual_ref?.artifact_type === "ObjectGaussians") {
+        editingRoot.url = null;
+        return [editingRoot];
+      }
+      if (policy?.visual_policy !== "source" || !policy.source_visual_required) return [editingRoot];
+      editingRoot.url = null;
+      editingRoot.visible = visible && isPlaced(object);
+      if (!policy.source_transform || policy.readiness_blockers.length) return [editingRoot];
+      return [editingRoot, {
+        id: `source:${object.id}`,
+        ...objectVisual(jobId, object, previews),
+        position: policy.source_transform.translation_xyz,
+        rotation_xyzw: policy.source_transform.rotation_quaternion_xyzw,
+        visible,
+      }];
+    }),
+    [scene, representations, jobId, previews, hiddenIds],
   );
 
   // Vật động (vật lý của SceneIR) đang đặt trong scene: khi Đi bộ, người đi đẩy được chúng (ADR 0010).
   const physicsObjects = useMemo<PhysicsObjectInput[]>(
     () =>
       (scene?.objects ?? [])
-        .filter((object) => object.physics?.dynamic && object.active && isPlaced(object))
+        .filter((object) => object.state === "CONFIRMED" && object.physics?.dynamic && object.active && !isIgnored(object))
         .map((object) => {
           const collider = colliderWithPreview(object, colliderDraft?.sceneRevision === scene?.scene_revision ? colliderDraft : null);
           return {
@@ -398,6 +438,7 @@ export function ObjectReviewView({
     () =>
       visibleObjects
         .flatMap((object) => {
+          if (!isPlaced(object) || hiddenIds.has(object.id)) return [];
           const collider = colliderWithPreview(object, currentColliderDraft);
           const dimensions = collider?.dimensions_xyz_m ?? object.primitive_dimensions_xyz_m;
           if (!dimensions) return [];
@@ -414,10 +455,10 @@ export function ObjectReviewView({
           };
         }),
     // `theme` trong deps: đổi chế độ/bảng màu thì khung vật vẽ lại bằng màu mới.
-    [visibleObjects, selected, jobId, theme, currentColliderDraft], // eslint-disable-line react-hooks/exhaustive-deps
+    [visibleObjects, selected, jobId, theme, currentColliderDraft, hiddenIds], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
-  async function run(mutate: (revision: string) => Promise<{ scene: SceneIR }>) {
+  async function run(mutate: (revision: string) => Promise<{ scene: SceneIR; representations?: ObjectRepresentation[] }>) {
     if (!scene || mutationInFlight.current) return;
     mutationInFlight.current = true;
     const revision = scene.scene_revision;
@@ -427,8 +468,9 @@ export function ObjectReviewView({
     setError(null);
     onSaveState?.({ status: "saving", revision });
     try {
-      const next = (await mutate(revision)).scene;
-      setScene(next);
+      const response = await mutate(revision);
+      const next = response.scene;
+      acceptScene(next, response.representations);
       onSaveState?.({ status: "saved", revision: next.scene_revision });
     } catch (cause: unknown) {
       // 409: scene đã đổi ở lượt khác — phải tải revision mới trước khi ghi (§S06 recovery).
@@ -556,7 +598,7 @@ export function ObjectReviewView({
             cameras={cameras}
             boxes={boxes}
             objects={splats}
-            gizmo={tool !== "none" && current && isPlaced(current) ? { id: current.id, mode: tool } : null}
+            gizmo={tool !== "none" && current && isPlaced(current) && !hiddenIds.has(current.id) ? { id: current.id, mode: tool } : null}
             onTransform={(id, position, rotation) => run((revision) => setObjectTransform(jobId, revision, id, position, rotation))}
             focus={focus}
             onPickBox={selectFromScene}
@@ -581,15 +623,15 @@ export function ObjectReviewView({
                 ? {
                     id: current.id,
                     name: current.name,
-                    active: current.active,
-                    canTransform: isPlaced(current),
+                    viewportHidden: hiddenIds.has(current.id),
+                    canTransform: isPlaced(current) && !hiddenIds.has(current.id),
                   }
                 : null
             }
             tool={tool}
             onTool={setTool}
             onDuplicate={current && !isIgnored(current) ? () => void act(current, "duplicate") : undefined}
-            onToggleActive={current ? () => act(current, "hide", { active: !current.active }) : undefined}
+            onToggleVisibility={current ? () => toggleViewportVisibility(current.id) : undefined}
             onDelete={
               current
                 ? () => {
@@ -607,7 +649,7 @@ export function ObjectReviewView({
           />
         ) : (
             <CollisionMeshCanvas url={jobArtifactContentUrl(jobId, scene.environment.geometry_ref)}>
-            {visibleObjects.map((object) => (
+            {visibleObjects.filter((object) => isPlaced(object) && !hiddenIds.has(object.id)).map((object) => (
               <ObjectBox
                 key={object.id}
                 object={object}
@@ -1034,6 +1076,10 @@ export function ObjectReviewView({
             </div>
             <div className="flex-1 overflow-y-auto">
               <ObjectifyNotice jobId={jobId} revision={scene.scene_revision} onRevision={() => setReload((value) => value + 1)} />
+              {missingSourcePolicies.length > 0 && <Notice tone="rust" className="m-3">SOURCE_POLICY_MISSING: Không có metadata nguồn để đặt Gaussian của {missingSourcePolicies.map((item) => item.id).join(", ")}. Hãy tải lại scene.</Notice>}
+              {representations.some((item) => item.readiness_blockers.length) && (
+                <Notice tone="rust" className="m-3">Representation chưa đầy đủ: {representations.flatMap((item) => item.readiness_blockers.map((code) => `${item.object_id}: ${code}`)).join(", ")}</Notice>
+              )}
               {error && (
                 <Notice tone="rust" className="m-3">
                   {error}
@@ -1043,6 +1089,8 @@ export function ObjectReviewView({
                 <Inspector
                   key={current.id}
                   object={current}
+                  viewportHidden={hiddenIds.has(current.id)}
+                  onToggleVisibility={() => toggleViewportVisibility(current.id)}
                   busy={busy}
                   catalog={catalog}
                   sceneRevision={scene.scene_revision}
@@ -1129,6 +1177,8 @@ function Legend() {
 /** Chi tiết + thao tác của vật đang chọn. Đổi tên cũng là một revision (Q5). */
 function Inspector({
   object,
+  viewportHidden,
+  onToggleVisibility,
   busy,
   catalog,
   sceneRevision,
@@ -1140,6 +1190,8 @@ function Inspector({
   onClose,
 }: {
   object: SceneObject;
+  viewportHidden: boolean;
+  onToggleVisibility: () => void;
   busy: boolean;
   catalog: SceneCatalog | null;
   sceneRevision: string;
@@ -1208,6 +1260,16 @@ function Inspector({
         <Button size="sm" variant="secondary" onClick={onFlyTo} className="border-line-dark bg-viewport-deep/80 text-on-dark hover:bg-viewport-deep">
           <Crosshair aria-hidden /> Bay tới
         </Button>
+        {!merged && object.provenance.review !== "DELETED" && (
+          <Button size="sm" variant="secondary" onClick={onToggleVisibility}>
+            {viewportHidden ? "Hiện trên màn hình" : "Ẩn trên màn hình"}
+          </Button>
+        )}
+        {object.state === "CONFIRMED" && !removed && (
+          <Button size="sm" variant="secondary" disabled={busy} onClick={() => onAct("hide", { active: !object.active })}>
+            {object.active ? "Tắt trong mô phỏng" : "Bật trong mô phỏng"}
+          </Button>
+        )}
         {object.state === "CANDIDATE" && !isIgnored(object) && (
           <>
             <Button size="sm" disabled={busy} onClick={() => onAct("confirm")}>

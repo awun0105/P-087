@@ -116,9 +116,14 @@ def rename_object(scene: SceneIR, object_id: str, name: str) -> SceneIR:
 
 
 def set_object_active(scene: SceneIR, object_id: str, active: bool) -> SceneIR:
-    """Hide/show or logically delete an object from active consumers."""
-    updated = _find_object(scene, object_id).model_copy(update={"active": active}, deep=True)
-    operation = "show" if active else "delete"
+    """Bật/tắt mô phỏng của vật đã xác nhận, độc lập ẩn viewport và Delete."""
+    if not isinstance(active, bool):
+        raise ValueError("simulation activation requires an explicit boolean")
+    target = _find_object(scene, object_id)
+    if target.state != SceneObjectState.CONFIRMED or target.provenance.get("review") in {"IGNORED", "DELETED"}:
+        raise ValueError("simulation activation requires a confirmed object that has not been removed")
+    updated = target.model_copy(update={"active": active}, deep=True)
+    operation = "activate_simulation" if active else "deactivate_simulation"
     return _replace_object(scene, updated, operation)
 
 

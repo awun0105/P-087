@@ -81,7 +81,9 @@ def apply_object_action(
         elif action == "ignore":
             updated = ignore_object(scene, object_id)
         elif action == "hide":
-            updated = set_object_active(scene, object_id, bool(active))
+            if not isinstance(active, bool):
+                raise ValueError("simulation activation requires an explicit boolean")
+            updated = set_object_active(scene, object_id, active)
         elif action == "delete":
             updated = delete_object(scene, object_id)
         elif action == "restore":

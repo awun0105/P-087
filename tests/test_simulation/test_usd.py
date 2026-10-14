@@ -389,7 +389,7 @@ def test_hybrid_entrypoint_and_layers_are_sealed_by_candidate_checksum(
             scene_ir_checksum=physics_scene.scene_ir_checksum,
             status=ExportCapabilityStatus.SUPPORTED,
             effective_mode=EffectiveExportMode.HYBRID,
-            builder_version="usd-export-capabilities-v2",
+            builder_version="usd-export-capabilities-v3",
             runtime_qualification=RuntimeQualificationStatus.QUALIFIED,
             runtime_version="test-runtime",
             requirements=export_requirements(physics_scene),
