@@ -1,4 +1,6 @@
-/** Host collision updates for the pinned MIT supersplat-viewer 1.35.2; no splat reload. */
+/** Host collision updates for the pinned MIT supersplat-viewer 1.35.2; no splat reload.
+ * Upstream: Copyright (c) 2011-2026 PlayCanvas Ltd.; see viewer-collision-LICENSE.txt.
+ */
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 

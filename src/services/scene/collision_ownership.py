@@ -83,6 +83,7 @@ def read_triangle_memberships(
 
     Both `ProductArtifactRef.artifact_checksum` values are byte checksums. The embedded source
     ref binds indices to the exact source mesh bytes; the membership ref binds the sidecar bytes.
+    Composition alone opts into shared claims so it can retain and report ambiguous triangles.
     """
     if source_triangle_count < 1:
         raise SourceCollisionOwnershipError("source collision mesh has no triangles")
