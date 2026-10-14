@@ -76,6 +76,8 @@ def read_triangle_memberships(
     source_geometry_bytes: bytes,
     source_triangle_count: int,
     resolve_bytes: ResolveArtifactBytes,
+    *,
+    allow_shared: bool = False,
 ) -> dict[str, tuple[int, ...]]:
     """Resolve exact membership sidecars and reject stale, out-of-range, or overlapping ownership.
 
@@ -118,7 +120,7 @@ def read_triangle_memberships(
             raise SourceCollisionOwnershipError(f"{owner.object_id}: membership index is outside source mesh bounds")
         for index in indices:
             previous_owner = claimed.get(index)
-            if previous_owner is not None:
+            if previous_owner is not None and not allow_shared:
                 raise SourceCollisionOwnershipError(
                     f"source triangle {index} is claimed by both {previous_owner} and {owner.object_id}"
                 )
