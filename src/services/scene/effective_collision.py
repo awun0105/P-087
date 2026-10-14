@@ -41,11 +41,11 @@ def _source_region_removed(item: SceneObject, objects_by_id: dict[str, SceneObje
     visited: set[str] = set()
     while item.provenance.get("review") == "MERGED":
         if item.id in visited:
-            return False
+            raise SourceCollisionOwnershipError(f"{item.id}: cyclic merged source ownership")
         visited.add(item.id)
         merged_into = item.provenance.get("merged_into")
         if not isinstance(merged_into, str) or merged_into not in objects_by_id:
-            return False
+            raise SourceCollisionOwnershipError(f"{item.id}: merged ownership target is missing")
         item = objects_by_id[merged_into]
     if item.provenance.get("duplicated_from") is not None:
         return False
@@ -76,6 +76,7 @@ def compose_effective_collision(
     reconstructed = [item for item in scene.objects if item.origin == SceneObjectOrigin.RECONSTRUCTED]
     objects_by_id = {item.id: item for item in reconstructed}
     selected_source = scene.environment.collision_source_ref is not None
+    has_removed_region = any(_source_region_removed(item, objects_by_id) for item in reconstructed)
     missing = [
         item.id
         for item in reconstructed
@@ -89,7 +90,7 @@ def compose_effective_collision(
                     or item.source_collision.region_kind != "triangle_indices"
                 )
             )
-            or (not selected_source and _source_region_removed(item, objects_by_id) and item.source_collision is None)
+            or (not selected_source and has_removed_region and item.source_collision is None)
         )
     ]
     if missing:
@@ -98,7 +99,14 @@ def compose_effective_collision(
             f"reconstructed objects require source collision ownership before rebuilding background: {ids}"
         )
 
-    owned = sorted((item for item in reconstructed if item.source_collision is not None), key=lambda item: item.id)
+    owned = sorted(
+        (
+            item
+            for item in reconstructed
+            if item.source_collision is not None and item.provenance.get("duplicated_from") is None
+        ),
+        key=lambda item: item.id,
+    )
     source_owners = [item.source_collision for item in owned]
     if any(owner is None for owner in source_owners):  # narrowed below for static type checkers
         raise SourceCollisionOwnershipError("source collision ownership is incomplete")

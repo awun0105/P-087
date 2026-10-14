@@ -189,3 +189,20 @@ def test_studio_walk_usd_share_geometry_revision_and_identity(tmp_path: Path, mo
         artifacts.get_walk_collision(**{**args, "scene_revision": "rev-stale"}, frame="display")
     assert exc.value.status_code == 409
     assert source.read_bytes() == payload
+
+
+@pytest.mark.parametrize("missing_target", [True, False])
+def test_broken_merge_ownership_blocks_composition(tmp_path: Path, missing_target: bool) -> None:
+    scene, compose, *_ = fixture(tmp_path)
+    scene = scene.model_copy(
+        update={
+            "objects": [
+                scene.objects[0].model_copy(
+                    update={"provenance": {"review": "MERGED", "merged_into": "missing" if missing_target else "A"}}
+                ),
+                scene.objects[1],
+            ]
+        }
+    )
+    with pytest.raises(SourceCollisionOwnershipError, match="merged|cyclic"):
+        compose(scene)

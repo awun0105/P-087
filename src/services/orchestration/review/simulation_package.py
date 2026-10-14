@@ -51,6 +51,7 @@ from src.services.orchestration.scene.effective_collision import (
     effective_environment as _carved_environment,
 )
 from src.services.scene.effective_collision import CarvedBackground
+from src.services.scene.effective_collision import _source_region_removed as _source_region_removed
 from src.services.scene.representation_composition import VisualPolicy, scene_representations
 from src.services.scene.representation_integrity import representation_issues
 from src.services.simulation.colliders.carve import (

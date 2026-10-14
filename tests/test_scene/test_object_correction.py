@@ -45,7 +45,7 @@ from src.services.orchestration.scene.errors import SceneEditRejectedError, Scen
 from src.services.orchestration.scene.models import SceneEditCommand, TransformEdit
 from src.services.orchestration.scene.object_correction import merge_object_candidates, reassign_object_membership
 from src.services.process_control import ProcessCancelledError
-from src.services.scene.collision_ownership import source_triangle_ownership
+from src.services.scene.collision_ownership import SourceCollisionOwnershipError, source_triangle_ownership
 from src.services.scene.decomposition import gaussian_split
 from src.services.scene.editing.commands import confirm_object, restore_object
 from src.services.scene.editing.membership import ObjectMembershipValidationError, encode_gaussian_membership_labels
@@ -509,7 +509,8 @@ def test_source_collision_region_for_merged_tombstone_follows_primary_review_sta
     assert _source_region_removed(secondary, {ignored.id: ignored, secondary.id: secondary}) is False
 
     malformed = secondary.model_copy(update={"provenance": {"review": "MERGED", "merged_into": "missing"}})
-    assert _source_region_removed(malformed, {malformed.id: malformed}) is False
+    with pytest.raises(SourceCollisionOwnershipError, match="merged ownership target is missing"):
+        _source_region_removed(malformed, {malformed.id: malformed})
 
 
 def test_reassign_object_to_object_preserves_rows_and_rebuilds_visual_collision_and_background(
