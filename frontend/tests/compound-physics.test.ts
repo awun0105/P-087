@@ -84,3 +84,40 @@ describe("real Ammo multipart/static colliders",()=>{
     expect(()=>convexHullVertices(new Float32Array([0,0,0,1,0,0,0,1,0,0,0,NaN]))).toThrow(/finite/);
   });
 });
+
+it("matches canonical object × collider × GLB-node transforms in Ammo and camera queries", async()=>{
+  const { ObjectCameraCollision }=await import("@/features/viewer/camera-collision");
+  const parts=parseGlbCollider(colliderGlb({edit:doc=>{
+    doc.nodes[0].translation=[-1,2,0];delete doc.nodes[1].matrix;
+    doc.nodes[1].translation=[2,0,.5];doc.nodes[1].rotation=[0,0,Math.SQRT1_2,Math.SQRT1_2];
+  }})).parts;
+  const object=item({colliderType:"CONVEX_HULL",parts,position:[10,20,3],rotation_xyzw:[0,0,Math.SQRT1_2,Math.SQRT1_2],colliderLocalTransform:{translation_xyz:[3,-1,.5],rotation_quaternion_xyzw:[0,0,Math.SQRT1_2,Math.SQRT1_2]}});
+  const p=new ScenePhysics(A,null,[object]);const camera=new ObjectCameraCollision([object]);
+  const min=new A.btVector3(),max=new A.btVector3();
+  try{
+    const hit=ray(p,[7,21,4],[15,21,4]);expect(hit).not.toBeNull();expect(hit![0]).toBeCloseTo(9,1);
+    const cameraHit=camera.queryRay(7,4,-21,1,0,0,8)!;expect(cameraHit.x).toBeCloseTo(9,4);expect(cameraHit.y).toBeCloseTo(hit![2],4);expect(-cameraHit.z).toBeCloseTo(hit![1],4);
+    body(p).getAabb(min,max);
+    [min.x(),min.y(),min.z()].forEach((value,axis)=>expect(value).toBeCloseTo([9,20.5,2.5][axis],1));
+    [max.x(),max.y(),max.z()].forEach((value,axis)=>expect(value).toBeCloseTo([11,21.5,5.5][axis],1));
+    expect(ray(p,[-3,0,4],[5,0,4])).toBeNull();
+    expect(p.step(0,null).get("table")!.position).toEqual([10,20,3]); // Gaussian/object pose stays distinct from child center.
+  }finally{A.destroy(min);A.destroy(max);p.destroy();camera.clear();}
+});
+
+it("repeated native world teardown balances tracked allocations and stabilizes WASM heap capacity",()=>{
+  const live=new Set<number>();let allocations=0,releases=0;
+  const tracked=new Proxy(A,{get:(target,key)=>{
+    if(key==="destroy")return (object:AmmoModule)=>{const pointer=A.getPointer(object);expect(live.delete(pointer)).toBe(true);releases++;target.destroy(object);};
+    const value=target[key];
+    if(typeof key==="string"&&key.startsWith("bt")&&typeof value==="function")return function(...args:unknown[]){const object=new value(...args);live.add(A.getPointer(object));allocations++;return object;};
+    return value;
+  }});
+  const run=()=>{const p=new ScenePhysics(tracked,null,[item(),item({id:"dynamic",dynamic:true,position:[5,0,4]})]);for(let frame=0;frame<30;frame++)p.step(1/60,null);p.reset();p.destroy();expect(p.statistics.ownedAllocations).toBe(0);expect(live.size).toBe(0);};
+  for(let i=0;i<5;i++)run();
+  const before=A.HEAP8.byteLength,start=performance.now();
+  for(let i=0;i<50;i++)run();
+  const duration=performance.now()-start,after=A.HEAP8.byteLength;
+  expect(allocations).toBe(releases);expect(after).toBe(before);
+  console.log("PR04 native allocation metrics",JSON.stringify({cycles:55,allocations,releases,live:live.size,heapBefore:before,heapAfter:after,measuredCycles:50,durationMs:duration}));
+});

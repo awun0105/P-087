@@ -49,27 +49,12 @@ export const CHARACTER_RADIUS_M = 0.3;
 export const CHARACTER_HEIGHT_M = 1.6;
 /** Chỉ giữ lưới tĩnh trong khoảng này quanh các vật động: xa hơn thì vật không thể chạm tới trong lúc chơi. */
 export const ENVIRONMENT_RADIUS_M = 6;
-/** Số đỉnh tối đa cho một bao lồi: đủ giữ hình, không làm chậm bước mô phỏng. */
-export const MAX_HULL_POINTS = 256;
-
 const CF_KINEMATIC_OBJECT = 2;
 const DISABLE_DEACTIVATION = 4;
 
 /** Không gian hiển thị (Y-up) của viewer → hệ canonical (Z-up): nghịch đảo của (x, y, z) → (x, z, −y). */
 export function displayToCanonical([x, y, z]: Vec3): Vec3 {
   return [x, -z, y];
-}
-
-/** Lấy đều tối đa `limit` đỉnh để làm bao lồi. */
-export function sampleHull(points: Float32Array, limit = MAX_HULL_POINTS): Float32Array {
-  const count = points.length / 3;
-  if (count <= limit) return points;
-  const result = new Float32Array(limit * 3);
-  for (let i = 0; i < limit; i += 1) {
-    const source = Math.floor((i * count) / limit) * 3;
-    result.set(points.subarray(source, source + 3), i * 3);
-  }
-  return result;
 }
 
 /** Hộp bao (hệ canonical) chứa mọi vật động, nới thêm `margin`. */
@@ -249,12 +234,12 @@ export class ScenePhysics {
   private convex(points: Float32Array): AmmoObject {
     const vertices = convexHullVertices(points);
     const shape = this.keep(new this.A.btConvexHullShape());
+    shape.setMargin(0.01);
     const point = this.keep(new this.A.btVector3());
     for (let i = 0; i < vertices.length; i += 3) {
       point.setValue(vertices[i], vertices[i+1], vertices[i+2]);
       shape.addPoint(point, i+3 === vertices.length);
     }
-    shape.setMargin(0.01);
     return shape;
   }
 
@@ -296,6 +281,7 @@ export class ScenePhysics {
     } else throw new Error(`${item.id}: unsupported collider type ${type}`);
     // Compound created after its children so reverse teardown destroys parent before child shapes.
     const compound = this.keep(new this.A.btCompoundShape());
+    compound.setMargin(0); // Only the child contact margin is applied; no second compound inflation.
     const local = item.colliderLocalTransform;
     const childTransform = this.transform({ position: local?.translation_xyz ?? [0,0,0], rotation_xyzw: local?.rotation_quaternion_xyzw ?? [0,0,0,1] });
     for (const child of children) compound.addChildShape(childTransform, child);
@@ -349,12 +335,13 @@ export function convexHullVertices(points: Float32Array): Float32Array {
   const edge = edges.reduce((a,b) => length(a)>length(b)?a:b);
   const cross = (a: number[], b: number[]) => [a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
   const normal = edges.map(e=>cross(edge,e)).reduce((a,b)=>length(a)>length(b)?a:b);
-  const volume = Math.max(...edges.map(e=>Math.abs(e.reduce((sum,v,axis)=>sum+v*normal[axis],0))));
+  let volume = 0;
+  for (const e of edges) volume = Math.max(volume, Math.abs(e.reduce((sum,v,axis)=>sum+v*normal[axis],0)));
   if (volume <= Math.pow(length(edge),3)*1e-10) throw new Error("Convex part is degenerate/coplanar");
   return new Float32Array(vertices.flat());
 }
 
-function validateTriangleMesh(mesh: ColliderMeshPart): void {
+export function validateTriangleMesh(mesh: ColliderMeshPart): void {
   const {positions,indices}=mesh;
   if (!positions.length || positions.length%3 || !indices.length || indices.length%3 || !positions.every(Number.isFinite)) throw new Error("Invalid triangle mesh arrays");
   for(let i=0;i<indices.length;i+=3) {
@@ -365,4 +352,39 @@ function validateTriangleMesh(mesh: ColliderMeshPart): void {
     const area=Math.hypot(e1[1]*e2[2]-e1[2]*e2[1],e1[2]*e2[0]-e1[0]*e2[2],e1[0]*e2[1]-e1[1]*e2[0]);
     if(!Number.isFinite(area)||area===0) throw new Error("Degenerate triangle mesh face");
   }
+}
+
+
+/** Verify that triangle surfaces and the convex hull represent the same closed volume. */
+export function validateConvexPart(part: ColliderMeshPart): void {
+  const vertices=convexHullVertices(part.positions);
+  validateTriangleMesh(part);
+  const unique=new Map<string,number>();
+  const vertexIds:number[]=[];
+  for(let i=0;i<part.positions.length;i+=3) {
+    const key=Array.from(part.positions.subarray(i,i+3)).join(",");
+    if(!unique.has(key))unique.set(key,unique.size);
+    vertexIds.push(unique.get(key)!);
+  }
+  const edges=new Map<string,number>();
+  const span=Math.max(...[0,1,2].map(axis=>{
+    let low=Infinity,high=-Infinity;
+    for(let i=axis;i<vertices.length;i+=3){low=Math.min(low,vertices[i]);high=Math.max(high,vertices[i]);}
+    return high-low;
+  }));
+  const tolerance=span*1e-5;
+  for(let i=0;i<part.indices.length;i+=3) {
+    const ids=[part.indices[i],part.indices[i+1],part.indices[i+2]];
+    for(let j=0;j<3;j++) {
+      const a=vertexIds[ids[j]],b=vertexIds[ids[(j+1)%3]],key=a<b?`${a}:${b}`:`${b}:${a}`;
+      edges.set(key,(edges.get(key)??0)+1);
+    }
+    const [a,b,c]=ids.map(id=>Array.from(part.positions.subarray(id*3,id*3+3)));
+    const u=b.map((value,axis)=>value-a[axis]),v=c.map((value,axis)=>value-a[axis]);
+    const n=[u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0]],length=Math.hypot(...n);
+    let low=Infinity,high=-Infinity;
+    for(let j=0;j<vertices.length;j+=3){const distance=n.reduce((sum,value,axis)=>sum+value*(vertices[j+axis]-a[axis]),0)/length;low=Math.min(low,distance);high=Math.max(high,distance);}
+    if(low < -tolerance && high > tolerance)throw new Error("Declared convex part has a non-convex surface");
+  }
+  if([...edges.values()].some(count=>count!==2))throw new Error("Convex part surface is not closed/manifold");
 }

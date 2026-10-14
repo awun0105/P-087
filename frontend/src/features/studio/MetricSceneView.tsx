@@ -25,6 +25,7 @@ import {
   type SourceFrame,
 } from "@/features/viewer/source-frame";
 import { jobArtifactContentUrl, jobLidarOverlayUrl, jobWalkCollisionUrl } from "@/lib/api/endpoints";
+import type { CollisionQuery } from "@playcanvas/supersplat-viewer/viewer";
 import { cn } from "@/lib/cn";
 
 const EMPTY_OBJECTS: readonly OverlayObject[] = [];
@@ -263,6 +264,7 @@ export function MetricSceneView({
     collisionUrl: walkCollisionUrl,
     objects: physicsObjects,
     overlayObjects: objects,
+    onObjectCollision: useCallback((collision: CollisionQuery | null) => viewerControls?.setObjectCollision(collision), [viewerControls]),
   });
 
   // Lớp LiDAR chỉ tải khi người dùng bật (vài MB); tắt thì giải phóng GPU, bật lại lấy từ cache của trình duyệt.
@@ -388,7 +390,7 @@ export function MetricSceneView({
         initialCameraMode="fly"
         annotations={annotations}
         onApp={onApp}
-        collisionUrl={walkBlocker || physics.status.state === "failed" ? null : walkCollisionUrl}
+        collisionUrl={walkBlocker || (physicsObjects.length > 0 && physics.status.state !== "ready") ? null : walkCollisionUrl}
         onCollisionError={setWalkCollisionError}
         onRuntime={setRuntime}
         wheelFactor={wheelFactor}
@@ -604,8 +606,8 @@ export function MetricSceneView({
         </div>
         {walking && physics.status.state !== "off" && (
           <div className="pointer-events-auto flex flex-wrap items-center gap-2 rounded-md border border-line-dark bg-viewport-deep/85 px-3 py-1.5 text-xs text-on-dark/90 backdrop-blur-md shadow-lg" role="status">
-            {physics.status.state === "loading" && "Đang dựng vật lý cho vật động…"}
-            {physics.status.state === "ready" && `Đi vào vật để đẩy · ${physics.status.objects} vật động`}
+            {physics.status.state === "loading" && "Đang nạp collider vật thể…"}
+            {physics.status.state === "ready" && `Đi vào vật để đẩy · ${physics.status.objects} vật có collision`}
             {physics.status.state === "failed" && `Không bật được vật lý: ${physics.status.message}`}
             {physics.status.state === "ready" && (
               <button type="button" onClick={physics.reset} className="rounded px-2 py-0.5 hover:bg-on-dark/10">Đặt lại vị trí vật</button>

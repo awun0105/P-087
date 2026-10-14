@@ -5,7 +5,7 @@ import path from "node:path";
 
 import { beforeAll, describe, expect, it } from "vitest";
 
-import { ScenePhysics, displayToCanonical, nearbyTriangles, sampleHull, type AmmoModule, type PhysicsObjectSpec } from "@/features/viewer/scene-physics";
+import { ScenePhysics, displayToCanonical, nearbyTriangles, convexHullVertices, type AmmoModule, type PhysicsObjectSpec } from "@/features/viewer/scene-physics";
 import { parseGlbMesh, type TriangleMesh } from "@/features/viewer/glb-mesh";
 import { fallbackColliderHull, transformColliderHullToObjectFrame } from "@/features/viewer/usePhysicsPlay";
 import { colliderGlb } from "./helpers/collider-glb";
@@ -140,10 +140,10 @@ describe("dữ liệu cho vật lý", () => {
     expect(centroid[2]).toBeCloseTo(0.5);
   });
 
-  it("lấy mẫu đều khi bao lồi quá nhiều đỉnh", () => {
-    const many = new Float32Array(3000 * 3).map((_, i) => i);
-    expect(sampleHull(many, 100)).toHaveLength(300);
-    expect(sampleHull(new Float32Array(9))).toHaveLength(9);
+  it("loại đúng các đỉnh trùng mà không lấy mẫu giảm hình học", () => {
+    const points = parseGlbMesh(colliderGlb()).positions;
+    const twice = new Float32Array([...points, ...points]);
+    expect(Array.from(convexHullVertices(twice))).toEqual(Array.from(points));
   });
 
   it("chỉ giữ lưới tĩnh quanh vật động", () => {

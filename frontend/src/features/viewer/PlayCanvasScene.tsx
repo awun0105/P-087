@@ -24,6 +24,8 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type Re
 import { createPortal } from "react-dom";
 
 import { parseGlbMesh } from "@/features/viewer/glb-mesh";
+import { CombinedCollision } from "@/features/viewer/camera-collision";
+import type { CollisionQuery } from "@playcanvas/supersplat-viewer/viewer";
 import type { ViewMode } from "@/features/viewer/layers";
 import {
   DISPLAY_EULER,
@@ -199,6 +201,7 @@ export interface ViewerControls {
   select(index: number): boolean;
   /** Bật/tắt điều khiển camera của viewer (tắt trong lúc kéo gizmo để hai bên không tranh con trỏ). */
   setInputEnabled(enabled: boolean): void;
+  setObjectCollision(collision: CollisionQuery | null): void;
   /**
    * Chuyển chế độ camera. `walk` chỉ được khi viewer báo `walkAllowed` (có dữ liệu va chạm và scene
    * đủ lớn). Trả false khi viewer chưa nạp xong hoặc chế độ không dùng được.
@@ -421,6 +424,9 @@ export function PlayCanvasScene({
               viewer.selectAnnotation(index);
               return true;
             },
+            setObjectCollision: (objectCollision) => {
+              if (!disposed) viewer.setCollisionProvider(objectCollision ? (environment) => environment ? new CombinedCollision(() => [environment, objectCollision], environment.voxelResolution) : null : null);
+            },
             setInputEnabled: (enabled) => {
               if (!disposed) viewer.state.inputEnabled = enabled;
             },
@@ -625,6 +631,7 @@ interface ViewerHandleLike {
     animationTime: number;
   };
   readonly events: { on(key: string, handler: () => void): { off(): void } };
+  setCollisionProvider(provider: ((environment: CollisionQuery | null) => CollisionQuery | null) | null): void;
   setCollisionMesh(positions: Float32Array | null, indices: Uint32Array | null): void;
   frameScene(): void;
   resetCamera(): void;

@@ -55,7 +55,7 @@ describe("physics mesh frames through the loading hook", () => {
     await waitFor(() => expect(result.current.status.state).toBe("ready"));
     const [environment, objects] = constructed.mock.calls[0] as [TriangleMesh, PhysicsObjectSpec[]];
     expect(Array.from(environment.positions)).toEqual(BOX_POINTS.flat());
-    expect(Array.from(objects[0].hull!)).toEqual(BOX_POINTS.flat());
+    expect(Array.from(objects[0].parts![0].positions)).toEqual(BOX_POINTS.flat());
     expect(objects[0].position).toEqual(input.position);
     expect(objects[0].rotation_xyzw).toEqual(input.rotation_xyzw);
   });
@@ -67,14 +67,15 @@ describe("physics mesh frames through the loading hook", () => {
     } });
     await waitFor(() => expect(result.current.status.state).toBe("ready"));
     const [, objects] = constructed.mock.calls[0] as [TriangleMesh, PhysicsObjectSpec[]];
-    const expected = BOX_POINTS.flatMap(([x, y, z]) => [2 - y, -1 + x, 0.5 + z]);
-    Array.from(objects[0].hull!).forEach((value, index) => expect(value).toBeCloseTo(expected[index], 5));
+    const expected = BOX_POINTS.flat();
+    expect(objects[0].colliderLocalTransform?.translation_xyz).toEqual([2,-1,.5]);
+    expect(objects[0].colliderLocalTransform?.rotation_quaternion_xyzw).toEqual([0,0,Math.SQRT1_2,Math.SQRT1_2]);
+    Array.from(objects[0].parts![0].positions).forEach((value, index) => expect(value).toBeCloseTo(expected[index], 5));
     expect(objects[0].position).toEqual(input.position);
     expect(objects[0].rotation_xyzw).toEqual(input.rotation_xyzw);
   });
 
   it.each<[string, (document: GlbFixtureDocument) => void]>([
-    ["node transform", (document) => { document.nodes[1].matrix![12] = 5; }],
     ["sparse accessor", (document) => { document.accessors[0].sparse = { count: 1 }; }],
   ])("reports unsupported %s instead of quietly using a fallback box", async (_name, edit) => {
     stubMeshes(colliderGlb({ edit }));
@@ -95,16 +96,60 @@ describe("physics mesh frames through the loading hook", () => {
     const other = BOX_POINTS.map(([x, y, z]) => [x + 4, y, z] as [number, number, number]);
     stubMeshes(colliderGlb({ parts: [BOX_POINTS, other] }));
     const { result } = start();
-    await waitFor(() => expect(result.current.status).toMatchObject({ state: "failed", message: expect.stringContaining("BLOCKED BY PR-04") }));
+    await waitFor(() => expect(result.current.status).toMatchObject({ state: "failed", message: expect.stringContaining("CONVEX_HULL requires exactly one part") }));
     expect(constructed).not.toHaveBeenCalled();
   });
 
   it.each([
-    { dynamic: false }, { colliderType: "CONVEX_DECOMPOSITION" }, { colliderType: "SIMPLIFIED_MESH" },
-  ])("explicitly blocks unsupported physics %j", async (flags) => {
+    { dynamic: false }, { colliderType: "CONVEX_DECOMPOSITION" }, { colliderType: "SIMPLIFIED_MESH", dynamic: false },
+  ])("loads supported static/multipart physics %j", async (flags) => {
     stubMeshes(colliderGlb());
     const { result } = start({ ...input, ...flags });
-    await waitFor(() => expect(result.current.status).toMatchObject({ state: "failed", message: expect.stringContaining("BLOCKED BY PR-04") }));
+    await waitFor(() => expect(result.current.status.state).toBe("ready"));
+    expect(constructed).toHaveBeenCalledOnce();
+    if (flags.dynamic === false) expect(constructed.mock.calls[0][1][0].mass_kg).toBe(0);
+  });
+
+  it.each([
+    { colliderType: "SIMPLIFIED_MESH", mass_kg: 10 }, { colliderType: "CONVEX_HULL", mass_kg: null },
+  ])("blocks unsafe/missing dynamic input %j", async (flags) => {
+    stubMeshes(colliderGlb());
+    const { result } = start({ ...input, ...flags });
+    await waitFor(() => expect(result.current.status.state).toBe("failed"));
     expect(constructed).not.toHaveBeenCalled();
   });
+});
+
+it("prepares camera before Walk, preserves physics for viewport hide, rebuilds moved poses, and releases on Exit/Delete/Restore", async()=>{
+  stubMeshes(colliderGlb());
+  const callbacks=new Map<string,(dt:number)=>void>();
+  const app={on:vi.fn((event:string,fn:(dt:number)=>void)=>callbacks.set(event,fn)),off:vi.fn((event:string)=>callbacks.delete(event))} as unknown as AppBase;
+  const overlay={setObjects:vi.fn()} as unknown as SceneOverlay;
+  const sink=vi.fn();
+  const {result,rerender,unmount}=renderHook(({walking,objects,visible})=>usePhysicsPlay({app,overlay,walking,collisionUrl:"/display-environment.glb",objects,overlayObjects:[{id:input.id,url:"/object.ply",position:input.position,rotation_xyzw:input.rotation_xyzw,visible}],onObjectCollision:sink}),{initialProps:{walking:false,objects:[input],visible:true}});
+  await waitFor(()=>expect(result.current.status.state).toBe("ready"));
+  expect(constructed).not.toHaveBeenCalled();expect(sink.mock.lastCall![0]).not.toBeNull();
+  rerender({walking:true,objects:[input],visible:true});await waitFor(()=>expect(constructed).toHaveBeenCalledTimes(1));
+  rerender({walking:true,objects:[input],visible:false});expect(constructed).toHaveBeenCalledTimes(1);
+  const moved={...input,position:[30,40,5] as [number,number,number]};
+  rerender({walking:true,objects:[moved],visible:false});
+  await waitFor(()=>expect(constructed).toHaveBeenCalledTimes(2));expect(constructed.mock.lastCall![1][0].position).toEqual(moved.position);
+  expect(vi.mocked(fetch).mock.calls.filter(([url])=>url==="/canonical-object.glb")).toHaveLength(1); // Pose edit reuses parsed collider bytes.
+  rerender({walking:false,objects:[moved],visible:false});expect(callbacks.size).toBe(0);
+  rerender({walking:false,objects:[],visible:false});expect(result.current.status.state).toBe("off");expect(sink.mock.lastCall![0]).toBeNull();
+  rerender({walking:true,objects:[moved],visible:true});await waitFor(()=>expect(constructed).toHaveBeenCalledTimes(3));
+  unmount();expect(callbacks.size).toBe(0);
+});
+
+it("an old collider response cannot resurrect an object deleted before loading finishes", async()=>{
+  let complete: ((response:object)=>void)|undefined;
+  vi.stubGlobal("fetch",vi.fn((url:string)=>url==="/canonical-object.glb"?new Promise(resolve=>{complete=resolve;}):Promise.resolve({ok:true,arrayBuffer:async()=>colliderGlb({frame:"display"})})));
+  const app={on:vi.fn(),off:vi.fn()} as unknown as AppBase;
+  const overlay={setObjects:vi.fn()} as unknown as SceneOverlay;
+  const {result,rerender}=renderHook(({objects})=>usePhysicsPlay({app,overlay,walking:true,collisionUrl:"/display-environment.glb",objects,overlayObjects:[]}),{initialProps:{objects:[input]}});
+  await waitFor(()=>expect(complete).toBeDefined());
+  rerender({objects:[]});
+  complete!({ok:true,arrayBuffer:async()=>colliderGlb()});
+  await waitFor(()=>expect(result.current.status.state).toBe("off"));
+  expect(constructed).not.toHaveBeenCalled();
 });

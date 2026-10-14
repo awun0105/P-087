@@ -28,6 +28,7 @@ function fixture() {
     app: { root: { findComponent: () => camera }, graphicsDevice: { deviceType: "webgl" } },
     state, events, annotations,
     setCollisionMesh: vi.fn(),
+    setCollisionProvider: vi.fn(),
     selectAnnotation: vi.fn(), frameScene: vi.fn(), resetCamera: vi.fn(), seek: vi.fn(), destroy: vi.fn(),
   };
   mocks.createViewer.mockImplementation(async (options) => {

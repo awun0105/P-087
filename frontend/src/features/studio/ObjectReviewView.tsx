@@ -440,8 +440,8 @@ export function ObjectReviewView({
             colliderUrl: colliderShapeUrl(jobId, collider),
             colliderLocalTransform: collider?.local_transform ?? null,
             dimensions: collider?.dimensions_xyz_m ?? object.primitive_dimensions_xyz_m ?? null,
-            mass_kg: object.physics?.mass_kg ?? 10,
-            friction: object.physics?.dynamic_friction ?? 0.5,
+            mass_kg: object.physics?.mass_kg ?? null,
+            friction: (object.physics?.dynamic ? object.physics.dynamic_friction : object.physics?.static_friction) ?? 0.5,
             restitution: object.physics?.restitution ?? 0,
           };
         }),

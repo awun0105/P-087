@@ -27,7 +27,7 @@ describe("MetricSceneView effective collision", () => {
   it("does not silently omit a confirmed static collider after removing its source region", () => {
     const object: PhysicsObjectInput = { id: "static-A", dynamic: false, position: [7, 8, 9], rotation_xyzw: [0, 0, 0, 1], colliderUrl: null, colliderLocalTransform: null, dimensions: [1, 2, 3], mass_kg: 0, friction: .5, restitution: 0 };
     render(<MetricSceneView jobId="j" visual={visual} collision={collision} cameras={cameras} sceneRevision="rev-3" physicsObjects={[object]} />);
-    expect(screen.getByText(/static-A.*BLOCKED BY PR-04/)).toBeInTheDocument();
+    expect(screen.queryByText(/BLOCKED BY PR-04/)).not.toBeInTheDocument();
     expect(renderViewer.mock.lastCall![0].collisionUrl).toBeNull();
   });
 });

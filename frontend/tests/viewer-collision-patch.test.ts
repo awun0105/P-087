@@ -19,6 +19,7 @@ it("the installed bridge updates camera/input/navigation and releases overlays w
   const host = {
     destroyed: false, inputController: { collision: null }, cameraManager: { setCollision: vi.fn() },
     navCursor: { collision: null }, meshOverlay: null as MeshDebugOverlay | null,
+    setCollisionProvider: vi.fn<(provider: ((environment: unknown) => unknown) | null) => void>(),
     setCollisionMesh: vi.fn<(points: Float32Array | null, indices: Uint32Array | null) => void>(),
   };
   const state = { hasCollision: false, hasCollisionOverlay: false, walkAllowed: false, cameraMode: "fly", collisionOverlayEnabled: false };
@@ -38,6 +39,13 @@ it("the installed bridge updates camera/input/navigation and releases overlays w
   host.setCollisionMesh(points, indices);
   expect(previous.destroy).toHaveBeenCalledOnce();
   expect(listeners.size).toBe(1);
+  const environment = host.inputController.collision;
+  const objectProvider = { kind: "object queries" };
+  host.setCollisionProvider(base => ({ environment: base, objectProvider }));
+  expect(host.cameraManager.setCollision).toHaveBeenLastCalledWith({ environment, objectProvider });
+  expect(host.navCursor.collision).toEqual({ environment, objectProvider });
+  host.setCollisionProvider(null);
+  expect(host.inputController.collision).toBe(environment);
   state.cameraMode = "walk";
   host.setCollisionMesh(null, null);
   expect(host.inputController.collision).toBeNull();
