@@ -83,3 +83,31 @@ Full contract suite: 238 PASS. Contract mirror, frontend tsc/scoped lint PASS.
 
 Pre-flight: CodeGraph convex_parts/build_one callers inspected; source change affects only explicit
 surface_mesh requests and reuses existing CoACD/GLB serialization. Ruff scoped lint/format PASS.
+
+## Checkpoint: ObjectGS prepared-input adapter and runner
+
+- `src/services/scene/objectgs.py` writes labelled RGB anchors, calibrated undistorted COLMAP text cameras,
+  explicit 0-background / 1..255 object mapping, and categorical PNG observations. No scale is applied.
+  Invalid IDs, camera quaternions, dimensions and missing source/visible labels fail before training.
+- Both ObjectGS and custom gsplat revisions are pinned and tracked source modifications are rejected.
+  Custom gsplat pinned SHA is 68a61a4485cfc2967703391a3e1cfb59981f8fc7 (package version 1.4.0; Apache-2.0).
+- The process runner invokes actual upstream training and numeric-label mesh export, checks anchors plus
+  opacity/cov/color MLP checkpoint files, validates nonempty finite raw exports and reports checksums.
+  It reuses run_cancellable_process for timeout/cancellation and records per-stage logs/progress.
+- `scripts/scene/objectgs_entry.py` removes only the exact pinned import-time GPU auto-selection prelude
+  in memory. Source files are not patched; the host's selected CUDA_VISIBLE_DEVICES remains effective.
+- `scripts/scene/run_objectgs.py --request ... --result ...` verifies immutable PLY/membership checksums,
+  prepares inputs, calls the real runner, archives checkpoint files, and converts canonical world surface
+  vertices to each immutable object-local frame exactly once. It does not publish SceneIR or claim that
+  the normal worker already calls it. Source poses must be explicitly supplied/bound by its caller.
+- Resume is unsupported because pinned upstream capture()/restore() tuple layouts disagree (11 vs 13).
+
+Nine CPU adapter tests PASS, including rotated/off-center 1x2x3 m world-to-object conversion. Runner
+command/checkpoint/export tests use explicit fixtures/mocks and are NOT real ObjectGS evidence.
+The real entry was attempted in existing scene_runtime and failed with ModuleNotFoundError: wandb
+(/tmp/p087-objectgs-runtime-probe.log). Existing scene runtime is unchanged and is not an ObjectGS runtime.
+A separate Python 3.8.19 Conda environment was created at /tmp/p087-objectgs-env; dependencies are being
+installed there only, not into application, Brush or SAM2 environments. GPU train/export remains UNVERIFIED.
+
+Pre-flight: new adapter reuses canonical membership decode, Gaussian reader, Transform and cancellation
+runner. Ruff lint/format PASS; 9 focused tests PASS. UI unchanged. No PR-05 push.
