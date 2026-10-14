@@ -69,8 +69,8 @@ def apply_object_action(
 ) -> SceneEditResult:
     """Một thao tác trên một vật, publish revision kế tiếp.
 
-    confirm/ignore ứng viên; hide (active=False/True); delete (vật thêm tay gỡ hẳn, vật tái dựng đánh
-    dấu DELETED); restore; rename; duplicate; label (nhãn + vật lý: khối lượng người dùng nhập, nếu
+    confirm/ignore ứng viên; hide bật/tắt mô phỏng vật đã xác nhận; delete giữ tombstone
+    DELETED để khôi phục cả vật thêm tay; restore khôi phục vật hoặc nhóm đã gộp; rename; duplicate; label (nhãn + vật lý: khối lượng người dùng nhập, nếu
     không thì mặc định của nhãn hoặc mật độ × thể tích collider).
     """
     scene = _current(editor, job_id, expected_revision)

@@ -388,7 +388,7 @@ export function ObjectReviewView({
   }, []);
 
   const previews = useMemo(() => new Set((catalog?.entries ?? []).filter((item) => item.has_preview).map((item) => item.family)), [catalog]);
-  // Scene theo vật (pipeline v2): mỗi vật có Gaussian riêng. Vật đã loại/xoá hoặc đang ẩn không vẽ.
+  // SOURCE giữ extraction pose; OBJECT dùng pose đã chỉnh. Visibility viewport độc lập lifecycle.
   const missingSourcePolicies = (scene?.objects ?? []).filter((object) =>
     object.state === "CANDIDATE" && object.visual_ref?.artifact_type === "ObjectGaussians" &&
     !["DELETED", "MERGED"].includes(String(object.provenance.review)) &&
