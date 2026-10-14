@@ -154,14 +154,8 @@ def ignore_object(scene: SceneIR, object_id: str) -> SceneIR:
 
 
 def delete_object(scene: SceneIR, object_id: str) -> SceneIR:
-    """Xoá vật khỏi scene.
-
-    Vật người dùng thêm bị gỡ hẳn. Vật tái dựng giữ lại trong revision (audit, khôi phục) nhưng tắt
-    active và ghi `review=DELETED` — khác "ẩn" ở chỗ UI xếp nó vào nhóm đã xoá, không hiện trong scene.
-    """
+    """Soft-delete every object so user-added assets remain auditable and restorable."""
     target = _find_object(scene, object_id)
-    if target.origin == SceneObjectOrigin.USER_ADDED:
-        return _replace_objects(scene, [item for item in scene.objects if item.id != object_id], "delete")
     review = {**target.provenance, "review": "DELETED"}
     updated = target.model_copy(update={"active": False, "provenance": review}, deep=True)
     return _replace_object(scene, updated, "delete")

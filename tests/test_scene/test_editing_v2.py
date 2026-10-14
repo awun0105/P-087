@@ -36,12 +36,15 @@ def test_delete_keeps_reconstructed_object_for_audit_and_restore_brings_it_back(
     assert restored.active is True and restored.provenance["review"] == "CONFIRMED"
 
 
-def test_delete_removes_user_added_object_entirely() -> None:
+def test_delete_keeps_user_added_object_restorable() -> None:
     scene = duplicate_object(_scene(), _PALLET, "user-001", (0.5, 0.0, 0.0))
-    user = _object(scene, "user-001").model_copy(update={"origin": "user_added"})
+    user = _object(scene, "user-001").model_copy(update={"origin": SceneObjectOrigin.USER_ADDED})
     scene = scene.model_copy(update={"objects": [*scene.objects[:-1], user]})
 
-    assert "user-001" not in {item.id for item in delete_object(scene, "user-001").objects}
+    deleted = delete_object(scene, "user-001")
+    assert _object(deleted, "user-001").provenance["review"] == "DELETED"
+    restored = _object(restore_object(deleted, "user-001"), "user-001")
+    assert restored.active and restored.visual_ref == user.visual_ref and restored.transform == user.transform
 
 
 def test_duplicate_rebinds_frames_and_offsets_position() -> None:

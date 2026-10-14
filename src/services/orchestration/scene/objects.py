@@ -22,6 +22,7 @@ from src.services.orchestration.scene.errors import (
     SceneRevisionConflictError,
 )
 from src.services.orchestration.scene.models import ColliderEditCommand, SceneEditResult
+from src.services.orchestration.scene.object_restore import restore_merged_group
 from src.services.scene.editing.commands import (
     PrimitiveObjectCommand,
     add_primitive_object,
@@ -87,7 +88,12 @@ def apply_object_action(
         elif action == "delete":
             updated = delete_object(scene, object_id)
         elif action == "restore":
-            updated = restore_object(scene, object_id)
+            target = next(item for item in scene.objects if item.id == object_id)
+            updated = (
+                restore_merged_group(editor, job_id, scene, object_id)
+                if target.provenance.get("review") == "MERGED"
+                else restore_object(scene, object_id)
+            )
         elif action == "duplicate":
             updated = duplicate_object(scene, object_id, _next_id(scene, "user"), _DUPLICATE_OFFSET_M)
         elif action == "label":

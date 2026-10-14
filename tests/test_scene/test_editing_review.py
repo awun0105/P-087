@@ -85,3 +85,19 @@ def test_activation_body_requires_a_boolean(active: object) -> None:
     if active is not None:
         with pytest.raises(ValidationError):
             ObjectActionRequest(expected_scene_revision=scene.scene_revision, active=active)
+
+
+def test_restore_repairs_legacy_active_candidate_without_confirming_or_moving_it() -> None:
+    from src.models.contracts.identity import verify_content_checksum
+    from src.services.scene.editing.commands import restore_object
+    from src.services.scene.representation_composition import resolve_representation
+
+    scene = _candidate_scene()
+    candidate = scene.objects[0].model_copy(update={"active": True})
+    updated = restore_object(scene.model_copy(update={"objects": [candidate]}), candidate.id)
+    repaired = updated.objects[0]
+    assert repaired.state == SceneObjectState.CANDIDATE and not repaired.active
+    assert repaired.transform == candidate.transform and repaired.visual_ref == candidate.visual_ref
+    assert repaired.source_collision == candidate.source_collision
+    assert "INVALID_OBJECT_ACTIVATION" not in resolve_representation(repaired).readiness_blockers
+    verify_content_checksum(updated, "scene_ir_checksum")
