@@ -111,3 +111,26 @@ installed there only, not into application, Brush or SAM2 environments. GPU trai
 
 Pre-flight: new adapter reuses canonical membership decode, Gaussian reader, Transform and cancellation
 runner. Ruff lint/format PASS; 9 focused tests PASS. UI unchanged. No PR-05 push.
+
+## Checkpoint: ownership-aware occupancy and shared consumers
+
+`object_aware_geometry.build_background_collision` separates source occupancy before meshing. Object-only
+cells are excluded; background/shared/unknown cells remain conservative; measured free-space conflicts
+fail. Optional authored support points are counted separately as inferred. Exposed voxel faces are
+extracted directly with no exterior fill, smoothing or global triangle carving. Grid extent is bounded.
+This block surface is intentionally at the configured voxel resolution, not a reconstructed smooth mesh.
+
+The shared effective compositor recognizes the checksum-bound ObjectAwareEnvironmentManifest and reads
+its separately authored collider, without applying legacy triangle removal a second time. The baseline
+separates all source objects; formal Pending/Ignored source representations restore their verified object
+colliders at immutable extraction poses. Studio Pending preview uses the independent current-pose collider
+instead. Confirmed/inactive/deleted representations reuse existing lifecycle rules. Move does not move
+source restoration geometry or change the authored background. Changed membership/map or corrupt artifacts
+reject rather than falling back to global geometry. Existing browser and USD consumers call this compositor.
+
+Tests: occupancy 3 PASS; mode composition 2 PASS; including legacy effective collision, 13 PASS.
+Fixture global floor/table/legs/wall/unselected geometry is connected. Independent triangle-ray probes
+verify floor and wall remain, old tabletop no longer blocks, unselected object remains and shared floor
+contact cells survive. This does not establish real Room or unseen support recovery acceptance.
+Source map integrity, stale/corrupt rejection, Pending/Ignore and Confirm->Move composition are tested.
+Ruff lint/format and diff checks PASS; Graphify AST update in progress. No PR-05 push.

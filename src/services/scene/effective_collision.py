@@ -11,6 +11,7 @@ import trimesh
 
 from src.models.contracts.artifacts import ProductArtifactRef
 from src.models.contracts.floor_model import FloorFitEvidence
+from src.models.contracts.object_geometry import ObjectAwareEnvironmentManifest
 from src.models.contracts.scene import SceneIR, SceneObject, SceneObjectOrigin, SceneObjectState
 from src.services.scene.collision_ownership import SourceCollisionOwnershipError, read_triangle_memberships
 from src.services.scene.collision_surfaces import (
@@ -19,6 +20,7 @@ from src.services.scene.collision_surfaces import (
     require_closed_cuts,
     surface_planes,
 )
+from src.services.scene.editing.membership import decode_gaussian_membership_labels
 from src.services.simulation.colliders.carve import (
     COLLISION_CARVE_MARGIN_M,
     CarveBox,
@@ -68,6 +70,69 @@ def _source_region_removed(
     )
 
 
+def _object_aware_environment(
+    scene: SceneIR,
+    source_ref: ProductArtifactRef,
+    source_faces: np.ndarray,
+    read_artifact: Callable[[ProductArtifactRef], bytes],
+    *,
+    preview_pending: bool,
+) -> CarvedBackground:
+    """Use separately authored background; restore source colliders for objects kept at source pose."""
+
+    def read(reference: ProductArtifactRef) -> bytes:
+        payload = read_artifact(reference)
+        if reference.artifact_checksum != f"sha256:{hashlib.sha256(payload).hexdigest()}":
+            raise SourceCollisionOwnershipError("object-aware artifact checksum mismatch")
+        return payload
+
+    reference = scene.environment.object_aware_collision_ref
+    if reference is None:
+        raise SourceCollisionOwnershipError("object-aware manifest is missing")
+    manifest = ObjectAwareEnvironmentManifest.model_validate_json(read(reference))
+    if (
+        manifest.source_geometry_ref != source_ref
+        or manifest.source_membership != scene.environment.membership
+        or manifest.collision_ref != scene.environment.collider_ref
+    ):
+        raise SourceCollisionOwnershipError("object-aware geometry is stale; regenerate from current membership")
+    if set(manifest.removed_object_ids) != set(manifest.source_membership.label_to_object_id.values()):
+        raise SourceCollisionOwnershipError("object-aware baseline must separate every source object")
+    # Read the sealed source map too: a manifest must not attest to corrupt/missing membership bytes.
+    decode_gaussian_membership_labels(read(manifest.source_membership.labels_ref), manifest.source_membership)
+    mesh = trimesh.load(io.BytesIO(read(manifest.collision_ref)), file_type="glb", force="mesh", process=False)
+    if not len(mesh.faces) or not np.isfinite(mesh.vertices).all():
+        raise SourceCollisionOwnershipError("invalid object-aware environment mesh")
+    meshes = [mesh]
+    objects_by_id = {item.id: item for item in scene.objects}
+    for object_id in manifest.removed_object_ids:
+        item = objects_by_id.get(object_id)
+        if item is None or item.source_collision is None or item.source_collision.source_geometry_ref != source_ref:
+            raise SourceCollisionOwnershipError("object-aware source pose binding is missing or stale")
+        if _source_region_removed(item, objects_by_id, preview_pending=preview_pending):
+            continue
+        collider = item.collider
+        if collider is None or collider.geometry_ref is None:
+            raise SourceCollisionOwnershipError(f"{object_id}: source collider is required by object-aware composition")
+        restored = trimesh.load(io.BytesIO(read(collider.geometry_ref)), file_type="glb", force="mesh", process=False)
+        if not len(restored.faces) or not np.isfinite(restored.vertices).all():
+            raise SourceCollisionOwnershipError(f"{object_id}: invalid source collider geometry")
+        local = collider.local_transform
+        source = item.source_collision.source_transform
+        points = np.asarray(restored.vertices) @ _rotation(local.rotation_quaternion_xyzw).T + np.asarray(
+            local.translation_xyz
+        )
+        restored.vertices = points @ _rotation(source.rotation_quaternion_xyzw).T + np.asarray(source.translation_xyz)
+        meshes.append(restored)
+    combined = trimesh.util.concatenate(meshes)
+    vertices = np.asarray(combined.vertices, dtype=np.float64)
+    faces = np.asarray(combined.faces, dtype=np.int64)
+    digest = hashlib.sha256(reference.artifact_checksum.encode())
+    digest.update(vertices.tobytes())
+    digest.update(faces.tobytes())
+    return CarvedBackground(vertices, faces, 0, f"sha256:{digest.hexdigest()}", np.zeros(len(source_faces), dtype=bool))
+
+
 def compose_effective_collision(
     scene: SceneIR,
     source_ref: ProductArtifactRef,
@@ -90,6 +155,8 @@ def compose_effective_collision(
     faces = np.asarray(mesh.faces)
     if not len(faces):
         raise SourceCollisionOwnershipError("source collision mesh has no triangles")
+    if scene.environment.object_aware_collision_ref is not None:
+        return _object_aware_environment(scene, source_ref, faces, read_artifact, preview_pending=preview_pending)
 
     reconstructed = [item for item in scene.objects if item.origin == SceneObjectOrigin.RECONSTRUCTED]
     objects_by_id = {item.id: item for item in reconstructed}
