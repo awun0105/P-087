@@ -1,5 +1,6 @@
 """PR-03: exact source triangles survive review and object pose edits consistently."""
 
+import io
 from pathlib import Path
 
 import numpy as np
@@ -124,3 +125,67 @@ def test_ownership_failures_block_instead_of_guessing(tmp_path: Path, fault: str
         blobs[a.source_collision.region_ref.artifact_uri] = b"corrupt"
     with pytest.raises(SourceCollisionOwnershipError):
         compose(scene.model_copy(update={"objects": [a, scene.objects[1]]}))
+
+
+def test_studio_walk_usd_share_geometry_revision_and_identity(tmp_path: Path, monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from fastapi import HTTPException
+
+    from src.api.product import artifacts
+    from src.services.orchestration.projects.registry import ProjectRegistry
+    from src.services.orchestration.review.simulation_package import _carved_environment
+    from src.services.orchestration.scene.errors import SceneRevisionConflictError
+    from src.services.orchestration.scene.physics_collision import effective_collision_for_revision
+
+    scene, compose, ref, payload, blobs = fixture(tmp_path)
+    scene = confirm_object(scene, "A")
+    registry, _ = _scene_job(tmp_path / "api")
+    source = tmp_path / "source.glb"
+    source.write_bytes(payload)
+
+    def require(reference):
+        value = payload if reference == ref else blobs[reference.artifact_uri]
+        return SimpleNamespace(read_bytes=lambda: value)
+
+    monkeypatch.setattr(registry.runtime_resolver, "require", require)
+    monkeypatch.setattr(registry.runtime_resolver, "locate", lambda uri: None)
+    monkeypatch.setattr(registry.scene, "current", lambda job_id: SimpleNamespace(scene=scene))
+    monkeypatch.setattr(ProjectRegistry, "resolve_artifact", lambda self, job_id, reference: source)
+    monkeypatch.setattr(registry, "get_job", lambda job_id: SimpleNamespace(config_checksum="sha256:" + "0" * 64))
+    monkeypatch.setattr(artifacts.deps, "registry", lambda: registry)
+    monkeypatch.setattr(artifacts.deps, "job_or_404", lambda job_id: None)
+    args = dict(
+        job_id=ref.job_id,
+        filename="collision.glb",
+        artifact_uri=ref.artifact_uri,
+        artifact_checksum=ref.artifact_checksum,
+        dynamic=[],
+        scene_revision=scene.scene_revision,
+    )
+    studio = artifacts.get_walk_collision(**args, frame="canonical")
+    walk = artifacts.get_walk_collision(**args, frame="display")
+    usd = _carved_environment(registry, scene)
+    assert (
+        studio.headers["x-collision-composition"]
+        == walk.headers["x-collision-composition"]
+        == usd.identity
+        == compose(scene).identity
+    )
+    assert studio.headers["x-scene-revision"] == scene.scene_revision
+    assert "no-cache" in studio.headers["cache-control"]
+    canonical = trimesh.load(io.BytesIO(studio.body), file_type="glb", force="mesh", process=False)
+    display = trimesh.load(io.BytesIO(walk.body), file_type="glb", force="mesh", process=False)
+    np.testing.assert_allclose(canonical.vertices[canonical.faces], usd.vertices[usd.faces])
+    np.testing.assert_allclose(
+        display.vertices[display.faces], canonical.vertices[canonical.faces][..., [0, 2, 1]] * [1, 1, -1]
+    )
+    before = usd.identity
+    scene = move_object(scene, "A", scene.objects[0].transform.model_copy(update={"translation_xyz": (10, 5, 4)}))
+    assert _carved_environment(registry, scene).identity == before
+    with pytest.raises(SceneRevisionConflictError):
+        effective_collision_for_revision(registry, ref.job_id, "rev-stale")
+    with pytest.raises(HTTPException) as exc:
+        artifacts.get_walk_collision(**{**args, "scene_revision": "rev-stale"}, frame="display")
+    assert exc.value.status_code == 409
+    assert source.read_bytes() == payload

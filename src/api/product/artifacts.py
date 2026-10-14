@@ -1,6 +1,7 @@
 """Artifact của job: danh sách được phép thấy, bytes theo allow-list, preview 3DGS, bản ghi Rerun."""
 
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query, Response, status
 from fastapi.responses import FileResponse, RedirectResponse
@@ -14,7 +15,11 @@ from src.services.orchestration.artifacts import ArtifactNotFoundError, Artifact
 from src.services.orchestration.jobs.display_glb import display_space_glb
 from src.services.orchestration.projects import JobNotFoundError
 from src.services.orchestration.scene.errors import SceneError
-from src.services.orchestration.scene.physics import dynamic_carve_boxes
+from src.services.orchestration.scene.physics_collision import (
+    effective_collision_bytes,
+    effective_collision_for_revision,
+)
+from src.services.scene.collision_ownership import SourceCollisionOwnershipError
 
 router = APIRouter()
 
@@ -110,14 +115,12 @@ def get_walk_collision(
     artifact_uri: str = Query(..., min_length=1),
     artifact_checksum: Checksum = Query(...),
     dynamic: list[str] = Query(default=[]),
+    scene_revision: str | None = Query(default=None),
+    frame: Literal["display", "canonical"] = Query(default="display"),
 ) -> Response:
-    """Lưới va chạm của job đã xoay sang không gian hiển thị, cho chế độ đi bộ của viewer.
+    """Shared effective environment for SceneIR consumers; raw preview only before scene review.
 
-    `dynamic`: id các vật động; vùng gốc của chúng bị khoét khỏi lưới để người đi chạm và đẩy được vật (ADR 0010).
-
-    Quyền đọc như `artifacts/content`: URI/checksum phải nằm trong allow-list của job. Bytes
-    trả về là bản dẫn xuất tính tại chỗ từ artifact đã verify checksum; artifact gốc không đổi.
-    Luôn đi qua API (không redirect sang kho file) vì kho chỉ giữ bản canonical.
+    Both output frames use the same source removal mask. Deprecated `dynamic` never controls carving.
     """
     if filename != artifact_uri.rsplit("/", 1)[-1] or not filename.lower().endswith(".glb"):
         raise HTTPException(status_code=404, detail="artifact filename does not match its reference")
@@ -133,8 +136,24 @@ def get_walk_collision(
             job_id=job_id,
         )
         registry = deps.registry()
-        carve = dynamic_carve_boxes(registry, job_id, dynamic) if dynamic else []
-        payload = display_space_glb(registry.resolve_artifact(job_id, reference).read_bytes(), carve)
+        # Resolve allow-list before composition; never accept an arbitrary source URI.
+        source_path = registry.resolve_artifact(job_id, reference)
+        identity = artifact_checksum
+        shared = 0
+        if scene_revision is not None:
+            scene, background = effective_collision_for_revision(registry, job_id, scene_revision)
+            selected = scene.environment.collision_source_ref or scene.environment.geometry_ref
+            if (artifact_uri, artifact_checksum) != (selected.artifact_uri, selected.artifact_checksum):
+                raise SourceCollisionOwnershipError("collision URL does not bind the selected SceneIR source")
+            payload = effective_collision_bytes(background, display=frame == "display")
+            identity = background.identity
+            shared = background.retained_shared_triangles
+        else:
+            if dynamic:
+                raise SourceCollisionOwnershipError("object collision composition requires scene_revision")
+            # Reconstruction-stage preview has no SceneIR lifecycle yet.
+            raw = source_path.read_bytes()
+            payload = display_space_glb(raw) if frame == "display" else raw
     except ValidationError as error:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)) from error
     except ArtifactStoreError as error:
@@ -147,7 +166,14 @@ def get_walk_collision(
         payload,
         media_type="model/gltf-binary",
         # Nội dung gắn với checksum trong URL nên trình duyệt được giữ lại.
-        headers={"Cache-Control": "private, max-age=3600", "X-Content-Type-Options": "nosniff"},
+        headers={
+            "Cache-Control": "private, no-cache",
+            "X-Content-Type-Options": "nosniff",
+            "X-Scene-Revision": scene_revision or "source-preview",
+            "X-Collision-Composition": identity,
+            "X-Retained-Shared-Triangles": str(shared),
+            "ETag": '"' + identity.removeprefix("sha256:") + ":" + frame + '"',
+        },
     )
 
 
