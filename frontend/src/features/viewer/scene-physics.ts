@@ -2,15 +2,16 @@
  * Vật lý trong trình duyệt cho scene tương tác (H5, ADR 0010): người đi đẩy được vật động.
  *
  * Thế giới vật lý ở hệ canonical của scene (mét, Z hướng lên, sàn z = 0) để pose của vật đọc/ghi thẳng như SceneIR:
- * - sàn: mặt phẳng z = 0 (lưới va chạm không chứa sàn — Isaac tự tạo sàn);
- * - tĩnh: lưới va chạm của scene đã khoét vùng gốc của vật động, chỉ giữ phần quanh các vật động;
- * - động: mỗi vật có `physics.dynamic` — bao lồi của collider (hoặc hộp theo kích thước), khối lượng và ma sát theo
+ * - sàn: giữ mặt phẳng z = 0 hiện có, cùng các triangle môi trường được giữ lại;
+ * - tĩnh: effective environment PR-03 quanh bounds collider, cùng các object static mass 0;
+ * - động: mỗi vật có `physics.dynamic` — compound convex parts hoặc authored box, khối lượng và ma sát theo
  *   SceneIR;
  * - người đi: thân con nhộng động học bám theo vị trí người đi của viewer; chạm vào vật thì đẩy vật.
  *
  * Tương tác chỉ ở trình duyệt: không ghi SceneIR, không tạo revision. `reset()` đưa mọi vật về pose của SceneIR.
  */
 
+import { Mat4, Quat as PcQuat, Vec3 as PcVec3 } from "playcanvas";
 import type { Vec3 } from "@/features/viewer/source-frame";
 import type { ColliderMeshPart, TriangleMesh } from "@/features/viewer/glb-mesh";
 
@@ -57,20 +58,29 @@ export function displayToCanonical([x, y, z]: Vec3): Vec3 {
   return [x, -z, y];
 }
 
-/** Hộp bao (hệ canonical) chứa mọi vật động, nới thêm `margin`. */
+/** Bounds canonical của geometry collider hiện tại, gồm collider local transform, nới thêm margin. */
 function objectBounds(objects: readonly PhysicsObjectSpec[], margin: number): { min: Vec3; max: Vec3 } {
   const min: Vec3 = [Infinity, Infinity, Infinity];
   const max: Vec3 = [-Infinity, -Infinity, -Infinity];
   for (const item of objects) {
-    for (let axis = 0; axis < 3; axis += 1) {
-      min[axis] = Math.min(min[axis], item.position[axis] - margin);
-      max[axis] = Math.max(max[axis], item.position[axis] + margin);
+    const parent = new Mat4().setTRS(new PcVec3(...item.position), new PcQuat(...item.rotation_xyzw), PcVec3.ONE);
+    const local = item.colliderLocalTransform;
+    if (local) parent.mul(new Mat4().setTRS(new PcVec3(...local.translation_xyz), new PcQuat(...local.rotation_quaternion_xyzw), PcVec3.ONE));
+    const box: number[] = [];
+    if (item.dimensions && !item.parts?.length && !item.hull) {
+      for (const x of [-.5,.5]) for (const y of [-.5,.5]) for (const z of [-.5,.5]) box.push(x*item.dimensions[0],y*item.dimensions[1],z*item.dimensions[2]);
+    }
+    const arrays = item.parts?.map(part => part.positions) ?? [item.hull ?? new Float32Array(box.length ? box : [0,0,0])];
+    const point = new PcVec3();
+    for (const points of arrays) for (let i = 0; i < points.length; i += 3) {
+      parent.transformPoint(point.set(points[i], points[i+1], points[i+2]), point);
+      [point.x,point.y,point.z].forEach((value,axis) => { min[axis] = Math.min(min[axis],value-margin); max[axis] = Math.max(max[axis],value+margin); });
     }
   }
   return { min, max };
 }
 
-/** Tam giác của lưới tĩnh có trọng tâm nằm trong vùng quanh vật động (giảm thời gian dựng cây va chạm). */
+/** Tam giác môi trường có trọng tâm quanh actual collider bounds (giữ tối ưu dựng cây va chạm hiện có). */
 export function nearbyTriangles(mesh: TriangleMesh, objects: readonly PhysicsObjectSpec[], radius = ENVIRONMENT_RADIUS_M): number[] {
   const { min, max } = objectBounds(objects, radius);
   const kept: number[] = [];
@@ -256,7 +266,9 @@ export class ScenePhysics {
         mesh.addTriangle(...vectors, false);
       }
     }
-    return this.keep(new this.A.btBvhTriangleMeshShape(mesh, true, true));
+    const shape = this.keep(new this.A.btBvhTriangleMeshShape(mesh, true, true));
+    shape.setMargin(0.01);
+    return shape;
   }
 
   private addObject(item: PhysicsObjectSpec): void {

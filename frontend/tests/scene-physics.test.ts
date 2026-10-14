@@ -179,3 +179,9 @@ it("real Ammo ray probes find the child collider at edited world pose and no bod
     expect(probe([-3, 2, 3], [5, 2, 3])).toBeNull();
   } finally { physics.destroy(); }
 });
+
+it("environment selection follows the rotated/off-center collider rather than only the object origin", () => {
+  const item = crate({ position: [0,0,0], colliderLocalTransform: { translation_xyz: [30,0,0], rotation_quaternion_xyzw: [0,0,Math.SQRT1_2,Math.SQRT1_2] } });
+  const environment:TriangleMesh = {positions:new Float32Array([30,-1,0,30,1,0,30,1,2,0,-1,0,0,1,0,0,1,2]),indices:new Uint32Array([0,1,2,3,4,5])};
+  expect(nearbyTriangles(environment,[item],1)).toEqual([0]);
+});
