@@ -6,8 +6,9 @@ import path from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 
 import { ScenePhysics, displayToCanonical, nearbyTriangles, sampleHull, type AmmoModule, type PhysicsObjectSpec } from "@/features/viewer/scene-physics";
-import type { TriangleMesh } from "@/features/viewer/glb-mesh";
+import { parseGlbMesh, type TriangleMesh } from "@/features/viewer/glb-mesh";
 import { fallbackColliderHull, transformColliderHullToObjectFrame } from "@/features/viewer/usePhysicsPlay";
+import { colliderGlb } from "./helpers/collider-glb";
 
 const vendor = path.resolve(__dirname, "../public/vendor/ammo");
 let Ammo: AmmoModule;
@@ -75,6 +76,30 @@ describe("vật lý của scene tương tác", () => {
     const physics = new ScenePhysics(Ammo, null, [crate({ hull: new Float32Array(corners), dimensions: null })]);
     expect(walk(physics, -5, -5, 1).position[2]).toBeCloseTo(0.25, 1);
     physics.destroy();
+  });
+
+  it("collider 1×2×3 giữ frame local, child rotation/offset và world pose trong Ammo", () => {
+    const hull = transformColliderHullToObjectFrame(parseGlbMesh(colliderGlb()).positions, {
+      translation_xyz: [0, 0, 0.25],
+      rotation_quaternion_xyzw: [Math.SQRT1_2, 0, 0, Math.SQRT1_2],
+    });
+    const item = crate({
+      position: [4, -6, 5], rotation_xyzw: [0, 0, Math.SQRT1_2, Math.SQRT1_2],
+      hull, dimensions: null,
+    });
+    const physics = new ScenePhysics(Ammo, null, [item]);
+    try {
+      let pose = physics.step(0, null).get(item.id)!;
+      pose.position.forEach((value, axis) => expect(value).toBeCloseTo(item.position[axis], 5));
+      pose.rotation_xyzw.forEach((value, axis) => expect(value).toBeCloseTo(item.rotation_xyzw[axis], 5));
+      for (let i = 0; i < 240; i += 1) pose = physics.step(1 / 60, null).get(item.id)!;
+      // Child quay quanh X: chiều cao là 2m, đáy local z=-1+0.25. World yaw không đổi cao độ.
+      expect(pose.position[2]).toBeCloseTo(0.75, 1);
+      expect(pose.position[0]).toBeCloseTo(4, 1);
+      expect(pose.position[1]).toBeCloseTo(-6, 1);
+    } finally {
+      physics.destroy();
+    }
   });
 });
 

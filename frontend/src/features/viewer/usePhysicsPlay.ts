@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AppBase, Entity } from "playcanvas";
 
-import { parseGlbMesh, type TriangleMesh } from "@/features/viewer/glb-mesh";
+import { GlbMeshError, parseGlbMesh, type TriangleMesh } from "@/features/viewer/glb-mesh";
 import type { OverlayObject, SceneOverlay } from "@/features/viewer/scene-overlay";
 import { ScenePhysics, displayToCanonical, loadAmmo, type PhysicsObjectSpec } from "@/features/viewer/scene-physics";
 import type { Vec3 } from "@/features/viewer/source-frame";
@@ -22,6 +22,7 @@ export interface PhysicsObjectInput {
   id: string;
   position: Vec3;
   rotation_xyzw: [number, number, number, number];
+  /** GLB đã bake trong collider-local frame canonical; không phải display-space GLB. */
   colliderUrl: string | null;
   /** Child collider frame relative to the SceneObject; applied to hull vertices before simulation. */
   colliderLocalTransform: {
@@ -40,10 +41,11 @@ export type PhysicsStatus =
   | { state: "ready"; objects: number }
   | { state: "failed"; message: string };
 
-async function fetchMesh(url: string, signal: AbortSignal): Promise<TriangleMesh> {
+async function fetchMesh(url: string, signal: AbortSignal, frame: "display_world" | "canonical_collider_local"): Promise<TriangleMesh> {
   const response = await fetch(url, { signal });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  return parseGlbMesh(await response.arrayBuffer());
+  const mesh = parseGlbMesh(await response.arrayBuffer());
+  return frame === "display_world" ? toCanonical(mesh) : mesh;
 }
 
 /** Lưới va chạm của viewer ở không gian hiển thị → hệ canonical của thế giới vật lý. */
@@ -151,14 +153,17 @@ export function usePhysicsPlay({
       try {
         const [ammo, environment, hulls] = await Promise.all([
           loadAmmo(),
-          fetchMesh(collisionUrl, controller.signal).then(toCanonical),
+          fetchMesh(collisionUrl, controller.signal, "display_world"),
           Promise.all(
             specs.map((item) => {
               const fallback = fallbackColliderHull(item.dimensions, item.colliderLocalTransform);
               return item.colliderUrl
-                ? fetchMesh(item.colliderUrl, controller.signal).then(
-                    (mesh) => transformColliderHullToObjectFrame(toCanonical(mesh).positions, item.colliderLocalTransform),
-                    () => fallback,
+                ? fetchMesh(item.colliderUrl, controller.signal, "canonical_collider_local").then(
+                    (mesh) => transformColliderHullToObjectFrame(mesh.positions, item.colliderLocalTransform),
+                    (error: unknown) => {
+                      if (error instanceof GlbMeshError) throw new GlbMeshError(`${item.id}: ${error.message}`);
+                      return fallback;
+                    },
                   )
                 : Promise.resolve(fallback);
             }),
