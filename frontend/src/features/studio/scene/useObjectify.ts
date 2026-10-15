@@ -3,7 +3,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ApiError } from "@/lib/api/client";
-import { cancelObjectify, getObjectifyState, requestObjectify, type ObjectifyMode, type ObjectifyState } from "@/lib/api/studio";
+import {
+  buildObjectGeometry,
+  cancelObjectify,
+  getObjectifyState,
+  requestObjectify,
+  type ObjectifyMode,
+  type ObjectifyState,
+} from "@/lib/api/studio";
 import type { ExecutionError } from "@/lib/contracts/api";
 import type { StageState } from "@/lib/contracts/studio";
 
@@ -79,7 +86,8 @@ export function useObjectifyState({
     setSending(true);
     setError(null);
     try {
-      setState(await requestObjectify(jobId, expected, mode));
+      // Tạo mesh đi qua route riêng; các chế độ tách còn lại đi qua hàng đợi objectify.
+      setState(await (mode === "geometry" ? buildObjectGeometry(jobId, expected) : requestObjectify(jobId, expected, mode)));
     } catch (cause) {
       setError(cause instanceof ApiError ? cause.detail : "Không gửi được yêu cầu.");
       // 409: scene đã đổi (revision cũ) hoặc đã có yêu cầu khác; đọc lại trạng thái để màn hình khớp máy chủ.
@@ -89,17 +97,19 @@ export function useObjectifyState({
     }
   }, [jobId, revision, state?.scene_revision]);
 
+  // Huỷ đúng yêu cầu đang hiển thị (operation_id); không có thì huỷ theo job như trước.
+  const operationId = state?.operation_id;
   const cancel = useCallback(async () => {
     setSending(true);
     setError(null);
     try {
-      setState(await cancelObjectify(jobId));
+      setState(await (operationId ? cancelObjectify(jobId, operationId) : cancelObjectify(jobId)));
     } catch (cause) {
       setError(cause instanceof ApiError ? cause.detail : "Không hủy được yêu cầu.");
     } finally {
       setSending(false);
     }
-  }, [jobId]);
+  }, [jobId, operationId]);
 
   return { state, error, sending, pending, send, cancel };
 }

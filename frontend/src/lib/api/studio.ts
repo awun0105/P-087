@@ -733,7 +733,7 @@ export function restoreSceneRevision(
 
 // ── dựng lại tập vật: chạy lại tách theo vật / dùng hộp ứng viên ─────────────
 
-export type ObjectifyMode = "objectify" | "boxes" | "membership";
+export type ObjectifyMode = "objectify" | "boxes" | "membership" | "geometry" | "region";
 
 export type OperationResource = "vram" | "ram" | "disk";
 export type OperationWaitReason = "busy" | "external" | "exceeds_machine" | "unmeasured";
@@ -783,6 +783,14 @@ export function requestObjectify(jobId: string, expectedRevision: string, mode: 
   return apiFetch<ObjectifyState>(`${API}/jobs/${encodeURIComponent(jobId)}/scene/objectify`, {
     method: "POST",
     body: JSON.stringify({ expected_scene_revision: expectedRevision, mode }),
+  });
+}
+
+/** Xếp hàng tạo mesh theo vật trên đúng revision Draft đang hiển thị (architecture.md §7.4). */
+export function buildObjectGeometry(jobId: string, expectedRevision: string): Promise<ObjectifyState> {
+  return apiFetch<ObjectifyState>(`${API}/jobs/${encodeURIComponent(jobId)}/scene/geometry/build`, {
+    method: "POST",
+    body: JSON.stringify({ expected_scene_revision: expectedRevision }),
   });
 }
 
