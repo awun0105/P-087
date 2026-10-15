@@ -105,8 +105,28 @@ def _shell(points: np.ndarray, opacity: np.ndarray) -> tuple[bytes | None, dict,
         return None, {}, str(error)
 
 
+def _donor_status(
+    source: MembershipSource, resolution: RegionResolution, claim_from: list[str]
+) -> tuple[dict[str, int], list[dict]]:
+    """Số hàng còn lại của từng vật "Lấy luôn" sau khi áp box. Vật nào dưới tối thiểu thì nêu, không raise (T-024).
+
+    Apply vẫn từ chối đúng điều kiện này trong `_require_remaining_rows`; preview chỉ báo trước để người dùng sửa.
+    """
+    remaining: dict[str, int] = {}
+    blockers: list[dict] = []
+    for donor in claim_from:
+        owned = [int(key) for key, owner in source.manifest.label_to_object_id.items() if owner == donor]
+        total = int(np.count_nonzero(np.isin(source.labels, owned)))
+        left = total - resolution.claimed.get(donor, 0)
+        remaining[donor] = left
+        if left < MIN_OBJECT_ROWS:
+            blockers.append({"object_id": donor, "remaining": left, "minimum": MIN_OBJECT_ROWS})
+    return remaining, blockers
+
+
 def preview_region(registry: ProjectRegistry, job_id: str, object_id: str, command: ObjectRegionCommand) -> dict:
     scene, _, source, resolution, local = _resolve(registry, job_id, object_id, command)
+    donor_remaining, blockers = _donor_status(source, resolution, list(command.claim_from))
     selected = np.flatnonzero(resolution.object_mask)
     # Uniform deterministic stride bounds shell filtering cost; membership counts remain exact.
     stride = max(1, (len(selected) + 99_999) // 100_000)
@@ -120,6 +140,8 @@ def preview_region(registry: ProjectRegistry, job_id: str, object_id: str, comma
         "shell_glb_base64": base64.b64encode(payload).decode("ascii") if payload is not None else None,
         "shell_error": error,
         "shell_sample_rows": len(selected),
+        "donor_remaining": donor_remaining,
+        "blockers": blockers,
     }
 
 

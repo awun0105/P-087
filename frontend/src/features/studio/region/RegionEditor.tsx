@@ -134,7 +134,9 @@ export function RegionEditor({
   const [applyError, setApplyError] = useState<string | null>(null);
   const [conflict, setConflict] = useState(false);
   // Apply chỉ bật khi có xem trước khớp box hiện tại và box hợp lệ; đổi box là tắt lại tới khi xem trước mới về.
-  const canApply = preview !== null && boxError === null && !applying;
+  // Vật "Lấy luôn" mà áp box này sẽ còn dưới tối thiểu: máy chủ từ chối Apply, nên khoá nút và nêu tên trước.
+  const donorBlockers = preview?.blockers ?? [];
+  const canApply = preview !== null && boxError === null && donorBlockers.length === 0 && !applying;
 
   async function apply() {
     if (!canApply) return;
@@ -288,9 +290,15 @@ export function RegionEditor({
             {rows.map((row) => {
               const name = nameOf(row.id);
               const claimed = session.claimFrom.includes(row.id);
+              const blocked = donorBlockers.find((item) => item.object_id === row.id);
               return (
                 <li key={row.id} className="space-y-1 rounded border border-line-dark p-2">
                   <p>{rowText(row, name, claimed)}</p>
+                  {blocked && (
+                    <p className="text-rust">
+                      {name} sẽ chỉ còn {blocked.remaining} Gaussian (tối thiểu {blocked.minimum})
+                    </p>
+                  )}
                   <label className="flex items-center gap-2">
                     <input
                       type="checkbox"
@@ -343,11 +351,22 @@ export function RegionEditor({
         </p>
       )}
 
+      {donorBlockers.length > 0 && (
+        <p className="text-rust">
+          Chưa Apply được: {donorBlockers.map((item) => nameOf(item.object_id)).join(", ")} sẽ còn dưới{" "}
+          {donorBlockers[0].minimum} Gaussian. Bỏ “Lấy luôn” hoặc thu box để tiếp tục.
+        </p>
+      )}
       <div className="flex justify-end gap-2 border-t border-line-dark pt-3">
         <Button size="sm" variant="ghost" onClick={onClose}>
           Huỷ
         </Button>
-        <Button size="sm" disabled={!canApply} onClick={() => void apply()}>
+        <Button
+          size="sm"
+          disabled={!canApply}
+          title={donorBlockers.length > 0 ? "Vật lấy luôn sẽ còn dưới tối thiểu" : undefined}
+          onClick={() => void apply()}
+        >
           {applying && <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden />}
           Apply
         </Button>

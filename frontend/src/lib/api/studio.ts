@@ -644,6 +644,10 @@ export interface RegionPreview {
   shell_glb_base64: string | null;
   shell_error: string | null;
   shell_sample_rows?: number;
+  /** Số Gaussian còn lại của từng vật "Lấy luôn" sau khi áp box (T-024). */
+  donor_remaining?: Record<string, number>;
+  /** Vật "Lấy luôn" sẽ còn dưới tối thiểu nếu áp box này: Apply bị khoá tới khi bỏ tick hoặc thu box. */
+  blockers?: { object_id: string; remaining: number; minimum: number }[];
 }
 
 export function previewObjectRegion(

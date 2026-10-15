@@ -552,3 +552,27 @@ def test_fit_is_identical_on_draft_and_ready(draft_scene, cpu_providers, monkeyp
     assert {k: v for k, v in before.items() if k != "scene_revision"} == {
         k: v for k, v in after.items() if k != "scene_revision"
     }
+
+
+def test_preview_reports_donor_below_minimum_and_apply_refuses_the_same(draft, monkeypatch):
+    """GR-04: preview names a donor that would be left under the minimum, without raising; Apply refuses the same case."""
+    from src.services.orchestration.scene import object_region as module
+
+    registry, scene, command, *_ = draft
+    command = command.model_copy(update={"claim_from": [OTHER]})
+    preview = module.preview_region(registry, JOB, TARGET, command)
+    left = preview["donor_remaining"][OTHER]
+    assert left == 400 - preview["claimed"].get(OTHER, 0)
+    assert preview["blockers"] == []
+
+    monkeypatch.setattr(module, "MIN_OBJECT_ROWS", left + 1)
+    blocked = module.preview_region(registry, JOB, TARGET, command)
+    assert blocked["blockers"] == [{"object_id": OTHER, "remaining": left, "minimum": left + 1}]
+    assert blocked["added_count"] == preview["added_count"]
+    with pytest.raises(ObjectMembershipValidationError):
+        module.apply_region_draft(registry, JOB, TARGET, command, actor_id="reviewer")
+
+    monkeypatch.setattr(module, "MIN_OBJECT_ROWS", left)
+    assert module.preview_region(registry, JOB, TARGET, command)["blockers"] == []
+    applied = module.apply_region_draft(registry, JOB, TARGET, command, actor_id="reviewer")
+    assert applied.revision.scene.scene_revision != scene.scene_revision

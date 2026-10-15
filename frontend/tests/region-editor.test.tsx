@@ -944,3 +944,38 @@ describe("cổng lấy box ban đầu (T-023)", () => {
     expect(global.fetch).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("khoá Apply theo vật lấy luôn (T-024)", () => {
+  afterEach(() => {
+    vi.mocked(previewObjectRegion).mockImplementation(realPreview);
+  });
+
+  it("donor còn 49 Gaussian: nêu tên và số, Apply bị khoá kèm lý do", async () => {
+    vi.mocked(previewObjectRegion).mockResolvedValue({
+      ...preview,
+      claimed: { chair: 351 },
+      donor_remaining: { chair: 49 },
+      blockers: [{ object_id: "chair", remaining: 49, minimum: 50 }],
+    });
+    render(<Panel start={{ ...initial, claimFrom: ["chair"] }} />);
+
+    expect(await screen.findByText("Ghế sẽ chỉ còn 49 Gaussian (tối thiểu 50)")).toBeInTheDocument();
+    expect(screen.getByText(/Chưa Apply được: Ghế sẽ còn dưới 50 Gaussian/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Apply" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Apply" })).toHaveAttribute("title", "Vật lấy luôn sẽ còn dưới tối thiểu");
+  });
+
+  it("donor còn đúng 50 Gaussian: không nêu gì và Apply bật", async () => {
+    vi.mocked(previewObjectRegion).mockResolvedValue({
+      ...preview,
+      claimed: { chair: 350 },
+      donor_remaining: { chair: 50 },
+      blockers: [],
+    });
+    render(<Panel start={{ ...initial, claimFrom: ["chair"] }} />);
+
+    expect(await screen.findByText("Box lấy 350 Gaussian từ Ghế — sẽ lấy về vật này")).toBeInTheDocument();
+    expect(screen.queryByText(/sẽ chỉ còn/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Apply" })).toBeEnabled();
+  });
+});
