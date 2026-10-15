@@ -161,7 +161,103 @@ def test_membership_source_cache_is_bounded_and_never_shares_edited_labels(tmp_p
         source.labels[:] = -1
         np.testing.assert_array_equal(again.labels, fixture.source_labels)
         sources.append(source)
-    assert len(module._SOURCE_CACHE) == 2
+    # Ngân sách byte: mặc định 1 GiB nên ba PLY nhỏ đều nằm trong cache.
+    assert len(module._SOURCE_CACHE) == 3
+
+
+def test_source_cache_evicts_oldest_entries_over_the_byte_budget(tmp_path, monkeypatch):
+    module._SOURCE_CACHE.clear()
+    monkeypatch.setattr(module, "fit_canonical_floor_model", lambda *args: None)
+    monkeypatch.setattr(module, "above_floor_mask", lambda xyz, _: np.ones(len(xyz), dtype=bool))
+    monkeypatch.setattr(module, "_source_cache_budget", lambda: 1)
+    first = _fixture(tmp_path / "first", source_rows=_source_rows())
+    second_rows = _source_rows()
+    second_rows["x"] += 5
+    second = _fixture(tmp_path / "second", source_rows=second_rows)
+    for fixture in (first, second):
+        registry = SimpleNamespace(scene=fixture.editor, runtime_resolver=fixture.editor.resolver)
+        module.load_membership_source(registry, "job-fixture-001", fixture.scene)
+    # Mục mới nhất luôn được giữ; mục cũ hơn bị bỏ khi vượt ngân sách.
+    assert len(module._SOURCE_CACHE) == 1
+    (only_key,) = module._SOURCE_CACHE
+    assert only_key[1] == second.membership.source_visual_ref.artifact_checksum
+
+
+def test_cold_read_of_one_job_does_not_block_another_job(tmp_path, monkeypatch):
+    import threading
+
+    module._SOURCE_CACHE.clear()
+    monkeypatch.setattr(module, "fit_canonical_floor_model", lambda *args: None)
+    monkeypatch.setattr(module, "above_floor_mask", lambda xyz, _: np.ones(len(xyz), dtype=bool))
+    real_load = module._load_membership_source
+    started, release = threading.Event(), threading.Event()
+    calls = []
+
+    def slow_first_read(resolver, membership, *, protect_floor):
+        calls.append(membership.source_visual_ref.artifact_checksum)
+        if len(calls) == 1:
+            started.set()
+            assert release.wait(10)
+        return real_load(resolver, membership, protect_floor=protect_floor)
+
+    monkeypatch.setattr(module, "_load_membership_source", slow_first_read)
+    slow = _fixture(tmp_path / "slow", source_rows=_source_rows())
+    other_rows = _source_rows()
+    other_rows["x"] += 3
+    other = _fixture(tmp_path / "other", source_rows=other_rows)
+    slow_registry = SimpleNamespace(scene=slow.editor, runtime_resolver=slow.editor.resolver)
+    other_registry = SimpleNamespace(scene=other.editor, runtime_resolver=other.editor.resolver)
+
+    first = threading.Thread(target=module.load_membership_source, args=(slow_registry, "job-slow", slow.scene))
+    first.start()
+    assert started.wait(10)
+    second_done = threading.Event()
+
+    def second() -> None:
+        module.load_membership_source(other_registry, "job-other", other.scene)
+        second_done.set()
+
+    threading.Thread(target=second, daemon=True).start()
+    assert second_done.wait(5), "a cold read in progress must not hold the cache lock for other jobs"
+    release.set()
+    first.join(10)
+    assert not first.is_alive()
+
+
+def test_concurrent_requests_for_one_source_read_the_ply_once(tmp_path, monkeypatch):
+    import threading
+
+    module._SOURCE_CACHE.clear()
+    monkeypatch.setattr(module, "fit_canonical_floor_model", lambda *args: None)
+    monkeypatch.setattr(module, "above_floor_mask", lambda xyz, _: np.ones(len(xyz), dtype=bool))
+    real_load = module._load_membership_source
+    started, release = threading.Event(), threading.Event()
+    reads = []
+
+    def slow_read(resolver, membership, *, protect_floor):
+        reads.append(1)
+        started.set()
+        assert release.wait(10)
+        return real_load(resolver, membership, protect_floor=protect_floor)
+
+    monkeypatch.setattr(module, "_load_membership_source", slow_read)
+    fixture = _fixture(tmp_path, source_rows=_source_rows())
+    registry = SimpleNamespace(scene=fixture.editor, runtime_resolver=fixture.editor.resolver)
+    results = []
+    threads = [
+        threading.Thread(target=lambda: results.append(module.load_membership_source(registry, "job-fixture-001", fixture.scene)))
+        for _ in range(3)
+    ]
+    threads[0].start()
+    assert started.wait(10)
+    for thread in threads[1:]:
+        thread.start()
+    release.set()
+    for thread in threads:
+        thread.join(10)
+    assert len(reads) == 1
+    assert len(results) == 3
+    assert all(item.rows is results[0].rows for item in results)
 
 
 def test_brush_correction_uses_real_partial_builder_and_preserves_other_objects(tmp_path, monkeypatch):

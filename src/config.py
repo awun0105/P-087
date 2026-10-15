@@ -94,6 +94,8 @@ class Settings(BaseSettings):
     product_anonymize_remote_worker: bool = False
     product_sam2_checkpoint: Path | None = None
     product_scene_timeout_seconds: float = Field(default=1800, gt=0, allow_inf_nan=False)
+    #: Ngân sách bộ nhớ cho Gaussian nguồn đã đọc của xem trước vùng (MiB); mục cũ nhất bị bỏ khi vượt (T-025).
+    product_region_source_cache_mib: int = Field(default=1024, ge=0)
     #: Pipeline v2 (ADR 0007): trọng số LaMa TorchScript cho vá nền; thiếu thì dùng cv2.inpaint.
     product_lama_checkpoint: Path | None = None
     #: Bật tách scene theo vật (Gaussian + collider từng vật, vá nền). Cần runtime có gsplat/coacd.

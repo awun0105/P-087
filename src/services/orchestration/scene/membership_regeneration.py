@@ -4,13 +4,14 @@ import hashlib
 import json
 from collections import OrderedDict
 from collections.abc import Callable
+from concurrent.futures import Future
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Event, Lock
 
 import numpy as np
 
-from src.config import Settings
+from src.config import Settings, get_settings
 from src.models.contracts.artifacts import ProductArtifactRef
 from src.models.contracts.manifests import StageId
 from src.models.contracts.object_membership import (
@@ -66,8 +67,65 @@ def _load_membership_source(
     return MembershipSource(xyz, rows, labels, membership, protected)
 
 
-_SOURCE_CACHE: OrderedDict[tuple[str, str, str], tuple[np.ndarray, np.ndarray, np.ndarray]] = OrderedDict()
+_SourceArrays = tuple[np.ndarray, np.ndarray, np.ndarray | None]
+
+
+@dataclass(frozen=True)
+class _CachedSource:
+    arrays: _SourceArrays
+    nbytes: int
+
+
+#: Khoá theo PLY nguồn (bất biến) chứ không theo nhãn: Apply đổi nhãn nhưng không đổi PLY, nên không đọc lại PLY (T-025).
+_SOURCE_CACHE: OrderedDict[tuple[str, str], _CachedSource] = OrderedDict()
+#: Một lần đọc PLY đang chạy cho mỗi khoá; yêu cầu khác cùng khoá chờ kết quả đó thay vì đọc lại.
+_SOURCE_PENDING: dict[tuple[str, str], Future] = {}
+#: Khoá chỉ bảo vệ hai bảng trên, không giữ khi đọc PLY hay fit sàn.
 _SOURCE_LOCK = Lock()
+
+
+def _source_cache_budget() -> int:
+    return get_settings().product_region_source_cache_mib << 20
+
+
+def _evict_over_budget(budget: int) -> None:
+    """Bỏ mục cũ nhất cho tới khi dưới ngân sách byte; mục vừa đọc luôn được giữ. Gọi khi đã giữ `_SOURCE_LOCK`."""
+    while len(_SOURCE_CACHE) > 1 and sum(item.nbytes for item in _SOURCE_CACHE.values()) > budget:
+        _SOURCE_CACHE.popitem(last=False)
+
+
+def _source_arrays(registry: ProjectRegistry, job_id: str, membership: ObjectMembershipArtifact) -> _SourceArrays:
+    key = (job_id, membership.source_visual_ref.artifact_checksum)
+    with _SOURCE_LOCK:
+        cached = _SOURCE_CACHE.get(key)
+        if cached is not None:
+            _SOURCE_CACHE.move_to_end(key)
+            return cached.arrays
+        pending = _SOURCE_PENDING.get(key)
+        owner = pending is None
+        if owner:
+            pending = _SOURCE_PENDING[key] = Future()
+    if not owner:
+        return pending.result()
+    try:
+        source = _load_membership_source(registry.runtime_resolver, membership, protect_floor=True)
+        arrays: _SourceArrays = (source.positions, source.rows, source.floor_protected)
+        for array in arrays:
+            if array is not None:
+                array.setflags(write=False)
+        nbytes = sum(array.nbytes for array in arrays if array is not None)
+        with _SOURCE_LOCK:
+            _SOURCE_CACHE[key] = _CachedSource(arrays, nbytes)
+            _SOURCE_CACHE.move_to_end(key)
+            _evict_over_budget(_source_cache_budget())
+        pending.set_result(arrays)
+        return arrays
+    except BaseException as error:
+        pending.set_exception(error)
+        raise
+    finally:
+        with _SOURCE_LOCK:
+            _SOURCE_PENDING.pop(key, None)
 
 
 def load_membership_source(registry: ProjectRegistry, job_id: str, scene: SceneIR) -> MembershipSource:
@@ -75,22 +133,11 @@ def load_membership_source(registry: ProjectRegistry, job_id: str, scene: SceneI
     membership = scene.environment.membership
     if membership is None:
         raise ObjectMembershipValidationError("scene has no persisted Gaussian membership")
-    key = (job_id, membership.labels_ref.artifact_checksum, membership.source_visual_ref.artifact_checksum)
-    with _SOURCE_LOCK:
-        cached = _SOURCE_CACHE.get(key)
-        if cached is None:
-            source = _load_membership_source(registry.runtime_resolver, membership, protect_floor=True)
-            cached = source.positions, source.rows, source.floor_protected
-            for array in cached:
-                array.setflags(write=False)
-            _SOURCE_CACHE[key] = cached
-            if len(_SOURCE_CACHE) > 2:
-                _SOURCE_CACHE.popitem(last=False)
-        _SOURCE_CACHE.move_to_end(key)
+    positions, rows, floor_protected = _source_arrays(registry, job_id, membership)
     labels = decode_gaussian_membership_labels(
         registry.runtime_resolver.require(membership.labels_ref).read_bytes(), membership
     )
-    return MembershipSource(cached[0], cached[1], labels, membership, cached[2])
+    return MembershipSource(positions, rows, labels, membership, floor_protected)
 
 
 def prepare_correction(
