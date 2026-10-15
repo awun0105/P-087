@@ -40,6 +40,7 @@ from src.services.orchestration.projects.registry import ProjectRegistry
 from src.services.orchestration.scene.errors import SceneError, SceneRevisionConflictError
 from src.services.orchestration.scene.extraction import box_candidates_require_gpu, use_boxes
 from src.services.orchestration.scene.membership_regeneration import preview_correction, regenerate_membership
+from src.services.orchestration.scene.object_geometry_build import ObjectGeometryBuildError, build_object_geometry
 from src.services.orchestration.scene.objectify import AWAITING_CHOICE, METHOD, ObjectifyError, reobjectify
 from src.services.process_control import ProcessCancelledError
 from src.services.scene.geometry_state import object_geometry_state
@@ -246,7 +247,7 @@ def state(registry: ProjectRegistry, settings: Settings, job_id: str) -> Objecti
         public["retryable"] = None
     if record is not None and record.status == "failed" and record.base_revision == scene.scene_revision:
         public["floor_fit"] = record.floor_fit or public["floor_fit"]
-        if record.mode == "objectify" and record.config_checksum == _config_checksum(
+        if record.mode in {"objectify", "geometry"} and record.config_checksum == _config_checksum(
             registry.get_job(job_id), settings, record.mode
         ):
             public["retryable"] = record.retryable
@@ -677,7 +678,7 @@ def process_next(registry: ProjectRegistry, settings: Settings) -> bool:
             raise ObjectifyError(bind_error or "không thể giữ snapshot operation")
         running = bound
 
-        uses_gpu = running.mode in {"objectify", "membership"} or box_candidates_require_gpu(settings)
+        uses_gpu = running.mode in {"objectify", "membership", "geometry"} or box_candidates_require_gpu(settings)
         profile = admission.operation_profile_for_job(job, gpu_required=uses_gpu)
         request = OperationAdmissionRequest(
             operation_kind="reobjectify",
@@ -708,7 +709,7 @@ def process_next(registry: ProjectRegistry, settings: Settings) -> bool:
             commit_guard=_commit_guard(job_id, running, admission, request),
             cancel_event=cancel_event,
         )
-        if running.mode == "membership":
+        if running.mode in {"membership", "geometry"}:
 
             def progress(phase: str) -> None:
                 with _database(settings).transaction(write=True) as tx:
@@ -717,21 +718,26 @@ def process_next(registry: ProjectRegistry, settings: Settings) -> bool:
                         record, running.lease_token or "", running.lease_generation, datetime.now(UTC)
                     ):
                         cancel_event.set()
-                        raise ProcessCancelledError("membership progress lost worker lease")
+                        raise ProcessCancelledError(f"{running.mode} progress lost worker lease")
                     _write(tx, job_id, record.model_copy(update={"phase": phase}))
 
-            if running.correction_command is None or running.actor_id is None:
-                raise ObjectifyRequestError("queued correction payload is missing")
-            revision = regenerate_membership(
-                registry,
-                job_id,
-                settings,
-                workspace,
-                command=running.correction_command,
-                actor_id=running.actor_id,
-                progress=progress,
-                **arguments,
-            )
+            if running.mode == "geometry":
+                revision = build_object_geometry(
+                    registry, settings, job_id, workspace=workspace, progress=progress, **arguments
+                )
+            else:
+                if running.correction_command is None or running.actor_id is None:
+                    raise ObjectifyRequestError("queued correction payload is missing")
+                revision = regenerate_membership(
+                    registry,
+                    job_id,
+                    settings,
+                    workspace,
+                    command=running.correction_command,
+                    actor_id=running.actor_id,
+                    progress=progress,
+                    **arguments,
+                )
         else:
             operation = reobjectify if running.mode == "objectify" else use_boxes
             revision = operation(registry, job_id, settings, workspace, **arguments)
@@ -756,11 +762,13 @@ def process_next(registry: ProjectRegistry, settings: Settings) -> bool:
             }
         else:
             outcome = {"status": "cancelled", "error": "Đã hủy theo yêu cầu.", "result_revision": None}
-    except (ObjectifyError, ArtifactStoreError, SceneError, ValueError, OSError) as error:
+    except (ObjectifyError, ObjectGeometryBuildError, ArtifactStoreError, SceneError, ValueError, OSError) as error:
         logger.warning("Dựng lại tập vật (%s) lỗi job=%s cause=%s", running.mode, job_id, error)
         outcome = {"status": "failed", "error": str(error)[:500], "result_revision": None}
         if isinstance(error, ObjectifyError):
             outcome.update(retryable=error.retryable, floor_fit=error.floor_fit)
+        elif isinstance(error, ObjectGeometryBuildError):
+            outcome["retryable"] = error.retryable
     except Exception as error:  # noqa: BLE001 - durable operation boundary must record unexpected failure
         logger.exception("Dựng lại tập vật (%s) lỗi ngoài dự kiến job=%s", running.mode, job_id)
         outcome = {"status": "failed", "error": str(error)[:500], "result_revision": None}
