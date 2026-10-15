@@ -47,6 +47,75 @@ function copyVec3(v: Vec3): Vec3 {
   return [v[0], v[1], v[2]];
 }
 
+const FACES: Record<FaceId, { axis: Axis; sign: 1 | -1 }> = {
+  "+x": { axis: 0, sign: 1 },
+  "-x": { axis: 0, sign: -1 },
+  "+y": { axis: 1, sign: 1 },
+  "-y": { axis: 1, sign: -1 },
+  "+z": { axis: 2, sign: 1 },
+  "-z": { axis: 2, sign: -1 },
+};
+
+function clampHalf(half: number): number {
+  return Math.min(MAX_HALF_M, Math.max(MIN_HALF_M, half));
+}
+
+function withComponent(v: Vec3, axis: Axis, value: number): Vec3 {
+  const out = copyVec3(v);
+  out[axis] = value;
+  return out;
+}
+
+const TWO_PI = 2 * Math.PI;
+
+/** Đưa góc về (-π, π]. */
+function wrapYaw(angle: number): number {
+  const wrapped = angle - TWO_PI * Math.floor((angle + Math.PI) / TWO_PI);
+  return wrapped === -Math.PI ? Math.PI : wrapped;
+}
+
+/**
+ * Kéo một mặt `deltaM` theo pháp tuyến ngoài của mặt đó; mặt đối diện đứng yên.
+ * Nửa kích thước kẹp trong [MIN_HALF_M, MAX_HALF_M] và tâm chỉ dịch bằng phần đổi của nửa kích thước,
+ * nên kéo âm quá mức thu box về MIN_HALF_M mà không đảo chiều.
+ */
+export function dragFace(box: EditableBox, face: FaceId, deltaM: number): EditableBox {
+  const { axis, sign } = FACES[face];
+  const half = clampHalf(box.half[axis] + deltaM / 2);
+  const shift = sign * (half - box.half[axis]);
+  const e = axisDirection(box.yaw, axis);
+  return {
+    ...box,
+    center: [box.center[0] + e[0] * shift, box.center[1] + e[1] * shift, box.center[2] + e[2] * shift],
+    half: withComponent(box.half, axis, half),
+  };
+}
+
+/** Tịnh tiến tâm box, giữ nguyên kích thước và yaw. */
+export function translateBox(box: EditableBox, delta: Vec3): EditableBox {
+  return { ...box, center: [box.center[0] + delta[0], box.center[1] + delta[1], box.center[2] + delta[2]] };
+}
+
+/** Xoay quanh Z; góc sau khi cộng được chuẩn hoá về (-π, π]. */
+export function rotateYaw(box: EditableBox, deltaRad: number): EditableBox {
+  return { ...box, yaw: wrapYaw(box.yaw + deltaRad) };
+}
+
+/** Tâm của mặt trong object-local, dùng làm vị trí tay nắm. */
+export function faceCenter(box: EditableBox, face: FaceId): Vec3 {
+  const { axis, sign } = FACES[face];
+  const e = axisDirection(box.yaw, axis);
+  const offset = sign * box.half[axis];
+  return [box.center[0] + e[0] * offset, box.center[1] + e[1] * offset, box.center[2] + e[2] * offset];
+}
+
+/** Pháp tuyến đơn vị hướng ra ngoài của mặt, trong object-local. */
+export function faceNormal(box: EditableBox, face: FaceId): Vec3 {
+  const { axis, sign } = FACES[face];
+  const e = axisDirection(box.yaw, axis);
+  return [sign * e[0], sign * e[1], sign * e[2]];
+}
+
 /** Điểm object-local nằm trong box (bỏ qua op: cộng/trừ do server xử lý). */
 export function contains(box: EditableBox, p: Vec3): boolean {
   const d: Vec3 = [p[0] - box.center[0], p[1] - box.center[1], p[2] - box.center[2]];
