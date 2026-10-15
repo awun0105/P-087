@@ -399,7 +399,21 @@ def _publish_draft(
             membership=membership,
         ),
         objects=objects,
-        provenance={"object_geometry": "awaiting_review"},
+        provenance={
+            "object_extraction": METHOD,
+            "objectify_retryable": True,
+            "object_geometry": "awaiting_review",
+            "geometry_method": config.scene.geometry_method,
+            "geometry_review": "required",
+            "object_gaussians": sum(len(part.rows) for part in parts),
+            "background_gaussians": membership.gaussian_count - sum(len(part.rows) for part in parts),
+            "lift_views": int(lift["views"]),
+            "segmentation_refinement": config.scene.refinement,
+            "floor_model_status": floor_model.status,
+            "floor_fallback_reason": floor_model.fallback_reason,
+            "floor_profile_checksum": floor_model.profile_checksum,
+            "floor_fit": floor_fit,
+        },
     )
 
 

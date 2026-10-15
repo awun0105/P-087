@@ -94,16 +94,11 @@ def draft_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     return SimpleNamespace(extract=extract, bundle=bundle, published=published, labels=labels, source=source)
 
 
-def test_objectgs_draft_does_not_require_objectgs_runtime(draft_inputs, monkeypatch):
-    class ReachedSegmentationError(Exception):
-        pass
-
-    def stop(*args, **kwargs):
-        raise ReachedSegmentationError
-
-    monkeypatch.setattr(module, "_seeds", stop)
-    with pytest.raises(ReachedSegmentationError):
-        draft_inputs.extract("objectgs")
+def test_objectgs_draft_does_not_require_objectgs_runtime(draft_inputs):
+    result = draft_inputs.extract("objectgs")
+    assert result.provenance["object_geometry"] == "awaiting_review"
+    assert result.provenance["geometry_method"] == "objectgs"
+    assert len(result.objects) == 2
 
 
 def test_draft_objects_have_preview_shells_and_source_poses(draft_inputs):
@@ -150,3 +145,31 @@ def test_shell_failure_keeps_object_as_display_placeholder(draft_inputs, monkeyp
         assert item.provenance["shell_error"] == "fixture QA failure"
         assert item.provenance["shell_display"] == "bounding_box_placeholder"
         assert item.geometry_ref.artifact_type == "ObjectShellMesh"
+
+
+def test_draft_never_calls_geometry_or_background_providers(draft_inputs):
+    # Fixture providers raise immediately if anything beyond lift is invoked.
+    result = draft_inputs.extract()
+    assert result.provenance["geometry_review"] == "required"
+    assert result.provenance["segmentation_refinement"] == "legacy"
+    assert result.provenance["floor_fit"] == {"status": "supported"}
+    assert result.provenance["object_gaussians"] == 686
+    assert result.provenance["background_gaussians"] == 1
+    assert "inpaint_method" not in result.provenance
+
+
+def test_draft_environment_keeps_full_bundle_and_published_membership(draft_inputs):
+    result = draft_inputs.extract()
+    environment = result.environment
+    assert environment.visual_ref == draft_inputs.bundle.visual_artifact_ref
+    assert environment.geometry_ref == draft_inputs.bundle.canonical_geometry_ref
+    assert environment.object_aware_collision_ref is None
+    assert environment.collider_ref is None
+    assert environment.visual_master_ref is None
+    membership = environment.membership
+    assert membership.source_visual_ref == draft_inputs.source
+    assert membership.label_to_object_id == {"2": "candidate-001", "5": "candidate-002"}
+    assert membership.extraction_revision == "rev-001"
+    np.testing.assert_array_equal(
+        np.frombuffer(draft_inputs.published[membership.labels_ref.artifact_uri], dtype="<i4"), draft_inputs.labels
+    )
