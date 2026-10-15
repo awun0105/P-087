@@ -31,7 +31,7 @@ from src.models.contracts.artifacts import ArtifactDataClass, ContractModel, Jso
 from src.models.contracts.coordinates import CoordinateSystem, Transform
 from src.models.contracts.floor_model import FloorModel
 from src.models.contracts.manifests import JobManifest, StageId
-from src.models.contracts.object_geometry import ObjectAwareEnvironmentManifest, ObjectSurfaceManifest
+from src.models.contracts.object_geometry import ObjectSurfaceManifest
 from src.models.contracts.object_membership import ObjectMembershipArtifact
 from src.models.contracts.reconstruction import ReconstructionBundle
 from src.models.contracts.scene import (
@@ -48,6 +48,7 @@ from src.services.orchestration.projects.registry import ProjectRegistry
 from src.services.orchestration.scene.diagnostics import capture_attempt
 from src.services.orchestration.scene.errors import SceneRevisionConflictError
 from src.services.orchestration.scene.floor_evidence import publish_floor_fit_evidence, scene_floor_fit_summary
+from src.services.orchestration.scene.object_geometry_steps import build_environment_collision
 from src.services.orchestration.scene.surface_evidence import publish_surface_artifacts
 from src.services.process_control import ProcessCancelledError, ProcessTimeoutError, run_cancellable_process
 from src.services.reconstruction import camera_views, metric_visual_master, package_splat
@@ -61,7 +62,7 @@ from src.services.scene.editing.membership import (
 from src.services.scene.floor_model import fit_canonical_floor_model, point_cloud_checksum
 from src.services.scene.gaussian_shell import GaussianShellError, ShellParams, build_gaussian_shell
 from src.services.scene.geometric import GeometricConfig, box_from_points
-from src.services.scene.object_aware_geometry import build_background_collision
+from src.services.scene.object_aware_geometry import build_background_collision as build_background_collision
 from src.services.scene.objectgs import OBJECTGS_COMMIT, ObjectGSRuntime, PreparedObjectGSRequest, run_prepared_objectgs
 from src.services.scene.sampro3d.consolidate import Sampro3dConfig, segment
 from src.services.scene.sampro3d.pipeline import CameraFrame, Sam2Runtime, Sampro3dInputError, run_sam2
@@ -1055,74 +1056,28 @@ def objectify(
         membership=membership,
     )
     if objectgs_receipt is not None:
-        voxel = config.scene.objectgs_background_voxel_m
-        support = []
-        # Inferred support never comes from inpaint rows or a current edited object pose.
-        if floor_model.status in {"supported", "confirmed_prior_fallback"}:
-            normal = np.asarray(floor_model.plane_normal_world)
-            for part in parts:
-                if correction is None:
-                    low = np.asarray(part.center) - np.asarray(part.dimensions) / 2
-                    high = np.asarray(part.center) + np.asarray(part.dimensions) / 2
-                else:
-                    anchors = source_points[membership_labels == part.index]
-                    low, high = anchors.min(axis=0), anchors.max(axis=0)
-                base = np.array([part.center[0], part.center[1], low[2]])
-                if abs(float(normal @ base + floor_model.plane_offset_m)) > floor_model.floor_band_m + 2 * voxel:
-                    continue
-                xs = np.arange(low[0], high[0] + voxel, voxel)
-                ys = np.arange(low[1], high[1] + voxel, voxel)
-                if len(xs) * len(ys) > 1_000_000:
-                    raise ObjectifyError("inferred support exceeds the geometry budget", retryable=False)
-                for x in xs:
-                    for y in ys:
-                        z = -(normal[0] * x + normal[1] * y + floor_model.plane_offset_m) / normal[2]
-                        support.append([x, y, z])
-        background_mesh = build_background_collision(
-            source_points,
-            membership_labels,
-            {int(label) for label in label_to_object_id},
-            voxel_m=voxel,
-            unknown=membership_labels < 0,
-            inferred_support_points=np.asarray(support).reshape(-1, 3),
-        )
-        mesh = trimesh.Trimesh(background_mesh.vertices, background_mesh.faces, process=False)
-        collision_payload = mesh.export(file_type="glb")
-        active_ref = publish(
-            _reference(
-                job_id,
-                "objectgs/environment/{digest}.glb",
-                "ObjectAwareEnvironmentCollision",
-                StageId.COLLIDER,
-                collision_payload,
-            ),
-            collision_payload,
-        )
-        manifest = ObjectAwareEnvironmentManifest(
-            source_geometry_ref=bundle.canonical_geometry_ref,
-            collision_ref=active_ref,
-            source_membership=membership,
-            removed_object_ids=sorted(label_to_object_id.values()),
-            occupancy_checksum=background_mesh.occupancy_checksum,
-            provenance={
-                "statistics": background_mesh.statistics,
-                "voxel_m": voxel,
-                "support_origin": "inferred_floor_plane_under_source_contact_footprints",
-                "floor_fit": floor_fit,
-                "watertight": bool(mesh.is_watertight),
-                "inpaint_used_for_physics": False,
-            },
-        )
-        manifest_payload = manifest.model_dump_json().encode()
-        manifest_ref = publish(
-            _reference(
-                job_id,
-                "objectgs/environment/{digest}.json",
-                "ObjectAwareEnvironmentManifest",
-                StageId.COLLIDER,
-                manifest_payload,
-            ),
-            manifest_payload,
+        footprints = []
+        for part in parts:
+            if correction is None:
+                low = np.asarray(part.center) - np.asarray(part.dimensions) / 2
+                high = np.asarray(part.center) + np.asarray(part.dimensions) / 2
+            else:
+                anchors = source_points[membership_labels == part.index]
+                low, high = anchors.min(axis=0), anchors.max(axis=0)
+            footprints.append((low, high))
+        active_ref, manifest_ref = build_environment_collision(
+            source_points=source_points,
+            membership_labels=membership_labels,
+            label_to_object_id=label_to_object_id,
+            footprints=footprints,
+            footprint_centers=[part.center for part in parts],
+            floor_model=floor_model,
+            floor_fit=floor_fit,
+            voxel_m=config.scene.objectgs_background_voxel_m,
+            bundle=bundle,
+            membership=membership,
+            publish=publish,
+            job_id=job_id,
         )
         environment = environment.model_copy(
             update={"collider_ref": active_ref, "object_aware_collision_ref": manifest_ref}
