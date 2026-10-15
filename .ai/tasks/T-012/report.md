@@ -91,3 +91,49 @@ Không chạy full test suite.
 - Working tree có thay đổi của phiên khác, không thuộc T-012: `tests/test_scene/test_object_geometry_build.py` (đang sửa),
   `BRAINSTORM.md` và `MASTER_PITCH.md` (chưa track), các `tasks/CFG-*` đã xoá. Không stage các mục này; mỗi commit T-012
   chỉ gồm đường dẫn của T-012.
+
+## Round 2
+
+Làm theo Required changes 1–4 của `review.md`.
+
+**Quyết định cho thao tác ngoài bảng** (theo review; mục "Chưa gate" ở Round 1 đã được chốt):
+
+| Thao tác | Draft | Cài đặt |
+| --- | --- | --- |
+| Thêm box (`add_box_object`) | Chặn: `"thêm vật"` | Gate ngay sau kiểm revision, trước khi ghi GLB |
+| Thêm asset catalog (`add_catalog_object`) | Chặn: `"thêm vật từ thư viện"` | Gate ngay sau kiểm revision, trước khi ghi GLB |
+| Nhân bản (`apply_object_action`, action `duplicate`) | Chặn đúng action: `"nhân bản vật"` | Gate trong nhánh `duplicate`; confirm/ignore/hide/delete/restore/rename/label vẫn chạy |
+| Sửa bề mặt va chạm (`edit_collision_surfaces`) | Chặn: `"sửa bề mặt va chạm"` | Gate sau kiểm revision, áp cho mark, fill và remove |
+| Khôi phục revision (`restore_revision`) | Cho phép | Không đổi code, chỉ thêm test |
+| Gán nhãn (`label`) | Cho phép | Không đổi code |
+
+**Files changed (Round 2)**
+- `src/services/orchestration/scene/objects.py`: gate trong `add_box_object()`, `add_catalog_object()` và nhánh `duplicate` của `apply_object_action()`.
+- `src/services/orchestration/scene/collision_surfaces.py`: gate trong `edit_collision_surfaces()`.
+- `tests/test_api/test_scene_v2_routes.py`: 4 test route.
+- `tests/test_orchestration/test_scene_editor.py`: 2 test `restore_revision`.
+
+**Test**
+- Route (Required change 2): mỗi test làm request trên scene ready trước (201), rồi chuyển sang Draft. Request với revision hiện tại bị 422 với `detail` đúng, và không có revision mới được publish:
+  - `POST /scene/objects` → `Cần tạo mesh trước khi thêm vật.`
+  - `POST /scene/catalog-objects` → `Cần tạo mesh trước khi thêm vật từ thư viện.`
+  - `POST /scene/objects/{id}/duplicate` → `Cần tạo mesh trước khi nhân bản vật.`
+  - `POST /scene/collision-surfaces` → `Cần tạo mesh trước khi sửa bề mặt va chạm.`
+- Restore (Required change 3), trên `SceneEditor` trực tiếp:
+  - Ready → Draft: `restore_revision` đưa `object_geometry` về `awaiting_review`.
+  - Draft → Ready: `object_geometry` là `ready`; collider của vật pallet, `membership` và `object_aware_collision_ref` khớp revision đích.
+  - Scene đích object-aware được dựng như helper ở `tests/test_contracts/test_object_geometry.py`, vì validator yêu cầu `membership` và `collider_ref` đi kèm `object_aware_collision_ref`.
+- Chạy lại (Required change 4): 16 file test gồm 8 file của Round 1 cùng `test_collision_surfaces.py`, `test_object_restore.py`, `test_editing_review.py`, `test_release_sealing_recovery.py`, `test_review_workflow.py`, `test_demo_routes.py`, `test_editing_v2.py`, `test_collision_edit_composition.py`: **276 passed in 27.38s**.
+- `ruff check` và `ruff format --check` sạch trên 4 file đã sửa. `graphify update .`: exit 0.
+
+**Commit**
+- `558c164b` — Refuse adding objects, duplicating and editing collision surfaces on a scene awaiting geometry review.
+- `f3e79825` — Cover restore_revision across Draft and ready revisions.
+
+**Ghi chú**
+- Gate của `edit_collision_surfaces` áp cho cả `remove` và `fill`, không chỉ `mark`: review ghi "sửa collision surfaces" nên chặn mọi thao tác sửa.
+- Thêm box và thêm asset chặn trước khi ghi GLB, nên request bị từ chối không để lại artifact nào.
+
+**Known issues còn lại**
+- Studio vẫn gửi Walk/USD khi Draft tới T-013 (đã chấp nhận theo review).
+- `restore_revision` có thể đưa scene Draft về `ready` mà không qua tạo mesh; đây là quyết định của review và đã có test.
