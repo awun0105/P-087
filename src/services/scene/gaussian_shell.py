@@ -1,12 +1,15 @@
 """Closed shell of one object from its Gaussians: opacity and floater filters, voxel closing, strict QA."""
 
+import math
 from dataclasses import dataclass
 
 import numpy as np
+from scipy import ndimage
 from scipy.spatial import cKDTree
 from scipy.special import expit
 
 MIN_GAUSSIANS = 50
+_CROSS = ndimage.generate_binary_structure(3, 1)  # 6-connected neighbourhood for every morphology step
 
 
 class GaussianShellError(ValueError):
@@ -55,3 +58,41 @@ def _filter_gaussians(points: np.ndarray, logit: np.ndarray | None, params: Shel
     if len(points) < MIN_GAUSSIANS:
         raise GaussianShellError("too few Gaussians after filtering")
     return points, opacity_dropped, outliers_dropped
+
+
+def _voxelize(points: np.ndarray, voxel_m: float, pad: int, max_grid_cells: int) -> tuple[np.ndarray, np.ndarray, int]:
+    """Occupancy grid with `pad` empty cells on each side; returns grid, origin in world cells, occupied count."""
+    scaled = points / voxel_m
+    if not np.isfinite(scaled).all() or np.max(np.abs(scaled)) > 2**52:
+        raise GaussianShellError("source coordinates exceed the exact occupancy grid range")
+    cells = np.floor(scaled).astype(np.int64)
+    low, high = cells.min(axis=0), cells.max(axis=0)
+    shape = (high - low + 1 + 2 * pad).tolist()
+    if math.prod(shape) > max_grid_cells:
+        raise GaussianShellError("shell grid exceeds max_grid_cells budget")
+    grid = np.zeros(shape, dtype=bool)
+    grid[tuple((cells - low + pad).T)] = True
+    return grid, low - pad, int(np.count_nonzero(grid))
+
+
+def _close_shell(grid: np.ndarray, dilate_voxels: int, close_iterations: int) -> np.ndarray:
+    """Grow by dilate_voxels, close narrow gaps, then fill enclosed cavities.
+
+    scipy treats iterations=0 as repeat-until-stable, so a zero count skips that operation.
+    """
+    if dilate_voxels:
+        grid = ndimage.binary_dilation(grid, structure=_CROSS, iterations=dilate_voxels)
+    if close_iterations:
+        grid = ndimage.binary_closing(grid, structure=_CROSS, iterations=close_iterations)
+    return ndimage.binary_fill_holes(grid, structure=_CROSS)
+
+
+def _keep_large_components(grid: np.ndarray, min_fraction: float) -> tuple[np.ndarray, int, int]:
+    """Keep components holding at least min_fraction of all occupied cells; returns grid, kept and dropped counts."""
+    labels, count = ndimage.label(grid, structure=_CROSS)
+    sizes = np.bincount(labels.ravel(), minlength=count + 1)[1:]
+    keep = sizes >= min_fraction * sizes.sum()
+    if not keep.any():
+        raise GaussianShellError("no connected component reaches min_component_fraction")
+    lookup = np.concatenate(([False], keep))
+    return lookup[labels], int(keep.sum()), int(count - keep.sum())
