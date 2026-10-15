@@ -3,12 +3,14 @@
 Proposal được dựng tay (như kết quả SAM2) để kiểm logic gộp mà không cần GPU/torch.
 """
 
+import json
 from pathlib import Path
 
 import numpy as np
 import pytest
 
 from src.models.contracts.floor_model import FloorModel
+from src.services.scene.diagnostics import EvidenceRecorder
 from src.services.scene.floor_model import above_floor_mask, fit_canonical_floor_model, point_cloud_checksum
 from src.services.scene.geometric import GeometricConfig
 from src.services.scene.sampro3d.consolidate import (
@@ -69,6 +71,25 @@ def test_low_iou_or_single_view_masks_are_dropped() -> None:
     low_iou = [(view, int(a[0]), 0.3, a) for view in range(3)]
     single_view = [(0, int(b[0]), 0.95, b)]
     assert segment(_proposal(low_iou + single_view, 3, points), points, _floor_model(points)) == []
+
+
+def test_trace_records_rejections_without_changing_instances(tmp_path):
+    points, a, b = _scene()
+    records = [(v, int(a[0]), 0.9, a) for v in range(3)]
+    records += [(v, int(a[1]), 0.8, a) for v in range(3)]  # suppressed by same-view NMS
+    records += [(v, int(b[0]), 0.3, b) for v in range(3)]
+    records += [(0, int(b[1]), 0.95, b)]  # insufficient cross-view support
+    proposal = _proposal(records, 3, points)
+    baseline = segment(proposal, points, _floor_model(points))
+    state = np.random.get_state()
+    traced = segment(proposal, points, _floor_model(points), evidence=EvidenceRecorder(tmp_path, "segmentation"))
+    assert len(traced) == len(baseline)
+    assert all(np.array_equal(a, b) for a, b in zip(traced, baseline, strict=True))
+    assert np.array_equal(state[1], np.random.get_state()[1])
+    events = [json.loads(line) for line in (tmp_path / "segmentation.jsonl").read_text().splitlines()]
+    reasons = {reason for event in events for reason in event.get("reasons", [])}
+    assert {"same_view_nms", "predicted_iou_below_threshold", "insufficient_views"} <= reasons
+    assert any(event["kind"] == "instance_decision" for event in events)
 
 
 def test_floor_points_never_join_an_instance() -> None:

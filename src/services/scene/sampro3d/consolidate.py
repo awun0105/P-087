@@ -13,6 +13,7 @@ from scipy.sparse.csgraph import connected_components
 from scipy.spatial import cKDTree
 
 from src.models.contracts.floor_model import FloorModel
+from src.services.scene.diagnostics import EvidenceRecorder
 from src.services.scene.floor_model import above_floor_mask
 
 
@@ -89,7 +90,9 @@ def _jaccard(a: np.ndarray, b: np.ndarray) -> float:
     return inter / (len(a) + len(b) - inter)
 
 
-def _surviving_records(proposal: Proposal, config: Sampro3dConfig) -> list[int]:
+def _surviving_records(
+    proposal: Proposal, config: Sampro3dConfig, evidence: EvidenceRecorder | None = None
+) -> list[int]:
     """Mask đạt IoU dự đoán, đủ điểm; NMS trong cùng frame theo tập điểm (thay box NMS)."""
     good = [
         i
@@ -106,6 +109,26 @@ def _surviving_records(proposal: Proposal, config: Sampro3dConfig) -> list[int]:
             ):
                 chosen.append(record)
         kept.extend(chosen)
+    if evidence is not None:
+        good_set, kept_set = set(good), set(kept)
+        for i in range(len(proposal.iou)):
+            reasons = []
+            if proposal.iou[i] < config.pred_iou_thres:
+                reasons.append("predicted_iou_below_threshold")
+            if len(proposal.members[i]) < config.min_mask_points:
+                reasons.append("too_few_mask_points")
+            if i in good_set and i not in kept_set:
+                reasons.append("same_view_nms")
+            evidence.emit(
+                "mask_decision",
+                record=i,
+                view=int(proposal.view[i]),
+                prompt=int(proposal.prompt[i]),
+                predicted_iou=float(proposal.iou[i]),
+                points=len(proposal.members[i]),
+                accepted=i in kept_set,
+                reasons=reasons,
+            )
     return kept
 
 
@@ -114,9 +137,11 @@ def segment(
     points: np.ndarray,
     floor_model: FloorModel,
     config: Sampro3dConfig = Sampro3dConfig(),
+    *,
+    evidence: EvidenceRecorder | None = None,
 ) -> list[np.ndarray]:
     """Trả danh sách instance (chỉ số điểm), đã dọn nhiễu và bỏ sàn."""
-    kept = _surviving_records(proposal, config)
+    kept = _surviving_records(proposal, config, evidence)
     prompts = np.unique(proposal.prompt)
     visible_per_prompt = {p: int((proposal.prompt == p).sum()) for p in prompts}
     kept_per_prompt: dict[int, list[int]] = {}
@@ -127,6 +152,27 @@ def segment(
         for p, records in kept_per_prompt.items()
         if len(records) >= config.min_views and len(records) / visible_per_prompt[p] >= config.keep_thres
     ]
+    if evidence is not None:
+        from dataclasses import asdict
+
+        evidence.emit("config", thresholds=asdict(config), input_points=len(points))
+        for p in prompts:
+            count = len(kept_per_prompt.get(p, []))
+            evidence.emit(
+                "prompt_decision",
+                prompt=int(p),
+                observations=visible_per_prompt[p],
+                kept_masks=count,
+                accepted=bool(p in valid),
+                reasons=[
+                    reason
+                    for condition, reason in [
+                        (count < config.min_views, "insufficient_views"),
+                        (count / visible_per_prompt[p] < config.keep_thres, "insufficient_kept_fraction"),
+                    ]
+                    if condition
+                ],
+            )
     if not valid:
         return []
     # Bỏ phiếu: điểm được mask của prompt p "chọn" / số frame p và điểm cùng được nhìn thấy.
@@ -142,6 +188,15 @@ def segment(
     owner = score.argmax(axis=0)
     confident = score.max(axis=0) >= config.vote_thres
     supports = [np.nonzero(confident & (owner == column[p]))[0] for p in valid]
+    if evidence is not None:
+        for p, support in zip(valid, supports, strict=True):
+            evidence.emit(
+                "voting",
+                prompt=int(p),
+                assigned_points=len(support),
+                insufficient_observations=int(np.count_nonzero(seen[column[p]] < config.min_views)),
+                above_vote_threshold=int(np.count_nonzero(score[column[p]] >= config.vote_thres)),
+            )
     # Gộp prompt cùng vật (union-find theo độ chồng tập điểm hỗ trợ).
     parent = list(range(len(valid)))
 
@@ -157,14 +212,34 @@ def segment(
         for j in range(i + 1, len(valid)):
             if _jaccard(per_prompt[i], per_prompt[j]) >= config.merge_thres:
                 parent[find(i)] = find(j)
+                if evidence is not None:
+                    evidence.emit(
+                        "merge",
+                        prompts=[int(valid[i]), int(valid[j])],
+                        reason="support_overlap",
+                        overlap=_jaccard(per_prompt[i], per_prompt[j]),
+                        threshold=config.merge_thres,
+                    )
     groups: dict[int, list[np.ndarray]] = {}
     for i, support in enumerate(supports):
         groups.setdefault(find(i), []).append(support)
     instances = []
-    for parts in groups.values():
+    for group, parts in groups.items():
         members = np.unique(np.concatenate(parts))
+        before_floor = len(members)
         members = members[above_floor_mask(points[members], floor_model)]
         cleaned = _largest_cluster(points, members, config)
+        if evidence is not None:
+            evidence.emit(
+                "instance_decision",
+                prompts=[int(valid[i]) for i in range(len(valid)) if find(i) == group],
+                before_floor=before_floor,
+                floor_removed=before_floor - len(members),
+                cluster_removed=len(members) - len(cleaned),
+                retained=len(cleaned),
+                accepted=len(cleaned) >= config.min_instance_points,
+                reason=None if len(cleaned) >= config.min_instance_points else "too_few_instance_points",
+            )
         if len(cleaned) >= config.min_instance_points:
             instances.append(cleaned)
     return sorted(instances, key=len, reverse=True)
