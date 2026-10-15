@@ -89,10 +89,14 @@ From repository root:
   --workspace /absolute/path/fresh-synthetic-smoke
 ```
 
-This generates eight calibrated 96x96 observations of a one-metre cube above a floor, explicit labels and
-metric anchors, runs actual upstream training and each numeric-label mesh export, then writes result.json.
-The workspace must not exist; retries require a fresh path. Logs are runtime/runtime-check.log, train.log,
-and export-1.log. A 100-iteration smoke tests execution, not trained mesh quality or CoACD acceptance.
+This generates sixteen calibrated 96x96 observations (above and below the cube) of a one-metre cube above a floor, explicit labels and
+metric anchors, runs the same prepared-input service as the worker, including real upstream training, each numeric-label
+mesh export, dataset/checkpoint archives and explicit world-to-object-local conversion, then writes result.json.
+Pinned upstream indexes camera 10 during iteration-1 visualization, so training requires at least 11
+calibrated views; the runner validates this before launching training.
+The workspace must not exist; retries require a fresh path. Logs are prepared/runtime/runtime-check.log, train.log,
+and export-1.log. request.json preserves the exact service input; source.ply, labels.i32le and source.glb
+are byte-bound synthetic inputs. No Studio job is created or changed. A 100-iteration smoke tests execution, not trained mesh quality or CoACD acceptance.
 An optional `extension_cache_dir` in runtime.json reuses a completed CUDA extension for the same
 pinned source, Python/Torch/CUDA/compiler environment. Keep distinct directories for different runtimes.
 The default remains per-invocation scratch. A process-level lock rejects concurrent users of an explicitly

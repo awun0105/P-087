@@ -262,3 +262,20 @@ This metadata does not replace byte checksums. Focused adapter/contracts/produce
 producer metadata stays explicitly marked fixture. Contract mirror: 5 enums / 6 models PASS. Actual
 `npm run typecheck` (next typegen + tsc --noEmit) PASS. Latest broad suite after cache/process-session fixes:
 724 PASS / 67.11s; provenance-only changes have the focused evidence above.
+
+
+## Checkpoint: first successful real GPU train and surface export
+
+Smoke 05 completed actual pinned upstream training (100 iterations), anchor/MLP checkpoint, render/evaluation
+and explicit label-1 TSDF export on Quadro T2000. No mocked GPU output: raw surface has 25,636 vertices and
+47,521 finite triangles, 391 connected components, non-watertight. Bounds are approximately
+[-1.1231,-1.155,-0.165]..[1.125,1.065,1.8364] metres for the undertrained 1m synthetic cube. This is execution
+evidence, not reconstruction accuracy. Strict surface validation rejected it before CoACD, returned parts=0
+and no collider GLB. No OBB/hull fallback or SceneIR success was fabricated.
+
+Before that, smoke 04 completed CUDA extension compilation but hit a real upstream visualization assumption:
+train.py accesses getTrainCameras()[10] at iteration 1. The runner now rejects prepared datasets with fewer
+than 11 calibrated views before training; synthetic smoke uses 16 views above/below the cube. Fourteen
+adapter/process tests PASS; focused runtime/contracts/producer suite: 28 PASS / 4.44s. A further real smoke 06
+uses the complete prepared-input service (immutable PLY/labels/poses, 8,000 iterations, checkpoint/dataset
+archives and object-local GLB conversion) and is still running. Its quality/CoACD outcome is not yet known.

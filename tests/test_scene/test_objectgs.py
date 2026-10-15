@@ -109,7 +109,8 @@ def test_runner_contract_calls_train_then_each_numeric_label_never_minus_one(tmp
         extension_cache_dir=tmp_path / "compiler-cache" if shared_cache else None,
     )
     dataset = tmp_path / "data/job-test"
-    objectgs.prepare_dataset(*inputs(tmp_path), dataset)
+    rows, labels, mapping, views = inputs(tmp_path)
+    objectgs.prepare_dataset(rows, labels, mapping, views * 11, dataset)
     monkeypatch.setattr(
         objectgs, "_revision", lambda p: objectgs.OBJECTGS_COMMIT if p == repo else objectgs.GSPLAT_COMMIT
     )
@@ -281,7 +282,8 @@ os.environ['CUDA_VISIBLE_DEVICES']=str(np.argmin([int(x.split()[2]) for x in res
     gsplat = tmp_path / "gsplat"
     gsplat.mkdir()
     dataset = tmp_path / "data/job-test"
-    objectgs.prepare_dataset(*inputs(tmp_path), dataset)
+    rows, labels, mapping, views = inputs(tmp_path)
+    objectgs.prepare_dataset(rows, labels, mapping, views * 11, dataset)
     runtime = objectgs.ObjectGSRuntime(python=python, repository=repo, gsplat_repository=gsplat, timeout_seconds=10)
     monkeypatch.setattr(
         objectgs, "_revision", lambda p: objectgs.OBJECTGS_COMMIT if p == repo else objectgs.GSPLAT_COMMIT
@@ -313,3 +315,21 @@ os.environ['CUDA_VISIBLE_DEVICES']=str(np.argmin([int(x.split()[2]) for x in res
     with pytest.raises(ProcessLookupError):
         os.kill(int(marker.read_text()), 0)
     assert not (tmp_path / "work/result.json").exists()
+
+
+@pytest.mark.parametrize("view_count", [1, 10])
+def test_training_rejects_too_few_views_before_starting_upstream(tmp_path, monkeypatch, view_count):
+    repo, gsplat = tmp_path / "repo", tmp_path / "gsplat"
+    python = tmp_path / "isolated/bin/python"
+    python.parent.mkdir(parents=True)
+    python.touch()
+    runtime = objectgs.ObjectGSRuntime(python=python, repository=repo, gsplat_repository=gsplat)
+    monkeypatch.setattr(
+        objectgs, "_revision", lambda p: objectgs.OBJECTGS_COMMIT if p == repo else objectgs.GSPLAT_COMMIT
+    )
+    rows, labels, mapping, views = inputs(tmp_path)
+    dataset = tmp_path / "data"
+    objectgs.prepare_dataset(rows, labels, mapping, views * view_count, dataset)
+    with pytest.raises(ValueError, match="at least 11 calibrated views"):
+        objectgs.run_objectgs(runtime, dataset, tmp_path / "runtime")
+    assert not (tmp_path / "runtime").exists()

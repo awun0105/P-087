@@ -198,6 +198,11 @@ def run_objectgs(
     dataset = dataset.resolve()
     if any(token in str(dataset) for token in ["replica", "3dovs", "lerf_ovs", "scannet", "mipnerf360"]):
         raise ValueError("prepared dataset path triggers unsupported upstream dataset-name heuristics")
+    # Pinned train.py indexes getTrainCameras()[10] for visualization at iteration 1.
+    # Prepared images.txt has one pose row and an empty feature row per camera.
+    camera_rows = (dataset / "sparse/0/images.txt").read_text().splitlines()
+    if sum(bool(row.strip()) and not row.lstrip().startswith("#") for row in camera_rows) < 11:
+        raise ValueError("pinned ObjectGS training requires at least 11 calibrated views")
     mapping = json.loads((dataset / "label-map.json").read_text())
     if not mapping or not set(mapping.values()) <= set(range(1, 256)):
         raise ValueError("invalid explicit object label mapping")
