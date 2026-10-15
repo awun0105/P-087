@@ -313,6 +313,36 @@ describe("unified input flow", () => {
     await waitFor(() => expect(mocks.run).toHaveBeenCalledWith("assembly-1", expect.objectContaining({ processing: { "sampling.max_frames": 100 } })));
   });
 
+  it("sends scene.geometry_review = auto in the create payload when the user chooses Tạo mesh ngay", async () => {
+    mocks.processingOptions.mockResolvedValue({
+      ok: true,
+      data: {
+        ...processingOptions,
+        parameters: [
+          ...processingOptions.parameters,
+          { key: "scene.geometry_review", group: "scene", label: "Duyệt tách vật trước khi tạo mesh", description: "", kind: "choice", min: null, max: null, step: null, unit: null, choices: [{ value: "required", label: "Dừng để duyệt tách vật" }, { value: "auto", label: "Tạo mesh ngay" }] },
+        ],
+        presets: {
+          minimum_quality: { "sampling.max_frames": 10, "scene.geometry_review": "required" },
+          maximum: { "sampling.max_frames": 100, "scene.geometry_review": "required" },
+          machine_maximum: { "sampling.max_frames": 100, "scene.geometry_review": "required" },
+        },
+      },
+    });
+    mocks.resolve.mockReset().mockResolvedValue({ report: report("ready", [videoCandidate("r1-auto", "file-upload-1", "ready")], "r1-auto") });
+    const { container } = render(<UnifiedInputFlow />);
+    fireEvent.change(container.querySelector<HTMLInputElement>('input[type="file"]')!, { target: { files: [new File(["video"], "warehouse.mp4", { type: "video/mp4" })] } });
+    fireEvent.click(await screen.findByRole("button", { name: "Tải file đã chọn lên" }));
+    await nextStep();
+    await screen.findByRole("heading", { name: "Thông số xử lý" });
+    fireEvent.click(screen.getByRole("radio", { name: /Tạo mesh ngay, không duyệt/ }));
+    await nextStep();
+    completeVideoAttestation();
+    await waitFor(() => expect(screen.getByRole("button", { name: /Tạo scene/ })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: /Tạo scene/ }));
+    await waitFor(() => expect(mocks.run).toHaveBeenCalledWith("assembly-1", expect.objectContaining({ processing: { "sampling.max_frames": 10, "scene.geometry_review": "auto" } })));
+  });
+
   it("automatically resolves a legacy upload and hides redundant notices", async () => {
     mocks.search = new URLSearchParams("upload=upload-existing");
     const ready = report("ready", [videoCandidate("only", "file-upload-existing", "ready")], "only");
