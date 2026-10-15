@@ -277,7 +277,7 @@ def test_environment_build_removes_object_cells(draft_scene: SimpleNamespace, cp
 
     fixture = draft_scene
     store = FilesystemArtifactStore(fixture.registry.runtime_resolver)
-    environment = module._build_environment(
+    environment, inpainted = module._build_environment(
         fixture.registry,
         fixture.settings,
         fixture.job_id,
@@ -289,6 +289,7 @@ def test_environment_build_removes_object_cells(draft_scene: SimpleNamespace, cp
         store.publish,
         None,
     )
+    assert inpainted == 0
     assert environment.object_aware_collision_ref is not None
     assert environment.membership == fixture.scene.environment.membership
     mesh = trimesh.load(fixture.registry.runtime_resolver.require(environment.collider_ref), force="mesh")
@@ -751,11 +752,8 @@ def test_explicit_object_ids_build_only_requested_reviewed_objects(
 
 
 def _ready_override(fixture):
-    import numpy as np
-
     from src.models.contracts.manifests import StageId
     from src.services.orchestration.artifacts import FilesystemArtifactStore
-    from src.services.orchestration.scene import object_geometry_build as module
     from src.services.orchestration.scene.objectify import _reference
 
     store = FilesystemArtifactStore(fixture.registry.runtime_resolver)
@@ -798,6 +796,18 @@ def _ready_override(fixture):
     ).revision.scene
     fixture.labels = labels
     build(fixture)
+    return _shrink_override(fixture)
+
+
+def _shrink_override(fixture):
+    """Override that hands candidate-001's rows above x=1 back to the background, against the current Ready scene."""
+    import numpy as np
+
+    from src.models.contracts.manifests import StageId
+    from src.services.orchestration.artifacts import FilesystemArtifactStore
+    from src.services.orchestration.scene import object_geometry_build as module
+    from src.services.orchestration.scene.objectify import _reference
+
     fixture.scene = fixture.registry.scene.current(fixture.job_id).scene
     labels = fixture.labels.copy()
     own = np.flatnonzero(labels == 0)
@@ -806,6 +816,8 @@ def _ready_override(fixture):
 
     def publish(kind, data, tail):
         ref = _reference(fixture.job_id, tail, kind, StageId.SCENE_DECOMPOSE, data)
+        if fixture.registry.runtime_resolver.locate(ref.artifact_uri) is not None:
+            return ref  # Immutable artifacts are content-addressed; the same override may be published again.
         return store.publish(ref, data)
 
     reference = publish("ObjectMembershipLabels", labels.astype("<i4").tobytes(), "test-override/{digest}.i32le")
@@ -929,3 +941,137 @@ def test_partial_build_failure_keeps_ready_head(draft_scene, cpu_providers, monk
     with pytest.raises(error):
         build(fixture, **kwargs)
     assert fixture.registry.scene.current(fixture.job_id).scene == before
+
+
+def install_background_fill(
+    monkeypatch: pytest.MonkeyPatch,
+    cpu_providers: SimpleNamespace,
+    count: int,
+    *,
+    reported: object | None = None,
+    real_convex: bool = False,
+) -> SimpleNamespace:
+    """Inpaint double that keeps the background prefix and appends `count` rows.
+
+    It reports `reported` when given (for invalid-count tests), otherwise the real number of appended rows.
+    CoACD is the test double from `cpu_providers`, or the real provider when `real_convex` is set.
+    """
+    import numpy as np
+
+    from src.services.orchestration.scene import objectify
+    from src.services.scene.decomposition.gaussian_split import read_gaussian_ply, write_gaussian_ply
+
+    fill = SimpleNamespace(count=count, reported=reported)
+    fake_run = objectify._run
+    convex_run = cpu_providers.real_run if real_convex else fake_run
+
+    def run(
+        python: Path, script: Path, request: dict, workspace: Path, name: str, *args: object, **kwargs: object
+    ) -> dict:
+        if name != "inpaint":
+            provider = convex_run if name == "convex" else fake_run
+            return provider(python, script, request, workspace, name, *args, **kwargs)
+        background = read_gaussian_ply(Path(request["background_ply"]).read_bytes())
+        added = background[: fill.count].copy()
+        added["x"] += 10.0
+        Path(request["output_ply"]).write_bytes(write_gaussian_ply(np.concatenate([background, added])))
+        reported_count = len(added) if fill.reported is None else fill.reported
+        return {"method": "fixture-fill", "original_gaussians": len(background), "inpainted_gaussians": reported_count}
+
+    monkeypatch.setattr(objectify, "_run", run)
+    return fill
+
+
+def test_full_build_records_inpaint_count_and_validator_accepts_it(
+    draft_scene: SimpleNamespace, cpu_providers: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import numpy as np
+
+    from src.services.scene.decomposition.gaussian_split import read_gaussian_ply
+    from src.services.scene.representation_integrity import representation_issues
+
+    install_background_fill(monkeypatch, cpu_providers, 3)
+    fixture = draft_scene
+    build(fixture)
+    ready = fixture.registry.scene.current(fixture.job_id).scene
+    resolve = fixture.registry.runtime_resolver.require
+    background = read_gaussian_ply(resolve(ready.environment.visual_master_ref).read_bytes())
+    assert len(background) == int(np.count_nonzero(fixture.labels == -1)) + 3
+    assert ready.provenance["inpainted_gaussians"] == 3
+    assert representation_issues(ready, resolve) == []
+
+
+def test_partial_rebuild_rewrites_the_count_for_each_revision(
+    draft_scene: SimpleNamespace, cpu_providers: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from src.services.scene.representation_integrity import representation_issues
+
+    fill = install_background_fill(monkeypatch, cpu_providers, 3)
+    fixture = draft_scene
+    build(fixture)
+    assert fixture.registry.scene.current(fixture.job_id).scene.provenance["inpainted_gaussians"] == 3
+    resolve = fixture.registry.runtime_resolver.require
+    # 0 is the case the old code left stale: the count must drop, not keep the previous revision's value.
+    for count in (0, 5):
+        fill.count = count
+        override = _shrink_override(fixture)
+        build(fixture, object_ids={"candidate-001"}, membership_override=override)
+        current = fixture.registry.scene.current(fixture.job_id).scene
+        assert current.provenance["inpainted_gaussians"] == count
+        issues = representation_issues(current, resolve)
+        assert issues == [], issues
+
+
+def test_reassign_correction_carries_the_rebuilt_count(
+    draft_scene: SimpleNamespace, cpu_providers: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from src.services.scene.representation_integrity import representation_issues
+
+    install_background_fill(monkeypatch, cpu_providers, 3)
+    fixture = draft_scene
+    correction = {"operation": "reassign", "inpainted_gaussians": 0, "background_gaussians": 0}
+    fixture.scene = fixture.registry.scene.publish_next(
+        fixture.job_id,
+        fixture.scene.scene_revision,
+        fixture.scene.model_copy(
+            update={"provenance": {**fixture.scene.provenance, "membership_correction": correction}}
+        ),
+        "fixture-reassign",
+    ).revision.scene
+    build(fixture)
+    ready = fixture.registry.scene.current(fixture.job_id).scene
+    assert ready.provenance["membership_correction"]["operation"] == "reassign"
+    assert ready.provenance["membership_correction"]["inpainted_gaussians"] == 3
+    assert representation_issues(ready, fixture.registry.runtime_resolver.require) == []
+
+
+def test_tampered_background_count_still_fails_the_validator(
+    draft_scene: SimpleNamespace, cpu_providers: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from src.services.scene.representation_integrity import representation_issues
+
+    install_background_fill(monkeypatch, cpu_providers, 3)
+    fixture = draft_scene
+    build(fixture)
+    ready = fixture.registry.scene.current(fixture.job_id).scene
+    tampered = fixture.registry.scene.publish_next(
+        fixture.job_id,
+        ready.scene_revision,
+        ready.model_copy(update={"provenance": {**ready.provenance, "inpainted_gaussians": 2}}),
+        "fixture-tamper",
+    ).revision.scene
+    issues = representation_issues(tampered, fixture.registry.runtime_resolver.require)
+    assert ("candidate-001", "SOURCE_BACKGROUND_INVALID") in issues
+
+
+@pytest.mark.parametrize("reported", [True, "3", -1, 2.0])
+def test_invalid_inpaint_count_fails_before_publication(
+    draft_scene: SimpleNamespace, cpu_providers: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, reported: object
+) -> None:
+    from src.services.orchestration.scene import object_geometry_build as module
+
+    install_background_fill(monkeypatch, cpu_providers, 3, reported=reported)
+    fixture = draft_scene
+    with pytest.raises(module.ObjectGeometryBuildError, match="Gaussian vá"):
+        build(fixture)
+    assert fixture.registry.scene.current(fixture.job_id).scene == fixture.scene

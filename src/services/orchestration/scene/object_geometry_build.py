@@ -526,7 +526,7 @@ def _build_environment(
     workspace: Path,
     publish: Publish,
     cancel_event: Event | None,
-) -> SceneEnvironment:
+) -> tuple[SceneEnvironment, int]:
     membership = scene.environment.membership
     bundle = job_bundle(registry, registry.get_job(job_id))
     if bundle is None or bundle.canonical_geometry_ref != membership.source_geometry_ref:
@@ -542,7 +542,7 @@ def _build_environment(
     requests = [
         {**view.model_dump(mode="json", exclude={"image"}), "image_path": str(resolve(view.image))} for view in views
     ]
-    master, visual, _ = run_inpaint_and_package(
+    master, visual, inpaint_result = run_inpaint_and_package(
         settings.product_scene_runtime_python,
         background_ply=background,
         objects_ply=objects,
@@ -555,6 +555,9 @@ def _build_environment(
         publish=publish,
         job_id=job_id,
     )
+    inpainted = inpaint_result.get("inpainted_gaussians")
+    if isinstance(inpainted, bool) or not isinstance(inpainted, int) or inpainted < 0:
+        raise ObjectGeometryBuildError("Inpaint không trả số Gaussian vá hợp lệ.")
     _ensure_not_cancelled(cancel_event)
     xyz = positions(rows)
     floor_model = fit_canonical_floor_model(xyz, point_cloud_checksum(xyz))
@@ -578,7 +581,7 @@ def _build_environment(
         publish=publish,
         job_id=job_id,
     )
-    return scene.environment.model_copy(
+    environment = scene.environment.model_copy(
         update={
             "visual_ref": visual,
             "visual_master_ref": master,
@@ -587,6 +590,7 @@ def _build_environment(
         },
         deep=True,
     )
+    return environment, inpainted
 
 
 def build_object_geometry(
@@ -781,7 +785,7 @@ def build_object_geometry(
     )
     phase("environment")
     try:
-        environment = _build_environment(
+        environment, inpainted_count = _build_environment(
             registry, settings, job_id, scene, rows, labels, config, workspace, publish, cancel_event
         )
     except ObjectifyError as error:
@@ -851,29 +855,26 @@ def build_object_geometry(
             )
             updated = updated.model_copy(update={"source_collision": bound.source_collision})
         objects.append(updated)
-    updated_scene = scene.model_copy(
-        update={
-            "objects": objects,
-            "environment": environment,
-            "provenance": {
-                **scene.provenance,
-                "object_geometry": "ready",
-                **(
-                    {
-                        "membership_correction": {
-                            "evidence_ref": membership_override.evidence_ref.model_dump(mode="json")
-                        }
-                    }
-                    if membership_override is not None
-                    else {}
-                ),
-                "geometry_build": {
-                    "input_scene_revision": expected_revision,
-                    "built_object_ids": sorted(colliders),
-                    "at": datetime.now(UTC).isoformat(),
-                },
-            },
+    # Validator reads this count for the background master written above; a `reassign` correction carries its own copy.
+    correction = scene.provenance.get("membership_correction")
+    if membership_override is not None:
+        correction = {"evidence_ref": membership_override.evidence_ref.model_dump(mode="json")}
+    elif isinstance(correction, dict) and correction.get("operation") == "reassign":
+        correction = {**correction, "inpainted_gaussians": inpainted_count}
+    provenance = {
+        **scene.provenance,
+        "object_geometry": "ready",
+        "inpainted_gaussians": inpainted_count,
+        "geometry_build": {
+            "input_scene_revision": expected_revision,
+            "built_object_ids": sorted(colliders),
+            "at": datetime.now(UTC).isoformat(),
         },
+    }
+    if correction is not None:
+        provenance["membership_correction"] = correction
+    updated_scene = scene.model_copy(
+        update={"objects": objects, "environment": environment, "provenance": provenance},
         deep=True,
     )
     updated_scene = SceneIR.model_validate(updated_scene.model_dump())
