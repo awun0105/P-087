@@ -34,6 +34,7 @@ import {
   type FaceId,
   type Vec3,
 } from "@/features/studio/region/box-model";
+import type { DisplayCameraPose } from "@/features/viewer/source-frame";
 import {
   isolateGizmoPointer,
   isolatePointerGesture,
@@ -81,6 +82,10 @@ const FACE_AXIS: Record<FaceId, { axis: 0 | 1 | 2; sign: 1 | -1 }> = {
 
 function copyVec3(v: Vec3): Vec3 {
   return [v[0], v[1], v[2]];
+}
+
+function toVec3(v: PcVec3): Vec3 {
+  return [v.x, v.y, v.z];
 }
 
 function copyBox(box: EditableBox): EditableBox {
@@ -235,6 +240,38 @@ interface FaceDrag {
   startParam: number;
 }
 
+/** Ba trục của khung box trong thế giới (đơn vị, đã gồm xoay của vật và của box). */
+interface BoxAxes {
+  x: Vec3;
+  y: Vec3;
+  z: Vec3;
+}
+
+function negate(v: Vec3): Vec3 {
+  return [-v[0], -v[1], -v[2]];
+}
+
+/**
+ * Pose camera nhìn vuông góc vào box, theo khung của chính box: `top` nhìn xuống −Z, `front` nhìn theo +Y, `side` nhìn
+ * theo +X. Khoảng cách đủ để quả cầu bao box (bán kính `halfDiag`, cộng 20 %) vừa khung theo FOV dọc.
+ */
+export function viewPose(
+  preset: ViewPreset,
+  center: Vec3,
+  axes: BoxAxes,
+  halfDiag: number,
+  fovDeg: number,
+): DisplayCameraPose {
+  const distance = (1.2 * halfDiag) / Math.sin((fovDeg * Math.PI) / 360);
+  // Hướng từ tâm tới camera: `top` đứng trên trục z; `front` và `side` đứng ở phía âm của trục nhìn.
+  const toward = preset === "top" ? axes.z : preset === "front" ? negate(axes.y) : negate(axes.x);
+  return {
+    position: [center[0] + toward[0] * distance, center[1] + toward[1] * distance, center[2] + toward[2] * distance],
+    target: copyVec3(center),
+    fov: fovDeg,
+  };
+}
+
 function styleKey(box: EditableBox, selected: boolean): string {
   return `${box.op}|${selected}|${box.half.join(",")}`;
 }
@@ -292,6 +329,25 @@ export class RegionOverlay {
     this.boxes = boxes.map(copyBox);
     this.selectedId = this.boxes.some((box) => box.id === selectedId) ? selectedId : null;
     this.sync();
+  }
+
+  /**
+   * Đưa camera viewer tới góc nhìn của box đang chọn. Trả false khi không có box chọn, chưa có camera, hoặc viewer
+   * chưa nối lệnh chuyển pose (`SceneOverlay.bindViewerGotoPose`): không làm gì âm thầm.
+   */
+  viewFrom(preset: ViewPreset): boolean {
+    const box = this.boxes.find((item) => item.id === this.selectedId);
+    const root = this.selectedRoot();
+    const camera = this.host.activeCamera();
+    if (!box || !root || !camera || !this.live()) return false;
+    const frame = root.getWorldTransform();
+    const axes: BoxAxes = {
+      x: toVec3(frame.transformVector(new PcVec3(1, 0, 0))),
+      y: toVec3(frame.transformVector(new PcVec3(0, 1, 0))),
+      z: toVec3(frame.transformVector(new PcVec3(0, 0, 1))),
+    };
+    const halfDiag = Math.hypot(box.half[0], box.half[1], box.half[2]);
+    return this.host.gotoPose(viewPose(preset, toVec3(root.getPosition()), axes, halfDiag, camera.fov));
   }
 
   /** Mặt sàn (z, object-local). Khi thả, box không được xuống dưới sàn; chưa đặt sàn thì không kẹp. */

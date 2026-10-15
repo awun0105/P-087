@@ -90,8 +90,10 @@ import {
   edgeBars,
   handleScale,
   rayLineParam,
+  viewPose,
   type RegionHost,
 } from "@/features/viewer/region-overlay";
+import type { DisplayCameraPose } from "@/features/viewer/source-frame";
 
 const VIEW = { width: 800, height: 600, fovDeg: 60 };
 
@@ -134,7 +136,12 @@ function fakeApp(canvas: HTMLCanvasElement = document.createElement("canvas")): 
   return app;
 }
 
-function fakeHost(app: AppBase, object: Entity, camera: CameraComponent | null = null): RegionHost {
+function fakeHost(
+  app: AppBase,
+  object: Entity,
+  camera: CameraComponent | null = null,
+  gotoPose = vi.fn<(pose: DisplayCameraPose) => boolean>(() => true),
+): RegionHost {
   return {
     isAlive: () => true,
     application: () => app,
@@ -142,7 +149,7 @@ function fakeHost(app: AppBase, object: Entity, camera: CameraComponent | null =
     objectEntity: (id: string) => (id === "obj-1" ? object : null),
     sharedGizmoLayer: () => ({}) as Layer,
     requestFrame: vi.fn(),
-    gotoPose: vi.fn(() => true),
+    gotoPose,
   } as unknown as RegionHost;
 }
 
@@ -191,8 +198,9 @@ function scene() {
   app.root.addChild(object);
   const camera = pinholeCamera(app);
   const callbacks = handlers();
-  const overlay = new RegionOverlay(fakeHost(app, object, camera), "obj-1", callbacks);
-  return { canvas, app, object, camera, overlay, ...callbacks };
+  const gotoPose = vi.fn<(pose: DisplayCameraPose) => boolean>(() => true);
+  const overlay = new RegionOverlay(fakeHost(app, object, camera, gotoPose), "obj-1", callbacks);
+  return { canvas, app, object, camera, overlay, gotoPose, ...callbacks };
 }
 
 /** Toạ độ CSS trên canvas của một điểm object-local (như `offsetX/offsetY` mà trình duyệt báo). */
@@ -533,5 +541,60 @@ describe("RegionOverlay gizmos", () => {
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     expect(onChange).not.toHaveBeenCalled();
     expect(entityNamed(object, "region-box-b1").getLocalPosition().x).toBeCloseTo(0, 9);
+  });
+});
+
+describe("viewPose", () => {
+  const IDENTITY = { x: [1, 0, 0] as Vec3, y: [0, 1, 0] as Vec3, z: [0, 0, 1] as Vec3 };
+
+  it("looks down -Z from above for the top view, framing the sphere with 20 % margin", () => {
+    // Bán kính 1 m, FOV 60°: khoảng cách = 1.2 / sin(30°) = 2.4 m.
+    const pose = viewPose("top", [0, 0, 0], IDENTITY, 1, 60);
+    expect(pose.position[0]).toBeCloseTo(0, 9);
+    expect(pose.position[1]).toBeCloseTo(0, 9);
+    expect(pose.position[2]).toBeCloseTo(2.4, 9);
+    expect(pose.target).toEqual([0, 0, 0]);
+    expect(pose.fov).toBe(60);
+  });
+
+  it("views the front along +Y and the side along +X from the negative side", () => {
+    expect(viewPose("front", [0, 0, 0], IDENTITY, 1, 60).position[1]).toBeCloseTo(-2.4, 9);
+    expect(viewPose("side", [0, 0, 0], IDENTITY, 1, 60).position[0]).toBeCloseTo(-2.4, 9);
+  });
+});
+
+describe("RegionOverlay.viewFrom", () => {
+  it("frames the selected box from the chosen preset and hands the pose to the viewer", () => {
+    const { overlay, gotoPose } = scene();
+    overlay.setBoxes([box()], "b1");
+    expect(overlay.viewFrom("front")).toBe(true);
+    // Half-diagonal 0.866 m: khoảng cách = 1.2 · 0.866 / sin(30°) ≈ 2.078 m, nhìn theo +Y từ phía -Y.
+    const [pose] = gotoPose.mock.calls[0];
+    expect(pose.position[1]).toBeCloseTo(-2.0785, 3);
+    expect(pose.target).toEqual([0, 0, 0]);
+  });
+
+  it("aims along the box's own axes when the box is rotated", () => {
+    const { overlay, gotoPose } = scene();
+    overlay.setBoxes([box({ yaw: Math.PI / 2 })], "b1");
+    // Trục x của box quay về +Y thế giới, nên nhìn theo +X của box là nhìn từ phía -Y.
+    overlay.viewFrom("side");
+    const [pose] = gotoPose.mock.calls[0];
+    expect(pose.position[0]).toBeCloseTo(0, 6);
+    expect(pose.position[1]).toBeCloseTo(-2.0785, 3);
+  });
+
+  it("returns false and reports nothing when no box is selected", () => {
+    const { overlay, gotoPose } = scene();
+    overlay.setBoxes([box()], null);
+    expect(overlay.viewFrom("top")).toBe(false);
+    expect(gotoPose).not.toHaveBeenCalled();
+  });
+
+  it("returns false when the viewer refuses the pose", () => {
+    const { overlay, gotoPose } = scene();
+    gotoPose.mockReturnValueOnce(false);
+    overlay.setBoxes([box()], "b1");
+    expect(overlay.viewFrom("top")).toBe(false);
   });
 });
