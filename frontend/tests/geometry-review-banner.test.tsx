@@ -33,6 +33,10 @@ function draft(objects: { id: string; name: string; review?: string; shellError?
   return {
     scene_revision: "rev-001",
     provenance: geometry === null ? {} : { object_geometry: geometry },
+    // Mỗi vật có một nhãn trong membership: builder dựng vỏ cho tất cả, kể cả vật đã loại.
+    environment: {
+      membership: { label_to_object_id: Object.fromEntries(objects.map((item, index) => [String(index), item.id])) },
+    },
     objects: objects.map((item) => ({
       id: item.id,
       name: item.name,
@@ -94,6 +98,37 @@ describe("banner Duyệt tách vật", () => {
     expect(within(region).getByText("Đang duyệt tách vật · 2 vật · chưa có collider")).toBeInTheDocument();
     expect(within(region).getByText("Vỏ của Kệ chưa dựng được — sửa vùng trước khi Tạo mesh")).toBeInTheDocument();
     expect(within(region).getByRole("button", { name: "Tạo mesh" })).toBeEnabled();
+  });
+
+  it("vật đã loại có lỗi vỏ vẫn được nêu kèm hướng khắc phục, vì Tạo mesh vẫn dựng vật đó", async () => {
+    render(
+      <GeometryReviewBanner
+        jobId="job-1"
+        scene={draft([
+          { id: "pallet", name: "Pallet" },
+          { id: "chair", name: "Ghế", review: "IGNORED", shellError: "vỏ rỗng" },
+        ])}
+        onRevision={vi.fn()}
+      />,
+    );
+    const region = await screen.findByRole("region", { name: "Duyệt tách vật" });
+    expect(within(region).getByText("Đang duyệt tách vật · 1 vật · chưa có collider")).toBeInTheDocument();
+    expect(
+      within(region).getByText("Vỏ của Ghế (đã loại) chưa dựng được — Khôi phục, sửa vùng, rồi Tạo mesh"),
+    ).toBeInTheDocument();
+  });
+
+  it("vật có lỗi vỏ nhưng không còn nhãn trong membership thì không được nêu", async () => {
+    const orphan = {
+      ...draft([
+        { id: "pallet", name: "Pallet" },
+        { id: "ghost", name: "Đã mất", shellError: "vỏ rỗng" },
+      ]),
+      environment: { membership: { label_to_object_id: { "0": "pallet" } } },
+    } as unknown as SceneIR;
+    render(<GeometryReviewBanner jobId="job-1" scene={orphan} onRevision={vi.fn()} />);
+    const region = await screen.findByRole("region", { name: "Duyệt tách vật" });
+    expect(within(region).queryByText(/Đã mất/)).not.toBeInTheDocument();
   });
 
   it("bấm Tạo mesh gửi đúng revision đang hiển thị, rồi khoá nút khi yêu cầu đang chạy", async () => {

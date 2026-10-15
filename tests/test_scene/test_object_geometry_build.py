@@ -1075,3 +1075,25 @@ def test_invalid_inpaint_count_fails_before_publication(
     with pytest.raises(module.ObjectGeometryBuildError, match="Gaussian vá"):
         build(fixture)
     assert fixture.registry.scene.current(fixture.job_id).scene == fixture.scene
+
+
+@pytest.mark.parametrize("review", ["IGNORED", "DELETED", "MERGED"])
+def test_archived_member_with_shell_error_blocks_build_and_is_named(
+    draft_scene: SimpleNamespace, cpu_providers: SimpleNamespace, review: str
+) -> None:
+    """GR-03: the banner names every member whose shell fails, archived ones included; the build refuses for the same object."""
+    from src.services.orchestration.scene import object_geometry_build as module
+
+    item = draft_scene.scene.objects[0]
+    provenance = {**item.provenance, "review": review, "shell_error": "fixture placeholder"}
+    updated = item.model_copy(update={"provenance": provenance})
+    draft_scene.scene = draft_scene.registry.scene.publish_next(
+        draft_scene.job_id,
+        draft_scene.scene.scene_revision,
+        draft_scene.scene.model_copy(update={"objects": [updated, draft_scene.scene.objects[1]]}),
+        "fixture-archived-error",
+    ).revision.scene
+    with pytest.raises(module.ObjectGeometryBuildError) as error:
+        build(draft_scene)
+    assert error.value.object_id == "candidate-001"
+    assert draft_scene.registry.scene.current(draft_scene.job_id).scene == draft_scene.scene
