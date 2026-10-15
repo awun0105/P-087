@@ -23,6 +23,7 @@ import {
 } from "@/features/studio/region/region-session";
 import { PREVIEW_DEBOUNCE_MS, regionKey, useRegionPreview } from "@/features/studio/region/useRegionPreview";
 import type { RegionOverlayHandlers } from "@/features/viewer/region-overlay";
+import type { ShellSpec } from "@/features/viewer/shell-glow";
 import { ApiError } from "@/lib/api/client";
 import { applyObjectRegion, isSceneEditResponse, previewObjectRegion, type RegionPreview } from "@/lib/api/studio";
 import type { ObjectRegionCommand, SceneObject } from "@/lib/contracts/api";
@@ -386,7 +387,7 @@ describe("panel chỉnh vùng", () => {
 
   it("góc nhìn gọi overlay; khi overlay chưa nối thì khoá các nút và báo lý do", () => {
     const viewFrom = vi.fn(() => false);
-    const viewApi: RefObject<RegionViewApi | null> = { current: { viewFrom, isGesturing: () => false } };
+    const viewApi: RefObject<RegionViewApi | null> = { current: { viewFrom, isGesturing: () => false, showPreview: vi.fn() } };
     render(<Panel viewApi={viewApi} />);
     fireEvent.click(screen.getByRole("button", { name: "Trước" }));
     expect(viewFrom).toHaveBeenCalledWith("front");
@@ -403,7 +404,7 @@ describe("panel chỉnh vùng", () => {
   it("Esc đóng panel khi không kéo; khi đang kéo thì Esc thuộc về overlay", () => {
     const onClose = vi.fn();
     const isGesturing = vi.fn(() => true);
-    const viewApi: RefObject<RegionViewApi | null> = { current: { viewFrom: () => true, isGesturing } };
+    const viewApi: RefObject<RegionViewApi | null> = { current: { viewFrom: () => true, isGesturing, showPreview: vi.fn() } };
     render(<Panel viewApi={viewApi} onClose={onClose} />);
     fireEvent.keyDown(window, { key: "Escape" });
     expect(onClose).not.toHaveBeenCalled();
@@ -495,6 +496,18 @@ describe("panel chỉnh vùng", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Lấy luôn từ Ghế" }));
     await waitFor(() => expect(vi.mocked(previewObjectRegion).mock.lastCall![2].claim_from).toEqual([]));
     expect(await screen.findByText("Box chồng lên Ghế (12 Gaussian) — giữ chủ cũ")).toBeInTheDocument();
+  });
+
+  it("panel đưa xem trước và trạng thái đang tính lên viewer; đóng panel thì viewer nhận lệnh trả vỏ gốc", async () => {
+    const showPreview = vi.fn();
+    const viewApi: RefObject<RegionViewApi | null> = { current: { viewFrom: () => true, isGesturing: () => false, showPreview } };
+    vi.mocked(previewObjectRegion).mockResolvedValue(preview);
+    const { unmount } = render(<Panel viewApi={viewApi} />);
+    expect(showPreview).toHaveBeenLastCalledWith("pallet", null, true);
+    expect(await screen.findByText("+3 / −0 · tổng 120")).toBeInTheDocument();
+    expect(showPreview).toHaveBeenLastCalledWith("pallet", preview, false);
+    unmount();
+    expect(showPreview).toHaveBeenLastCalledWith("pallet", null, false);
   });
 
   it("vỏ chưa dựng được thì nêu lý do trong cảnh báo", async () => {
@@ -599,6 +612,21 @@ describe("Apply và Huỷ", () => {
 
 // ---- MetricSceneView nối overlay vùng (bàn giao T-015) ----
 
+// Lớp vỏ giả: ghi lại lời gọi để test đọc; vỏ thật (GLB, vật liệu) được test riêng ở shell-glow.test.ts.
+vi.mock("@/features/viewer/shell-glow", async (original) => ({
+  ...(await original<typeof import("@/features/viewer/shell-glow")>()),
+  ShellGlowLayer: class {
+    setShell = vi.fn(async () => undefined);
+    setPointSets = vi.fn();
+    setTone = vi.fn();
+    clear = vi.fn();
+    destroy = vi.fn();
+    constructor() {
+      viewer.glowLayers.push(this);
+    }
+  },
+}));
+
 // Viewer giả: PlayCanvasScene chỉ đưa props ra ngoài; SceneOverlay và overlay vùng được ghi lại để đọc lời gọi.
 type FakeRegion = {
   objectId: string;
@@ -613,6 +641,7 @@ const viewer = vi.hoisted(() => ({
   entities: new Map<string, object>(),
   sceneOverlays: [] as Array<{ bindViewerGotoPose: Mock }>,
   regionOverlays: [] as FakeRegion[],
+  glowLayers: [] as Array<{ setShell: Mock; setPointSets: Mock; setTone: Mock; clear: Mock; destroy: Mock }>,
 }));
 vi.mock("@/features/viewer/scene-overlay", () => ({
   SceneOverlay: class {
@@ -681,9 +710,10 @@ type ViewerProps = {
   regionEdit: RegionEditProp | null;
   objects?: (typeof palletObject)[];
   regionApi?: RefObject<RegionViewApi | null>;
+  shells?: readonly ShellSpec[];
 };
 
-function viewerElement({ regionEdit, objects = [palletObject], regionApi }: ViewerProps) {
+function viewerElement({ regionEdit, objects = [palletObject], regionApi, shells }: ViewerProps) {
   return (
     <MetricSceneView
       jobId="j"
@@ -692,6 +722,7 @@ function viewerElement({ regionEdit, objects = [palletObject], regionApi }: View
       objects={objects}
       regionEdit={regionEdit}
       regionApi={regionApi}
+      shells={shells}
     />
   );
 }
@@ -719,6 +750,7 @@ describe("MetricSceneView nối overlay vùng", () => {
     viewer.entities.set("pallet", {});
     viewer.sceneOverlays.length = 0;
     viewer.regionOverlays.length = 0;
+    viewer.glowLayers.length = 0;
   });
 
   it("đưa lệnh chuyển camera của viewer vào overlay để góc nhìn dùng được", () => {
@@ -804,5 +836,53 @@ describe("MetricSceneView nối overlay vùng", () => {
     expect(overlay.viewFrom).toHaveBeenCalledWith("side");
     overlay.isGesturing.mockReturnValue(true);
     expect(api.current?.isGesturing()).toBe(true);
+  });
+
+  it("vỏ gốc của vật trong Draft được nạp; lần xem trước thay vỏ của vật đang chỉnh, đóng thì trả vỏ gốc", () => {
+    const api: RefObject<RegionViewApi | null> = { current: null };
+    const shells: ShellSpec[] = [{ id: "pallet", url: "https://example.test/pallet.glb", style: "selected" }];
+    mountViewer({ regionEdit: regionEdit([addBox]), regionApi: api, shells });
+    const layer = viewer.glowLayers[0];
+    expect(layer.setShell).toHaveBeenCalledWith("pallet", "https://example.test/pallet.glb", "selected");
+    layer.setShell.mockClear();
+
+    api.current!.showPreview("pallet", { ...preview, shell_glb_base64: btoa("glTF") }, false);
+    expect(layer.setPointSets).toHaveBeenLastCalledWith("pallet", expect.any(Float32Array), expect.any(Float32Array));
+    expect(layer.setShell).toHaveBeenLastCalledWith("pallet", expect.any(ArrayBuffer), "selected");
+
+    api.current!.showPreview("pallet", null, false);
+    expect(layer.setShell).toHaveBeenLastCalledWith("pallet", "https://example.test/pallet.glb", "selected");
+    expect(layer.setPointSets).toHaveBeenLastCalledWith("pallet", new Float32Array(0), new Float32Array(0));
+  });
+
+  it("xem trước lỗi vỏ: giữ vỏ cũ và đổi màu cam, điểm xanh vẫn được vẽ", () => {
+    const api: RefObject<RegionViewApi | null> = { current: null };
+    mountViewer({
+      regionEdit: regionEdit([addBox]),
+      regionApi: api,
+      shells: [{ id: "pallet", url: "https://example.test/pallet.glb", style: "selected" }],
+    });
+    const layer = viewer.glowLayers[0];
+    layer.setShell.mockClear();
+
+    api.current!.showPreview("pallet", { ...preview, shell_error: "lưới rỗng", added_sample_m: [[0, 0, 0]] }, false);
+    expect(layer.setTone).toHaveBeenLastCalledWith("pallet", "warning");
+    expect(layer.setShell).not.toHaveBeenCalled();
+    expect(layer.setPointSets).toHaveBeenLastCalledWith("pallet", new Float32Array([0, 0, 0]), new Float32Array(0));
+  });
+
+  it("đang tính xem trước thì làm mờ vỏ của vật và không đổi điểm", () => {
+    const api: RefObject<RegionViewApi | null> = { current: null };
+    mountViewer({
+      regionEdit: regionEdit([addBox]),
+      regionApi: api,
+      shells: [{ id: "pallet", url: "https://example.test/pallet.glb", style: "selected" }],
+    });
+    const layer = viewer.glowLayers[0];
+    layer.setPointSets.mockClear();
+
+    api.current!.showPreview("pallet", null, true);
+    expect(layer.setTone).toHaveBeenLastCalledWith("pallet", "pending");
+    expect(layer.setPointSets).not.toHaveBeenCalled();
   });
 });

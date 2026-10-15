@@ -170,6 +170,17 @@ export function RegionEditor({
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [session, onSession, onClose, viewApi]);
 
+  // Vỏ và điểm của lần xem trước đi lên viewer; đang tính thì viewer làm mờ vỏ cũ. Panel đóng thì viewer trả vỏ gốc.
+  useEffect(() => {
+    viewApi.current?.showPreview(object.id, preview, region.loading);
+  }, [viewApi, object.id, preview, region.loading]);
+  useEffect(() => {
+    // Handle của viewer ổn định suốt đời MetricSceneView; giữ lại lúc mở để gọi được cả khi panel đóng.
+    const api = viewApi.current;
+    const id = object.id;
+    return () => api?.showPreview(id, null, false);
+  }, [viewApi, object.id]);
+
   function look(preset: ViewPreset) {
     const moved = viewApi.current?.viewFrom(preset) ?? false;
     if (!moved) setViewsReady(false);

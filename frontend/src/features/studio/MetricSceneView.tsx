@@ -26,6 +26,7 @@ import {
   type ViewerControls,
 } from "@/features/viewer/PlayCanvasScene";
 import { RegionOverlay, type RegionOverlayHandlers } from "@/features/viewer/region-overlay";
+import { ShellGlowLayer, decodeShellGlb, type ShellSpec } from "@/features/viewer/shell-glow";
 import { SceneOverlay, type GizmoMode, type OverlayBox, type OverlayObject } from "@/features/viewer/scene-overlay";
 import { ThirdPersonRig } from "@/features/viewer/third-person";
 import { browserPhysicsBlocker, usePhysicsPlay, type PhysicsObjectInput } from "@/features/viewer/usePhysicsPlay";
@@ -39,12 +40,19 @@ import {
 import { jobArtifactContentUrl, jobLidarOverlayUrl, jobWalkCollisionUrl } from "@/lib/api/endpoints";
 import type { CollisionQuery } from "@playcanvas/supersplat-viewer/viewer";
 import { rotateVector, multiplyQuaternions } from "@/features/viewer/layers";
-import type { CollisionSurfacePlane } from "@/lib/api/studio";
+import type { CollisionSurfacePlane, RegionPreview } from "@/lib/api/studio";
 import { themeColor } from "@/lib/theme";
 import { cn } from "@/lib/cn";
 
 const EMPTY_OBJECTS: readonly OverlayObject[] = [];
 const NO_PHYSICS: readonly PhysicsObjectInput[] = [];
+const NO_SHELLS: readonly ShellSpec[] = [];
+const EMPTY_POINTS = new Float32Array(0);
+
+/** Các điểm `[x, y, z]` của lần xem trước thành mảng xyz liên tiếp, đúng dạng viewer nhận. */
+function toPointArray(points: readonly [number, number, number][]): Float32Array {
+  return Float32Array.from(points.flat());
+}
 const NO_SURFACES: readonly CollisionSurfacePlane[] = [];
 
 interface Ref {
@@ -90,6 +98,7 @@ export function MetricSceneView({
   lockedReason = null,
   regionEdit = null,
   regionApi,
+  shells = NO_SHELLS,
 }: {
   jobId: string;
   visual: Ref;
@@ -156,10 +165,13 @@ export function MetricSceneView({
   } | null;
   /** Cầu nối tới góc nhìn và trạng thái cử chỉ của overlay vùng, để panel chỉnh vùng dùng. */
   regionApi?: RefObject<RegionViewApi | null>;
+  /** Vỏ của từng vật trong Draft (T-017): GLB vỏ thô theo URL; `selected` cho vật đang chọn. Ready không truyền. */
+  shells?: readonly ShellSpec[];
 }) {
   const [capability, setCapability] = usePlayCanvasCapability();
   const fail = useCallback(() => setCapability("failed"), [setCapability]);
   const [overlay, setOverlay] = useState<SceneOverlay | null>(null);
+  const [glow, setGlow] = useState<ShellGlowLayer | null>(null);
   const [surfaceTool, setSurfaceTool] = useState<"floor" | "wall" | null>(null);
   // Draft: bỏ công cụ đánh dấu đang chọn ngay khi scene bị khoá (chỉnh state theo prop trong lúc render, không dùng effect).
   const [lockedBefore, setLockedBefore] = useState(lockedReason);
@@ -201,6 +213,10 @@ export function MetricSceneView({
 
   // Viewer gọi onApp(app) khi tạo và onApp(null) trước khi huỷ app → lớp phủ sống đúng bằng app.
   const overlayRef = useRef<SceneOverlay | null>(null);
+  // Vỏ phát sáng (T-017) gắn vào overlay hiện tại. Vật đang có lần xem trước giữ vỏ và điểm của lần đó (`previewOwners`).
+  const glowRef = useRef<ShellGlowLayer | null>(null);
+  const previewOwners = useRef(new Set<string>());
+  const baseShellRefs = useRef(new Map<string, { key: string; entity: Entity }>());
   const controls = useRef<ViewerControls | null>(null);
   const rigRef = useRef<ThirdPersonRig | null>(null);
   const [rig, setRig] = useState<ThirdPersonRig | null>(null);
@@ -210,13 +226,18 @@ export function MetricSceneView({
     rigRef.current?.destroy();
     rigRef.current = app ? new ThirdPersonRig(app as unknown as AppBase) : null;
     setRig(rigRef.current);
+    glowRef.current?.destroy();
     overlayRef.current?.destroy();
     overlayRef.current = app ? new SceneOverlay(app) : null;
     // Góc nhìn của overlay vùng đi qua lệnh chuyển camera của viewer.
     overlayRef.current?.bindViewerGotoPose(next ? (pose) => next.gotoPose(pose) : null);
+    glowRef.current = overlayRef.current ? new ShellGlowLayer(overlayRef.current) : null;
+    previewOwners.current.clear();
+    baseShellRefs.current.clear();
     controls.current = next ?? null;
     setViewerControls(next ?? null);
     setOverlay(overlayRef.current);
+    setGlow(glowRef.current);
   }, []);
 
   // Mỗi hộp là một điểm đến camera của viewer. PlayCanvasScene cập nhật danh sách này tại chỗ (không tạo lại
@@ -417,18 +438,92 @@ export function MetricSceneView({
     if (!region || regionBoxes === undefined || region.isGesturing()) return;
     region.setBoxes(regionBoxes, regionSelected);
   }, [regionBoxes, regionSelected]);
+  // Vỏ của vật (T-017): vật đang có lần xem trước giữ vỏ và điểm của lần đó; các vật khác theo `shells`.
+  const shellsRef = useRef(shells);
+  useEffect(() => {
+    shellsRef.current = shells;
+  }, [shells]);
+  useEffect(() => {
+    if (!glow || !overlay) return;
+    const wanted = new Set(shells.map((shell) => shell.id));
+    for (const id of [...baseShellRefs.current.keys()]) {
+      if (wanted.has(id) || previewOwners.current.has(id)) continue;
+      glow.clear(id);
+      baseShellRefs.current.delete(id);
+    }
+    for (const shell of shells) {
+      if (previewOwners.current.has(shell.id)) continue;
+      const entity = overlay.objectEntity(shell.id);
+      if (!entity) continue; // vật chưa có entity: lần đổi objects sau sẽ thử lại
+      const key = `${shell.url}|${shell.style}`;
+      const applied = baseShellRefs.current.get(shell.id);
+      if (applied?.key === key && applied.entity === entity) continue;
+      baseShellRefs.current.set(shell.id, { key, entity });
+      glow.setShell(shell.id, shell.url, shell.style).catch(() => undefined); // vỏ lỗi thì vật không có vỏ; viewer vẫn chạy
+    }
+  }, [glow, overlay, shells, objects]);
+
+  /** Trả vỏ gốc của vật (từ `shells`) sau khi lần xem trước đóng; vật không có vỏ gốc thì không còn vỏ. */
+  const restoreBaseShell = useCallback((objectId: string) => {
+    const layer = glowRef.current;
+    if (!layer) return;
+    baseShellRefs.current.delete(objectId);
+    const spec = shellsRef.current.find((shell) => shell.id === objectId);
+    if (!spec) {
+      layer.clear(objectId);
+      return;
+    }
+    const entity = overlayRef.current?.objectEntity(objectId);
+    if (!entity) return;
+    baseShellRefs.current.set(objectId, { key: `${spec.url}|${spec.style}`, entity });
+    layer.setShell(objectId, spec.url, spec.style).catch(() => undefined);
+  }, []);
+
+  /**
+   * Vỏ và điểm của lần xem trước (vật đang chỉnh vùng). Đang tính: làm mờ vỏ cũ. Có kết quả: điểm xanh và đỏ, vỏ mới thay
+   * vỏ cũ (vỏ lỗi thì giữ vỏ cũ và đổi màu cam). Không có kết quả và không tính: trả vỏ gốc và xoá điểm.
+   */
+  const showPreview = useCallback(
+    (objectId: string, preview: RegionPreview | null, pending: boolean) => {
+      const layer = glowRef.current;
+      if (!layer) return;
+      if (!preview && !pending) {
+        if (!previewOwners.current.delete(objectId)) return;
+        layer.setPointSets(objectId, EMPTY_POINTS, EMPTY_POINTS);
+        restoreBaseShell(objectId);
+        return;
+      }
+      previewOwners.current.add(objectId);
+      baseShellRefs.current.delete(objectId);
+      if (!preview) {
+        layer.setTone(objectId, "pending");
+        return;
+      }
+      layer.setPointSets(objectId, toPointArray(preview.added_sample_m), toPointArray(preview.removed_sample_m));
+      if (preview.shell_error) {
+        layer.setTone(objectId, "warning");
+      } else if (preview.shell_glb_base64) {
+        layer.setShell(objectId, decodeShellGlb(preview.shell_glb_base64), "selected").catch(() => undefined);
+      }
+    },
+    [restoreBaseShell],
+  );
+
   useImperativeHandle(
     regionApi,
     (): RegionViewApi => ({
       viewFrom: (preset) => regionRef.current?.viewFrom(preset) ?? false,
       isGesturing: () => regionRef.current?.isGesturing() ?? false,
+      showPreview,
     }),
-    [],
+    [showPreview],
   );
   useEffect(
     () => () => {
       regionRef.current?.destroy();
       regionRef.current = null;
+      glowRef.current?.destroy();
+      glowRef.current = null;
     },
     [],
   );

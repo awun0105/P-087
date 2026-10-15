@@ -5,6 +5,7 @@
 
 import type { EditableBox } from "@/features/studio/region/box-model";
 import type { ViewPreset } from "@/features/viewer/region-overlay";
+import type { RegionPreview } from "@/lib/api/studio";
 import type { SceneObject } from "@/lib/contracts/api";
 
 export interface RegionSession {
@@ -19,6 +20,11 @@ export interface RegionSession {
 export interface RegionViewApi {
   viewFrom(preset: ViewPreset): boolean;
   isGesturing(): boolean;
+  /**
+   * Vỏ và điểm của lần xem trước trong viewer. `pending`: đang tính (làm mờ vỏ cũ). `preview` null và không pending:
+   * trả vỏ gốc của vật và xoá điểm.
+   */
+  showPreview(objectId: string, preview: RegionPreview | null, pending: boolean): void;
 }
 
 /** Box cộng ban đầu: tâm 0, yaw 0, nửa kích thước bằng một nửa kích thước của vật. Vật không có kích thước thì không có phiên. */
