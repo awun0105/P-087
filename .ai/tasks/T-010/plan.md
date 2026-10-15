@@ -54,7 +54,9 @@ tối đa 2 mục, lưu `positions` + `rows` + `floor_protected` (không lưu la
    `shell_error=<lý do>` (preview vẫn 200 để người dùng thấy lý do). Test. Commit.
 3. `apply_region_draft`: yêu cầu `awaiting_review`. `apply_resolution` → labels mới → encode + publish
    `ObjectMembershipLabels` + `ObjectMembershipArtifact` mới (giữ `source_visual_ref`, `source_geometry_ref`,
-   `extraction_revision`). Vật bị ảnh hưởng = `object_id` + các vật trong `claimed`: publish lại `ObjectGaussians`,
+   `extraction_revision`). Vật bị ảnh hưởng = `object_id` + các vật trong `claimed`: publish lại `ObjectGaussians` (hàng nguồn đổi sang local bằng
+   `Rᵀ(p_world − t)` của `provenance.source_transform` của **chính vật đó**; KHÔNG căn tâm lại, KHÔNG gọi `split()` — xem
+   architecture §7.1 "Quy tắc khung"; thêm test: sau Apply, tâm world của Gaussian không dịch so với trước với các hàng giữ nguyên),
    vỏ thô (`ObjectShellMesh`), cập nhật `primitive_dimensions_xyz_m` từ bounds hàng mới, `provenance.shell_preview`,
    xoá `provenance.shell_error` nếu vỏ dựng được (hoặc ghi lỗi mới). Vật bị lấy hết còn < 50 hàng → 422 trước khi publish.
    Ghi evidence `ObjectRegionEdit` JSON (command, preview không gồm mẫu điểm, actor, membership cũ/mới). `publish_next`. Commit.

@@ -89,6 +89,10 @@ ngay sau tách vật (cho batch). Người dùng chọn ở màn tạo job (T-02
 - `provenance.geometry_method`: `"legacy" | "shell" | "objectgs"`.
 - Draft: mỗi vật có `visual_ref` (Gaussian của vật), `geometry_ref` = vỏ thô (`ObjectShellMesh`),
   `collider = null`, `provenance.source_transform` = Transform lúc tách (world ← object).
+  **Quy tắc khung:** PLY Gaussian của vật (`visual_ref`) và mọi mesh vỏ/collider ở object-local **theo `source_transform`**.
+  `source_transform` không bao giờ đổi sau khi tách, kể cả khi chỉnh vùng làm tâm nhóm Gaussian thay đổi: hàng mới được đổi
+  sang local bằng `Rᵀ(p_world − t)` của `source_transform`, không căn tâm lại. (`gaussian_split.split()` đã trả hàng local
+  theo tâm AABB lúc tách, trùng `source_transform` của Draft.)
   `environment.membership` có; `environment.object_aware_collision_ref = null`.
   Môi trường Draft = `visual_ref` 3DGS đầy đủ của bundle (chưa vá nền). Vì Move bị khoá trong Draft,
   Studio **không** vẽ thêm Gaussian của vật (tránh vẽ chồng hai lần), chỉ vẽ vỏ. Vá nền (inpaint) + nén SOG

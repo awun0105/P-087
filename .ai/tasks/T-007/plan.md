@@ -46,7 +46,7 @@ def build_object_geometry(
 3. Tập vật cần dựng: vật có nhãn trong membership, `review` không thuộc `DELETED/IGNORED/MERGED`, giao với `object_ids` nếu có.
    Vật có `provenance.shell_error` mà membership chưa đổi → lỗi `ObjectGeometryBuildError(object_id=…)`:
    "Vỏ của <tên> không dựng được: <lý do>. Sửa vùng vật rồi thử lại."
-4. `progress("shell")`. Với từng vật: lấy hàng có nhãn của vật; `source_transform` từ `provenance.source_transform`
+4. `progress("shell")`. Với từng vật: lấy hàng **từ PLY nguồn world** (không dùng `visual_ref` của vật, vốn đã local) có nhãn của vật; `source_transform` từ `provenance.source_transform`
    (thiếu → lỗi); `positions_local = R^T (p − t)`; `build_gaussian_shell(..., ShellParams())` (0.02 m, smoothing bật).
    `GaussianShellError` → `ObjectGeometryBuildError(object_id=…)`. Ghi GLB vào workspace.
 5. `progress("quality")`: lưu `quality` từ shell (đã QA trong T-002). Publish `ObjectShellMesh` + `ObjectShellManifest`
