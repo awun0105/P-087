@@ -1,0 +1,105 @@
+# T-009 report
+
+## Outcome
+
+Thêm mode `geometry` vào durable objectify queue. Worker gọi `build_object_geometry` với base revision, admission/lease commit guard, cancellation event và progress callback. Lỗi `ObjectGeometryBuildError` giữ thông điệp và retryable trong state; scene vẫn là Draft nếu chưa commit.
+
+Route `POST /api/v1/jobs/{job_id}/scene/geometry/build` trả 202 queued với operation_id/base_revision/phase null; ready → 422, stale/busy → 409. Route có contributor dependency, ownership guard đúng operation, cùng quota/audit GPU như route membership hiện có. Envelope lỗi giữ `{detail}`.
+
+Extraction của job `auto` tạo/publish Draft trước rồi enqueue geometry bằng actor hệ thống. `required` không enqueue. Retry extraction giữ operation geometry đang queued/running trên cùng revision.
+
+## Changed files
+
+- `src/services/orchestration/scene/objectify_queue.py`: mode, Draft gate, geometry worker dispatch, progress và retryable projection.
+- `src/api/product/scene.py`: body model và route geometry/build.
+- `src/services/orchestration/scene/extraction.py`: auto Draft + enqueue.
+- `tests/test_orchestration/test_scene_objectify_queue.py`: request/worker/admission/cancel/retry/lease tests.
+- `tests/test_api/test_scene_v2_routes.py`: 202/409/422/401 và response envelope.
+- `tests/test_api/test_role_matrix.py`: đăng ký route authenticated.
+- `tests/test_orchestration/test_scene_extraction.py`: auto/required cho shell và objectgs, giữ config và queue operation khi retry.
+- `.ai/tasks/T-009/report.md`, `.ai/status.md` chỉ dòng T-009.
+
+Frontend `ObjectifyMode` đã có `geometry` trong commit đồng thời của T-013 `815cb30b`. T-009 kiểm type/lint trên file đó và không chép lại hay commit phần UI/region của agent khác.
+
+## Verification
+
+Đúng nhóm Tests required, chạy ngoài sandbox sau khi xác định thread wakeup của AnyIO bị treo trong sandbox:
+
+```bash
+.venv/bin/python -m pytest tests/test_orchestration/test_scene_objectify_queue.py tests/test_api/test_scene_v2_routes.py tests/test_api/test_role_matrix.py tests/test_orchestration/test_scene_extraction.py -q
+```
+
+**88 passed in 8.15s**, không skip. Không chạy full suite.
+
+```bash
+.venv/bin/ruff check src/services/orchestration/scene/objectify_queue.py src/api/product/scene.py src/services/orchestration/scene/extraction.py tests/test_orchestration/test_scene_objectify_queue.py tests/test_api/test_scene_v2_routes.py tests/test_api/test_role_matrix.py tests/test_orchestration/test_scene_extraction.py
+.venv/bin/ruff format --check src/services/orchestration/scene/objectify_queue.py src/api/product/scene.py src/services/orchestration/scene/extraction.py tests/test_orchestration/test_scene_objectify_queue.py tests/test_api/test_scene_v2_routes.py tests/test_api/test_role_matrix.py tests/test_orchestration/test_scene_extraction.py
+```
+
+`All checks passed!`; `7 files already formatted`. `git diff --check`: sạch.
+
+`graphify update .`: exit 0; **25.133 nodes, 77.981 edges, 811 communities**. Đã cập nhật graph.json/graph.html/GRAPH_REPORT.md (gitignored). Không chạy LLM label.
+
+Trong `frontend/`:
+
+```bash
+npm run typecheck
+npx eslint src/lib/api/studio.ts
+```
+
+Type generation và `tsc --noEmit` exit 0; eslint exit 0. Kiểm typecheck lần cuối sau khi các commit frontend đồng thời đã xuất hiện cũng exit 0.
+
+### Red → green
+
+1. Geometry request: 2 failed vì `_Record` chưa nhận geometry; thêm mode/Draft gate/phase null → 2 passed.
+2. Geometry worker: 5 failed/2 passed vì mode mới đi vào nhánh boxes, chưa gọi service và chưa yêu cầu GPU. Nối dispatch, phase, typed error/retryable và admission → toàn bộ queue file 37 passed. Test lease loss gọi recovery sau khi chứng minh CAS bị fence, đúng lifecycle hiện có.
+3. Route: 5 failed do 404 trước khi có route. Sau nối route: 5 passed khi chạy ngoài sandbox; role matrix 6 passed. Toàn bộ nhóm cuối 88 passed.
+4. Auto: 2 failed/2 passed vì chưa chuyển auto sang Draft/enqueue. Nối extraction → file extraction 5 passed.
+5. Frontend type đã được T-013 bổ sung đồng thời; kiểm typecheck/eslint xanh, không có assertion hay logic UI do T-009 thêm.
+
+### Sandbox diagnosis
+
+Lượt API trong sandbox treo mà không hoàn tất test. Lượt chẩn đoán với `-o faulthandler_timeout=20` cho thấy worker AnyIO chờ queue, event loop chờ selector. Đã dừng hai lượt treo bằng Ctrl-C, không coi là PASS. Chạy cùng 5 test API ngoài sandbox → 5 passed trong 0,36 s; nhóm Tests required ngoài sandbox → 88 passed.
+
+## Acceptance evidence
+
+- Request Draft có mode geometry, operation_id và revision snapshot; không cần checkpoint SAM2.
+- Worker success gọi service qua admission/commit_guard, ghi các phase shell/quality/collider/environment/publish rồi done, result_revision là scene Ready mới. Callback lưu chuỗi bất kỳ nên phase objectgs của T-008 cũng được truyền nguyên trạng.
+- Queued/running cancel giữ scene Draft. Running cancel kiểm CAS bị từ chối ngay cả trước khi polling event, rồi xác nhận event được bật.
+- Build lỗi có tên Ghế 1 và retryable=False trong state; gửi yêu cầu mới sau sửa có operation_id mới và chạy done.
+- Lease hết hạn: CAS không thể commit; recovery đánh dấu failed. Resource wait giữ operation_id, requeue và không gọi build.
+- GPU required vẫn True dù box-candidate path CPU-only; dùng profile scene operation hiện có.
+- HTTP 202 queued/409 stale/409 busy/422 ready/401 anonymous; role matrix guard passed.
+- Auto shell/objectgs đều publish Draft rồi queue geometry, giữ refinement/sam_batch/CoACD/inpaint config; required không queue. Job config niêm phong không bị sửa.
+
+Các test worker/build wiring dùng service/provider thay thế và registry/DB thật trong fixture; không phải bằng chứng GPU/live deployment/browser hoặc ObjectGS E2E.
+
+## Decisions and deviations
+
+1. Auto: direct `objectify()` vẫn giữ hành vi cũ khi nhận auto. `extract_scene` truyền config thực thi với `geometry_review=required` để tạo Draft, giữ tất cả knob khác từ sealed job, rồi provenance ghi lại lựa chọn auto và xếp build sau publication. Không đổi `_publish_draft`, không đổi chữ ký objectify_with_retry và không bỏ mất config nhóm coacd/inpaint.
+2. Tái dùng `operation_profile_for_job(..., gpu_required=True)`, cùng profile scene operation dùng cho nhánh boxes có GPU. Đây là estimate finalize hiện có, có thể bảo thủ; không bịa một mức VRAM inpaint nhỏ. Nếu chưa có estimate, cơ chế resource admission vẫn fail closed/chờ như trước.
+3. Tạo `ObjectGeometryAlreadyReadyError` nội bộ kế thừa ObjectifyRequestError để route phân biệt 422 ready với 409 busy mà không so chuỗi thông điệp. Không thêm code vào HTTP body.
+4. Đặt body model GeometryBuildRequest trong route module, chỉ có expected_scene_revision; không mở rộng body objectify cũ để tránh gửi geometry vào endpoint tách vật cũ.
+5. Frontend type được commit bởi T-013 trong lúc T-009 chạy. Thử stage hunk riêng đã không áp dụng vì commit đó đã có sẵn; index không đổi. Không commit thêm vì không còn diff type thuộc T-009. Các commit T-013 không được tính là commit T-009.
+6. Actor tự enqueue là `system`. Các request thủ công ghi user_id hoặc local như route membership. Retry extraction chỉ tái dùng geometry operation đang queued/running có cùng base_revision; không thay yêu cầu của mode khác.
+
+## Commits T-009
+
+- `b7253a94` Mark T-009 in progress
+- `297f7ad1` Accept geometry requests only for the current draft revision
+- `42c973c4` Run geometry builds through durable worker leases and admission
+- `c32ed6ba` Expose authorized geometry build requests with draft and conflict responses
+- `3b109112` Queue automatic geometry builds after publishing reviewed extraction
+
+## Pre-flight (GUIDE.md Rule 13)
+
+- codegraph: đọc queue request/state/process_next, admission profile, extraction, route membership/objectify và frontend ObjectifyMode trước sửa; đã đọc review T-007 và plan T-009.
+- impact: callers request gồm API và test; process_next được worker_cli gọi. Geometry build service giữ nguyên chữ ký T-007. TypeScript consumers gồm ObjectifyNotice/useObjectify/requestObjectify; đã typecheck toàn frontend.
+- understand: request → snapshot → lease/admission → service progress/cancel/fenced commit → terminal state; extraction auto → Draft publication → queued geometry. Đã dùng graphify query. UNVERIFIED: understand-anything explain/domain không có tool trong session; dùng codegraph và tài liệu.
+- minimal-code: rung 2 — dùng chung durable queue, progress callback với membership, ResourceAdmission và build service đã accepted; không thêm queue riêng.
+- checks: pytest 88 passed, ruff check/format sạch, TypeScript typecheck và eslint sạch.
+- DevTools: n/a — T-009 không sửa rendered UI; API được kiểm qua ASGI, không claim browser acceptance.
+
+## Architect review
+
+Không có quyết định contract cần chốt thêm. T-008, T-010/T-011 và UI T-013 không được triển khai trong task này.
