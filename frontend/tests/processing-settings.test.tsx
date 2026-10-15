@@ -120,4 +120,10 @@ describe("lựa chọn duyệt tách vật", () => {
     expect(screen.queryByRole("radio", { name: AUTO_LABEL })).not.toBeInTheDocument();
     expect(screen.queryByRole("radio", { name: REQUIRED_LABEL })).not.toBeInTheDocument();
   });
+
+  it("không hiện khối khi preset không có khóa duyệt tách vật (preset cũ)", () => {
+    render(<ProcessingSettings parameters={parameters} values={values} editable onChange={vi.fn()} />);
+    expect(screen.queryByRole("group", { name: "Sau khi tách vật" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("radio", { name: AUTO_LABEL })).not.toBeInTheDocument();
+  });
 });
