@@ -270,3 +270,60 @@ def test_moved_shell_collider_is_placed_once_in_usd_and_environment_is_not_carve
     assert measured["environment_faces"] == len(state.after.faces) == len(state.before.faces)
     expected = _world_points(collider_bytes, obj.transform, local=obj.collider.local_transform)
     np.testing.assert_allclose(measured["bounds"], [expected.min(axis=0), expected.max(axis=0)], atol=1e-4)
+
+
+def test_legacy_scene_without_geometry_key_opens_edits_walks_and_packages_as_before(tmp_path: Path) -> None:
+    from src.api.product.artifacts import _require_walk_allowed
+    from src.models.contracts.validation import RuleResult
+    from src.services.orchestration.review.simulation_package import build_simulation_package
+    from src.services.scene.geometry_state import object_geometry_state
+    from tests.test_orchestration.test_simulation_package import _scene_job
+
+    registry, job = _scene_job(tmp_path)
+    scene = registry.scene.current(job.job_id).scene
+    # Legacy scenes carry no object_geometry key; a missing key means ready.
+    assert "object_geometry" not in scene.provenance
+    assert object_geometry_state(scene) == "ready"
+    _require_walk_allowed(registry, job.job_id)
+    (pallet,) = scene.objects
+    confirmed = apply_object_action(registry.scene, job.job_id, pallet.id, "confirm", scene.scene_revision)
+    confirmed = confirmed.revision.scene
+    _, before = effective_collision_for_revision(registry, job.job_id, confirmed.scene_revision)
+    x, y, z = pallet.transform.translation_xyz
+    pose = pallet.transform.model_copy(
+        update={"translation_xyz": (x + 1.0, y, z), "rotation_quaternion_xyzw": (0.0, 0.0, SQRT_HALF, SQRT_HALF)}
+    )
+    moved = registry.scene.publish_next(
+        job.job_id, confirmed.scene_revision, move_object(confirmed, pallet.id, pose), "move"
+    ).revision.scene
+    _, after = effective_collision_for_revision(registry, job.job_id, moved.scene_revision)
+    # Legacy carving follows source triangles, not the edited pose, so a move leaves the Walk environment as it was.
+    np.testing.assert_array_equal(after.vertices, before.vertices)
+    np.testing.assert_array_equal(after.faces, before.faces)
+    package = build_simulation_package(registry, job.job_id)
+    assert package.preflight.blocking_result == RuleResult.PASS
+    assert package.confirmed_objects == 1
+
+
+def test_objectgs_era_scene_without_geometry_key_keeps_walk_and_surface_refs(tmp_path: Path) -> None:
+    from src.services.scene.editing.commands import confirm_object
+    from src.services.scene.geometry_state import object_geometry_state, require_geometry_ready
+    from tests.test_scene.test_object_aware_composition import case
+
+    scene, compose, _ = case(tmp_path)
+    scene = confirm_object(confirm_object(scene, "A"), "B")
+    first = scene.objects[0]
+    surface = first.geometry_ref.model_copy(update={"artifact_type": "ObjectSurfaceMesh"})
+    scene = scene.model_copy(
+        update={"objects": [first.model_copy(update={"surface_mesh_ref": surface}), scene.objects[1]]}
+    )
+    assert "object_geometry" not in scene.provenance
+    assert object_geometry_state(scene) == "ready"
+    require_geometry_ready(scene, "Walk")
+    before = compose(scene)
+    moved = move_object(scene, "A", first.transform.model_copy(update={"translation_xyz": (10, 4, 2)}))
+    after = compose(moved)
+    np.testing.assert_array_equal(after.vertices, before.vertices)
+    np.testing.assert_array_equal(after.faces, before.faces)
+    _, geometry, _ = _collect_scene_refs(moved)
+    assert surface in geometry
