@@ -147,10 +147,11 @@ Gaussian (dưới mức đó → 422, gợi ý dùng Delete).
 ## 8. Quy tắc hình học (bắt buộc)
 
 1. Vỏ: lọc opacity (sigmoid(logit) ≥ 0.1), lọc điểm lẻ (k=8 láng giềng, loại > mean + 2·std),
-   voxel hoá (voxel thích ứng: `max(voxel_m, cạnh dài nhất / 96)`), giãn 1 voxel, `binary_closing`,
-   **nắp vành** trên 6 hướng trục (chỉ đóng mặt không quan sát khi biên tạo vòng kín; gầm bàn/khe chân không bị lấp; ghi
-   `capped_directions`, coi là hình học suy ra), `binary_fill_holes`, vá tiếp xúc chéo để mesh
+   voxel hoá (voxel thích ứng: `max(voxel_m, cạnh dài nhất / 96)`), giãn 1 voxel, `binary_closing`, `binary_fill_holes`, vá tiếp xúc chéo để mesh
    2-manifold, phát mặt voxel lộ ra bằng `occupancy_surface()`, rồi Taubin smoothing (giữ topology).
+   Mặt camera không thấy (đáy sát sàn, mặt sát tường) **không** được lấp tự động: vỏ khi đó rỗng phía mặt đó nhưng vẫn kín,
+   và tương đương khối đặc về va chạm vì không vật nào đi vào được. Luật lấp tự động đã thử ở T-002 và bị loại (lấp nhầm hoặc
+   rò). Ghi `solidity = V(vỏ)/V(bao lồi)` để truy vết, không chặn.
 2. Vỏ phải qua `assess_surface`. Không qua → lỗi rõ ràng, **không** thay bằng OBB.
 3. Vỏ nhiều thành phần rời: giữ tất cả thành phần ≥ 5% tổng voxel, ghi số thành phần vào report.
    CoACD chạy riêng từng thành phần (hành vi hiện có của convex runner).

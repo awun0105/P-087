@@ -77,3 +77,37 @@ truy vết.
 ## Ghi chú cho task sau
 - Lọc kNN 1,44 s trên 300k điểm ở đường preview: vượt mục tiêu preview 1,5 s (architecture §11). Đã thêm ghi chú vào T-010:
   preview phải đo và, nếu cần, lấy mẫu đều (stride, deterministic) trước khi lọc kNN.
+
+---
+
+# Review T-002 — Round 2
+
+Verdict: CHANGES REQUESTED (nhỏ; chốt hướng Q4)
+
+Chạy lại 4 file test của review: 57 passed, 2 xfailed. Đã đọc diff `ce627ea9` (budget mặc định giữ 250k → ObjectGS/CoACD
+không đổi). Required change 2, 3, 4: **pass**. Vật 2,0×0,9×0,8 m dựng 3,5–4,9 s, QA pass.
+
+## Quyết định Q4: chọn (a), bỏ luật nắp vành
+
+Luật nắp vành do Architect đặt ở Round 1 đã được thực nghiệm bác bỏ: tường vỏ có lỗ xuyên nên phần rỗng rò ra, các biến thể khác
+lấp quá tay (1,33–1,36×), và phép kiểm lỗ báo sai cả trên hình cầu kín. Không đặt thêm luật mới, vì:
+- **Mesh vỏ chỉ dùng cho va chạm.** Vỏ thiếu đáy vẫn **kín (watertight)** và qua QA. Đáy không thấy nằm sát sàn, mặt sau không thấy
+  nằm sát tường, nên không có vật nào đi vào phần rỗng đó. Về va chạm, vỏ rỗng hình cốc úp tương đương khối đặc.
+- Mọi luật lấp tự động đều phải đoán, và đoán sai thì lấp cả gầm bàn (tệ hơn nhiều cho Walk).
+
+Vì vậy:
+1. **Xoá** `_cap_open_faces`, `ShellParams.cap_open_faces`, `capped_cells`, `capped_directions` và phần docstring tương ứng.
+   Không giữ (c): tín hiệu hướng bị đóng không đáng tin (báo 5 hướng trên hình cầu kín) thì không nên đưa vào manifest.
+2. Thêm thống kê **chỉ để truy vết**, không chặn: `solidity = volume(vỏ) / volume(bao lồi của vỏ)`, ghi vào `statistics`.
+   Giá trị thấp gợi ý vỏ rỗng hoặc vật lõm; T-007 ghi nó vào `ObjectShellManifest.statistics`, Studio có thể hiển thị sau.
+3. Test:
+   - Hai test đóng mặt (`test_open_bottom_scan_is_closed_watertight`, `test_box_missing_back_face_is_capped`) đổi thành
+     `test_open_bottom_scan_gives_watertight_shell_that_passes_qa` và `test_missing_back_face_gives_watertight_shell_that_passes_qa`:
+     khẳng định watertight, QA pass, `0 < solidity < 1`. Bỏ xfail. Không khẳng định thể tích ≥ 80%.
+   - Xoá `test_cap_can_be_disabled`.
+   - Giữ `test_table_underside_stays_open`, `test_chair_leg_gaps_stay_open` (nay là kiểm tra hồi quy: không có bước nào lấp gầm).
+   - Thêm `test_solidity_is_close_to_one_for_filled_box` (hộp đặc → solidity > 0,9).
+   - Giữ bộ sinh dữ liệu bề mặt đều mới (sửa đúng).
+4. Lệnh kiểm tra như Round 1. Commit theo nhóm (xoá nắp; solidity + test). Thêm "Round 3" vào report, `status.md` → `implemented`.
+
+Architect đã cập nhật `architecture.md` §8.1 theo quyết định này.
