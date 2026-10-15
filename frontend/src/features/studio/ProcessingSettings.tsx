@@ -339,7 +339,7 @@ function ReviewChoice({
     return (
       <fieldset className="mt-5">
         <legend className="text-sm font-semibold text-ink">Sau khi tách vật</legend>
-        <p className="mt-2 text-xs text-ink-subtle">Không được ghi lại trong video mẫu.</p>
+        <p className="mt-2 text-xs text-ink-subtle">Job này tạo trước khi có lựa chọn này; dùng hành vi cũ (không dừng duyệt).</p>
       </fieldset>
     );
   }
