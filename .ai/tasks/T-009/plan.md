@@ -27,7 +27,8 @@ POST /api/v1/jobs/{job_id}/scene/geometry/build
 body: {"expected_scene_revision": "rev-003"}
 202 → ObjectifyState {status: "queued", mode: "geometry", operation_id, base_revision, phase: null}
 409 → revision lệch hoặc đang có việc objectify khác chạy
-422 → scene không ở trạng thái awaiting_review (code "OBJECT_GEOMETRY_ALREADY_READY")
+422 → scene không ở trạng thái awaiting_review (`detail`: "Scene đã có hình học; dùng chỉnh vùng để dựng lại vật.")
+Lỗi trả theo envelope hiện có `ApiErrorResponse {detail}`; không thêm trường `code` vào body (quyết định ở review T-003).
 ```
 Guard: `Depends(require_contributor)` + `authorize_job_mutation(user, registry, job_id, operation="tạo hình học vật của")`.
 Phase gửi qua `progress`: `shell`, `quality`, `collider`, `objectgs`, `environment`, `publish` (ghi vào `ObjectifyState.phase`).

@@ -33,7 +33,7 @@ POST /api/v1/jobs/{job_id}/scene/objects/{object_id}/region/preview   body: Obje
 }
 POST /api/v1/jobs/{job_id}/scene/objects/{object_id}/region/apply     body: ObjectRegionCommand
 201 (Draft) → SceneEditResponse (revision mới)
-202 (Ready) → ObjectifyState  (T-011 làm; task này trả 422 "OBJECT_GEOMETRY_READY_USE_REBUILD" cho Ready)
+202 (Ready) → ObjectifyState  (T-011 làm; task này trả 422 với `detail` "Scene đã có hình học; tính năng dựng lại vật sẽ có ở bước sau." cho Ready)
 409 → revision/membership checksum lệch
 422 → command không hợp lệ, vật < 50 Gaussian, vật không thuộc membership, vật DELETED/IGNORED/MERGED
 ```
@@ -68,7 +68,7 @@ tối đa 2 mục, lưu `positions` + `rows` + `floor_protected` (không lưu la
    vật khác không bị ảnh hưởng giữ nguyên ref.
 4. Claim từ vật B → B có Gaussian/vỏ mới; B còn < 50 → 422, không publish gì.
 5. Revision hoặc membership checksum cũ → 409, không publish.
-6. Apply trên scene Ready → 422 với code `OBJECT_GEOMETRY_READY_USE_REBUILD` (T-011 đổi thành 202).
+6. Apply trên scene Ready → 422 (envelope `{detail}`) (T-011 đổi thành 202).
 7. Vật đã Move (transform khác source_transform) → kết quả giống khi chưa Move (dùng source_transform).
 8. Route có trong role matrix.
 

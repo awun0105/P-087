@@ -6,7 +6,7 @@ hàng loạt). Lựa chọn hiển thị rõ, không nằm lẫn trong mục nâ
 
 ## Context
 `architecture.md` §5 (`scene.geometry_review`), §9. Param `scene.geometry_review` (choice `required` / `auto`) được thêm
-vào presets ở T-003. `frontend/src/features/studio/ProcessingSettings.tsx` hiện tự vẽ mọi param theo nhóm (`GROUPS`, nhóm
+vào presets ở T-013 (bước 7). `frontend/src/features/studio/ProcessingSettings.tsx` hiện tự vẽ mọi param theo nhóm (`GROUPS`, nhóm
 `scene` "Tách vật thể · CoACD") bên trong `<details>` nâng cao; `useProcessingForm.ts` giữ giá trị form.
 
 ## Files

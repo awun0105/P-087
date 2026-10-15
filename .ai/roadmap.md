@@ -8,7 +8,7 @@
 | --- | --- | --- | --- | --- |
 | T-001 | Tách `occupancy_surface()` | Hàm dựng mesh từ ô voxel dùng chung, không đổi hành vi | – | S |
 | T-002 | Dựng vỏ Gaussian kín | `build_gaussian_shell()` cho ra mesh qua QA | T-001 | M |
-| T-003 | Contract vỏ + trạng thái hình học + presets | `ObjectShellManifest`, `geometry_method=shell`, `geometry_review`, presets | – | M |
+| T-003 | Contract vỏ + trạng thái hình học | `ObjectShellManifest`, `geometry_method=shell`, `geometry_review` (presets chuyển sang T-013) | – | M |
 | T-004 | Box → membership | `ObjectRegionCommand` + `resolve_region()` + preview diff | T-003 | M |
 
 ## Sprint 2: Pipeline tách hai pha
@@ -28,12 +28,12 @@
 
 | ID | Tiêu đề | Mục tiêu | Cần | Cỡ |
 | --- | --- | --- | --- | --- |
-| T-013 | API client + banner Draft + tiến độ build | Nút "Tạo mesh", khoá Walk/USD/Move, phase build | T-009, T-012 | M |
+| T-013 | API client + banner Draft + tiến độ build + presets | Nút "Tạo mesh", khoá Walk/USD/Move, phase build; đổi preset sang shell + required | T-009, T-012 | M |
 | T-014 | Box model (TS thuần) | Kiểu dữ liệu, tự khớp OBB, kéo mặt, clamp sàn | – | M |
 | T-015 | Box overlay + tay nắm + góc nhìn | Vẽ box, tay nắm mặt/xoay/dịch, Trên/Trước/Cạnh | T-014 | L |
 | T-016 | Region Editor panel | Box cộng/trừ, preview debounce, bộ đếm, chồng lấn, Apply/Huỷ | T-010, T-015 | M |
 | T-017 | Vỏ phát sáng + điểm thêm/bớt | Vỏ emissive, điểm xanh/đỏ, Draft không vẽ Gaussian vật chồng | T-016 | M |
-| T-020 | Lựa chọn Duyệt trước / Tạo mesh ngay khi tạo job | Radio riêng cho `scene.geometry_review` | T-003, T-009 | S |
+| T-020 | Lựa chọn Duyệt trước / Tạo mesh ngay khi tạo job | Radio riêng cho `scene.geometry_review` | T-013 | S |
 
 ## Sprint 4: Bàn giao
 

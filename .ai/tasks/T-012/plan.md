@@ -26,14 +26,15 @@ scene chưa có collider vật. Các thao tác duyệt vẫn được phép.
 ## Steps
 1. Trong SceneEditor: trước khi áp lệnh làm đổi `transform` hoặc `collider`, gọi `require_geometry_ready(scene, "di chuyển/xoay vật")`.
    Lỗi trả về client như các `SceneEditRejectedError` khác (giữ HTTP code đang dùng cho lỗi này, thường 409/422). Test. Commit.
-2. Walk collision route: scene `awaiting_review` → 409, body `{"code": "OBJECT_GEOMETRY_NOT_READY", "message": "Cần tạo mesh trước khi Walk"}`
-   (theo định dạng lỗi API hiện có). Test. Commit.
+2. Walk collision route: scene `awaiting_review` → 409, envelope hiện có `{"detail": "Cần tạo mesh trước khi Walk."}`.
+   Dùng `require_geometry_ready(scene, "Walk")` (raise `ObjectGeometryNotReadyError`, lớp con của `SceneEditRejectedError`,
+   có thuộc tính `code = "OBJECT_GEOMETRY_NOT_READY"` — xem review T-003). Không thêm trường `code` vào body HTTP. Test. Commit.
 3. Simulation package POST: tương tự, message "Cần tạo mesh trước khi xuất USD". Test. Commit.
 
 ## Acceptance criteria
-1. Draft: lệnh Move/Rotate → bị từ chối với code `OBJECT_GEOMETRY_NOT_READY`; scene không đổi.
+1. Draft: lệnh Move/Rotate → `ObjectGeometryNotReadyError` (HTTP theo mapping hiện có của `SceneEditRejectedError`); scene không đổi.
 2. Draft: Confirm/Ignore/Hide/Delete/Restore → thành công như cũ.
-3. Draft: walk-collision và simulation-package → 409 code đúng.
+3. Draft: walk-collision và simulation-package → 409, `detail` chứa "Cần tạo mesh".
 4. Scene ready hoặc scene cũ (không có khóa) → mọi thao tác như trước (test cũ PASS).
 
 ## Tests required

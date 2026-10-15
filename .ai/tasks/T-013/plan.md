@@ -12,6 +12,8 @@ lý do, theo dõi tiến độ build (phase, huỷ, lỗi, thử lại), tải r
 - `frontend/src/features/studio/MetricSceneView.tsx`: nút Walk; nơi xuất USD (tìm `simulation-package` / `SimulationPackage` trong `frontend/src`).
 
 ## Files
+- Sửa: `configs/product/processing_presets_v1.json` (chuyển từ T-003, xem review T-003 câu 1)
+- Test: `tests/test_orchestration/test_processing_config.py`, `tests/test_orchestration/test_processing_presets_schema.py`
 - Sửa: `frontend/src/lib/api/studio.ts`
 - Tạo: `frontend/src/features/studio/GeometryReviewBanner.tsx`
 - Sửa: `frontend/src/features/studio/ObjectifyNotice.tsx`, `ObjectReviewView.tsx`, `MetricSceneView.tsx`
@@ -51,6 +53,16 @@ Phase → nhãn tiếng Việt: `shell` "Dựng vỏ vật", `quality` "Kiểm t
 4. `ObjectifyNotice` nhánh `geometry`/`region` + test (phase, huỷ với operation_id, lỗi + Thử lại). Commit.
 5. Khoá Walk/USD/gizmo trong Draft + test. Commit.
 6. Dòng nguồn collider trong panel vật khi ready + test. Commit.
+7. **Presets (chuyển từ T-003).** Chỉ làm sau khi bước 1–6 xong, vì lúc này job mới mới đi được trọn Draft → Tạo mesh:
+   - Param `scene.geometry_method`: thêm choice `{"value": "shell", "label": "Vỏ Gaussian (mặc định)"}`; mô tả:
+     "Vỏ Gaussian: nhanh, luôn kín. ObjectGS: chi tiết hơn, cần GPU; vật không đạt chất lượng giữ collider từ vỏ."
+   - Param mới `scene.geometry_review` (choice `required` "Dừng để duyệt tách vật" / `auto` "Tạo mesh ngay").
+   - Mọi preset: `"scene.geometry_method": "shell"`, thêm `"scene.geometry_review": "required"`; giữ `scene.refinement: "multiview_v1"`.
+   - Sửa bằng thay thế chuỗi để giữ định dạng; kiểm `python3 -m json.tool`.
+   - Đổi test `test_every_preset_seals_objectgs_geometry_and_multiview_refinement` thành
+     `test_every_preset_seals_shell_geometry_review_and_multiview` (khẳng định 3 giá trị); `SceneObjectifyConfig()` mặc định vẫn legacy.
+   - Chạy thêm: `.venv/bin/python -m pytest tests/test_orchestration/test_processing_config.py tests/test_orchestration/test_processing_presets_schema.py tests/test_scene/test_objectify_config_override.py tests/test_orchestration/test_scene_objectify_queue.py -q`.
+   Commit riêng.
 
 ## Acceptance criteria
 1. Scene Draft → banner hiện, nút Walk/USD/Move/Rotate disabled có tooltip đúng.
@@ -59,6 +71,7 @@ Phase → nhãn tiếng Việt: `shell` "Dựng vỏ vật", `quality` "Kiểm t
 4. Thất bại → thông báo lỗi + Thử lại; scene hiển thị không đổi.
 5. Xong → scene tải lại, banner biến mất, các nút mở khoá.
 6. Scene cũ (không có khóa) → không có banner, hành vi như trước (test cũ PASS).
+7. Mọi preset tạo job config có `geometry_method=shell`, `geometry_review=required`, `refinement=multiview_v1`.
 
 ## Tests required
 ```
