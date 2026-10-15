@@ -16,6 +16,8 @@ from src.services.scene.surface_mesh import assess_surface
 
 MIN_GAUSSIANS = 50
 _CROSS = ndimage.generate_binary_structure(3, 1)  # 6-connected neighbourhood for every morphology step
+# Shell meshes are denser than the 250k pair budget that suits ObjectGS and CoACD surfaces; shells get their own.
+SHELL_INTERSECTION_BUDGET = 2_000_000
 
 
 class GaussianShellError(ValueError):
@@ -33,6 +35,8 @@ class ShellParams:
     min_component_fraction: float = 0.05
     smooth_iterations: int = 10
     max_grid_cells: int = 32_000_000
+    # voxel_m grows for large objects so the longest extent spans at most this many cells.
+    max_cells_per_axis: int = 96
 
     def __post_init__(self) -> None:
         if not np.isfinite(self.voxel_m) or self.voxel_m <= 0:
@@ -47,6 +51,8 @@ class ShellParams:
             raise ValueError("min_component_fraction must be within (0, 1]")
         if self.max_grid_cells <= 0:
             raise ValueError("max_grid_cells must be positive")
+        if self.max_cells_per_axis < 1:
+            raise ValueError("max_cells_per_axis must be at least 1")
 
 
 def _filter_gaussians(points: np.ndarray, logit: np.ndarray | None, params: ShellParams) -> tuple[np.ndarray, int, int]:
@@ -179,8 +185,9 @@ def _validated_rows(positions: np.ndarray, opacity_logit: np.ndarray | None) -> 
     return points, logit
 
 
-def _checksum(params: ShellParams, cells: np.ndarray, origin: np.ndarray) -> str:
-    digest = hashlib.sha256(json.dumps(asdict(params), sort_keys=True).encode("utf-8"))
+def _checksum(params: ShellParams, voxel_m: float, cells: np.ndarray, origin: np.ndarray) -> str:
+    payload = {**asdict(params), "voxel_m_effective": voxel_m}
+    digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8"))
     digest.update((cells + origin).astype("<i8").tobytes())
     return "sha256:" + digest.hexdigest()
 
@@ -201,24 +208,26 @@ def build_gaussian_shell(
     points, logit = _validated_rows(positions, opacity_logit)
     rows = len(points)
     points, opacity_dropped, outliers_dropped = _filter_gaussians(points, logit, params)
+    extent = float(np.max(points.max(axis=0) - points.min(axis=0)))
+    voxel_m = max(params.voxel_m, extent / params.max_cells_per_axis)
     pad = params.dilate_voxels + params.close_iterations + 1
-    grid, origin, occupied = _voxelize(points, params.voxel_m, pad, params.max_grid_cells)
+    grid, origin, occupied = _voxelize(points, voxel_m, pad, params.max_grid_cells)
     grid = _close_shell(grid, params.dilate_voxels, params.close_iterations)
     filled = int(np.count_nonzero(grid)) - occupied
     grid, components_kept, components_dropped = _keep_large_components(grid, params.min_component_fraction)
     grid, diagonal_fixes = _repair_diagonals(grid)
     cells = np.argwhere(grid)
-    vertices, faces = occupancy_surface({tuple(cell) for cell in cells.tolist()}, params.voxel_m)
-    mesh = trimesh.Trimesh(vertices + origin * params.voxel_m, faces, process=False)
+    vertices, faces = occupancy_surface({tuple(cell) for cell in cells.tolist()}, voxel_m)
+    mesh = trimesh.Trimesh(vertices + origin * voxel_m, faces, process=False)
     if params.smooth_iterations:
         mesh = trimesh.smoothing.filter_taubin(mesh, iterations=params.smooth_iterations)
-    quality = assess_surface(mesh)
+    quality = assess_surface(mesh, intersection_budget=SHELL_INTERSECTION_BUDGET)
     if not quality["passed"]:
         raise GaussianShellError("gaussian shell failed surface QA: " + ", ".join(quality["reasons"]))
     return GaussianShell(
         vertices=np.asarray(mesh.vertices, dtype=np.float64),
         faces=np.asarray(mesh.faces, dtype=np.int64),
-        checksum=_checksum(params, cells, origin),
+        checksum=_checksum(params, voxel_m, cells, origin),
         statistics={
             "input_rows": rows,
             "opacity_dropped": opacity_dropped,
@@ -228,6 +237,7 @@ def build_gaussian_shell(
             "components_kept": components_kept,
             "components_dropped": components_dropped,
             "diagonal_fixes": diagonal_fixes,
+            "voxel_m_effective": voxel_m,
         },
         quality=quality,
     )

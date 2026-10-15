@@ -57,6 +57,8 @@ def test_shell_params_reject_invalid_values():
         ShellParams(voxel_m=0.0)
     with pytest.raises(ValueError, match="min_component_fraction"):
         ShellParams(min_component_fraction=0.0)
+    with pytest.raises(ValueError, match="max_cells_per_axis"):
+        ShellParams(max_cells_per_axis=0)
 
 
 def test_voxel_grid_fails_closed_over_budget():
@@ -271,3 +273,11 @@ def test_same_input_and_params_give_same_checksum():
     np.testing.assert_array_equal(first.vertices, second.vertices)
     np.testing.assert_array_equal(first.faces, second.faces)
     assert build_gaussian_shell(points, None, ShellParams(voxel_m=0.03)).checksum != first.checksum
+
+
+def test_large_object_uses_adaptive_voxel_and_passes_qa():
+    rng = np.random.default_rng(19)
+    shell = build_gaussian_shell(rng.uniform([0.0, 0.0, 0.0], [2.0, 0.9, 0.8], size=(200000, 3)), None)
+    assert shell.statistics["voxel_m_effective"] > 0.02
+    assert shell.quality["passed"]
+    assert mesh_of(shell).is_watertight
