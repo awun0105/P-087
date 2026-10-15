@@ -147,7 +147,9 @@ Gaussian (dưới mức đó → 422, gợi ý dùng Delete).
 ## 8. Quy tắc hình học (bắt buộc)
 
 1. Vỏ: lọc opacity (sigmoid(logit) ≥ 0.1), lọc điểm lẻ (k=8 láng giềng, loại > mean + 2·std),
-   voxel hoá, giãn 1 voxel, `binary_closing`, `binary_fill_holes`, vá tiếp xúc chéo để mesh
+   voxel hoá (voxel thích ứng: `max(voxel_m, cạnh dài nhất / 96)`), giãn 1 voxel, `binary_closing`,
+   **nắp vành** trên 6 hướng trục (chỉ đóng mặt không quan sát khi biên tạo vòng kín; gầm bàn/khe chân không bị lấp; ghi
+   `capped_directions`, coi là hình học suy ra), `binary_fill_holes`, vá tiếp xúc chéo để mesh
    2-manifold, phát mặt voxel lộ ra bằng `occupancy_surface()`, rồi Taubin smoothing (giữ topology).
 2. Vỏ phải qua `assess_surface`. Không qua → lỗi rõ ràng, **không** thay bằng OBB.
 3. Vỏ nhiều thành phần rời: giữ tất cả thành phần ≥ 5% tổng voxel, ghi số thành phần vào report.

@@ -59,7 +59,9 @@ tối đa 2 mục, lưu `positions` + `rows` + `floor_protected` (không lưu la
    xoá `provenance.shell_error` nếu vỏ dựng được (hoặc ghi lỗi mới). Vật bị lấy hết còn < 50 hàng → 422 trước khi publish.
    Ghi evidence `ObjectRegionEdit` JSON (command, preview không gồm mẫu điểm, actor, membership cũ/mới). `publish_next`. Commit.
 4. Routes + role matrix + test HTTP. Commit.
-5. Đo thời gian preview trên 300.000 Gaussian tổng hợp trong test (≤ 1,5 s; nếu CI chậm, ghi số đo vào report). Commit.
+5. Hiệu năng: lọc kNN của vỏ mất ~1,4 s trên 300k điểm (đo ở T-002). Nếu preview vượt 1,5 s, lấy mẫu đều (stride,
+   deterministic) tối đa 100k hàng trước khi dựng vỏ thô; ghi số hàng đã lấy mẫu vào payload (`shell_sample_rows`).
+   Đo thời gian preview trên 300.000 Gaussian tổng hợp trong test (≤ 1,5 s; nếu CI chậm, ghi số đo vào report). Commit.
 
 ## Acceptance criteria
 1. Preview không tạo artifact nào (đếm file trong artifact store trước/sau) và không đổi revision.
