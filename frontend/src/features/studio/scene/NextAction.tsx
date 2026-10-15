@@ -12,6 +12,9 @@ import { errorMessage } from "@/lib/ui-error";
 import type { SceneIR } from "@/lib/contracts/api";
 import type { JobProgress } from "@/lib/contracts/studio";
 import { isJobStale, useNow, type Tab, type StudioMode } from "@/features/studio/scene/state";
+import { useObjectify } from "@/features/studio/scene/objectifyContext";
+import { geometryReviewStep } from "@/features/studio/scene/useObjectify";
+import { geometryPhaseLabel, objectGeometryState } from "@/lib/scene/geometry-state";
 import { cn } from "@/lib/cn";
 
 interface Detail { scene: SceneIR; pkg: SimulationPackageView | null; review: ReviewStateView | null }
@@ -80,6 +83,9 @@ export function NextAction({
   }, [isOpen]);
   const now = useNow(progress?.status === "RUNNING");
   const stale = isJobStale(progress, now);
+  // Việc tạo mesh / dựng lại vùng và trạng thái Draft (T-021): cùng nguồn với hàng "Duyệt vật & Tạo mesh".
+  const objectify = useObjectify({ jobId });
+  const geometry = geometryReviewStep(objectify.state);
   const load = useCallback(async (signal: AbortSignal) => {
     const scene = await getJobScene(jobId, signal);
     if (signal.aborted) return;
@@ -105,7 +111,12 @@ export function NextAction({
   let pendingCount: number | null = null;
   // Đang đọc trạng thái chưa phải là thông báo cần người dùng chú ý: chuông không bật chấm cho nó.
   let reading = false;
-  if (retryState) {
+  if (geometry?.state === "running") {
+    const building = objectify.state?.mode === "geometry";
+    title = building ? "Đang tạo mesh" : "Đang dựng lại vùng";
+    description = (geometry.cancelling ? "Đang dừng…" : geometryPhaseLabel(geometry.phase)) ?? "Đang xếp hàng.";
+    action = { label: "Xem tiến trình", tab: "progress" };
+  } else if (retryState) {
     title = retryState === "submitting" ? "Đang gửi yêu cầu thử lại" : retryState === "rejected" ? "Đang kiểm tra phản hồi thử lại" : "Đang đồng bộ lần chạy mới";
     description = retryState === "uncertain"
       ? "Chưa xác nhận được máy chủ đã nhận yêu cầu. Trang đang đọc lại trạng thái job; nút thử lại tạm ẩn để tránh gửi trùng."
@@ -154,7 +165,19 @@ export function NextAction({
       const awaitingChoice = detail.scene.provenance.object_extraction === "objectify_failed_awaiting_choice";
       const pkg = detail.pkg?.scene_revision === detail.scene.scene_revision ? detail.pkg : null;
       const review = detail.review?.record.scene_revision === detail.scene.scene_revision ? detail.review : null;
-      if (awaitingChoice) {
+      // Draft: chưa có collider theo vật nên không đóng gói được. Nhánh này đứng trước các nhánh "sẵn sàng tạo gói".
+      const draft = objectGeometryState(detail.scene) === "awaiting_review";
+      if (draft && geometry?.state === "failed") {
+        title = "Tạo mesh chưa xong";
+        description = geometry.error ?? "Chỉnh vùng rồi thử lại Tạo mesh.";
+        action = { label: "Mở để sửa vùng", tab: "studio", mode: "scene" };
+      } else if (draft) {
+        title = "Duyệt vật rồi Tạo mesh";
+        description = pending > 0
+          ? `${pending} vật chờ xác nhận. Chỉnh vùng nếu cần, rồi bấm Tạo mesh trong Studio.`
+          : "Chỉnh vùng nếu cần, rồi bấm Tạo mesh trong Studio.";
+        action = { label: "Mở để duyệt", tab: "studio", mode: "scene" };
+      } else if (awaitingChoice) {
         // Pipeline v2: tách theo vật lỗi hết số lần thử; scene chỉ có môi trường cho tới khi người dùng chọn.
         title = "Tách theo vật chưa thành công";
         description = "Chạy lại tách theo vật hoặc dùng hộp ứng viên ngay tại bước “Tách vật thể”.";
