@@ -67,7 +67,7 @@ Overall: implementation is opt-in and NOT accepted end-to-end. Latest evidence s
 | 01 | PASS for actual isolated runner execution: pinned GPU train/checkpoint/export ran at 100 and 8,000 iterations. Full Studio worker job is unverified. |
 | 02 | PASS for CPU calibration/label/frame tests and actual 16-view dataset load. Pinned upstream requires >=11 training views; validated before launch. |
 | 03 | Real finite meshes exported and prepared service converted to object-local GLB; topology quality FAILED (open mesh). No physics-ready claim. |
-| 04 | Seven real CPU CoACD fixture tests PASS. Both actual GPU surfaces were rejected before CoACD due to open components; complete real producer-to-collider path NOT accepted. |
+| 04 | Seven real CPU CoACD fixture tests PASS. Actual GPU surfaces were rejected before CoACD due to open components; complete real producer-to-collider path NOT accepted. |
 | 05 | New producer separates source occupancy before meshing; independent fixture probes PASS. Real Room output UNVERIFIED. |
 | 06 | Fixture floor/wall/shared-contact preservation PASS. Actual Room and missing support recovery UNVERIFIED. |
 | 07 | Pose/source composition and ghost-removal fixtures PASS. Real Room Walk UNVERIFIED. |
@@ -315,3 +315,92 @@ Remaining implementation: controlled surface repair/quality acceptance with evid
 are preserved; ObjectGS-aware membership correction revision/regeneration; actual Room producer + authenticated
 browser Walk acceptance; Isaac Sim runtime validation. Existing OpenUSD fixture success is not Isaac evidence.
 Do not switch the user's Room to the new producer or call PR-05 complete on the present evidence.
+
+
+## Final verification and review handoff
+
+Code checkpoint: 138c2d62 (all PR-05 commits local). PR-04 origin branch verified at
+ ee6b69f05f5af40696b1d09a438601c93a6ae27d; origin has no PR-05 branch. No PR-05 push, PR creation or merge.
+Working tree has only unrelated untracked BRAINSTORM.md and MASTER_PITCH.md after committing this report.
+
+Actual commands/results:
+
+```text
+.venv/bin/pytest tests/test_process_control.py tests/test_contracts tests/test_scene tests/test_simulation
+  tests/test_orchestration/test_scene_objectify_queue.py
+  tests/test_orchestration/test_processing_presets_schema.py tests/test_api/test_scene_routes.py
+  tests/test_api/test_scene_v2_routes.py tests/test_orchestration/test_collision_source_invalidation.py
+  tests/test_orchestration/test_simulation_package.py -q
+  -> 727 PASS in 62.52s (the command was run on one line)
+.venv/bin/pytest tests/test_orchestration/test_scene_extraction.py -q -> 1 PASS in 0.54s
+frontend: npm test -- --maxWorkers=2 -> 630 PASS / 73 files
+frontend: npm run typecheck && npx eslint [three modified source files + metric collision test] -> exit 0
+.venv/bin/ruff check src/ tests/ [five scene entry CLIs] -> PASS
+.venv/bin/ruff format --check src/ tests/ [five scene entry CLIs] -> 640 files PASS
+.venv/bin/python scripts/check_contract_mirror.py -> 5 enums / 6 models PASS
+git diff --check -> PASS
+graphify update . -> 23,864 nodes / 73,965 edges updated (AST only)
+```
+
+Functional result is separate: real GPU train/checkpoint/export PASS; actual surface-to-collider quality
+FAIL (open geometry, no collider emitted). OpenUSD tests used the real local USD runtime; they do not prove
+Isaac Sim, cloud or browser acceptance. Authenticated browser earlier verified Legacy diagnostics and the
+rev-100 HTTP 409 closure guard. At final recheck that browser page no longer existed and there were no local
+listeners on 3010/8010 (or 3011/8011), so no final live-UI acceptance is claimed. This report does not assert
+why the earlier foreground stack stopped. Starting Studio requires the normal local stack command.
+
+Pre-flight gates: CodeGraph symbols/callers inspected for producer/lift, compositor, collider runner, contract
+refs, editor inventory, package builder, process control and correction guards. Graphify queried and updated.
+Reused existing process/artifact/membership/GLB/Ammo/USD paths; no new physics engine, segmentation algorithm,
+Brush/SAM2 runtime replacement or USD coordinate convention. Physical geometry never uses visual inpaint.
+Regression checks above passed; the real geometry quality failure is retained, not reclassified as a PASS.
+
+Diff summary: optional typed refs and receipts; isolated ObjectGS preparation/train/export with masks;
+strict surface CoACD mode; source occupancy separation and authored background mode; shared composition and
+candidate/USD inventory; collision diagnostics and explicit correction blocking; process cancellation/cache
+control; fixture/regression tests and executable handoff. Current changed-file inventory follows.
+
+- `configs/product/processing_presets_v1.json`
+- `docs/plans/active/2026-10-15-pr05-object-aware-geometry/HANDOFF.md`
+- `docs/plans/active/2026-10-15-pr05-object-aware-geometry/RUNTIME.md`
+- `docs/plans/active/2026-10-15-pr05-object-aware-geometry/TASK.md`
+- `docs/plans/active/2026-10-15-pr05-object-aware-geometry/runtime-packages.json`
+- `frontend/src/features/studio/MetricSceneView.tsx`
+- `frontend/src/features/studio/ObjectReviewView.tsx`
+- `frontend/src/lib/contracts/api.ts`
+- `frontend/tests/metric-effective-collision.test.tsx`
+- `scripts/scene/objectgs_entry.py`
+- `scripts/scene/objectgs_export_entry.py`
+- `scripts/scene/reobjectify.py`
+- `scripts/scene/run_objectgs.py`
+- `scripts/scene/smoke_objectgs.py`
+- `src/config.py`
+- `src/models/contracts/identity.py`
+- `src/models/contracts/object_geometry.py`
+- `src/models/contracts/scene.py`
+- `src/models/contracts/validation.py`
+- `src/services/orchestration/scene/editor.py`
+- `src/services/orchestration/scene/extraction.py`
+- `src/services/orchestration/scene/object_correction.py`
+- `src/services/orchestration/scene/objectify.py`
+- `src/services/process_control.py`
+- `src/services/scene/association/lift_runner.py`
+- `src/services/scene/effective_collision.py`
+- `src/services/scene/object_aware_geometry.py`
+- `src/services/scene/objectgs.py`
+- `src/services/simulation/colliders/convex_runner.py`
+- `src/services/simulation/isaac/process.py`
+- `src/services/simulation/usd/builder.py`
+- `tests/test_contracts/test_identity.py`
+- `tests/test_contracts/test_object_geometry.py`
+- `tests/test_process_control.py`
+- `tests/test_scene/test_effective_collision.py`
+- `tests/test_scene/test_object_aware_composition.py`
+- `tests/test_scene/test_object_aware_geometry.py`
+- `tests/test_scene/test_objectgs.py`
+- `tests/test_scene/test_objectgs_export_entry.py`
+- `tests/test_scene/test_objectgs_objectify_flow.py`
+- `tests/test_scene/test_objectgs_required_stage.py`
+- `tests/test_scene/test_objectify_config_override.py`
+- `tests/test_simulation/test_object_aware_usd.py`
+- `tests/test_simulation/test_surface_convex_runner.py`
