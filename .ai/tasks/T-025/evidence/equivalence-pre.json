@@ -1,0 +1,23 @@
+{
+  "1": "06b7880bacb9ab08009487b5ee5c32cd95c92487d5c2aefb5e881975f58ac462",
+  "16": "06b7880bacb9ab08009487b5ee5c32cd95c92487d5c2aefb5e881975f58ac462",
+  "16_counts": {
+    "added_count": 0,
+    "object_gaussian_count": 12000,
+    "protected_floor_count": 0,
+    "removed_count": 0
+  },
+  "1_counts": {
+    "added_count": 0,
+    "object_gaussian_count": 12000,
+    "protected_floor_count": 0,
+    "removed_count": 0
+  },
+  "small": "73e7656755eefa17b011cce259a8d443734c8d7f655b141c00f327f0ac40eba7",
+  "small_counts": {
+    "added_count": 0,
+    "object_gaussian_count": 1805,
+    "protected_floor_count": 0,
+    "removed_count": 10195
+  }
+}

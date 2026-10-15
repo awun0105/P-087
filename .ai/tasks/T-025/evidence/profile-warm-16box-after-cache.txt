@@ -1,0 +1,28 @@
+--- cProfile warm boxes=16 ---
+         15967 function calls (15896 primitive calls) in 1.188 seconds
+
+   Ordered by: cumulative time
+   List reduced from 589 to 18 due to restriction <18>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1    0.012    0.012    1.188    1.188 /home/lqaq/PROJECT/AI20K/P-087/src/services/orchestration/scene/object_region.py:129(preview_region)
+        1    0.000    0.000    0.812    0.812 /home/lqaq/PROJECT/AI20K/P-087/src/services/orchestration/scene/object_region.py:59(_resolve)
+        1    0.008    0.008    0.703    0.703 /home/lqaq/PROJECT/AI20K/P-087/src/services/scene/editing/region_box.py:90(resolve_region)
+        1    0.009    0.009    0.687    0.687 /home/lqaq/PROJECT/AI20K/P-087/src/services/scene/editing/region_box.py:59(boxes_contain)
+       16    0.657    0.041    0.678    0.042 /home/lqaq/PROJECT/AI20K/P-087/src/services/scene/editing/region_box.py:27(_box_contains)
+        1    0.000    0.000    0.361    0.361 /home/lqaq/PROJECT/AI20K/P-087/src/services/orchestration/scene/object_region.py:101(_shell)
+        1    0.001    0.001    0.360    0.360 /home/lqaq/PROJECT/AI20K/P-087/src/services/scene/gaussian_shell.py:214(build_gaussian_shell)
+        1    0.287    0.287    0.296    0.296 /home/lqaq/PROJECT/AI20K/P-087/src/services/scene/gaussian_shell.py:68(_filter_gaussians)
+        1    0.000    0.000    0.064    0.064 /home/lqaq/PROJECT/AI20K/P-087/src/services/orchestration/scene/membership_regeneration.py:131(load_membership_source)
+        1    0.000    0.000    0.045    0.045 /home/lqaq/PROJECT/AI20K/P-087/src/services/scene/editing/membership.py:70(decode_gaussian_membership_labels)
+        1    0.045    0.045    0.045    0.045 /home/lqaq/PROJECT/AI20K/P-087/src/services/orchestration/scene/object_region.py:54(_local)
+        1    0.000    0.000    0.040    0.040 /home/lqaq/PROJECT/AI20K/P-087/src/services/scene/surface_mesh.py:122(assess_surface)
+        1    0.011    0.011    0.032    0.032 /home/lqaq/PROJECT/AI20K/P-087/src/services/scene/surface_mesh.py:67(_intersections)
+        7    0.000    0.000    0.032    0.005 /home/lqaq/PROJECT/AI20K/P-087/.venv/lib/python3.12/site-packages/numpy/lib/_arraysetops_impl.py:145(unique)
+        7    0.000    0.000    0.032    0.005 /home/lqaq/PROJECT/AI20K/P-087/.venv/lib/python3.12/site-packages/numpy/lib/_arraysetops_impl.py:350(_unique1d)
+        3    0.028    0.009    0.028    0.009 {built-in method numpy._core._multiarray_umath._unique_hash}
+      252    0.025    0.000    0.025    0.000 {method 'reduce' of 'numpy.ufunc' objects}
+       19    0.000    0.000    0.023    0.001 /home/lqaq/PROJECT/AI20K/P-087/.venv/lib/python3.12/site-packages/numpy/_core/numeric.py:675(flatnonzero)
+
+
+
