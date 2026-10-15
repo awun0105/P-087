@@ -2,7 +2,7 @@
 
 from typing import Annotated, Literal, Self
 
-from pydantic import Field, model_validator
+from pydantic import Field, FiniteFloat, model_validator
 
 from src.models.contracts.artifacts import Checksum, ContractModel, Identifier, JsonObject, ProductArtifactRef
 from src.models.contracts.coordinates import Transform
@@ -47,6 +47,36 @@ class ObjectSurfaceManifest(ContractModel):
         )
         if len({ref.job_id for ref in refs}) != 1 or refs[0].job_id is None:
             raise ValueError("surface receipt refs must belong to the same job")
+        return self
+
+
+class ObjectShellManifest(ContractModel):
+    artifact_type: Literal["ObjectShellManifest"] = "ObjectShellManifest"
+    schema_version: Literal["1.0"] = "1.0"
+    object_id: Identifier
+    shell_mesh_ref: ProductArtifactRef
+    source_membership: ObjectMembershipArtifact
+    source_world_from_object: Transform
+    coordinate_frame: Literal["object_local"] = "object_local"
+    distance_unit: Literal["m"] = "m"
+    voxel_m: FiniteFloat = Field(gt=0)
+    params: JsonObject
+    statistics: JsonObject
+    quality: JsonObject
+    vertex_count: int = Field(ge=4, strict=True)
+    triangle_count: int = Field(ge=4, strict=True)
+    provenance: JsonObject = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_binding(self) -> Self:
+        if self.shell_mesh_ref.artifact_type != "ObjectShellMesh":
+            raise ValueError("shell manifest requires ObjectShellMesh")
+        if self.object_id not in self.source_membership.label_to_object_id.values():
+            raise ValueError("shell object is absent from source membership")
+        if self.quality.get("passed") is not True:
+            raise ValueError("shell manifest requires quality.passed to be True")
+        if self.shell_mesh_ref.job_id is None or self.shell_mesh_ref.job_id != self.source_membership.labels_ref.job_id:
+            raise ValueError("shell mesh and membership labels must belong to the same job")
         return self
 
 

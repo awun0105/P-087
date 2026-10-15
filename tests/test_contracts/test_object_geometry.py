@@ -5,7 +5,11 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from src.models.contracts.object_geometry import ObjectAwareEnvironmentManifest, ObjectSurfaceManifest
+from src.models.contracts.object_geometry import (
+    ObjectAwareEnvironmentManifest,
+    ObjectShellManifest,
+    ObjectSurfaceManifest,
+)
 from src.models.contracts.object_membership import ObjectMembershipArtifact
 from src.models.contracts.scene import SceneIR
 
@@ -107,3 +111,40 @@ def test_object_aware_manifest_preserves_original_source_identity() -> None:
         type(value.environment).model_validate(data | {"membership": None})
     with pytest.raises(ValidationError):
         ObjectAwareEnvironmentManifest.model_validate(manifest.model_dump() | {"removed_object_ids": ["missing"]})
+
+
+def shell_data(value: SceneIR) -> dict:
+    members = membership(value)
+    ref = members.source_geometry_ref
+    return dict(
+        object_id=value.objects[0].id,
+        shell_mesh_ref=ref.model_copy(update={"artifact_type": "ObjectShellMesh"}),
+        source_membership=members,
+        source_world_from_object=value.objects[0].transform,
+        voxel_m=0.02,
+        params={"opacity_min": 0.1, "outlier_k": 8, "outlier_std": 2.0, "close_iterations": 1},
+        statistics={"gaussian_count": 10},
+        quality={"passed": True},
+        vertex_count=8,
+        triangle_count=12,
+    )
+
+
+def test_shell_manifest_is_object_local_and_requires_passing_quality() -> None:
+    value = scene()
+    data = shell_data(value)
+    assert ObjectShellManifest(**data).coordinate_frame == "object_local"
+    wrong_job = data["shell_mesh_ref"].model_copy(update={"job_id": "other"})
+    for change in [
+        {"artifact_type": "ObjectSurfaceManifest"},
+        {"object_id": "unknown"},
+        {"quality": {"passed": False}},
+        {"quality": {}},
+        {"shell_mesh_ref": data["shell_mesh_ref"].model_copy(update={"artifact_type": "ObjectSurfaceMesh"})},
+        {"shell_mesh_ref": wrong_job},
+        {"voxel_m": 0},
+        {"vertex_count": 3},
+        {"triangle_count": 3},
+    ]:
+        with pytest.raises(ValidationError):
+            ObjectShellManifest(**(data | change))
