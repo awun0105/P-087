@@ -88,3 +88,12 @@ Round 3 sửa được một. Nhánh `[True]` (runtime có) giờ chạy tới `
      tests/test_scene/test_objectgs_objectify_flow.py tests/test_scene/test_objectify_config_override.py -q
    ```
    Kết quả phải 0 failed. Thêm "Round 4" vào report, đặt `implemented`.
+
+---
+
+# Review T-009 — Round 4
+
+Verdict: ACCEPTED
+
+Diff `e7d692bc` chỉ sửa fixture `test_objectgs_required_stage.py` (thêm `job_id`/`config_checksum`), assertion giữ nguyên.
+Chạy đủ 6 file test gọi `extract_scene`: 97 passed, 0 failed. T-013 được làm bước 7.
