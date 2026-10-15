@@ -104,4 +104,20 @@ describe("lựa chọn duyệt tách vật", () => {
     expect(within(details).queryByLabelText("Duyệt tách vật trước khi tạo mesh")).not.toBeInTheDocument();
     expect(screen.getByText("Thông số chi tiết (7 tham số)")).toBeInTheDocument();
   });
+
+  it("khi chỉ đọc hiện đúng giá trị đã niêm phong và khoá cả hai lựa chọn", () => {
+    render(<ProcessingSettings parameters={reviewParameters} values={{ ...reviewValues, "scene.geometry_review": "auto" }} editable={false} />);
+    expect(screen.getByRole("radio", { name: AUTO_LABEL })).toBeChecked();
+    expect(screen.getByRole("radio", { name: AUTO_LABEL })).toBeDisabled();
+    expect(screen.getByRole("radio", { name: REQUIRED_LABEL })).not.toBeChecked();
+    expect(screen.getByRole("radio", { name: REQUIRED_LABEL })).toBeDisabled();
+  });
+
+  it("không bịa lựa chọn khi giá trị đã ghi không có khóa duyệt tách vật", () => {
+    const recorded = Object.fromEntries(Object.entries(reviewValues).filter(([key]) => key !== "scene.geometry_review"));
+    render(<ProcessingSettings parameters={reviewParameters} values={recorded} editable={false} />);
+    expect(screen.getByText("Không được ghi lại trong video mẫu.")).toBeInTheDocument();
+    expect(screen.queryByRole("radio", { name: AUTO_LABEL })).not.toBeInTheDocument();
+    expect(screen.queryByRole("radio", { name: REQUIRED_LABEL })).not.toBeInTheDocument();
+  });
 });

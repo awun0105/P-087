@@ -335,6 +335,14 @@ function ReviewChoice({
   onChange: (value: ParamValue) => void;
 }) {
   const name = useId();
+  if (!editable && value === undefined) {
+    return (
+      <fieldset className="mt-5">
+        <legend className="text-sm font-semibold text-ink">Sau khi tách vật</legend>
+        <p className="mt-2 text-xs text-ink-subtle">Không được ghi lại trong video mẫu.</p>
+      </fieldset>
+    );
+  }
   const offered = REVIEW_CHOICES.filter((choice) => spec.choices?.some((item) => item.value === choice.value));
   return (
     <fieldset disabled={!editable} className="mt-5">
