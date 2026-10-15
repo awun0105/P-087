@@ -4,6 +4,7 @@ import {
   MAX_BOXES,
   MAX_HALF_M,
   MIN_HALF_M,
+  boxesKey,
   clampToFloor,
   contains,
   dragFace,
@@ -286,5 +287,38 @@ describe("clampToFloor", () => {
     const out = clampToFloor(box({ center: [0, 0, -0.499], half: [0.5, 0.5, 0.5] }), 0);
     expect(out.half[2]).toBe(MIN_HALF_M);
     expect(out.center[2] - out.half[2]).toBeCloseTo(0, 9);
+  });
+});
+
+describe("boxesKey", () => {
+  const original = box({ center: [1, 2, 3], half: [0.5, 0.6, 0.7], yaw: 0.3 });
+
+  it("is equal for equal boxes", () => {
+    expect(boxesKey([original])).toBe(boxesKey([{ ...original }]));
+  });
+
+  it("does not depend on the order of object properties", () => {
+    const reordered: EditableBox[] = [{ yaw: 0.3, half: [0.5, 0.6, 0.7], center: [1, 2, 3], op: "add", id: "b1" }];
+    expect(boxesKey(reordered)).toBe(boxesKey([original]));
+  });
+
+  it("ignores id, which the preview does not depend on", () => {
+    expect(boxesKey([{ ...original, id: "other" }])).toBe(boxesKey([original]));
+  });
+
+  it("changes when any value or op changes by at least 1e-6", () => {
+    const moved: EditableBox[] = [
+      { ...original, center: [1 + 1e-6, 2, 3] },
+      { ...original, center: [1, 2 - 1e-6, 3] },
+      { ...original, center: [1, 2, 3 + 1e-6] },
+      { ...original, half: [0.5 + 1e-6, 0.6, 0.7] },
+      { ...original, half: [0.5, 0.6 + 1e-6, 0.7] },
+      { ...original, half: [0.5, 0.6, 0.7 + 1e-6] },
+      { ...original, yaw: 0.3 + 1e-6 },
+      { ...original, op: "subtract" },
+    ];
+    for (const b of moved) {
+      expect(boxesKey([b])).not.toBe(boxesKey([original]));
+    }
   });
 });

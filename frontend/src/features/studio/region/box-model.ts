@@ -229,3 +229,16 @@ export function validateBoxes(boxes: EditableBox[]): string | null {
   }
   return null;
 }
+
+/** Lượng tử hoá 1e-7 m (rad): nhiễu số thực không đổi khoá, còn thay đổi ≥ 1e-6 luôn đổi khoá. */
+const KEY_SCALE = 1e7;
+
+/**
+ * Chuỗi ổn định mô tả hình học của tập box, để so preview với box hiện tại. Không gồm id (chỉ có ở UI) và được
+ * dựng từ từng trường theo thứ tự cố định, nên thứ tự thuộc tính của object không làm đổi khoá.
+ */
+export function boxesKey(boxes: EditableBox[]): string {
+  return boxes
+    .map((box) => `${box.op}:${[...box.center, ...box.half, box.yaw].map((v) => Math.round(v * KEY_SCALE)).join(",")}`)
+    .join(";");
+}
