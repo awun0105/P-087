@@ -83,3 +83,43 @@ Nếu đổi preset ngay, job mới mang cấu hình `shell` nhưng ra hình h�
 - **C:** đổi body lỗi sang `{detail, code}`. Đổi contract HTTP và cách frontend đọc `ApiError`. Vượt phạm vi T-003.
 
 Khi có lựa chọn, tôi làm `require_geometry_ready` và test, khoảng 15 dòng.
+
+## Round 2
+
+Đọc `review.md` (CHANGES REQUESTED, một việc nhỏ). Hai câu hỏi đã được trả lời:
+
+- **Câu 1 (preset):** chọn A. Bước 5 không còn thuộc T-003; chuyển sang T-013. Preset giữ `objectgs`. Round này không đổi preset.
+- **Câu 2 (mã lỗi):** chọn A. Lớp con `ObjectGeometryNotReadyError(SceneEditRejectedError)` với `code = "OBJECT_GEOMETRY_NOT_READY"`. Envelope HTTP không đổi.
+
+**Required change 1** (commit `9d4bd2a5`, một commit):
+
+- `src/services/orchestration/scene/errors.py`: thêm `ObjectGeometryNotReadyError`, đặt cạnh `SceneEditRejectedError`.
+- `src/services/scene/geometry_state.py`: thêm `require_geometry_ready(scene, action) -> None`. Khi state là `awaiting_review`, raise `ObjectGeometryNotReadyError(f"Cần tạo mesh trước khi {action}.")`. Scene `ready` hoặc thiếu khóa không raise.
+- `tests/test_scene/test_geometry_state.py`: test raise đúng lớp và `code`, là `SceneEditRejectedError`, thông điệp đúng chuỗi trên. Test scene `ready` và scene thiếu khóa không raise.
+
+**Required change 2:** báo cáo này và `status.md` → `implemented`, owner `summarizer`.
+
+### Kiểm tra (Round 2)
+
+- `.venv/bin/python -m pytest tests/test_scene/test_geometry_state.py -q`: **8 passed**. Trước khi sửa đã chạy đỏ: lỗi collect vì chưa có lớp lỗi.
+- Bộ Tests required của plan (`tests/test_contracts tests/test_scene/test_geometry_state.py tests/test_scene/test_objectify_config_override.py tests/test_orchestration/test_processing_config.py tests/test_orchestration/test_processing_presets_schema.py tests/test_orchestration/test_scene_objectify_queue.py`): **346 passed**. Chạy thêm vì `errors.py` được dùng chung bởi editor và các object action. Không có test nào liệt kê subclass của `SceneError`.
+- `ruff check` và `ruff format --check` trên 3 file đã sửa: **passed**.
+- `graphify update .` đã chạy.
+
+### Files changed (Round 2)
+
+- `src/services/orchestration/scene/errors.py`: thêm `ObjectGeometryNotReadyError`.
+- `src/services/scene/geometry_state.py`: thêm `require_geometry_ready`.
+- `tests/test_scene/test_geometry_state.py`: thêm 3 test cho `require_geometry_ready`.
+- `.ai/tasks/T-003/report.md`, `.ai/status.md` (chỉ dòng T-003).
+
+### Trạng thái các mục cũ
+
+- Deviation 1 (`require_geometry_ready`): đã xong.
+- Deviation 2 (bước 5, preset): theo quyết định câu 1, chuyển sang T-013. Không còn là việc của T-003.
+- Deviation 3 (`test_objectgs_required_stage.py`): architect đã chạy và pass trong `review.md`, cùng `test_objectgs_objectify_flow.py` (357 passed).
+
+### Ghi chú (không chặn)
+
+- `src/services/orchestration/scene/__init__.py` re-export `SceneEditRejectedError` và các lỗi khác, nhưng chưa re-export `ObjectGeometryNotReadyError`. Thêm khi API dùng lớp này (T-010).
+- Theo `review.md`, đổi tên `objectgs_required` và thông điệp "ObjectGS job requires…" làm ở T-005. Alias `job_requires_objectgs` không còn nơi dùng; xoá ở T-005.
