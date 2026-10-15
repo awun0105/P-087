@@ -15,13 +15,28 @@ from src.models.contracts.coordinates import Transform
 from src.models.contracts.manifests import StageId
 from src.models.contracts.object_geometry import ObjectShellManifest
 from src.models.contracts.object_membership import ObjectMembershipArtifact
-from src.models.contracts.scene import ColliderSpec, ColliderType, SceneObject
+from src.models.contracts.scene import ColliderSpec, ColliderType, SceneEnvironment, SceneIR, SceneObject
 from src.services.orchestration.jobs.database import RuntimeTransaction
+from src.services.orchestration.jobs.stage_views import job_bundle
 from src.services.orchestration.projects.registry import ProjectRegistry
-from src.services.orchestration.scene.object_geometry_steps import SurfaceInput, run_surface_colliders
-from src.services.orchestration.scene.objectify import ObjectifyError, Publish, _ensure_not_cancelled, _reference
-from src.services.scene.decomposition.gaussian_split import positions
+from src.services.orchestration.scene.floor_evidence import publish_floor_fit_evidence, scene_floor_fit_summary
+from src.services.orchestration.scene.object_geometry_steps import (
+    SurfaceInput,
+    build_environment_collision,
+    run_inpaint_and_package,
+    run_surface_colliders,
+)
+from src.services.orchestration.scene.objectify import (
+    ObjectifyConfig,
+    ObjectifyError,
+    Publish,
+    _ensure_not_cancelled,
+    _reference,
+)
+from src.services.reconstruction import camera_views
+from src.services.scene.decomposition.gaussian_split import positions, write_gaussian_ply
 from src.services.scene.editing.membership import StaleObjectMembershipRevisionError
+from src.services.scene.floor_model import fit_canonical_floor_model, point_cloud_checksum
 from src.services.scene.gaussian_shell import GaussianShellError, ShellParams, build_gaussian_shell
 from src.services.scene.geometry_state import object_geometry_state
 
@@ -161,6 +176,80 @@ def _build_colliders(
         )
         colliders[item.key] = (geometry, collider)
     return colliders
+
+
+def _build_environment(
+    registry: ProjectRegistry,
+    settings: Settings,
+    job_id: str,
+    scene: SceneIR,
+    rows: np.ndarray,
+    labels: np.ndarray,
+    config: ObjectifyConfig,
+    workspace: Path,
+    publish: Publish,
+    cancel_event: Event | None,
+) -> SceneEnvironment:
+    membership = scene.environment.membership
+    bundle = job_bundle(registry, registry.get_job(job_id))
+    if bundle is None or bundle.canonical_geometry_ref != membership.source_geometry_ref:
+        raise ObjectGeometryBuildError("Geometry build reconstruction source geometry mismatch")
+    if settings.product_scene_runtime_python is None:
+        raise ObjectGeometryBuildError("Chưa cấu hình runtime inpaint.")
+    workspace.mkdir(parents=True, exist_ok=True)
+    background, objects = workspace / "background.ply", workspace / "objects_world.ply"
+    background.write_bytes(write_gaussian_ply(rows[labels == -1]))
+    objects.write_bytes(write_gaussian_ply(rows[labels >= 0]))
+    resolve = registry.runtime_resolver.require
+    views = camera_views(bundle.camera_pose_refs[0], bundle.rgb_frame_refs, resolve)
+    requests = [
+        {**view.model_dump(mode="json", exclude={"image"}), "image_path": str(resolve(view.image))} for view in views
+    ]
+    master, visual, _ = run_inpaint_and_package(
+        settings.product_scene_runtime_python,
+        background_ply=background,
+        objects_ply=objects,
+        views=requests,
+        settings=settings,
+        inpaint_config=config.inpaint.model_dump(exclude_unset=True),
+        workspace=workspace,
+        timeout=settings.product_scene_timeout_seconds,
+        cancel_event=cancel_event,
+        publish=publish,
+        job_id=job_id,
+    )
+    _ensure_not_cancelled(cancel_event)
+    xyz = positions(rows)
+    floor_model = fit_canonical_floor_model(xyz, point_cloud_checksum(xyz))
+    floor_ref, evidence = publish_floor_fit_evidence(job_id, membership.source_visual_ref, floor_model, publish)
+    footprints = []
+    for owner in sorted(set(membership.label_to_object_id.values())):
+        keys = [int(key) for key, value in membership.label_to_object_id.items() if value == owner]
+        anchors = xyz[np.isin(labels, keys)]
+        if len(anchors):
+            footprints.append((anchors.min(axis=0), anchors.max(axis=0)))
+    collision, manifest = build_environment_collision(
+        source_points=xyz,
+        membership_labels=labels,
+        label_to_object_id=membership.label_to_object_id,
+        footprints=footprints,
+        floor_model=floor_model,
+        floor_fit=scene_floor_fit_summary(floor_ref, evidence),
+        voxel_m=config.scene.objectgs_background_voxel_m,
+        bundle=bundle,
+        membership=membership,
+        publish=publish,
+        job_id=job_id,
+    )
+    return scene.environment.model_copy(
+        update={
+            "visual_ref": visual,
+            "visual_master_ref": master,
+            "collider_ref": collision,
+            "object_aware_collision_ref": manifest,
+        },
+        deep=True,
+    )
 
 
 def build_object_geometry(

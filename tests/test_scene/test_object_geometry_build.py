@@ -204,3 +204,65 @@ def test_zero_part_shell_collider_fails_without_new_revision(
             [item], draft_scene.settings, {}, draft_scene.workspace, lambda ref, payload: ref, draft_scene.job_id
         )
     assert draft_scene.registry.scene.current(draft_scene.job_id).scene == draft_scene.scene
+
+
+@pytest.fixture
+def cpu_providers(monkeypatch: pytest.MonkeyPatch) -> None:
+    from src.services.orchestration.scene import objectify
+
+    def run(
+        python: Path, script: Path, request: dict, workspace: Path, name: str, *args: object, **kwargs: object
+    ) -> dict:
+        if name == "inpaint":
+            Path(request["output_ply"]).write_bytes(Path(request["background_ply"]).read_bytes())
+            return {"method": "fixture", "original_gaussians": 336, "inpainted_gaussians": 0}
+        import trimesh
+
+        result = []
+        for item in request["objects"]:
+            # Test double for CoACD only; integration below runs the real provider.
+            mesh = trimesh.load(item["surface_mesh"], force="mesh")
+            Path(item["output_glb"]).write_bytes(mesh.export(file_type="glb"))
+            result.append({"id": item["id"], "parts": 1})
+        return {"objects": result}
+
+    def package(source: Path, workspace: Path, *args: object, **kwargs: object) -> Path:
+        workspace.mkdir(parents=True, exist_ok=True)
+        output = workspace / "background.sog"
+        output.write_bytes(b"fixture SOG")
+        return output
+
+    monkeypatch.setattr(objectify, "_run", run)
+    monkeypatch.setattr(objectify, "package_splat", package)
+
+
+def test_environment_build_removes_object_cells(draft_scene: SimpleNamespace, cpu_providers: None) -> None:
+    import trimesh
+
+    from src.services.orchestration.artifacts import FilesystemArtifactStore
+    from src.services.orchestration.scene import object_geometry_build as module
+    from src.services.scene.decomposition.gaussian_split import positions
+    from tests.test_scene.test_object_aware_geometry import ray
+
+    fixture = draft_scene
+    store = FilesystemArtifactStore(fixture.registry.runtime_resolver)
+    environment = module._build_environment(
+        fixture.registry,
+        fixture.settings,
+        fixture.job_id,
+        fixture.scene,
+        fixture.rows,
+        fixture.labels,
+        module.ObjectifyConfig(),
+        fixture.workspace,
+        store.publish,
+        None,
+    )
+    assert environment.object_aware_collision_ref is not None
+    assert environment.membership == fixture.scene.environment.membership
+    mesh = trimesh.load(fixture.registry.runtime_resolver.require(environment.collider_ref), force="mesh")
+    # Downward ray from each object's centre reaches inferred floor, not residual object cells.
+    for item in fixture.scene.objects:
+        point = positions(fixture.rows[fixture.labels == (0 if item.id.endswith("001") else 2)]).mean(axis=0)
+        assert ray(mesh, point, [0, 0, -1]) > 0.1
+    assert fixture.registry.scene.current(fixture.job_id).scene == fixture.scene
