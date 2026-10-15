@@ -73,7 +73,7 @@ Overall: implementation is opt-in and NOT accepted end-to-end. Latest evidence s
 | 07 | Pose/source composition and ghost-removal fixtures PASS. Real Room Walk UNVERIFIED. |
 | 08 | PASS: separate optional surface, collider and environment refs, checksums, source poses and inventories. |
 | 09 | Shared compositor + complete package/OpenUSD fixture PASS. Real ObjectGS browser/Walk scene UNVERIFIED. |
-| 10 | PARTIAL: correction rejects before mutation with OBJECTGS_RETRAIN_REQUIRED. Queued correction revision/retraining NOT IMPLEMENTED. |
+| 10 | IMPLEMENTED (CPU/fixture): visual correction → queued regeneration → fenced SceneIR publish; see [membership correction handoff](../2026-10-15-membership-correction/HANDOFF.md). GPU/browser acceptance pending. |
 | 11 | Automated related regressions PASS. Manual browser movement/physics regression on ObjectGS output UNVERIFIED. |
 | 12 | Automated checks PASS; exact latest counts/commands below. Functional mesh-quality gate remains FAIL. |
 | 13 | Executable synthetic and existing-Room commands in RUNTIME.md. Room producer/E2E NOT RUN; user's rev-100 preserved. |
@@ -424,3 +424,9 @@ Production defaults remain legacy; no new real-scene/GPU/browser/Isaac quality a
 intrinsics, evidence-supported local repair, strict geometry/report gates and real CPU CoACD fixtures.
 The saved 8,000-iteration masked surface remains rejected (275 boundary edges; no support available).
 This follow-up does not close the real-scene/GPU/browser/Isaac quality gate above.
+
+## Follow-up: visual membership correction and regeneration (2026-10-15)
+
+[Membership correction handoff](../2026-10-15-membership-correction/HANDOFF.md) supersedes the
+`OBJECTGS_RETRAIN_REQUIRED` limitation above: Studio Box/Brush/Lasso → preview → queued regeneration through
+ObjectGS, surface QA, strict CoACD and environment collision. Real-scene GPU/browser/Isaac acceptance remains open.
