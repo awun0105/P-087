@@ -443,7 +443,8 @@ export class RegionOverlay {
   /** Mặt box: hộp đơn vị co giãn theo kích thước, trong suốt. */
   private createFaces(box: EditableBox): Entity {
     const faces = new Entity(`region-faces-${box.id}`, this.app);
-    faces.addComponent("render", { type: "box", material: this.material(`face-${box.op}`, colorOf(box.op), FACE_OPACITY), castShadows: false });
+    const material = this.material(`face-${box.op}`, colorOf(box.op), FACE_OPACITY);
+    faces.addComponent("render", { type: "box", material, castShadows: false });
     faces.setLocalScale(2 * box.half[0], 2 * box.half[1], 2 * box.half[2]);
     return faces;
   }

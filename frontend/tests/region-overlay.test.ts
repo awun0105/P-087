@@ -517,44 +517,6 @@ describe("RegionOverlay gizmos", () => {
     expect(translateGizmo._onPointerMove).toHaveBeenCalled();
   });
 
-  it("keeps the bottom on the floor after a face drag pushes it below on release", () => {
-    const { canvas, camera, overlay, onChange } = scene();
-    overlay.setFloorZ(0);
-    // Đáy box cách sàn 10 cm; tay nắm -z nằm ở đáy và được kéo xuống 20 cm, xuống dưới sàn.
-    overlay.setBoxes([box({ center: [0, 0, 0.6] })], "b1");
-    pointer(canvas, "pointerdown", screenOf(camera, [0, 0, 0.1]));
-    pointer(canvas, "pointermove", screenOf(camera, [0, 0, -0.1]));
-    pointer(canvas, "pointerup", screenOf(camera, [0, 0, -0.1]));
-    expect(onChange).toHaveBeenCalledTimes(1);
-    const [[boxes]] = onChange.mock.calls;
-    // Đỉnh giữ nguyên ở 1.1 m, đáy bám sàn.
-    expect(boxes[0].center[2] - boxes[0].half[2]).toBeCloseTo(0, 6);
-    expect(boxes[0].center[2] + boxes[0].half[2]).toBeCloseTo(1.1, 6);
-  });
-
-  it("keeps the top fixed when a translate drops the bottom under the floor", () => {
-    const { object, overlay, onChange } = scene();
-    overlay.setFloorZ(0);
-    overlay.setBoxes([box({ center: [0, 0, 0.5] })], "b1");
-    const { translateGizmo } = gizmosOf(overlay);
-    translateGizmo.fire("transform:start");
-    entityNamed(object, "region-box-b1").setLocalPosition(0, 0, 0.2);
-    translateGizmo.fire("transform:end");
-    const [[boxes]] = onChange.mock.calls;
-    expect(boxes[0].center[2] - boxes[0].half[2]).toBeCloseTo(0, 6);
-    expect(boxes[0].center[2] + boxes[0].half[2]).toBeCloseTo(0.7, 6);
-  });
-
-  it("leaves the bottom where it was dragged when no floor has been set", () => {
-    const { canvas, camera, overlay, onChange } = scene();
-    overlay.setBoxes([box({ center: [0, 0, 0.5] })], "b1");
-    pointer(canvas, "pointerdown", screenOf(camera, [0, 0, 0]));
-    pointer(canvas, "pointermove", screenOf(camera, [0, 0, -0.2]));
-    pointer(canvas, "pointerup", screenOf(camera, [0, 0, -0.2]));
-    const [[boxes]] = onChange.mock.calls;
-    expect(boxes[0].center[2] - boxes[0].half[2]).toBeCloseTo(-0.2, 6);
-  });
-
   it("cancels a gizmo drag on Escape, restores the box and reports nothing", () => {
     const { canvas, object, overlay, onChange } = scene();
     overlay.setBoxes([box()], "b1");
@@ -674,5 +636,45 @@ describe("RegionOverlay.destroy", () => {
     overlay.setBoxes([box()], "b1");
     expect(object.children.length).toBe(0);
     expect(overlay.viewFrom("top")).toBe(false);
+  });
+});
+
+describe("RegionOverlay floor", () => {
+  it("keeps the bottom on the floor after a face drag pushes it below on release", () => {
+    const { canvas, camera, overlay, onChange } = scene();
+    overlay.setFloorZ(0);
+    // Đáy box cách sàn 10 cm; tay nắm -z nằm ở đáy và được kéo xuống 20 cm, xuống dưới sàn.
+    overlay.setBoxes([box({ center: [0, 0, 0.6] })], "b1");
+    pointer(canvas, "pointerdown", screenOf(camera, [0, 0, 0.1]));
+    pointer(canvas, "pointermove", screenOf(camera, [0, 0, -0.1]));
+    pointer(canvas, "pointerup", screenOf(camera, [0, 0, -0.1]));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const [[boxes]] = onChange.mock.calls;
+    // Đỉnh giữ nguyên ở 1.1 m, đáy bám sàn.
+    expect(boxes[0].center[2] - boxes[0].half[2]).toBeCloseTo(0, 6);
+    expect(boxes[0].center[2] + boxes[0].half[2]).toBeCloseTo(1.1, 6);
+  });
+
+  it("keeps the top fixed when a translate drops the bottom under the floor", () => {
+    const { object, overlay, onChange } = scene();
+    overlay.setFloorZ(0);
+    overlay.setBoxes([box({ center: [0, 0, 0.5] })], "b1");
+    const { translateGizmo } = gizmosOf(overlay);
+    translateGizmo.fire("transform:start");
+    entityNamed(object, "region-box-b1").setLocalPosition(0, 0, 0.2);
+    translateGizmo.fire("transform:end");
+    const [[boxes]] = onChange.mock.calls;
+    expect(boxes[0].center[2] - boxes[0].half[2]).toBeCloseTo(0, 6);
+    expect(boxes[0].center[2] + boxes[0].half[2]).toBeCloseTo(0.7, 6);
+  });
+
+  it("leaves the bottom where it was dragged when no floor has been set", () => {
+    const { canvas, camera, overlay, onChange } = scene();
+    overlay.setBoxes([box({ center: [0, 0, 0.5] })], "b1");
+    pointer(canvas, "pointerdown", screenOf(camera, [0, 0, 0]));
+    pointer(canvas, "pointermove", screenOf(camera, [0, 0, -0.2]));
+    pointer(canvas, "pointerup", screenOf(camera, [0, 0, -0.2]));
+    const [[boxes]] = onChange.mock.calls;
+    expect(boxes[0].center[2] - boxes[0].half[2]).toBeCloseTo(-0.2, 6);
   });
 });
