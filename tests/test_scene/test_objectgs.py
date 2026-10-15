@@ -153,6 +153,7 @@ def test_runner_contract_calls_train_then_each_numeric_label_never_minus_one(tmp
         "depth_trunc_m": 10.0,
         "num_cluster": 1,
         "mesh_variant": "raw_fuse",
+        "depth_mask": "per_view_instance_label",
     }
     config = yaml.safe_load((tmp_path / "work/config.yaml").read_text())
     assert config["model_params"]["source_path"] == str(dataset.parent)

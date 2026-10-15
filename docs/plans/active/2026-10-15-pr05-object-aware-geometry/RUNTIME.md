@@ -97,6 +97,9 @@ calibrated views; the runner validates this before launching training.
 The workspace must not exist; retries require a fresh path. Logs are prepared/runtime/runtime-check.log, train.log,
 and export-1.log. request.json preserves the exact service input; source.ply, labels.i32le and source.glb
 are byte-bound synthetic inputs. No Studio job is created or changed. A 100-iteration smoke tests execution, not trained mesh quality or CoACD acceptance.
+The export adapter converts each camera's categorical object_mask into the queried label's binary alpha_mask
+for upstream's native TSDF mask hook. Gaussian label selection alone is insufficient: upstream otherwise
+integrates low-confidence depths outside the object silhouette. No upstream file is patched on disk.
 An optional `extension_cache_dir` in runtime.json reuses a completed CUDA extension for the same
 pinned source, Python/Torch/CUDA/compiler environment. Keep distinct directories for different runtimes.
 The default remains per-invocation scratch. A process-level lock rejects concurrent users of an explicitly

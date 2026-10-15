@@ -298,7 +298,9 @@ with open(sys.argv[1], 'w') as f:
         execute(
             [
                 str(runtime.python),
-                str(runtime.repository.resolve() / "export_object_mesh.py"),
+                str(entry.with_name("objectgs_export_entry.py")),
+                "--upstream",
+                str(runtime.repository.resolve()),
                 "-m",
                 str(model),
                 "--query_label_id",
@@ -340,6 +342,7 @@ with open(sys.argv[1], 'w') as f:
             "depth_trunc_m": runtime.depth_trunc_m,
             "num_cluster": 1,
             "mesh_variant": "raw_fuse",
+            "depth_mask": "per_view_instance_label",
         },
         "config_checksum": "sha256:" + hashlib.sha256(config_path.read_bytes()).hexdigest(),
     }

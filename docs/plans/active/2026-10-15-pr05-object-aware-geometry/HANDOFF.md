@@ -1,4 +1,4 @@
-# PR-05 implementation in progress — NOT accepted
+# PR-05 partial implementation — physics quality gate FAILED, NOT accepted
 
 ## Baseline and delivery
 
@@ -28,7 +28,7 @@ https://github.com/RuijieZhu94/ObjectGS/tree/0f6842b0fa80b9bfe151c31b70c306cbc5e
 - ObjectGS requires its custom gsplat-object. The application/SAM2/Brush environment must not be modified.
 - Upstream environment.yml targets Python 3.8.19, PyTorch 2.1.2, CUDA 11.8. It omits several imported mesh
   dependencies (e.g. open3d). Local host has Quadro T2000 4 GB and nvcc 12.8; these are observations,
-  not evidence of ObjectGS success or failure. No ObjectGS train/export has run.
+  not alone evidence of ObjectGS success or failure. Real GPU smokes have now run; see final evidence below.
 - Existing render-lift computes useful per-view instance masks but only persists aggregate Gaussian labels.
   A producer integration must preserve calibrated undistorted images/masks and their object-ID map.
 - Existing convex runner silently falls back to one hull and merges excess parts; the surface-mesh path
@@ -37,7 +37,7 @@ https://github.com/RuijieZhu94/ObjectGS/tree/0f6842b0fa80b9bfe151c31b70c306cbc5e
 License inspection: ObjectGS root LICENSE says MIT. train.py/scene/__init__.py/dataset_readers.py retain
 Inria non-commercial/research headers referring to LICENSE.md, which is not present at root. Do not describe
 all included code as unambiguously MIT. No upstream source is vendored into this repository.
-Custom gsplat revision/license/dependency inspection is in progress.
+Custom gsplat is pinned to 68a61a4485cfc2967703391a3e1cfb59981f8fc7; its inspected license is Apache-2.0.
 
 ## Implementation checkpoints
 
@@ -64,20 +64,20 @@ Overall: implementation is opt-in and NOT accepted end-to-end. Latest evidence s
 
 | AC | Current evidence / remaining gate |
 | --- | --- |
-| 01 | Actual pinned runner is wired; real GPU smoke reached train and CUDA extension build. No completed train/export proof yet. |
-| 02 | Adapter/calibration/labels tests PASS; actual upstream loaded eight synthetic cameras and 1,128 anchors. |
-| 03 | Real exported ObjectGS surface UNVERIFIED. Synthetic command/export fixtures do not satisfy this gate. |
-| 04 | Seven real CPU CoACD tests PASS including concave connected geometry and void/contact probes; ObjectGS-output-to-CoACD remains unverified. |
-| 05 | New producer separates source Gaussian occupancy before meshing; fixture ray probes PASS. Legacy path remains available explicitly. |
-| 06 | Fixture floor, wall, shared contact preservation PASS; actual Room/unseen support recovery UNVERIFIED. |
-| 07 | Source/current pose composition and ghost-removal fixture probes PASS; manual Room Walk UNVERIFIED. |
-| 08 | Separate optional surface, collider and environment refs, byte checksums and inventories PASS. |
-| 09 | Shared compositor + full simulation-package/OpenUSD fixture PASS; actual ObjectGS browser scene/Walk UNVERIFIED. |
-| 10 | Corrections reject before mutation with OBJECTGS_RETRAIN_REQUIRED; controlled correction revision/retraining NOT IMPLEMENTED. |
-| 11 | Automated PR01–04-related regressions PASS; manual browser transform/physics regression UNVERIFIED. |
-| 12 | Latest backend: 720 PASS / 61.46s; frontend: 630 PASS / 73 files; tsc/scoped ESLint, Ruff lint/format PASS. |
-| 13 | Executable synthetic GPU and existing-Room commands documented in RUNTIME.md. Room producer/E2E NOT RUN. |
-| 14 | Required-stage failures, stale membership/geometry, CoACD errors reject; no new-mode silent legacy/box fallback in tests. |
+| 01 | PASS for actual isolated runner execution: pinned GPU train/checkpoint/export ran at 100 and 8,000 iterations. Full Studio worker job is unverified. |
+| 02 | PASS for CPU calibration/label/frame tests and actual 16-view dataset load. Pinned upstream requires >=11 training views; validated before launch. |
+| 03 | Real finite meshes exported and prepared service converted to object-local GLB; topology quality FAILED (open mesh). No physics-ready claim. |
+| 04 | Seven real CPU CoACD fixture tests PASS. Both actual GPU surfaces were rejected before CoACD due to open components; complete real producer-to-collider path NOT accepted. |
+| 05 | New producer separates source occupancy before meshing; independent fixture probes PASS. Real Room output UNVERIFIED. |
+| 06 | Fixture floor/wall/shared-contact preservation PASS. Actual Room and missing support recovery UNVERIFIED. |
+| 07 | Pose/source composition and ghost-removal fixtures PASS. Real Room Walk UNVERIFIED. |
+| 08 | PASS: separate optional surface, collider and environment refs, checksums, source poses and inventories. |
+| 09 | Shared compositor + complete package/OpenUSD fixture PASS. Real ObjectGS browser/Walk scene UNVERIFIED. |
+| 10 | PARTIAL: correction rejects before mutation with OBJECTGS_RETRAIN_REQUIRED. Queued correction revision/retraining NOT IMPLEMENTED. |
+| 11 | Automated related regressions PASS. Manual browser movement/physics regression on ObjectGS output UNVERIFIED. |
+| 12 | Automated checks PASS; exact latest counts/commands below. Functional mesh-quality gate remains FAIL. |
+| 13 | Executable synthetic and existing-Room commands in RUNTIME.md. Room producer/E2E NOT RUN; user's rev-100 preserved. |
+| 14 | Required-stage errors, stale/corrupt geometry and invalid surfaces reject. Actual invalid GPU output yielded zero parts and no fallback GLB. |
 
 ## Checkpoint: strict surface mesh -> CoACD
 
@@ -279,3 +279,39 @@ than 11 calibrated views before training; synthetic smoke uses 16 views above/be
 adapter/process tests PASS; focused runtime/contracts/producer suite: 28 PASS / 4.44s. A further real smoke 06
 uses the complete prepared-input service (immutable PLY/labels/poses, 8,000 iterations, checkpoint/dataset
 archives and object-local GLB conversion) and is still running. Its quality/CoACD outcome is not yet known.
+
+
+## Final real-GPU evidence and blocking quality result
+
+- Full prepared service smoke 06 ran 8,000 upstream training iterations on 16 calibrated synthetic views,
+  produced anchor + three MLP checkpoints, exported a label-1 TSDF mesh, archived dataset/checkpoint, and
+  converted world vertices to the explicit cube-local frame. Model checkpoint and dataset byte SHAs verified.
+- Unmasked raw surface: 132,891 vertices, 240,434 triangles, 1,454 components; local bounds approximately
+  [-2.385,-2.475,-1.9372]..[3.0767,2.325,1.575]. It was finite but physically unsuitable, and strict validation
+  rejected it. Image reconstruction metrics are not used as a physics or geometric accuracy gate.
+- Source audit then found GaussianExtractor's TSDF integration never uses categorical object_mask unless an
+  alpha_mask is supplied. Selecting labelled anchors alone still integrates spurious background depths.
+- New scripts/scene/objectgs_export_entry.py binds each camera's queried-label mask to alpha_mask in memory
+  before native reconstruction/TSDF. It uses the pinned existing API, keeps raw components, does not patch
+  upstream files on disk, and records the mask policy in export provenance. A CPU API fixture verifies exact
+  HxW categorical-to-1xHxW float masks, empty views and preservation of original categorical labels.
+- Re-export of the SAME 8,000-iteration checkpoint with this adapter succeeded: 7,497 vertices, 14,697 triangles,
+  11 components; local bounds [-0.558326,-0.558660,-0.495]..[0.563087,0.557848,0.675] m. Noise reduced, but
+  the main component remains open. Its boundaries include a large planar loop (~1.098 m span) and another
+  ~0.470 m loop with ~0.0256 m plane deviation. These are not proven safe small-hole repairs.
+- Actual strict surface validation again returned parts=0, error='surface mesh requires controlled repair
+  before CoACD; open components are unsupported'. No collider GLB, box, hull or accepted SceneIR was generated.
+  This is a functional quality FAIL, not merely a browser verification omission.
+
+Durable local evidence (ignored data, not committed or pushed): data/pr05_objectgs_smoke_20261015/ (25 MiB).
+It contains 21 files plus checksums.json: checkpoint/dataset archives, immutable input request/PLY/labels,
+original geometry, masked/unmasked surfaces, actual training/export logs, quality stats and strict validation
+requests/results. Original live Room data was not used as scratch and remains rev-100 Legacy.
+
+Checkpoint archive SHA: sha256:5e2e1383a6352d815d6cd5e9d241b4a782c5cf8426077cb32892cbd87fa899ed
+Dataset archive SHA: sha256:c9f0ead7dbf85351fa54226a0baa38ddece66a908a7748312518ca9fdecdb1a7
+
+Remaining implementation: controlled surface repair/quality acceptance with evidence that meaningful voids
+are preserved; ObjectGS-aware membership correction revision/regeneration; actual Room producer + authenticated
+browser Walk acceptance; Isaac Sim runtime validation. Existing OpenUSD fixture success is not Isaac evidence.
+Do not switch the user's Room to the new producer or call PR-05 complete on the present evidence.
