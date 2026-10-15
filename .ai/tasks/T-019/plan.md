@@ -4,6 +4,9 @@
 Task **duy nhất** được chạy full suite. Xác nhận toàn bộ, build lại editor nếu cần, viết handoff và hướng dẫn chạy scene mới.
 
 ## Steps
+0. Từ review T-018: thêm test `build_simulation_package` cho scene vỏ (Draft → build → Confirm → package → inventory có collider vỏ,
+   không lỗi). Ghi vào handoff: collider vỏ xuất hiện ở cả `geometry` và `colliders` trong USD inventory (thừa, chưa sửa).
+   Từ review T-008: chất lượng mask ObjectGS dựng lại từ nhãn hiện tại chỉ kiểm được trên GPU với scene thật.
 1. Backend: `.venv/bin/python -m pytest tests -q` (chỉ thư mục `tests`, không quét `data/`). Ghi số pass/skip/fail.
 2. `.venv/bin/ruff check src tests scripts` và `.venv/bin/ruff format --check src tests scripts`.
 3. `.venv/bin/python scripts/check_contract_mirror.py`.
