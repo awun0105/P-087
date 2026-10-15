@@ -51,7 +51,8 @@ def build_object_geometry(
    `GaussianShellError` → `ObjectGeometryBuildError(object_id=…)`. Ghi GLB vào workspace.
 5. `progress("quality")`: lưu `quality` từ shell (đã QA trong T-002). Publish `ObjectShellMesh` + `ObjectShellManifest`
    (`objects/shells/{digest}.glb`, `objects/shells/{digest}.json`, stage `SCENE_DECOMPOSE`).
-6. `progress("collider")`: `run_surface_colliders` với `surface_path` = GLB vỏ, `coordinate_frame=object_local`.
+6. `progress("collider")`: `run_surface_colliders` (thêm tham số keyword `surface_label: str = "ObjectGS surface"` vào helper T-006
+   để thông điệp lỗi nêu đúng nguồn; build từ vỏ truyền `"Gaussian shell"`; test cũ của ObjectGS giữ nguyên thông điệp) với `surface_path` = GLB vỏ, `coordinate_frame=object_local`.
    Publish collider `ObjectCollider` (`colliders/{digest}.glb`, stage `COLLIDER`). `ColliderSpec(type=CONVEX_DECOMPOSITION,
    provenance={"generator": "coacd", "surface_origin": "gaussian_shell_v1", "surface_mesh_ref": …,
    "coacd_config": …, "strict_surface_input": True})`.
