@@ -60,9 +60,24 @@ at this checkpoint. Browser/Isaac/ObjectGS GPU E2E UNVERIFIED. Graphify update r
 
 ## Acceptance status
 
-AC-01–AC-14: NOT COMPLETE. Contracts and compatibility audit are preliminary work, not a working ObjectGS
-pipeline. Room smoke, real train/checkpoint -> mesh, CoACD mesh path, voxel ownership, producer publication,
-consumer integration, correction invalidation and full regressions remain outstanding.
+Overall: implementation is opt-in and NOT accepted end-to-end. Latest evidence supersedes early checkpoint counts below.
+
+| AC | Current evidence / remaining gate |
+| --- | --- |
+| 01 | Actual pinned runner is wired; real GPU smoke reached train and CUDA extension build. No completed train/export proof yet. |
+| 02 | Adapter/calibration/labels tests PASS; actual upstream loaded eight synthetic cameras and 1,128 anchors. |
+| 03 | Real exported ObjectGS surface UNVERIFIED. Synthetic command/export fixtures do not satisfy this gate. |
+| 04 | Seven real CPU CoACD tests PASS including concave connected geometry and void/contact probes; ObjectGS-output-to-CoACD remains unverified. |
+| 05 | New producer separates source Gaussian occupancy before meshing; fixture ray probes PASS. Legacy path remains available explicitly. |
+| 06 | Fixture floor, wall, shared contact preservation PASS; actual Room/unseen support recovery UNVERIFIED. |
+| 07 | Source/current pose composition and ghost-removal fixture probes PASS; manual Room Walk UNVERIFIED. |
+| 08 | Separate optional surface, collider and environment refs, byte checksums and inventories PASS. |
+| 09 | Shared compositor + full simulation-package/OpenUSD fixture PASS; actual ObjectGS browser scene/Walk UNVERIFIED. |
+| 10 | Corrections reject before mutation with OBJECTGS_RETRAIN_REQUIRED; controlled correction revision/retraining NOT IMPLEMENTED. |
+| 11 | Automated PR01–04-related regressions PASS; manual browser transform/physics regression UNVERIFIED. |
+| 12 | Latest backend: 720 PASS / 61.46s; frontend: 630 PASS / 73 files; tsc/scoped ESLint, Ruff lint/format PASS. |
+| 13 | Executable synthetic GPU and existing-Room commands documented in RUNTIME.md. Room producer/E2E NOT RUN. |
+| 14 | Required-stage failures, stale membership/geometry, CoACD errors reject; no new-mode silent legacy/box fallback in tests. |
 
 ## Checkpoint: strict surface mesh -> CoACD
 
@@ -195,3 +210,27 @@ prove training. Real ObjectGS training/export and real Room/browser Walk/Isaac a
 Pre-flight gates: CodeGraph producer/lift/extraction/correction/enrichment/candidate inventory/editor callers
 inspected before changes; Graphify queried; reuse existing process control, artifacts, membership, compositor,
 Ammo and USD runners. No new physics engine. Source changes are opt-in and legacy defaults stay compatible.
+
+
+## Latest checkpoint: full package regression and local runtime
+
+Full public build_simulation_package fixture runs the real isolated OpenUSD runtime, publishes/seals the
+candidate, binds the object-aware receipt and distinct surface inventory, replaces collider_ref with a derived
+USD layer, and successfully reuses the manifest's GLB baseline afterward. Repeated same-revision build returns
+the same package. Fixture triangle count remains 24, with two independent colliders. Focused package/export
+regressions: 33 PASS / 17.90s; latest broader backend suite: 720 PASS / 61.46s. Ruff src/tests + four changed
+scene CLIs: PASS; format check: 637 files PASS. Frontend checks remain 630 PASS, tsc/scoped lint PASS.
+
+Local stack restarted on localhost:3010 / API 8010 after confirming all listed jobs SUCCEEDED. Its loaded
+source now rejects Room rev-100 preview with HTTP 409 and UNREPAIRED_COLLISION_CUT: 954 unresolved new boundary
+edges. Earlier 56,020-face browser preview was from the older process and must not be reused as acceptance.
+The temporary Collision mesh display toggle was restored off; no Room SceneIR revision was changed.
+
+An isolated Python 3.8.19 environment, Torch 2.1.2+cu118, custom source gsplat 1.4.0, Open3D CPU 0.18.0 and CUDA
+11.8 compiler prefix were installed outside app/Brush/SAM2. pip check PASS; imports and CUDA runtime probe PASS
+on Quadro T2000. Installed packages recorded in runtime-packages.json; source/compiler pins in RUNTIME.md.
+The first import attempt overlapped pip's unfinished file installation and exited SIGBUS; after pip completed,
+imports passed. A fresh train attempt failed at missing crypt.h under the isolated compiler sysroot. The runner
+now includes the actual Python environment include root alongside GLM. Ten adapter/process tests PASS after
+this correction. Fresh real-GPU smoke 03 is compiling CUDA kernels; checkpoint and mesh export are still
+pending and must not be marked integrated/PASS on the strength of this progress alone.

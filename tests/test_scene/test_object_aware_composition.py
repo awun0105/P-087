@@ -17,8 +17,8 @@ from src.services.scene.effective_collision import compose_effective_collision
 from tests.test_scene.test_effective_collision import fixture
 
 
-def case(tmp_path):
-    scene, _, ref, source, blobs = fixture(tmp_path)
+def case(tmp_path, registry_job=None):
+    scene, _, ref, source, blobs = fixture(tmp_path, registry_job=registry_job)
     blobs[ref.artifact_uri] = source
 
     def bound(payload, kind, name):

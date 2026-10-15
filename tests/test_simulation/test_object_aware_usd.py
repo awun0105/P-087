@@ -121,3 +121,60 @@ print(json.dumps(dict(up=str(UsdGeom.GetStageUpAxis(stage)),unit=UsdGeom.GetStag
     assert not inspected["ground"] and inspected["object_colliders"] == 2
     # Child rotation 90deg + parent rotation 90deg; offset rotated by the parent once.
     np.testing.assert_allclose(inspected["bounds"], [[8.5, 1, 1], [9.5, 3, 4]], atol=1e-5)
+
+
+@pytest.mark.skipif(not RUNTIME.is_file(), reason="requires isolated usd-core runtime")
+def test_object_aware_simulation_package_uses_manifest_after_enrichment(tmp_path, monkeypatch):
+    import io
+    import zipfile
+
+    from src.config import Settings
+    from src.models.contracts.artifacts import ProductArtifactRef
+    from src.models.contracts.identity import verify_candidate_inventory
+    from src.services.orchestration.review import simulation_package as service
+    from tests.test_orchestration.test_simulation_package import _scene_job
+
+    registry, job = _scene_job(tmp_path)
+    scene, compose, blobs = case(tmp_path, registry_job=(registry, job))
+    scene = confirm_object(confirm_object(scene, "A"), "B")
+    item = scene.objects[0]
+    surface = item.geometry_ref.model_copy(
+        update={"artifact_type": "ObjectSurfaceMesh", "artifact_uri": f"artifact://jobs/{job.job_id}/pr05/surface.glb"}
+    )
+    blobs[surface.artifact_uri] = blobs[item.geometry_ref.artifact_uri]
+    scene = scene.model_copy(
+        update={"objects": [item.model_copy(update={"surface_mesh_ref": surface}), scene.objects[1]]}
+    )
+    refs = SceneEditor.artifact_references(scene)
+    for reference in {ref.artifact_uri: ref for ref in refs}.values():
+        if reference.artifact_uri in blobs:
+            registry.scene.store.publish(reference, blobs[reference.artifact_uri])
+    registry.scene.publish_next(
+        job.job_id, registry.scene.current(job.job_id).scene.scene_revision, scene, "fixture_objectgs_geometry"
+    )
+    monkeypatch.setattr(service, "get_settings", lambda: Settings(product_scene_runtime_python=RUNTIME))
+    package = service.build_simulation_package(registry, job.job_id, simulation_config={"ground_plane": False})
+    assert package.candidate is not None, package.model_dump(mode="json")
+    verify_candidate_inventory(package.candidate)
+    assert surface in package.candidate.geometry
+    assert (
+        package.candidate.candidate_manifest.object_aware_collision_ref == scene.environment.object_aware_collision_ref
+    )
+    current = registry.scene.current(job.job_id).scene
+    assert current.environment.collider_ref.artifact_type == "ColliderGeometry"
+    assert compose(current).identity == compose(scene).identity
+    archive = zipfile.ZipFile(io.BytesIO(registry.runtime_resolver.require(package.package_ref).read_bytes()))
+    summary = json.loads(archive.read("usd_export_summary.json"))
+    assert summary["environment_triangles"] == 24
+    assert len(summary["objects"]) == 2
+    manifest = json.loads(archive.read("candidate_manifest.json"))
+    assert manifest["object_aware_collision_ref"] == scene.environment.object_aware_collision_ref.model_dump(
+        mode="json"
+    )
+    # Stored receipt remains byte-bound and available after the derived collider replaces collider_ref.
+    receipt = ProductArtifactRef.model_validate(manifest["object_aware_collision_ref"])
+    registry.runtime_resolver.require(receipt)
+    assert (
+        service.build_simulation_package(registry, job.job_id, simulation_config={"ground_plane": False}).package_ref
+        == package.package_ref
+    )

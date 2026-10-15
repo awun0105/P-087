@@ -21,8 +21,8 @@ from tests.test_orchestration.test_simulation_package import _scene_job
 from tests.test_simulation.test_collision_edit_composition import _membership_ref, _owner, _source_ref
 
 
-def fixture(tmp_path: Path):
-    registry, job = _scene_job(tmp_path)
+def fixture(tmp_path: Path, registry_job=None):
+    registry, job = registry_job or _scene_job(tmp_path)
     scene = registry.scene.current(job.job_id).scene
     # Disjoint floor, wall, A and B; face order is explicit and sealed by the source checksum.
     meshes = [trimesh.creation.box(extents=size) for size in [(8, 8, 0.02), (0.1, 8, 3), (1, 2, 3), (1, 1, 1)]]
@@ -30,6 +30,8 @@ def fixture(tmp_path: Path):
         mesh.apply_translation(offset)
     payload = trimesh.util.concatenate(meshes).export(file_type="glb")
     ref = _source_ref(job.job_id, payload)
+    if registry_job is not None:
+        ref = ref.model_copy(update={"artifact_uri": f"artifact://jobs/{job.job_id}/pr05/global.glb"})
     blobs = {}
     objects = []
     for id_, indices in [("A", list(range(24, 36))), ("B", list(range(36, 48)))]:
