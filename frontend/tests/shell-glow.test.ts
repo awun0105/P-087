@@ -246,3 +246,100 @@ describe("ShellGlowLayer: điểm xanh và đỏ", () => {
     expect(pointsOf("A")).toBeUndefined();
   });
 });
+
+describe("ShellGlowLayer: nhịp phát sáng và trạng thái", () => {
+  let app: AppBase;
+  let object: Entity;
+  let host: SceneOverlay;
+  let layer: ShellGlowLayer;
+
+  beforeEach(() => {
+    app = fakeApp();
+    autoLoad(app);
+    object = new Entity("object-A", app);
+    host = hostWith(app, new Map([["A", object]]));
+    layer = new ShellGlowLayer(host);
+    vi.spyOn(Asset.prototype, "unload").mockImplementation(() => undefined);
+    window.matchMedia = vi.fn(() => ({ matches: false }) as MediaQueryList);
+    vi.spyOn(performance, "now").mockReturnValue(0);
+  });
+
+  afterEach(() => {
+    Reflect.deleteProperty(window, "matchMedia");
+    vi.restoreAllMocks();
+  });
+
+  /** Hàm xử lý nhịp khung hình mà lớp đã đăng ký lên viewer. */
+  const frame = (): (() => void) => vi.mocked(app.on).mock.calls.find(([event]) => event === "update")![1] as () => void;
+  const fillOf = (id: string) => renderOf(shellOf(object, id)!.children[0] as Entity).meshInstances[0].material as StandardMaterial;
+
+  it("vỏ đang chọn nhấp nháy trong 0,22–0,28 và yêu cầu khung kế tiếp; chưa có vỏ thì chưa đăng ký nhịp", async () => {
+    expect(app.on).not.toHaveBeenCalled();
+    await layer.setShell("A", GLB_URL, "selected");
+    expect(app.on).toHaveBeenCalledWith("update", expect.any(Function));
+    const fill = fillOf("A");
+    let peak = 0;
+    for (const now of [0, 500, 1000, 1500, 2000]) {
+      vi.mocked(performance.now).mockReturnValue(now);
+      frame()();
+      expect(fill.opacity).toBeGreaterThanOrEqual(0.22 - 1e-9);
+      expect(fill.opacity).toBeLessThanOrEqual(0.28 + 1e-9);
+      peak = Math.max(peak, fill.emissiveIntensity);
+    }
+    expect(peak).toBeGreaterThan(1);
+    expect(peak).toBeLessThanOrEqual(1.3 + 1e-9);
+    expect(host.requestFrame).toHaveBeenCalled();
+  });
+
+  it("vỏ idle không nhấp nháy và không yêu cầu khung", async () => {
+    await layer.setShell("A", GLB_URL, "idle");
+    vi.mocked(performance.now).mockReturnValue(1000);
+    frame()();
+    expect(fillOf("A").opacity).toBeCloseTo(0.1);
+    expect(host.requestFrame).not.toHaveBeenCalled();
+  });
+
+  it("bật giảm chuyển động thì vỏ không nhấp nháy; đang nhấp nháy mà bật thì trả về độ mờ gốc", async () => {
+    await layer.setShell("A", GLB_URL, "selected");
+    vi.mocked(performance.now).mockReturnValue(1000);
+    frame()();
+    expect(fillOf("A").opacity).toBeCloseTo(0.28);
+
+    vi.mocked(window.matchMedia).mockReturnValue({ matches: true } as MediaQueryList);
+    vi.mocked(host.requestFrame).mockClear();
+    frame()();
+    expect(fillOf("A").opacity).toBeCloseTo(0.25);
+    expect(host.requestFrame).not.toHaveBeenCalled();
+  });
+
+  it("pending làm mờ vỏ về 0,12 và dừng nhấp nháy; trở lại thường thì có lại độ mờ gốc", async () => {
+    await layer.setShell("A", GLB_URL, "selected");
+    layer.setTone("A", "pending");
+    expect(fillOf("A").opacity).toBeCloseTo(0.12);
+    expect((renderOf((shellOf(object, "A") as Entity).children[1] as Entity).meshInstances[0].material as StandardMaterial).opacity).toBeCloseTo(0.12);
+    vi.mocked(performance.now).mockReturnValue(1000);
+    frame()();
+    expect(fillOf("A").opacity).toBeCloseTo(0.12);
+
+    layer.setTone("A", "normal");
+    expect(fillOf("A").opacity).toBeCloseTo(0.25);
+  });
+
+  it("warning đổi màu vỏ sang cam và giữ độ mờ của kiểu vỏ", async () => {
+    await layer.setShell("A", GLB_URL, "selected");
+    layer.setTone("A", "warning");
+    expect(fillOf("A").emissive.equals(new Color().fromString("#f59e0b"))).toBe(true);
+    expect(fillOf("A").opacity).toBeCloseTo(0.25);
+  });
+
+  it("setTone khi chưa có vỏ thì không làm gì", () => {
+    expect(() => layer.setTone("A", "pending")).not.toThrow();
+  });
+
+  it("destroy gỡ đăng ký nhịp khung hình", async () => {
+    await layer.setShell("A", GLB_URL, "selected");
+    const handler = frame();
+    layer.destroy();
+    expect(app.off).toHaveBeenCalledWith("update", handler);
+  });
+});

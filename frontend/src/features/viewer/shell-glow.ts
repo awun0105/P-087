@@ -22,6 +22,9 @@ import type { SceneOverlay } from "@/features/viewer/scene-overlay";
 
 export type ShellStyle = "selected" | "idle";
 
+/** `pending`: đang tính xem trước, giữ vỏ cũ và làm mờ tới khi vỏ mới về; `warning`: xem trước lỗi, giữ vỏ và đổi màu cam. */
+export type ShellTone = "normal" | "pending" | "warning";
+
 /** Một vỏ cần vẽ: GLB theo URL; `selected` là vật đang chọn (sáng hơn, có viền). */
 export interface ShellSpec {
   id: string;
@@ -32,6 +35,10 @@ export interface ShellSpec {
 const SHELL_COLOR = "#2dd4bf";
 const SHELL_OPACITY: Record<ShellStyle, number> = { selected: 0.25, idle: 0.1 };
 const WIRE_OPACITY = 0.5;
+const PENDING_OPACITY = 0.12;
+const WARNING_COLOR = "#f59e0b";
+const PULSE_PERIOD_MS = 2000;
+const PULSE_AMPLITUDE = 0.03;
 const ADDED_COLOR = "#22c55e";
 const REMOVED_COLOR = "#ef4444";
 
@@ -42,6 +49,10 @@ interface PointRecord {
 }
 
 interface ShellRecord {
+  style: ShellStyle;
+  tone: ShellTone;
+  /** Đang bị nhấp nháy: cần đặt lại độ mờ về gốc khi người dùng bật giảm chuyển động. */
+  pulsing: boolean;
   root: Entity;
   fill: StandardMaterial;
   wire: StandardMaterial | null;
@@ -91,6 +102,12 @@ function paint(entity: Entity, fill: StandardMaterial, wire: boolean): void {
   }
 }
 
+/** Người dùng bật "giảm chuyển động" thì vỏ không nhấp nháy. */
+function prefersReducedMotion(): boolean {
+  return typeof window !== "undefined" && typeof window.matchMedia === "function"
+    && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
 /** GLB của vỏ từ chuỗi base64 trong lần xem trước (máy chủ trả `shell_glb_base64`). */
 export function decodeShellGlb(base64: string): ArrayBuffer {
   const binary = atob(base64);
@@ -104,8 +121,30 @@ export class ShellGlowLayer {
   private readonly shells = new Map<string, ShellRecord>();
   private readonly points = new Map<string, PointRecord>();
   private destroyed = false;
+  private subscribed = false;
 
   constructor(private readonly host: SceneOverlay) {}
+
+  /** Nhịp của vỏ đang chọn: độ mờ 0,22–0,28 theo chu kỳ 2 s; tắt khi người dùng bật giảm chuyển động. */
+  private readonly onUpdate = (): void => {
+    if (this.destroyed) return;
+    const reduce = prefersReducedMotion();
+    const wave = (1 - Math.cos((2 * Math.PI * performance.now()) / PULSE_PERIOD_MS)) / 2;
+    let animating = false;
+    for (const record of this.shells.values()) {
+      if (record.style !== "selected" || record.tone !== "normal") continue;
+      if (reduce) {
+        if (record.pulsing) this.applyTone(record);
+        continue;
+      }
+      record.pulsing = true;
+      animating = true;
+      record.fill.opacity = SHELL_OPACITY.selected + PULSE_AMPLITUDE * (2 * wave - 1);
+      record.fill.emissiveIntensity = 1 + 0.3 * wave;
+      record.fill.update();
+    }
+    if (animating) this.host.requestFrame();
+  };
 
   /**
    * Vẽ vỏ của một vật (GLB dạng ArrayBuffer hoặc URL) làm con của entity vật; vỏ cũ của cùng vật được thay. Vật chưa có
@@ -121,6 +160,9 @@ export class ShellGlowLayer {
     const asset = new Asset(`r2s-shell-${objectId}`, "container", { url, filename: "shell.glb" });
     return new Promise<void>((resolve, reject) => {
       const record: ShellRecord = {
+        style,
+        tone: "normal",
+        pulsing: false,
         root: new Entity(`r2s-shell-${objectId}`, app),
         fill: shellMaterial(SHELL_COLOR, SHELL_OPACITY[style]),
         wire: style === "selected" ? shellMaterial(SHELL_COLOR, WIRE_OPACITY) : null,
@@ -130,6 +172,7 @@ export class ShellGlowLayer {
       };
       parent.addChild(record.root);
       this.shells.set(objectId, record);
+      this.subscribe();
       asset.once("load", () => {
         this.revoke(record);
         if (this.shells.get(objectId) !== record) return resolve();
@@ -189,6 +232,17 @@ export class ShellGlowLayer {
     this.points.set(objectId, record);
   }
 
+  /**
+   * Đổi trạng thái hiển thị của vỏ đang có: `pending` làm mờ tới khi vỏ mới về, `warning` đổi màu cam và giữ độ mờ của
+   * kiểu vỏ. Vỏ `normal` trở lại thì có màu và độ mờ gốc. Vật chưa có vỏ thì không làm gì.
+   */
+  setTone(objectId: string, tone: ShellTone): void {
+    const record = this.shells.get(objectId);
+    if (!record || record.tone === tone) return;
+    record.tone = tone;
+    this.applyTone(record);
+  }
+
   /** Gỡ vỏ và điểm của một vật, hoặc của mọi vật khi không truyền `objectId`. */
   clear(objectId?: string): void {
     const ids = objectId === undefined ? new Set([...this.shells.keys(), ...this.points.keys()]) : [objectId];
@@ -202,7 +256,31 @@ export class ShellGlowLayer {
   destroy(): void {
     if (this.destroyed) return;
     this.clear();
+    if (this.subscribed) this.host.application().off("update", this.onUpdate);
+    this.subscribed = false;
     this.destroyed = true;
+  }
+
+  /** Đăng ký nhịp khung hình khi có vỏ đầu tiên; không đăng ký trước để không chạm viewer khi chưa có gì để vẽ. */
+  private subscribe(): void {
+    if (this.subscribed) return;
+    this.subscribed = true;
+    this.host.application().on("update", this.onUpdate);
+  }
+
+  /** Màu và độ mờ theo trạng thái: thường (độ mờ theo kiểu), đang tính (mờ 0,12), hoặc xem trước lỗi (màu cam). */
+  private applyTone(record: ShellRecord): void {
+    const color = record.tone === "warning" ? WARNING_COLOR : SHELL_COLOR;
+    record.fill.emissive = new Color().fromString(color);
+    record.fill.opacity = record.tone === "pending" ? PENDING_OPACITY : SHELL_OPACITY[record.style];
+    record.fill.emissiveIntensity = 1;
+    record.fill.update();
+    if (record.wire) {
+      record.wire.emissive = new Color().fromString(color);
+      record.wire.opacity = record.tone === "pending" ? PENDING_OPACITY : WIRE_OPACITY;
+      record.wire.update();
+    }
+    record.pulsing = false;
   }
 
   private parentOf(objectId: string): Entity | null {
