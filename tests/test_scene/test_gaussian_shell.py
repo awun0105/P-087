@@ -191,6 +191,7 @@ def test_filled_box_gives_watertight_shell_that_passes_qa():
     assert mesh.is_watertight
     assert shell.quality["passed"]
     assert np.all(np.abs(mesh.bounds - [BOX_LOW, BOX_HIGH]) <= 2 * VOXEL)
+    assert shell.statistics["component_genus"] == [0.0]
 
 
 def test_open_bottom_face_is_detected_as_open():

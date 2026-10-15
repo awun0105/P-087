@@ -1,4 +1,10 @@
-"""Closed shell of one object from its Gaussians: opacity and floater filters, voxel closing, strict QA."""
+"""Closed shell of one object from its Gaussians: opacity and floater filters, voxel closing, rim caps, strict QA.
+
+A rim cap closes a face whose outer layers enclose a footprint in projection. It is a conservative approximation:
+holes parallel to an axis are filled, pinholes also count as capped faces, and a closed object can list capped
+directions. Faces that the scan never observed are not guaranteed to close; see report.md for the open cases.
+Shell meshes use a larger intersection budget than other surfaces, and large objects use coarser voxels.
+"""
 
 import hashlib
 import json
@@ -236,7 +242,7 @@ class GaussianShell:
     vertices: np.ndarray  # (N, 3) float64, object-local metres
     faces: np.ndarray  # (M, 3) int64
     checksum: str  # "sha256:" of the params JSON plus the final occupied cells
-    statistics: dict[str, int | float | list[str]]
+    statistics: dict[str, int | float | list[str] | list[float | None]]
     quality: dict  # assess_surface result
 
 
@@ -281,6 +287,7 @@ def build_gaussian_shell(
             "voxel_m_effective": voxel_m,
             "capped_cells": capped_cells,
             "capped_directions": capped_directions,
+            "component_genus": quality["metrics"]["component_genus"],
         },
         quality=quality,
     )
