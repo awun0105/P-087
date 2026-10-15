@@ -92,3 +92,43 @@ Kiểm tra backend chỉ bằng đọc mã: `src/api/product/scene.py` (route re
 4. **Dòng chồng lấn nhấp nháy** khi tích "Lấy luôn": bộ đếm và dòng chồng lấn ẩn trong lúc xem trước đang tính lại (khoảng 250 ms cộng thời gian máy chủ).
 5. **Góc nhìn khoá sau lần đầu thất bại.** Khi `viewFrom` trả false lần đầu, các nút góc nhìn khoá tới khi mở lại panel, đúng như plan. Nếu viewer sẵn sàng sau đó, phải mở lại panel.
 6. **Nhánh 202 chỉ được kiểm bằng phản hồi giả.** Đã có test cho phía frontend. Phía backend đã đọc mã nhưng chưa chạy end-to-end.
+
+## Round 2
+
+Sửa ba Required changes trong `review.md`. Mọi kết luận "đạt" của review giữ nguyên, không đổi code ở phần đó.
+
+1. **Nút "Chỉnh vùng" hiện trên Draft.** Nhóm nút của scene có khoá `object_geometry` không còn điều kiện `object_aware_collision_ref`. Nhánh cũ (nút "Chỉnh vùng Gaussian · Box / Brush / Lasso") chỉ dành cho scene không có khoá, và giữ điều kiện cũ. Test Draft dùng fixture thật: `object_geometry: "awaiting_review"`, có membership, không có collision ref, vật `collider: null`. Nút "Chỉnh vùng" hiện và mở được panel.
+2. **Brush/Lasso trên Draft bị khoá.** Khi `objectGeometryState(scene) === "awaiting_review"`, nút "Chỉnh chi tiết (Brush/Lasso)" bị disable, kèm tooltip "Dùng Chỉnh vùng khi đang duyệt; Brush/Lasso dùng được sau khi Tạo mesh". Test: Draft bị disable và có tooltip; Ready vẫn bật.
+3. **Dòng "Lấy luôn" không còn biến mất sau khi tick.** Danh sách là hợp của ba nguồn:
+   - `claimed` (count > 0): "Box lấy {n} Gaussian từ {tên} — sẽ lấy về vật này", đang tick.
+   - `overlaps` (count > 0): chữ cũ, "giữ chủ cũ" khi chưa tick.
+   - `claimFrom` nhưng không có trong hai nguồn trên: "{tên} không còn trong box", đang tick để bỏ được.
+
+   Đối chiếu máy chủ (`src/services/scene/editing/region_box.py`, dòng 115–127): `claimed[id]` chỉ có khi vật trong `claim_from` có Gaussian được lấy về, còn `overlaps` bỏ mọi vật trong `claim_from`. Vì vậy một mình `overlaps` làm mất dòng ngay sau khi tick. Vấn đề 3 ở trên đã được xử lý ở đây.
+
+Test mới (`tests/region-editor.test.tsx`): tick → máy chủ trả `overlaps: {}`, `claimed: {chair: 12}` → dòng còn, đang tick; bỏ tick → yêu cầu sau có `claim_from: []`. Test thứ hai: vật đang tick mà box không còn chồng lên thì hiện "không còn trong box" và vẫn bỏ tick được. Review ghi id `b`; test dùng `chair` với nhãn "Ghế", cùng logic.
+
+Kiểm tra test có bắt được lỗi cũ: tạm đặt lại điều kiện `object_aware_collision_ref` → test Draft đỏ ("Unable to find … Brush/Lasso"); tạm bỏ nguồn `claimed` → test Lấy luôn đỏ. Đã khôi phục đúng từng dòng, không còn đánh dấu tạm nào.
+
+### Commit round 2
+
+| Commit | Nội dung |
+| --- | --- |
+| `3a03a0e8` | Đặt T-016 `in-progress` cho vòng 2 |
+| `2ab02fee` | Required 1 và 2: nút Chỉnh vùng trên Draft, Brush/Lasso bị khoá khi đang duyệt, kèm test |
+| `7e99a225` | Required 3: dòng Lấy luôn lấy từ claimed, overlaps và claimFrom, kèm test |
+| (commit này) | `report.md` (Round 2), `status.md` |
+
+### Lệnh kiểm tra round 2
+
+Chạy trên code cuối (`7e99a225`), đúng khối lệnh trong `review.md`:
+
+- `vitest run tests/region-editor.test.tsx tests/object-review.test.tsx tests/region-box-model.test.ts` → **162/162 pass** (region-editor 51, object-review 56, region-box-model 55).
+- `npm run typecheck` → **exit 0**. Lần chạy đầu bị lỗi kiểu ở mock trong test mới (union không khớp `RegionPreview`), đã sửa bằng chú thích `Promise<RegionPreview>` cho hai mock.
+- `eslint` trên `RegionEditor.tsx`, `ObjectReviewView.tsx`, `region-editor.test.tsx`, `object-review.test.tsx` → **exit 0**.
+- `graphify update .` → exit 0.
+
+### Quyết định của review, không thay đổi
+
+- Không kẹp sàn phía client (review: server bảo vệ hàng sàn).
+- Kiểm bằng mắt và đường Ready thật thuộc chủ dự án khi chạy scene mới.
