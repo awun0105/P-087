@@ -40,3 +40,23 @@ Architect đã sửa tiêu chí 7 trong `plan.md` và ghi chú vào T-011 (rebui
 - Đoạn gom `processing.scene` thành nhóm `scene/coacd/inpaint` lặp lại logic trong `objectify_with_retry`. Khi có dịp, tách thành một hàm
   dùng chung (ví dụ `objectify_config_for_job(registry, job)`).
 - `fit_canonical_floor_model` được tính lại từ PLY nguồn; kết quả xác định nên trùng với lúc tách. Chấp nhận.
+
+---
+
+# Review T-007 — Round 2
+
+Verdict: ACCEPTED
+
+Đã đọc diff `dc7d547c`: bỏ lọc theo `review`, giờ dựng cho mọi vật trong membership (hoặc đúng `object_ids` nếu được truyền).
+Chạy lại `test_object_geometry_build.py`, `test_object_geometry_steps.py`, `test_effective_collision.py`,
+`test_object_aware_composition.py`: 58 passed. Ruff sạch.
+
+## Required changes Round 1
+1. Dựng collider cho mọi vật trong membership, giữ nguyên review/state: **pass**.
+2. Test cũ đổi thành khẳng định IGNORED/DELETED/MERGED **có** collider: **pass** (`test_review_tombstones_keep_review_and_receive_colliders`).
+3. Test tích hợp với compositor thật (`compose_effective_collision`): IGNORED → collider khôi phục đúng bounds tại pose nguồn; DELETED → không
+   có; Restore vật DELETED → compose lại thành công với cùng collider: **pass**.
+4. `object_ids` tường minh chỉ dựng đúng tập đó: có test riêng, **pass**.
+
+## Ghi chú
+- Mục "Verification" trong report vẫn ghi số của vòng 1 (68 passed); số đo vòng này là của Architect ở trên. Lần sau cập nhật số trong mục Round.
