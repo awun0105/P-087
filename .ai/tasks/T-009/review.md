@@ -34,3 +34,15 @@ chạy song song. Chạy lại Tests required: 88 passed.
 - Đoạn gom `processing.scene` thành nhóm `scene/coacd/inpaint` giờ xuất hiện ở 3 nơi (`objectify_with_retry`, `build_object_geometry`,
   `extract_scene`). Tách thành một hàm dùng chung khi có dịp (đã ghi ở review T-007).
 - Import `objectify_queue` trong hàm để tránh vòng import: chấp nhận tạm.
+
+---
+
+# Review T-009 — Round 2
+
+Verdict: ACCEPTED
+
+Đã đọc diff `afe537e1`: lời gọi `state()` + `request()` của auto enqueue được bọc `try/except (ObjectifyRequestError, SceneError,
+ArtifactStoreError)`, ghi `logger.warning` kèm job_id và lý do, stage vẫn trả SUCCEEDED. Chạy lại `test_scene_extraction.py` +
+`test_scene_objectify_queue.py`: 44 passed.
+
+T-013 được phép làm bước 7 (presets).
