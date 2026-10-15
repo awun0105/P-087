@@ -1276,6 +1276,7 @@ export function ObjectReviewView({
                 <CatalogForm
                   catalog={catalog}
                   busy={busy}
+                  lockedReason={geometryLockReason}
                   onAdd={(family, position) => run((revision) => addCatalogObject(jobId, revision, family, position))}
                   onStartPlace={(family, dimensions) => {
                     const entry = catalog.entries.find((item) => item.family === family);
@@ -1289,6 +1290,7 @@ export function ObjectReviewView({
               )}
               <AddObstacleForm
                 busy={busy}
+                lockedReason={geometryLockReason}
                 onAdd={(name, dimensions, center) => run((revision) => addBoxObstacle(jobId, revision, name, dimensions, center))}
                 onStartPlace={(name, dimensions) => {
                   setPlacing({
@@ -1697,11 +1699,14 @@ function CatalogForm({
   busy,
   onAdd,
   onStartPlace,
+  lockedReason,
 }: {
   catalog: SceneCatalog;
   busy: boolean;
   onAdd: (family: string, position: [number, number, number]) => void;
   onStartPlace?: (family: string, dimensions: [number, number, number]) => void;
+  /** Lý do khoá thêm vật khi scene Draft chưa có hình học; null = không khoá. */
+  lockedReason?: string | null;
 }) {
   const [open, setOpen] = useState(false);
   const [family, setFamily] = useState(catalog.entries[0]?.family ?? "");
@@ -1710,7 +1715,7 @@ function CatalogForm({
   if (!open) {
     return (
       <div className="border-t border-line-dark p-3">
-        <Button size="sm" variant="secondary" onClick={() => setOpen(true)} className="border-line-dark bg-viewport-deep/80 text-on-dark hover:bg-viewport-deep">
+        <Button size="sm" variant="secondary" disabled={Boolean(lockedReason)} title={lockedReason ?? undefined} onClick={() => setOpen(true)} className="border-line-dark bg-viewport-deep/80 text-on-dark hover:bg-viewport-deep">
           <Library aria-hidden /> Thêm từ thư viện
         </Button>
       </div>
@@ -1757,7 +1762,7 @@ function CatalogForm({
       </div>
       <p className="text-xs text-on-dark/50">{catalog.physics_note}</p>
       <div className="flex flex-wrap gap-2">
-        <Button size="sm" type="submit" disabled={busy || !valid}>
+        <Button size="sm" type="submit" disabled={busy || !valid || Boolean(lockedReason)} title={lockedReason ?? undefined}>
           Thêm
         </Button>
         {onStartPlace && entry && (
@@ -1765,13 +1770,13 @@ function CatalogForm({
             size="sm"
             type="button"
             variant="secondary"
-            disabled={busy}
+            disabled={busy || Boolean(lockedReason)}
             onClick={() => {
               onStartPlace(family, entry.size_xyz_m);
               setOpen(false);
             }}
             className="border-line-dark bg-viewport-deep/80 text-on-dark hover:bg-viewport-deep"
-            title="Di chuột vào scene để đặt vị trí"
+            title={lockedReason ?? "Di chuột vào scene để đặt vị trí"}
           >
             <Crosshair className="size-3.5" aria-hidden /> Đặt bằng chuột
           </Button>
@@ -1844,10 +1849,13 @@ function AddObstacleForm({
   busy,
   onAdd,
   onStartPlace,
+  lockedReason,
 }: {
   busy: boolean;
   onAdd: (name: string, dimensions: [number, number, number], center: [number, number, number]) => void;
   onStartPlace?: (name: string, dimensions: [number, number, number]) => void;
+  /** Lý do khoá thêm vật cản khi scene Draft chưa có hình học; null = không khoá. */
+  lockedReason?: string | null;
 }) {
   const [open, setOpen] = useState(false);
   const [values, setValues] = useState({ name: "", x: "0", y: "0", sx: "0.6", sy: "0.4", sz: "0.5" });
@@ -1865,7 +1873,7 @@ function AddObstacleForm({
   if (!open) {
     return (
       <div className="border-t border-line-dark p-3">
-        <Button size="sm" variant="secondary" onClick={() => setOpen(true)} className="border-line-dark bg-viewport-deep/80 text-on-dark hover:bg-viewport-deep">
+        <Button size="sm" variant="secondary" disabled={Boolean(lockedReason)} title={lockedReason ?? undefined} onClick={() => setOpen(true)} className="border-line-dark bg-viewport-deep/80 text-on-dark hover:bg-viewport-deep">
           <Plus aria-hidden /> Thêm vật cản hộp
         </Button>
       </div>
@@ -1895,7 +1903,7 @@ function AddObstacleForm({
         {field("sz", "Cao (m)")}
       </div>
       <div className="flex flex-wrap gap-2">
-        <Button size="sm" type="submit" disabled={busy || !valid}>
+        <Button size="sm" type="submit" disabled={busy || !valid || Boolean(lockedReason)} title={lockedReason ?? undefined}>
           Thêm
         </Button>
         {onStartPlace && (
@@ -1903,14 +1911,14 @@ function AddObstacleForm({
             size="sm"
             type="button"
             variant="secondary"
-            disabled={busy || !validDims}
+            disabled={busy || !validDims || Boolean(lockedReason)}
             onClick={() => {
               const [, , sx, sy, sz] = numbers;
               onStartPlace(values.name.trim() || "Vật cản hộp", [sx, sy, sz]);
               setOpen(false);
             }}
             className="border-line-dark bg-viewport-deep/80 text-on-dark hover:bg-viewport-deep"
-            title="Di chuột vào scene để đặt vị trí"
+            title={lockedReason ?? "Di chuột vào scene để đặt vị trí"}
           >
             <Crosshair className="size-3.5" aria-hidden /> Đặt bằng chuột
           </Button>

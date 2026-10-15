@@ -1264,4 +1264,24 @@ describe("ObjectReviewView", () => {
     expect(screen.getByText("Collider: Vỏ Gaussian")).toBeInTheDocument();
     expect(screen.getByText("ObjectGS không đạt QA")).toBeInTheDocument();
   });
+
+  it("scene Draft: khoá Thêm vật cản hộp và Thêm từ thư viện; scene sẵn sàng vẫn bấm được", async () => {
+    const policy = { object_id: "candidate-001", visual_policy: "source", source_visual_required: false, source_transform: null, readiness_blockers: [] };
+    const base = scene("rev-001", "CONFIRMED");
+    routeFetch({ "/scene": [reply({ scene: { ...base, provenance: { ...base.provenance, object_geometry: "awaiting_review" } }, representations: [policy] })] });
+    const { unmount } = render(<ObjectReviewView jobId="job-a" />);
+
+    const catalogButton = await screen.findByRole("button", { name: "Thêm từ thư viện" });
+    const obstacleButton = screen.getByRole("button", { name: "Thêm vật cản hộp" });
+    expect(catalogButton).toBeDisabled();
+    expect(catalogButton).toHaveAttribute("title", "Cần tạo mesh trước");
+    expect(obstacleButton).toBeDisabled();
+    expect(obstacleButton).toHaveAttribute("title", "Cần tạo mesh trước");
+    unmount();
+
+    routeFetch({ "/scene": [reply({ scene: base, representations: [policy] })] });
+    render(<ObjectReviewView jobId="job-a" />);
+    expect(await screen.findByRole("button", { name: "Thêm từ thư viện" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Thêm vật cản hộp" })).toBeEnabled();
+  });
 });
