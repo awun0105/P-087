@@ -25,6 +25,8 @@ export function ObjectifyNotice({ jobId, revision, onRevision }: { jobId: string
       <Notice tone="ember" className="m-3" icon={<Loader2 className="size-4 animate-spin" aria-hidden />}>
         {state.cancellation_requested
           ? "Đang dừng tiến trình và giải phóng tài nguyên…"
+          : state.mode === "membership"
+            ? `Đang tái tạo sau hiệu chỉnh Gaussian · ${state.phase ?? state.status}. Scene hiện tại được giữ đến khi hoàn tất.`
           : state.mode === "boxes"
             ? "Đang dựng hộp ứng viên…"
             : "Đang chạy lại tách theo vật (tự thử lại tối đa 3 lần, mỗi lần vài phút)…"}
@@ -39,6 +41,11 @@ export function ObjectifyNotice({ jobId, revision, onRevision }: { jobId: string
         {error && <span className="mt-1 block text-xs">{error}</span>}
       </Notice>
     );
+  }
+  if (state.mode === "membership") {
+    return state.status === "failed" || state.status === "cancelled" ? (
+      <Notice tone="rust" className="m-3">Tái tạo {state.status === "cancelled" ? "đã hủy" : "thất bại"}. Scene hiện tại được giữ nguyên. Mở chỉnh vùng Gaussian để thử lại. {state.error}</Notice>
+    ) : null;
   }
   if (state.object_centric && state.status !== "cancelled") return null;
 

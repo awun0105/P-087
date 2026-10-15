@@ -733,7 +733,7 @@ export function restoreSceneRevision(
 
 // ── dựng lại tập vật: chạy lại tách theo vật / dùng hộp ứng viên ─────────────
 
-export type ObjectifyMode = "objectify" | "boxes";
+export type ObjectifyMode = "objectify" | "boxes" | "membership";
 
 export type OperationResource = "vram" | "ram" | "disk";
 export type OperationWaitReason = "busy" | "external" | "exceeds_machine" | "unmeasured";
@@ -750,6 +750,8 @@ export interface ObjectifyResourceWait {
 
 /** Trạng thái tách theo vật của scene + yêu cầu dựng lại gần nhất (worker thực hiện). */
 export interface ObjectifyState {
+  operation_id?: string | null;
+  phase?: string | null;
   status: "idle" | "queued" | "running" | "done" | "failed" | "cancelled";
   mode: ObjectifyMode | null;
   /** Revision SceneIR hiện tại; API cũ không gửi. */
@@ -785,8 +787,8 @@ export function requestObjectify(jobId: string, expectedRevision: string, mode: 
 }
 
 /** Cancel queued work or request a running objectify worker to stop its child process. */
-export function cancelObjectify(jobId: string): Promise<ObjectifyState> {
-  return apiFetch<ObjectifyState>(`${API}/jobs/${encodeURIComponent(jobId)}/scene/objectify/cancel`, {
+export function cancelObjectify(jobId: string, operationId?: string | null): Promise<ObjectifyState> {
+  return apiFetch<ObjectifyState>(`${API}/jobs/${encodeURIComponent(jobId)}/scene/objectify/cancel${operationId ? `?operation_id=${encodeURIComponent(operationId)}` : ""}`, {
     method: "POST",
   });
 }
@@ -1490,6 +1492,32 @@ export function editCollisionSurface(jobId: string, command: {
   kind?: "floor" | "wall"; points?: CollisionSurfacePlane["points"]; plane_id?: string;
 }): Promise<SceneEditResponse> {
   return apiFetch<SceneEditResponse>(`${API}/jobs/${encodeURIComponent(jobId)}/scene/collision-surfaces`, {
+    method: "POST", body: JSON.stringify(command),
+  });
+}
+
+export interface MembershipPreview {
+  scene_revision: string;
+  membership_checksum: string;
+  source_visual_checksum: string;
+  source_object_id: string | null;
+  target_object_id: string | null;
+  affected_object_ids: string[];
+  gaussian_count: number;
+  protected_count: number;
+  wrong_owner_count: number;
+  source_gaussian_indices: number[];
+  remaining_gaussians: Record<string, number>;
+}
+
+export function previewMembership(jobId: string, command: ObjectMembershipReassignCommand): Promise<MembershipPreview> {
+  return apiFetch<MembershipPreview>(`${API}/jobs/${encodeURIComponent(jobId)}/scene/membership/preview`, {
+    method: "POST", body: JSON.stringify(command),
+  });
+}
+
+export function regenerateMembership(jobId: string, command: ObjectMembershipReassignCommand): Promise<ObjectifyState> {
+  return apiFetch<ObjectifyState>(`${API}/jobs/${encodeURIComponent(jobId)}/scene/membership/regenerate`, {
     method: "POST", body: JSON.stringify(command),
   });
 }

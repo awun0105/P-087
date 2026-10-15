@@ -1,6 +1,8 @@
 "use client";
 
 
+import { GaussianMembershipEditor } from "@/features/studio/GaussianMembershipEditor";
+
 import { errorMessage } from "@/lib/ui-error";
 
 import dynamic from "next/dynamic";
@@ -292,6 +294,7 @@ export function ObjectReviewView({
     setFilter(hiding ? "ignored" : "all");
   };
   const [mergeRestoreTarget, setMergeRestoreTarget] = useState<string | null>(null);
+  const [membershipEditorOpen, setMembershipEditorOpen] = useState(false);
   const [correctionPanelOpen, setCorrectionPanelOpen] = useState(false);
   const [collisionSourcePanelOpen, setCollisionSourcePanelOpen] = useState(false);
   const [collisionCandidates, setCollisionCandidates] = useState<ProductArtifactRef[]>([]);
@@ -925,6 +928,9 @@ export function ObjectReviewView({
                 <span>Gộp ứng viên / Sửa nhóm Gaussian</span>
                 <span className="font-normal text-on-dark/60">{membership ? `${eligibleCorrections.length} ứng viên khả dụng` : "chưa có membership"}</span>
               </button>
+              {scene.environment.object_aware_collision_ref && selected && membership && Object.values(membership.label_to_object_id).includes(selected) && (
+                <Button size="sm" disabled={busy} onClick={() => setMembershipEditorOpen(true)}>Chỉnh vùng Gaussian · Box / Brush / Lasso</Button>
+              )}
               {correctionPanelOpen && (
                 <div id="membership-correction-panel" className="mt-2 max-h-80 space-y-3 overflow-y-auto rounded-md border border-line-dark bg-viewport-deep/60 p-2 text-xs">
                   {!membership ? (
@@ -1274,6 +1280,11 @@ export function ObjectReviewView({
           </>
         )}
       </aside>
+      {membershipEditorOpen && selected && scene.environment.membership && (
+        <GaussianMembershipEditor jobId={jobId} scene={scene} objectId={selected}
+          onClose={() => setMembershipEditorOpen(false)}
+          onPublished={() => { setMembershipEditorOpen(false); setReload(value => value + 1); }} />
+      )}
     </div>
   );
 }
