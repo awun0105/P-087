@@ -17,7 +17,7 @@ from src.models.contracts.manifests import StageId
 from src.models.contracts.object_geometry import ObjectShellManifest
 from src.models.contracts.object_membership import ObjectMembershipArtifact
 from src.models.contracts.scene import ColliderSpec, ColliderType, SceneEnvironment, SceneIR, SceneObject
-from src.services.orchestration.artifacts import FilesystemArtifactStore
+from src.services.orchestration.artifacts import FilesystemArtifactStore, sha256_bytes
 from src.services.orchestration.jobs.database import RuntimeTransaction
 from src.services.orchestration.jobs.stage_views import job_bundle
 from src.services.orchestration.processing.config import load_job_config
@@ -286,8 +286,6 @@ def build_object_geometry(
         raise ObjectGeometryBuildError("Dựng hình học trên scene nguồn trước khi chọn collision source khác.")
     resolve = registry.runtime_resolver.require
     payload = resolve(membership.source_visual_ref).read_bytes()
-    from src.services.orchestration.artifacts import sha256_bytes
-
     if sha256_bytes(payload) != membership.source_visual_ref.artifact_checksum:
         raise ObjectGeometryBuildError("source PLY checksum mismatch")
     try:

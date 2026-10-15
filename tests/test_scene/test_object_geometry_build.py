@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -40,7 +41,13 @@ def draft_scene(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamesp
     from src.config import Settings
     from src.models.contracts.coordinates import CoordinateSystem, Transform
     from src.models.contracts.object_membership import ObjectMembershipArtifact
-    from src.models.contracts.scene import SceneEnvironment, SceneObject, SceneObjectOrigin, SceneObjectState
+    from src.models.contracts.scene import (
+        ObjectPhysics,
+        SceneEnvironment,
+        SceneObject,
+        SceneObjectOrigin,
+        SceneObjectState,
+    )
     from src.services.orchestration.artifacts import FilesystemArtifactStore
     from src.services.orchestration.scene import object_geometry_build as module
     from src.services.orchestration.scene.objectify import _reference
@@ -105,6 +112,17 @@ def draft_scene(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamesp
                 geometry_ref=preview,
                 primitive_dimensions_xyz_m=(0.24, 0.32, 0.4),
                 provenance={"source_transform": pose.model_dump(mode="json")},
+                physics=ObjectPhysics(
+                    dynamic=True,
+                    mass_kg=18,
+                    mass_source="user",
+                    static_friction=0.8,
+                    dynamic_friction=0.6,
+                    restitution=0.1,
+                    provenance={"fixture": True},
+                )
+                if index == 1
+                else None,
             )
         )
     objects = bind_source_collision_ownership(objects, base.environment.geometry_ref, membership.extraction_revision)
@@ -141,7 +159,7 @@ def draft_scene(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamesp
     )
     monkeypatch.setattr(module, "camera_views", lambda *args: [], raising=False)
     settings = Settings(
-        product_scene_runtime_python=Path("data/scene_runtime/bin/python").resolve(), product_sam2_checkpoint=None
+        product_scene_runtime_python=Path("data/scene_runtime/bin/python").absolute(), product_sam2_checkpoint=None
     )
     return SimpleNamespace(
         registry=registry,
@@ -207,8 +225,10 @@ def test_zero_part_shell_collider_fails_without_new_revision(
 
 
 @pytest.fixture
-def cpu_providers(monkeypatch: pytest.MonkeyPatch) -> None:
+def cpu_providers(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     from src.services.orchestration.scene import objectify
+
+    real_run = objectify._run
 
     def run(
         python: Path, script: Path, request: dict, workspace: Path, name: str, *args: object, **kwargs: object
@@ -234,9 +254,10 @@ def cpu_providers(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(objectify, "_run", run)
     monkeypatch.setattr(objectify, "package_splat", package)
+    return SimpleNamespace(real_run=real_run)
 
 
-def test_environment_build_removes_object_cells(draft_scene: SimpleNamespace, cpu_providers: None) -> None:
+def test_environment_build_removes_object_cells(draft_scene: SimpleNamespace, cpu_providers: SimpleNamespace) -> None:
     import trimesh
 
     from src.services.orchestration.artifacts import FilesystemArtifactStore
@@ -282,7 +303,7 @@ def build(fixture: SimpleNamespace, **kwargs: object) -> str:
 
 
 def test_draft_build_publishes_ready_and_preserves_user_state(
-    draft_scene: SimpleNamespace, cpu_providers: None
+    draft_scene: SimpleNamespace, cpu_providers: SimpleNamespace
 ) -> None:
     from src.models.contracts.object_geometry import ObjectShellManifest
     from src.models.contracts.scene import ColliderType
@@ -314,7 +335,9 @@ def test_draft_build_publishes_ready_and_preserves_user_state(
 
 
 @pytest.mark.parametrize("phase", ["quality", "collider", "environment", "publish"])
-def test_cancelled_build_never_publishes(draft_scene: SimpleNamespace, cpu_providers: None, phase: str) -> None:
+def test_cancelled_build_never_publishes(
+    draft_scene: SimpleNamespace, cpu_providers: SimpleNamespace, phase: str
+) -> None:
     from threading import Event
 
     from src.services.process_control import ProcessCancelledError
@@ -332,7 +355,7 @@ def test_cancelled_build_never_publishes(draft_scene: SimpleNamespace, cpu_provi
 
 @pytest.mark.parametrize("reason", ["placeholder", "qa", "missing_frame"])
 def test_shell_failure_keeps_draft_without_obb(
-    draft_scene: SimpleNamespace, cpu_providers: None, monkeypatch: pytest.MonkeyPatch, reason: str
+    draft_scene: SimpleNamespace, cpu_providers: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, reason: str
 ) -> None:
     from src.services.orchestration.scene import object_geometry_build as module
 
@@ -364,7 +387,9 @@ def test_shell_failure_keeps_draft_without_obb(
 
 
 @pytest.mark.parametrize("review", ["IGNORED", "DELETED", "MERGED"])
-def test_review_tombstones_are_not_built(draft_scene: SimpleNamespace, cpu_providers: None, review: str) -> None:
+def test_review_tombstones_are_not_built(
+    draft_scene: SimpleNamespace, cpu_providers: SimpleNamespace, review: str
+) -> None:
     item = draft_scene.scene.objects[0]
     ignored = item.model_copy(update={"provenance": {**item.provenance, "review": review}})
     draft_scene.scene = draft_scene.registry.scene.publish_next(
@@ -380,7 +405,7 @@ def test_review_tombstones_are_not_built(draft_scene: SimpleNamespace, cpu_provi
     assert scene.provenance["geometry_build"]["built_object_ids"] == ["candidate-002"]
 
 
-def test_source_frame_wins_over_moved_pose(draft_scene: SimpleNamespace, cpu_providers: None) -> None:
+def test_source_frame_wins_over_moved_pose(draft_scene: SimpleNamespace, cpu_providers: SimpleNamespace) -> None:
     import numpy as np
     import trimesh
 
@@ -416,7 +441,7 @@ def test_source_frame_wins_over_moved_pose(draft_scene: SimpleNamespace, cpu_pro
 
 @pytest.mark.parametrize("outcome", ["concurrent_edit", "fenced", "environment_failure"])
 def test_failed_publication_or_environment_keeps_committed_head(
-    draft_scene: SimpleNamespace, cpu_providers: None, monkeypatch: pytest.MonkeyPatch, outcome: str
+    draft_scene: SimpleNamespace, cpu_providers: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, outcome: str
 ) -> None:
     from src.services.orchestration.scene import object_geometry_build as module
     from src.services.orchestration.scene.errors import SceneRevisionConflictError
@@ -505,3 +530,100 @@ def test_full_build_rejects_zero_part_collider_before_environment(
     with pytest.raises(module.ObjectGeometryBuildError, match="Gaussian shell collider generation failed"):
         build(draft_scene)
     assert draft_scene.registry.scene.current(draft_scene.job_id).scene == draft_scene.scene
+
+
+RUNTIME = Path(__file__).resolve().parents[2] / "data/scene_runtime/bin/python"
+
+
+@pytest.mark.skipif(not RUNTIME.is_file(), reason="isolated CoACD runtime data/scene_runtime is not installed")
+def test_real_coacd_builds_ready_scene(
+    draft_scene: SimpleNamespace, cpu_providers: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from src.services.orchestration.scene import objectify
+
+    fake_run = objectify._run
+
+    def run(
+        python: Path, script: Path, request: dict, workspace: Path, name: str, *args: object, **kwargs: object
+    ) -> dict:
+        provider = cpu_providers.real_run if name == "convex" else fake_run
+        return provider(python, script, request, workspace, name, *args, **kwargs)
+
+    monkeypatch.setattr(objectify, "_run", run)
+    build(draft_scene)
+    scene = draft_scene.registry.scene.current(draft_scene.job_id).scene
+    assert scene.provenance["object_geometry"] == "ready"
+    for item in scene.objects:
+        assert 0 < item.collider.parameters["parts"] <= 8
+
+
+@pytest.mark.skipif(not RUNTIME.is_file(), reason="isolated CoACD runtime data/scene_runtime is not installed")
+def test_open_bottom_shell_real_coacd_budget_and_bounds(
+    tmp_path: Path, record_property: Callable[[str, object], None]
+) -> None:
+    import time
+
+    import numpy as np
+    import trimesh
+
+    from src.services.orchestration.artifacts import sha256_bytes
+    from src.services.orchestration.scene.object_geometry_steps import SurfaceInput, run_surface_colliders
+    from src.services.scene.gaussian_shell import ShellParams, build_gaussian_shell
+    from tests.test_scene.test_gaussian_shell import BOX_HIGH, BOX_LOW, open_face_points
+
+    points = open_face_points(np.random.default_rng(19), BOX_LOW, BOX_HIGH, 20000, axis=2, side=0)
+    params = ShellParams()
+    shell = build_gaussian_shell(points, None, params)
+    source_mesh = trimesh.Trimesh(shell.vertices, shell.faces, process=False)
+    payload = source_mesh.export(file_type="glb")
+    path = tmp_path / "shell.glb"
+    path.write_bytes(payload)
+    output = tmp_path / "collider.glb"
+    maximum = 8
+    started = time.perf_counter()
+    result = run_surface_colliders(
+        RUNTIME,
+        [SurfaceInput("open-bottom", path, sha256_bytes(payload), output)],
+        {"max_convex_hull": maximum},
+        tmp_path,
+        120,
+        None,
+        surface_label="Gaussian shell",
+    )
+    elapsed = time.perf_counter() - started
+    parts = result["open-bottom"]["parts"]
+    collider = trimesh.load(output, force="mesh")
+    np.testing.assert_allclose(collider.bounds, source_mesh.bounds, atol=2 * params.voxel_m)
+    assert 0 < parts <= maximum
+    record_property("coacd_parts", parts)
+    record_property("coacd_seconds", elapsed)
+    record_property("solidity", shell.statistics["solidity"])
+    print(
+        f"open-bottom: CoACD parts={parts}/{maximum}, elapsed={elapsed:.3f}s, solidity={shell.statistics['solidity']:.6f}"
+    )
+
+
+def test_missing_source_ownership_is_bound_to_extraction_pose(
+    draft_scene: SimpleNamespace, cpu_providers: SimpleNamespace
+) -> None:
+    original = draft_scene.scene.objects[0]
+    moved = original.model_copy(
+        update={
+            "source_collision": None,
+            "transform": original.transform.model_copy(update={"translation_xyz": (20, 30, 40)}),
+        }
+    )
+    draft_scene.scene = draft_scene.registry.scene.publish_next(
+        draft_scene.job_id,
+        draft_scene.scene.scene_revision,
+        draft_scene.scene.model_copy(update={"objects": [moved, draft_scene.scene.objects[1]]}),
+        "fixture-no-ownership",
+    ).revision.scene
+    build(draft_scene)
+    scene = draft_scene.registry.scene.current(draft_scene.job_id).scene
+    assert scene.objects[0].transform == moved.transform
+    assert scene.objects[0].source_collision.source_transform == original.transform
+    assert (
+        scene.objects[0].source_collision.extraction_revision
+        == draft_scene.scene.environment.membership.extraction_revision
+    )
