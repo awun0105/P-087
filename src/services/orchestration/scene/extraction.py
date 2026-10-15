@@ -21,12 +21,12 @@ from src.models.contracts.floor_model import FloorModel
 from src.models.contracts.manifests import JobManifest, StageArtifact, StageId, StageStatus
 from src.models.contracts.reconstruction import ReconstructionBundle
 from src.models.contracts.scene import SceneObject
-from src.services.orchestration.artifacts import FilesystemArtifactStore
+from src.services.orchestration.artifacts import ArtifactStoreError, FilesystemArtifactStore
 from src.services.orchestration.jobs.database import RuntimeTransaction
 from src.services.orchestration.jobs.progress import metric_confirmation_stage
 from src.services.orchestration.processing.config import load_job_config
 from src.services.orchestration.projects.registry import ProjectRegistry
-from src.services.orchestration.scene.errors import SceneRevisionConflictError
+from src.services.orchestration.scene.errors import SceneError, SceneRevisionConflictError
 from src.services.orchestration.scene.floor_evidence import publish_floor_fit_evidence, scene_floor_fit_summary
 from src.services.orchestration.scene.objectify import (
     AWAITING_CHOICE,
@@ -237,15 +237,18 @@ def extract_scene(
     if auto_geometry and object_geometry_state(revision.scene) == "awaiting_review":
         from src.services.orchestration.scene import objectify_queue
 
-        queued = objectify_queue.state(registry, settings, job.job_id)
-        if not (
-            queued.mode == "geometry"
-            and queued.base_revision == revision.scene.scene_revision
-            and queued.status in {"queued", "running"}
-        ):
-            objectify_queue.request(
-                registry, settings, job.job_id, revision.scene.scene_revision, "geometry", actor_id="system"
-            )
+        try:
+            queued = objectify_queue.state(registry, settings, job.job_id)
+            if not (
+                queued.mode == "geometry"
+                and queued.base_revision == revision.scene.scene_revision
+                and queued.status in {"queued", "running"}
+            ):
+                objectify_queue.request(
+                    registry, settings, job.job_id, revision.scene.scene_revision, "geometry", actor_id="system"
+                )
+        except (objectify_queue.ObjectifyRequestError, SceneError, ArtifactStoreError) as error:
+            logger.warning("Could not queue automatic geometry build for job %s: %s", job.job_id, error)
     reference = revision.scene_reference
     return StageArtifact(
         stage_id=StageId.OBJECT_EXTRACT,

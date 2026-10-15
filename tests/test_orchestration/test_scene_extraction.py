@@ -5,6 +5,7 @@ bằng chứng chất lượng SAMPro3D trên dữ liệu thật.
 """
 
 import io
+import logging
 from pathlib import Path
 
 import pytest
@@ -80,10 +81,15 @@ def test_without_sam2_runtime_falls_back_to_geometric_candidates(tmp_path: Path)
     assert again.artifact_checksum == stage.artifact_checksum
 
 
-@pytest.mark.parametrize("review", ["auto", "required"])
+@pytest.mark.parametrize("review,queue_failure", [("auto", False), ("required", False), ("auto", True)])
 @pytest.mark.parametrize("method", ["shell", "objectgs"])
 def test_extraction_auto_publishes_draft_then_enqueues_geometry(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, review: str, method: str
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    review: str,
+    method: str,
+    queue_failure: bool,
 ) -> None:
     from types import SimpleNamespace
 
@@ -132,13 +138,30 @@ def test_extraction_auto_publishes_draft_then_enqueues_geometry(
         )
 
     monkeypatch.setattr(module, "objectify_with_retry", extract)
+    if queue_failure:
+
+        def reject_request(*args: object, **kwargs: object) -> None:
+            raise objectify_queue.ObjectifyRequestError("geometry queue is busy")
+
+        monkeypatch.setattr(objectify_queue, "request", reject_request)
     settings = Settings(database_url=f"sqlite:///{tmp_path / 'queue.db'}", product_objectify=True)
-    stage = module.extract_scene(registry, job, bundle, settings, tmp_path / "work")
+    with caplog.at_level(logging.WARNING, logger=module.__name__):
+        stage = module.extract_scene(registry, job, bundle, settings, tmp_path / "work")
+    assert stage.stage_id == StageId.OBJECT_EXTRACT and stage.status == StageStatus.SUCCEEDED
     scene = registry.scene.current(job.job_id).scene
     queued = objectify_queue.state(registry, settings, job.job_id)
     assert scene.provenance["object_geometry"] == "awaiting_review"
     assert stage.artifact_uri.endswith("scene_ir.rev-001.json")
-    if review == "auto":
+    if queue_failure:
+        assert scene.scene_revision == "rev-001"
+        assert queued.status == "idle"
+        assert any(
+            record.levelno == logging.WARNING
+            and job.job_id in record.getMessage()
+            and "geometry queue is busy" in record.getMessage()
+            for record in caplog.records
+        )
+    elif review == "auto":
         assert scene.provenance["geometry_review"] == "auto"
         assert queued.status == "queued" and queued.mode == "geometry" and queued.base_revision == scene.scene_revision
         # Retrying extraction after initial publication keeps the same queued operation.
