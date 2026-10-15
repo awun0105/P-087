@@ -52,6 +52,7 @@ from src.services.orchestration.scene.effective_collision import (
 )
 from src.services.scene.effective_collision import CarvedBackground
 from src.services.scene.effective_collision import _source_region_removed as _source_region_removed
+from src.services.scene.geometry_state import require_geometry_ready
 from src.services.scene.representation_composition import VisualPolicy, scene_representations
 from src.services.scene.representation_integrity import representation_issues
 from src.services.simulation.colliders.carve import (
@@ -471,6 +472,8 @@ def build_simulation_package(
 ) -> SimulationPackage:
     """Tạo (hoặc trả lại) gói mô phỏng của revision SceneIR hiện tại."""
     current = registry.scene.current(job_id)
+    # Refuse before ownership recovery can publish: an awaiting-review scene has no per-object geometry yet.
+    require_geometry_ready(current.scene, "xuất USD")
     scene, recovered_ownership = _recover_legacy_source_ownership(registry, job_id, current.scene)
     job = registry.get_job(job_id)
     controls = (

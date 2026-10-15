@@ -607,3 +607,18 @@ async def test_draft_scene_refuses_walk_collision_for_the_current_and_a_pinned_r
     assert current.json()["detail"] == "Cần tạo mesh trước khi Walk."
     assert pinned.status_code == 409
     assert pinned.json()["detail"] == "Cần tạo mesh trước khi Walk."
+
+
+@pytest.mark.asyncio
+async def test_draft_scene_refuses_simulation_package_without_publishing(
+    client, isolated_registry, monkeypatch
+) -> None:
+    from src.api.studio import deps as studio_deps
+
+    monkeypatch.setattr(studio_deps, "get_project_registry", lambda: isolated_registry)
+    _as_draft(isolated_registry, monkeypatch)
+    response = await client.post(f"{_JOB}/simulation-package")
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Cần tạo mesh trước khi xuất USD."
+    assert isolated_registry.scene.revision("job-fixture-001", "rev-002") is None

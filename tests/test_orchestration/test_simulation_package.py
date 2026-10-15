@@ -21,6 +21,7 @@ from src.models.contracts.scene import ColliderType, SceneObjectState
 from src.models.contracts.validation import RuleResult
 from src.services.orchestration.review import simulation_package as simulation_package_service
 from src.services.orchestration.review.simulation_package import BUILD_CONFIG, build_simulation_package, current_package
+from src.services.orchestration.scene.errors import ObjectGeometryNotReadyError
 from src.services.orchestration.scene.extraction import extract_scene
 from src.services.orchestration.scene.objects import add_box_object, add_catalog_object, apply_object_action
 from src.services.scene.collision_ownership import SourceCollisionOwnershipError
@@ -117,6 +118,20 @@ def test_confirmed_objects_become_a_sealed_package(tmp_path: Path) -> None:
     assert again.package_ref == package.package_ref
     assert registry.scene.current(job.job_id).scene.scene_revision == "rev-003"
     assert current_package(registry, job.job_id) == package
+
+
+def test_draft_scene_refuses_usd_export_before_recovery_or_publication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registry, job = _scene_job(tmp_path)
+    current = registry.scene.current(job.job_id)
+    draft = current.scene.model_copy(
+        update={"provenance": {**current.scene.provenance, "object_geometry": "awaiting_review"}}
+    )
+    monkeypatch.setattr(registry.scene, "current", lambda job_id: current.model_copy(update={"scene": draft}))
+
+    with pytest.raises(ObjectGeometryNotReadyError, match="Cần tạo mesh trước khi xuất USD."):
+        build_simulation_package(registry, job.job_id)
 
 
 def _neighbour_candidate(item, new_id: str):  # noqa: ANN001, ANN202
