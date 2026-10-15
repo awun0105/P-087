@@ -387,7 +387,7 @@ def test_shell_failure_keeps_draft_without_obb(
 
 
 @pytest.mark.parametrize("review", ["IGNORED", "DELETED", "MERGED"])
-def test_review_tombstones_are_not_built(
+def test_review_tombstones_keep_review_and_receive_colliders(
     draft_scene: SimpleNamespace, cpu_providers: SimpleNamespace, review: str
 ) -> None:
     item = draft_scene.scene.objects[0]
@@ -400,9 +400,16 @@ def test_review_tombstones_are_not_built(
     ).revision.scene
     build(draft_scene)
     scene = draft_scene.registry.scene.current(draft_scene.job_id).scene
-    assert scene.objects[0] == ignored
+    first = scene.objects[0]
+    assert first.collider is not None
+    assert first.surface_mesh_ref.artifact_type == "ObjectShellMesh"
+    assert first.provenance["review"] == review
+    assert first.state == ignored.state and first.active == ignored.active
+    assert first.transform == ignored.transform
+    assert first.source_collision == ignored.source_collision
+    assert first.physics == ignored.physics and first.name == ignored.name
     assert scene.objects[1].collider is not None
-    assert scene.provenance["geometry_build"]["built_object_ids"] == ["candidate-002"]
+    assert scene.provenance["geometry_build"]["built_object_ids"] == ["candidate-001", "candidate-002"]
 
 
 def test_source_frame_wins_over_moved_pose(draft_scene: SimpleNamespace, cpu_providers: SimpleNamespace) -> None:
@@ -627,3 +634,94 @@ def test_missing_source_ownership_is_bound_to_extraction_pose(
         scene.objects[0].source_collision.extraction_revision
         == draft_scene.scene.environment.membership.extraction_revision
     )
+
+
+@pytest.mark.parametrize("review", ["IGNORED", "DELETED"])
+def test_reviewed_build_composes_source_collision_and_restores_deleted_object(
+    draft_scene: SimpleNamespace, cpu_providers: SimpleNamespace, review: str
+) -> None:
+    import numpy as np
+    import trimesh
+
+    from src.models.contracts.scene import SceneIR, SceneObjectState
+    from src.services.orchestration.scene.objects import apply_object_action
+    from src.services.scene.effective_collision import CarvedBackground, compose_effective_collision
+
+    first, second = draft_scene.scene.objects
+    reviewed = first.model_copy(
+        update={
+            "provenance": {**first.provenance, "review": review},
+            "transform": first.transform.model_copy(update={"translation_xyz": (20, 30, 40)}),
+        }
+    )
+    # A confirmed second object leaves only the first object's review-dependent source restoration.
+    confirmed = second.model_copy(update={"state": SceneObjectState.CONFIRMED, "active": True})
+    draft_scene.scene = draft_scene.registry.scene.publish_next(
+        draft_scene.job_id,
+        draft_scene.scene.scene_revision,
+        draft_scene.scene.model_copy(update={"objects": [reviewed, confirmed]}),
+        "fixture-reviewed-draft",
+    ).revision.scene
+    build(draft_scene)
+    scene = draft_scene.registry.scene.current(draft_scene.job_id).scene
+    resolve = draft_scene.registry.runtime_resolver.require
+    source_ref = scene.environment.geometry_ref
+    source_payload = resolve(source_ref).read_bytes()
+    baseline = trimesh.load(resolve(scene.environment.collider_ref), force="mesh", process=False)
+    collider = trimesh.load(resolve(scene.objects[0].collider.geometry_ref), force="mesh", process=False)
+
+    def compose(value: SceneIR) -> CarvedBackground:
+        return compose_effective_collision(value, source_ref, source_payload, lambda ref: resolve(ref).read_bytes())
+
+    def assert_source_restored(result: CarvedBackground) -> None:
+        assert len(result.faces) == len(baseline.faces) + len(collider.faces)
+        restored_points = result.vertices[result.faces[len(baseline.faces) :]].reshape(-1, 3)
+        # The immutable source pose wins over the edited pose at (20, 30, 40).
+        expected_bounds = collider.bounds + np.asarray(first.source_collision.source_transform.translation_xyz)
+        np.testing.assert_allclose(
+            [restored_points.min(axis=0), restored_points.max(axis=0)], expected_bounds, atol=1e-6
+        )
+
+    result = compose(scene)
+    if review == "IGNORED":
+        assert_source_restored(result)
+    else:
+        assert len(result.faces) == len(baseline.faces)
+        np.testing.assert_allclose(result.vertices[result.faces], baseline.vertices[baseline.faces])
+        restored = apply_object_action(
+            draft_scene.registry.scene, draft_scene.job_id, first.id, "restore", scene.scene_revision
+        ).revision.scene
+        assert restored.objects[0].collider == scene.objects[0].collider
+        assert_source_restored(compose(restored))
+
+
+def test_explicit_object_ids_build_only_requested_reviewed_objects(
+    draft_scene: SimpleNamespace, cpu_providers: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from src.services.orchestration.scene import object_geometry_build as module
+
+    first, second = draft_scene.scene.objects
+    ignored = first.model_copy(update={"provenance": {**first.provenance, "review": "IGNORED"}})
+    draft_scene.scene = draft_scene.registry.scene.publish_next(
+        draft_scene.job_id,
+        draft_scene.scene.scene_revision,
+        draft_scene.scene.model_copy(update={"objects": [ignored, second]}),
+        "fixture-ignored",
+    ).revision.scene
+    build(draft_scene)
+    draft_scene.scene = draft_scene.registry.scene.current(draft_scene.job_id).scene
+    build_shell = module._build_shell
+    seen = []
+
+    def shell(item: module.SceneObject, *args: object, **kwargs: object) -> tuple:
+        seen.append(item.id)
+        return build_shell(item, *args, **kwargs)
+
+    monkeypatch.setattr(module, "_build_shell", shell)
+    build(draft_scene, object_ids={first.id})
+    current = draft_scene.registry.scene.current(draft_scene.job_id).scene
+    assert seen == [first.id]
+    assert current.provenance["geometry_build"]["built_object_ids"] == [first.id]
+    assert current.objects[0].provenance["review"] == "IGNORED"
+    assert current.objects[0].collider is not None
+    assert current.objects[1] == draft_scene.scene.objects[1]

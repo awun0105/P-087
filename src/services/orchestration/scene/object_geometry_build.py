@@ -307,9 +307,7 @@ def build_object_geometry(
     selected = [
         item
         for item in scene.objects
-        if item.id in membership.label_to_object_id.values()
-        and item.provenance.get("review") not in {"DELETED", "IGNORED", "MERGED"}
-        and (object_ids is None or item.id in object_ids)
+        if item.id in membership.label_to_object_id.values() and (object_ids is None or item.id in object_ids)
     ]
     store = FilesystemArtifactStore(registry.runtime_resolver)
 
