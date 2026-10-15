@@ -1,6 +1,6 @@
 # Review T-020
 
-Verdict: CHANGES REQUESTED (hai sửa nhỏ về chữ hiển thị; logic đạt)
+Verdict: ACCEPTED (vòng 2) (hai sửa nhỏ về chữ hiển thị; logic đạt)
 
 Review code: đọc trọn diff `ProcessingSettings.tsx` (khối `ReviewChoice`) và `useProcessingForm.ts` (`matchesPreset`, `keepReviewChoice`),
 và đoạn tóm tắt trong `UnifiedInputFlow.tsx`. Chạy `processing-settings`, `ux-processing-form`, `unified-input-flow`: 46 passed.
@@ -28,3 +28,12 @@ và đoạn tóm tắt trong `UnifiedInputFlow.tsx`. Chạy `processing-settings
 
 ## Ghi chú
 - Kiểm bố cục bằng mắt là việc của chủ dự án.
+
+
+## Round 2 — ACCEPTED
+
+Đọc diff `28cf8de8`, `bfcdd86f`. Chạy lại `processing-settings`, `unified-input-flow`, `studio-sample-pipeline`: 43/43 PASS.
+
+1. Pass. `summaryValue` tra nhãn cho mọi tham số `choice`, không tìm thấy thì rơi về giá trị thô (không trống). Test dùng nhãn
+   thật từ JSON preset.
+2. Pass. Khối ReviewChoice chỉ-đọc dùng câu chung. Giữ câu "video mẫu" cho tham số khác là đúng phạm vi.
