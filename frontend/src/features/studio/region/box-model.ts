@@ -121,7 +121,8 @@ const DEFAULT_FIT_MARGIN_M = 0.02;
 /**
  * Box mặc định bao quanh các điểm object-local (xyz phẳng). Yaw theo hướng chính trên mặt XY (PCA); cạnh dài hơn
  * là trục x. Đáy bám đúng z nhỏ nhất của điểm; mọi nửa kích thước cộng `marginM`, nên đỉnh cao hơn điểm cao nhất
- * 2·marginM. Nửa kích thước kẹp trong [MIN_HALF_M, MAX_HALF_M]. Ném lỗi khi không có điểm.
+ * 2·marginM. Nửa kích thước không bị kẹp: fit ngoài [MIN_HALF_M, MAX_HALF_M] để validateBoxes báo lỗi, không
+ * cắt âm thầm. Ném lỗi khi không có điểm.
  */
 export function fitBoxToPoints(points: Float32Array, marginM = DEFAULT_FIT_MARGIN_M): Omit<EditableBox, "id" | "op"> {
   if (points.length === 0 || points.length % 3 !== 0) throw new Error("fitBoxToPoints cần mảng xyz với ít nhất một điểm");
@@ -172,9 +173,9 @@ export function fitBoxToPoints(points: Float32Array, marginM = DEFAULT_FIT_MARGI
   const midU = (minU + maxU) / 2;
   const midV = (minV + maxV) / 2;
   const half: Vec3 = [
-    clampHalf(Math.max(extU, extV) / 2 + marginM),
-    clampHalf(Math.min(extU, extV) / 2 + marginM),
-    clampHalf((maxZ - minZ) / 2 + marginM),
+    Math.max(extU, extV) / 2 + marginM,
+    Math.min(extU, extV) / 2 + marginM,
+    (maxZ - minZ) / 2 + marginM,
   ];
   return {
     center: [midU * u[0] + midV * v[0], midU * u[1] + midV * v[1], minZ + half[2]],

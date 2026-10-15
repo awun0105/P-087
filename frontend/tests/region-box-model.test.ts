@@ -257,10 +257,12 @@ describe("fitBoxToPoints", () => {
     expect(fit.half[1]).toBeCloseTo(0.02, 9);
   });
 
-  it("keeps a single point within the valid half-extent range", () => {
-    const fit = fitBoxToPoints(new Float32Array([3, 4, 5]), 0);
-    expect(fit.half).toEqual([MIN_HALF_M, MIN_HALF_M, MIN_HALF_M]);
-    expect(fit.center).toEqual([3, 4, 5 + MIN_HALF_M]);
+  it("returns raw extents plus margin so validateBoxes reports fits outside the allowed range", () => {
+    const tall = fitBoxToPoints(new Float32Array([0, 0, 0, 0, 0, 45]), 0);
+    expect(tall.half[2]).toBeCloseTo(22.5, 6);
+    expect(validateBoxes([{ id: "fit", op: "add", ...tall }])).toBe(
+      "Box 1: nửa kích thước phải từ 0,005 m đến 20 m",
+    );
   });
 
   it("puts the longer extent on x even when the principal axis is the shorter one", () => {
