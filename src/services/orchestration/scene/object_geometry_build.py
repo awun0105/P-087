@@ -674,6 +674,27 @@ def build_object_geometry(
         raise ObjectGeometryBuildError("Membership references missing scene objects")
     if object_ids is not None and (not object_ids or not object_ids <= mapped):
         raise ObjectGeometryBuildError("Geometry build requested unknown membership objects")
+    if membership_override is not None:
+        objects = []
+        for item in scene.objects:
+            if item.id in object_ids and "source_transform" not in item.provenance:
+                ownership = item.source_collision
+                if (
+                    ownership is None
+                    or ownership.source_geometry_ref != membership.source_geometry_ref
+                    or ownership.extraction_revision != membership.extraction_revision
+                ):
+                    raise ObjectGeometryBuildError(f"{item.id}: missing matching source ownership", object_id=item.id)
+                item = item.model_copy(
+                    update={
+                        "provenance": {
+                            **item.provenance,
+                            "source_transform": ownership.source_transform.model_dump(mode="json"),
+                        }
+                    }
+                )
+            objects.append(item)
+        scene = scene.model_copy(update={"objects": objects})
     selected = [
         item
         for item in scene.objects

@@ -24,11 +24,10 @@ from src.services.orchestration.jobs.database import RuntimeTransaction
 from src.services.orchestration.jobs.stage_views import job_bundle
 from src.services.orchestration.projects.registry import ProjectRegistry
 from src.services.orchestration.scene.editor import SceneEditor
+from src.services.orchestration.scene.object_geometry_build import MembershipOverride, build_object_geometry
 from src.services.orchestration.scene.objectify import (
-    CorrectedMembership,
     _ensure_not_cancelled,
     _reference,
-    objectify_with_retry,
 )
 from src.services.scene.decomposition.gaussian_split import positions, read_gaussian_ply
 from src.services.scene.editing.membership import (
@@ -39,6 +38,7 @@ from src.services.scene.editing.membership import (
     validate_object_membership_command,
 )
 from src.services.scene.floor_model import above_floor_mask, fit_canonical_floor_model, point_cloud_checksum
+from src.services.scene.geometry_state import object_geometry_state
 
 
 @dataclass(frozen=True)
@@ -145,10 +145,8 @@ def regenerate_membership(
     if command.expected_scene_revision != expected_revision:
         raise ObjectMembershipValidationError("correction command and queue base revision differ")
     scene, membership, labels, preview = prepare_correction(registry.scene, job_id, command)
-    if scene.environment.object_aware_collision_ref is None:
-        raise ObjectMembershipValidationError(
-            "queued regeneration requires an ObjectGS scene; use legacy ROI correction"
-        )
+    if object_geometry_state(scene) != "ready":
+        raise ObjectMembershipValidationError("queued membership regeneration requires a Ready scene")
     if scene.environment.collision_selection_ref is not None:
         raise ObjectMembershipValidationError("correct the source scene before selecting another collision source")
     if any(count < 50 for count in preview["remaining_gaussians"].values()):
@@ -186,11 +184,6 @@ def regenerate_membership(
         payload,
     )
     corrected = membership.model_copy(update={"labels_ref": labels_ref, "label_to_object_id": mapping}, deep=True)
-    originals = {item.id: item for item in scene.objects}
-    poses = {
-        owner: originals[owner].source_collision.source_transform
-        for owner in set(membership.label_to_object_id.values())
-    }
     correction_payload = json.dumps(
         {
             "operation": "reassign",
@@ -212,81 +205,16 @@ def regenerate_membership(
         ),
         correction_payload,
     )
-    # The existing producer trains a shared labelled model. Regenerate that model
-    # rather than claiming its old checkpoint reflects changed supervision.
-    result = objectify_with_retry(
+    _ensure_not_cancelled(cancel_event)
+    return build_object_geometry(
         registry,
-        job,
-        bundle,
         settings,
-        workspace,
-        publish,
-        extraction_revision=membership.extraction_revision,
-        geometry_method="objectgs",
-        correction=CorrectedMembership(corrected, labels, poses, correction_ref),
+        job_id,
+        expected_revision=expected_revision,
+        workspace=workspace,
+        object_ids=set(preview["affected_object_ids"]),
+        membership_override=MembershipOverride(labels, corrected, correction_ref),
+        commit_guard=commit_guard,
         cancel_event=cancel_event,
         progress=progress,
     )
-    if result.environment.membership != corrected:
-        raise ObjectMembershipValidationError("regenerated membership receipt mismatch")
-    generated = {item.id: item for item in result.objects}
-    if set(generated) != set(poses):
-        raise ObjectMembershipValidationError("regeneration changed source object identity")
-    objects = []
-    for item in scene.objects:
-        if item.id not in generated:
-            objects.append(item)
-            continue
-        fresh = generated[item.id]
-        objects.append(
-            item.model_copy(
-                update={
-                    "visual_ref": fresh.visual_ref,
-                    "geometry_ref": fresh.geometry_ref,
-                    "surface_mesh_ref": fresh.surface_mesh_ref,
-                    "collider": fresh.collider,
-                    "primitive_dimensions_xyz_m": fresh.primitive_dimensions_xyz_m,
-                    "provenance": {
-                        **item.provenance,
-                        **fresh.provenance,
-                        "membership_regeneration": {
-                            "input_scene_revision": expected_revision,
-                            "actor_id": actor_id,
-                            "source_membership_checksum": labels_ref.artifact_checksum,
-                        },
-                    },
-                },
-                deep=True,
-            )
-        )
-    environment = scene.environment.model_copy(
-        update={
-            key: getattr(result.environment, key)
-            for key in ("visual_ref", "visual_master_ref", "membership", "collider_ref", "object_aware_collision_ref")
-        },
-        deep=True,
-    )
-    updated = scene.model_copy(
-        update={
-            "objects": objects,
-            "environment": environment,
-            "provenance": {
-                **scene.provenance,
-                **result.provenance,
-                "membership_correction": {
-                    "operation": "reassign",
-                    "evidence_ref": correction_ref.model_dump(mode="json"),
-                    "actor_id": actor_id,
-                    "preview": {key: value for key, value in preview.items() if key != "source_gaussian_indices"},
-                },
-            },
-        },
-        deep=True,
-    )
-    _ensure_not_cancelled(cancel_event)
-    if progress:
-        progress("publishing")
-    published = registry.scene.publish_next(
-        job_id, expected_revision, updated, "object_membership_regeneration", commit_guard=commit_guard
-    )
-    return published.revision.scene.scene_revision

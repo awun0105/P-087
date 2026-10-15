@@ -9,12 +9,12 @@ import pytest
 from src.models.contracts.object_membership import ObjectMembershipReassignCommand
 from src.services.orchestration.scene import membership_regeneration as module
 from src.services.orchestration.scene.errors import SceneRevisionConflictError
-from src.services.orchestration.scene.objectify import ObjectifyResult
+from src.services.orchestration.scene.object_geometry_build import ObjectGeometryBuildError
 from src.services.process_control import ProcessCancelledError
 from tests.test_scene.test_object_correction import _fixture, _source_rows
 
 
-@pytest.mark.parametrize("outcome", ["success", "surface_failure", "cancelled", "stale", "wrong_receipt"])
+@pytest.mark.parametrize("outcome", ["success", "surface_failure", "cancelled", "stale", "build_failure"])
 def test_regeneration_preserves_active_scene_until_fenced_publish(tmp_path, monkeypatch, outcome):
     rows = np.repeat(_source_rows(), 60)
     labels = np.repeat(np.array([0, 0, 1, 1, 2, 2, 3, 3, -1], dtype=np.int32), 60)
@@ -67,26 +67,39 @@ def test_regeneration_preserves_active_scene_until_fenced_publish(tmp_path, monk
     cancel = Event()
     seen = []
 
-    def producer(*args, correction, **kwargs):
+    def producer(*args, membership_override, object_ids, **kwargs):
+        correction = membership_override
         seen.append(correction)
         assert editor.current("job-fixture-001").scene == base
         assert correction.labels[0] == 2
-        assert correction.labels[120] == 0  # duplicate owner labels canonicalized, never another object
-        assert correction.source_poses[edited.id] == first.source_collision.source_transform
-        assert set(correction.membership.label_to_object_id) == {"0", "2", "3"}
+        assert correction.labels[120] == 0
+        assert object_ids == {"candidate-001", "candidate-002"}
+        assert set(correction.manifest.label_to_object_id) == {"0", "2", "3"}
         assert correction.evidence_ref.artifact_type == "ObjectMembershipCorrection"
         if outcome == "surface_failure":
             raise RuntimeError("surface quality gate failed")
+        if outcome == "build_failure":
+            raise ObjectGeometryBuildError("fixture build failed", object_id="candidate-001")
         if outcome == "cancelled":
             cancel.set()
+            raise ProcessCancelledError("cancelled")
         if outcome == "stale":
             editor.publish_next("job-fixture-001", base.scene_revision, base, "concurrent-edit")
-        environment = base.environment.model_copy(
-            update={"membership": correction.membership if outcome != "wrong_receipt" else fixture.membership}
+        environment = base.environment.model_copy(update={"membership": correction.manifest})
+        updated = base.model_copy(
+            update={
+                "environment": environment,
+                "provenance": {
+                    **base.provenance,
+                    "membership_correction": {"evidence_ref": correction.evidence_ref.model_dump(mode="json")},
+                },
+            }
         )
-        return ObjectifyResult(environment, base.objects, {"fixture": True})
+        return editor.publish_next(
+            "job-fixture-001", kwargs["expected_revision"], updated, "fixture-build"
+        ).revision.scene.scene_revision
 
-    monkeypatch.setattr(module, "objectify_with_retry", producer)
+    monkeypatch.setattr(module, "build_object_geometry", producer, raising=False)
     kwargs = dict(command=command, actor_id="fixture-user", expected_revision=base.scene_revision, cancel_event=cancel)
     if outcome == "success":
         revision = module.regenerate_membership(registry, "job-fixture-001", None, tmp_path / "work", **kwargs)
@@ -102,7 +115,7 @@ def test_regeneration_preserves_active_scene_until_fenced_publish(tmp_path, monk
             "surface_failure": RuntimeError,
             "cancelled": ProcessCancelledError,
             "stale": SceneRevisionConflictError,
-            "wrong_receipt": ValueError,
+            "build_failure": ObjectGeometryBuildError,
         }
         with pytest.raises(errors[outcome]):
             module.regenerate_membership(registry, "job-fixture-001", None, tmp_path / "work", **kwargs)
@@ -149,3 +162,61 @@ def test_membership_source_cache_is_bounded_and_never_shares_edited_labels(tmp_p
         np.testing.assert_array_equal(again.labels, fixture.source_labels)
         sources.append(source)
     assert len(module._SOURCE_CACHE) == 2
+
+
+def test_brush_correction_uses_real_partial_builder_and_preserves_other_objects(tmp_path, monkeypatch):
+    from tests.test_scene.test_object_geometry_build import _ready_override, cpu_providers, draft_scene
+
+    fixture = draft_scene.__wrapped__(tmp_path, monkeypatch)
+    cpu_providers.__wrapped__(monkeypatch)
+    _ready_override(fixture)
+    before = fixture.scene
+    monkeypatch.setattr(
+        module,
+        "job_bundle",
+        lambda *a: SimpleNamespace(canonical_geometry_ref=before.environment.membership.source_geometry_ref),
+    )
+    first = before.objects[0]
+    # Legacy Ready scenes have the immutable extraction pose in source_collision.
+    provenance = dict(first.provenance)
+    provenance.pop("source_transform")
+    first = first.model_copy(
+        update={
+            "provenance": provenance,
+            "transform": first.transform.model_copy(update={"translation_xyz": (10, 20, 30)}),
+        }
+    )
+    before = fixture.registry.scene.publish_next(
+        fixture.job_id,
+        before.scene_revision,
+        before.model_copy(update={"objects": [first, *before.objects[1:]]}),
+        "legacy-ready",
+    ).revision.scene
+    command = ObjectMembershipReassignCommand(
+        expected_scene_revision=before.scene_revision,
+        membership_checksum=before.environment.membership.labels_ref.artifact_checksum,
+        source_visual_checksum=before.environment.membership.source_visual_ref.artifact_checksum,
+        source_gaussian_indices=[0],
+        source_object_id=first.id,
+        target_object_id=None,
+    )
+    phases = []
+    revision = module.regenerate_membership(
+        fixture.registry,
+        fixture.job_id,
+        fixture.settings,
+        fixture.workspace,
+        command=command,
+        actor_id="reviewer",
+        expected_revision=before.scene_revision,
+        progress=phases.append,
+    )
+    after = fixture.registry.scene.current(fixture.job_id).scene
+    assert after.scene_revision == revision
+    assert after.objects[1:] == before.objects[1:]
+    assert after.objects[0].transform == first.transform
+    assert after.objects[0].provenance["source_transform"] == first.source_collision.source_transform.model_dump(
+        mode="json"
+    )
+    assert after.objects[0].provenance["gaussians"] == (fixture.labels == 0).sum() - 1
+    assert phases == ["shell", "quality", "collider", "environment", "publish"]

@@ -322,6 +322,14 @@ def test_objectgs_surface_reaches_real_coacd_and_publishes_separate_background(
             job.job_id, current.scene_revision, move_object(current, object_id, pose), "move"
         ).revision.scene
         monkeypatch.setattr(correction_module, "job_bundle", lambda *a: bundle)
+        # Ready corrections rebuild the affected object from its Gaussian shell. The fixture object is only 100 rows
+        # spread over 2 × 2 × 1.3 m, far sparser than a real scan, so a coarse voxel keeps one connected shell here.
+        from src.services.orchestration.scene import object_geometry_build as build_module
+        from src.services.scene.gaussian_shell import ShellParams
+
+        monkeypatch.setattr(build_module, "ShellParams", lambda: ShellParams(voxel_m=0.5))
+        monkeypatch.setattr(build_module, "job_bundle", lambda *a: bundle)
+        monkeypatch.setattr(build_module, "camera_views", module.camera_views)
         command = ObjectMembershipReassignCommand(
             expected_scene_revision=current.scene_revision,
             membership_checksum=current.environment.membership.labels_ref.artifact_checksum,
@@ -342,7 +350,11 @@ def test_objectgs_surface_reaches_real_coacd_and_publishes_separate_background(
         )
         regenerated = registry.scene.current(job.job_id).scene
         assert regenerated.scene_revision != current.scene_revision
-        assert regenerated.provenance["object_pipeline_evidence"]["artifact_type"] == "ObjectPipelineEvidence"
+        # Ready corrections rebuild only the affected object; the correction evidence replaces the full
+        # extraction's pipeline diagnostics, which this path no longer re-runs.
+        assert regenerated.provenance["membership_correction"]["evidence_ref"]["artifact_type"] == (
+            "ObjectMembershipCorrection"
+        )
         assert regenerated.objects[0].transform == pose
         assert regenerated.environment.membership.labels_ref != old_membership.labels_ref
         assert regenerated.environment.object_aware_collision_ref != current.environment.object_aware_collision_ref
@@ -454,4 +466,15 @@ print(json.dumps(dict(up=str(UsdGeom.GetStageUpAxis(stage)),unit=UsdGeom.GetStag
         measured = json.loads(inspection.stdout)
         assert measured["up"] == "Z" and measured["unit"] == 1
         assert measured["env_faces"] == len(walk_background.faces)
-        np.testing.assert_allclose(measured["bounds"], [[23.9, 34.24, 43.5], [26.1, 35.76, 46.5]], atol=1e-5)
+        # Expected world bounds come independently from the published object-local collider and the moved pose,
+        # so USD must apply the pose exactly once and keep metres.
+        from scipy.spatial.transform import Rotation
+
+        collider_mesh = trimesh.load(collider_path, file_type="glb", force="mesh", process=False)
+        final_pose = moved.objects[0].transform
+        world_vertices = Rotation.from_quat(final_pose.rotation_quaternion_xyzw).apply(
+            np.asarray(collider_mesh.vertices)
+        ) + np.asarray(final_pose.translation_xyz)
+        np.testing.assert_allclose(
+            measured["bounds"], [world_vertices.min(axis=0), world_vertices.max(axis=0)], atol=1e-5
+        )
