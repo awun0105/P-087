@@ -4,7 +4,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from src.api import schemas
 from src.api.auth import enforce_gpu_quota, record_gpu_run, require_contributor
@@ -55,6 +55,7 @@ from src.services.scene.editing.membership import (
     StaleObjectMembershipRevisionError,
     validate_object_membership_command,
 )
+from src.services.scene.geometry_state import object_geometry_state
 
 router = APIRouter()
 
@@ -715,23 +716,41 @@ def preview_object_region(
 
 
 @router.post(
-    "/jobs/{job_id}/scene/objects/{object_id}/region/apply", response_model=schemas.SceneEditResponse, status_code=201
+    "/jobs/{job_id}/scene/objects/{object_id}/region/apply",
+    response_model=schemas.SceneEditResponse | ObjectifyState,
+    status_code=201,
+    responses={202: {"model": ObjectifyState}, 409: {"model": schemas.ApiErrorResponse}},
 )
 def apply_object_region(
     job_id: str,
     object_id: str,
     request: ObjectRegionCommand,
     user: UserRecord | None = Depends(require_contributor),
-) -> schemas.SceneEditResponse:
+) -> schemas.SceneEditResponse | JSONResponse:
+    """Draft: publish the edit now (201). Ready: queue a rebuild of the affected objects (202)."""
     registry = deps.registry()
     authorize_job_mutation(user, registry, job_id, operation="sửa vùng Gaussian vật của")
     deps.job_or_404(job_id)
+    actor_id = user.user_id if user else "local"
     try:
-        result = apply_region_draft(registry, job_id, object_id, request, actor_id=user.user_id if user else "local")
+        if object_geometry_state(registry.scene.current(job_id).scene) == "ready":
+            enforce_gpu_quota(user)
+            queued = objectify_queue.request(
+                registry,
+                deps.settings(),
+                job_id,
+                request.expected_scene_revision,
+                "region",
+                region=(object_id, request),
+                actor_id=actor_id,
+            )
+            record_gpu_run(user, job_id, {"kind": "scene.region_rebuild"})
+            return JSONResponse(status_code=202, content=queued.model_dump(mode="json"))
+        result = apply_region_draft(registry, job_id, object_id, request, actor_id=actor_id)
         return schemas.scene_edit_response(result)
     except (StaleObjectMembershipRevisionError, SceneRevisionConflictError) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     except ObjectMembershipValidationError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
-    except (ArtifactStoreError, SceneError) as error:
+    except (ObjectifyRequestError, ArtifactStoreError, SceneError) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error

@@ -756,12 +756,21 @@ async def test_region_routes(client, tmp_path, monkeypatch, operation, case):
             "ready-fixture",
         ).revision.scene
         body["expected_scene_revision"] = current.scene_revision
+    queued = []
+
+    def fake_request(reg, settings, job_id, revision, mode, **kwargs):
+        queued.append((job_id, revision, mode, kwargs["region"][0], kwargs["region"][1].model_dump(mode="json")))
+        return scene_api.ObjectifyState(status="queued", mode=mode, base_revision=revision, operation_id="op-1")
+
+    monkeypatch.setattr(scene_api.objectify_queue, "request", fake_request)
     response = await client.post(f"{_JOB}/scene/objects/{TARGET}/region/{operation}", json=body)
     expected = (
         409
         if case in {"stale", "checksum"}
         else 422
-        if case == "invalid" or (case == "ready" and operation == "apply")
+        if case == "invalid"
+        else 202
+        if case == "ready" and operation == "apply"
         else 200
         if operation == "preview"
         else 201
@@ -773,14 +782,16 @@ async def test_region_routes(client, tmp_path, monkeypatch, operation, case):
         assert response.json()["scene"]["scene_revision"] != scene.scene_revision
     elif expected == 200:
         assert response.json()["shell_glb_base64"]
+    elif expected == 202:
+        # A Ready scene queues a region rebuild of the affected objects instead of publishing directly.
+        assert response.json()["mode"] == "region"
+        assert queued == [(JOB, body["expected_scene_revision"], "region", TARGET, body)]
     elif case != "invalid":
         assert set(response.json()) == {"detail"}
-        if case == "ready":
-            assert response.json()["detail"] == "Scene đã có hình học; tính năng dựng lại vật sẽ có ở bước sau."
 
 
 @pytest.mark.asyncio
-async def test_region_apply_ready_legacy_returns_explicit_deferred_message(client):
+async def test_region_apply_on_ready_scene_without_membership_is_rejected(client):
     response = await client.post(
         f"{_JOB}/scene/objects/{_PALLET}/region/apply",
         json={
@@ -790,4 +801,55 @@ async def test_region_apply_ready_legacy_returns_explicit_deferred_message(clien
         },
     )
     assert response.status_code == 422
-    assert response.json() == {"detail": "Scene đã có hình học; tính năng dựng lại vật sẽ có ở bước sau."}
+    assert response.json() == {"detail": "scene has no persisted Gaussian membership"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", ["queued", "busy", "stale", "checksum", "too_small"])
+async def test_ready_region_apply_through_real_durable_queue(client, tmp_path, monkeypatch, isolated_registry, case):
+    from pathlib import Path
+
+    from src.api.product import scene as module
+    from src.config import Settings
+    from src.models.contracts.reconstruction import ReconstructionBundle
+    from tests.test_scene.test_object_region import JOB, TARGET, draft
+
+    registry, scene, command, *_ = draft.__wrapped__(tmp_path, monkeypatch)
+    registry.get_job = isolated_registry.get_job
+    scene = registry.scene.publish_next(
+        JOB,
+        scene.scene_revision,
+        scene.model_copy(update={"provenance": {"object_geometry": "ready"}}),
+        "ready-fixture",
+    ).revision.scene
+    command = command.model_copy(update={"expected_scene_revision": scene.scene_revision})
+    settings = Settings(database_url=f"sqlite:///{tmp_path / 'queue.db'}")
+    bundle = ReconstructionBundle.model_validate_json(
+        (Path(__file__).resolve().parents[2] / "fixtures/reconstruction_bundle/manifest.json").read_bytes()
+    )
+    monkeypatch.setattr(module.deps, "registry", lambda: registry)
+    monkeypatch.setattr(module.deps, "settings", lambda: settings)
+    monkeypatch.setattr(module.deps, "job_or_404", lambda _: None)
+    monkeypatch.setattr(module, "authorize_job_mutation", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module.objectify_queue, "job_bundle", lambda *args: bundle)
+    body = command.model_dump(mode="json")
+    if case == "busy":
+        first = await client.post(f"{_JOB}/scene/objects/{TARGET}/region/apply", json=body)
+        assert first.status_code == 202, first.text
+    elif case == "stale":
+        body["expected_scene_revision"] = "rev-999"
+    elif case == "checksum":
+        body["membership_checksum"] = "sha256:" + "a" * 64
+    elif case == "too_small":
+        body["boxes"][0]["half_extents_m"] = [0.005, 0.005, 0.005]
+    result = await client.post(f"{_JOB}/scene/objects/{TARGET}/region/apply", json=body)
+    assert result.status_code == (202 if case == "queued" else 422 if case == "too_small" else 409), result.text
+    assert registry.scene.current(JOB).scene == scene
+    if case == "queued":
+        with module.objectify_queue._database(settings).transaction() as tx:
+            record = module.objectify_queue._read(tx, JOB)
+            assert record.region_command == command and record.region_object_id == TARGET
+            assert record.actor_id == "local"
+        assert result.json()["mode"] == "region" and result.json()["operation_id"]
+    else:
+        assert set(result.json()) == {"detail"}
