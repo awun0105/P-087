@@ -147,3 +147,18 @@ Sau sửa, chạy cùng lệnh: **7 passed in 0.96s**, không skip. Không chạ
 - `afe537e1` Preserve extraction success when automatic geometry enqueue fails
 
 `graphify update .`: exit 0; 25.205 nodes, 78.255 edges, 823 communities. Đã cập nhật graph.json/graph.html/GRAPH_REPORT.md; không chạy LLM label.
+
+## Round 3 — Runtime gate trước auto config
+
+- Đã đọc review Round 3 và CodeGraph `extract_scene`/`test_objectify_draft.py`; caller chính vẫn là jobs runner.
+- `extraction.py`: khởi tạo auto_geometry=False; chỉ load sealed config, tính auto và tạo execution override trong nhánh objectify sau runtime gate. Nhánh auto giữ nguyên Draft/enqueue và warning khi enqueue lỗi.
+- `test_objectify_draft.py`: job giả có config_checksum, registry giả có resolver, stub config None; runtime-gate test cấm đọc config.
+- Trước sửa: nhóm 3 file **2 failed, 53 passed in 7.75s**. Sau sửa fixture, trước sửa source: Draft file **1 failed, 10 passed** đúng lỗi thứ tự gate.
+- Sau sửa:
+  `.venv/bin/python -m pytest tests/test_scene/test_objectify_draft.py tests/test_orchestration/test_scene_extraction.py tests/test_orchestration/test_scene_objectify_queue.py -q`
+  → **55 passed in 7.76s**, không skip, không full suite.
+- `.venv/bin/ruff check src/services/orchestration/scene/extraction.py tests/test_scene/test_objectify_draft.py` → All checks passed.
+- `.venv/bin/ruff format --check src/services/orchestration/scene/extraction.py tests/test_scene/test_objectify_draft.py` → 2 files already formatted. `git diff --check` sạch.
+- Commits: `111324b6` status in-progress; `62e6288a` runtime ordering + fixture regression.
+- Pre-flight: CodeGraph/source/callers đã đọc; sửa thứ tự cục bộ, không đổi contract/artifact, không thêm abstraction; service-only nên DevTools n/a. Không có quyết định cần Architect chốt. T-010 đang dở được giữ riêng.
+- `graphify update .`: exit 0; 25.261 nodes, 78.551 edges, 809 communities; không chạy LLM label.
