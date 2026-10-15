@@ -13,13 +13,19 @@ from src.models.contracts.artifacts import ArtifactRef, Checksum
 from src.models.contracts.preview import ReconstructionPreview
 from src.services.orchestration.artifacts import ArtifactNotFoundError, ArtifactStoreError
 from src.services.orchestration.jobs.display_glb import display_space_glb
-from src.services.orchestration.projects import JobNotFoundError
-from src.services.orchestration.scene.errors import SceneError
+from src.services.orchestration.projects import JobNotFoundError, ProjectRegistry
+from src.services.orchestration.scene.errors import (
+    ObjectGeometryNotReadyError,
+    SceneError,
+    SceneHeadNotReadyError,
+    SceneNotAvailableError,
+)
 from src.services.orchestration.scene.physics_collision import (
     effective_collision_bytes,
     effective_collision_for_revision,
 )
 from src.services.scene.collision_ownership import SourceCollisionOwnershipError
+from src.services.scene.geometry_state import require_geometry_ready
 
 router = APIRouter()
 
@@ -108,6 +114,17 @@ def get_named_artifact_content(
     return get_artifact_content(job_id, artifact_uri, artifact_checksum)
 
 
+def _require_walk_allowed(registry: ProjectRegistry, job_id: str) -> None:
+    """Walk chỉ dùng cho scene đã có hình học theo vật; job chưa có SceneIR giữ đường xem trước theo bản tái dựng."""
+    try:
+        scene = registry.scene.current(job_id).scene
+    except SceneHeadNotReadyError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=error.user_message) from error
+    except SceneNotAvailableError:
+        return
+    require_geometry_ready(scene, "Walk")
+
+
 @router.get("/jobs/{job_id}/walk-collision/{filename}")
 def get_walk_collision(
     job_id: str,
@@ -137,6 +154,7 @@ def get_walk_collision(
             job_id=job_id,
         )
         registry = deps.registry()
+        _require_walk_allowed(registry, job_id)
         # Resolve allow-list before composition; never accept an arbitrary source URI.
         source_path = registry.resolve_artifact(job_id, reference)
         identity = artifact_checksum
@@ -165,6 +183,8 @@ def get_walk_collision(
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)) from error
     except ArtifactStoreError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+    except ObjectGeometryNotReadyError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     except (ValueError, SceneError) as error:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail=f"Không dùng được lưới va chạm: {error}"

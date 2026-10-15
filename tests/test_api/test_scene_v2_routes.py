@@ -589,3 +589,21 @@ async def test_draft_scene_rejects_move_and_collider_edits_without_publishing(
     assert collider.status_code == 422
     assert collider.json()["detail"] == "Cần tạo mesh trước khi sửa collider."
     assert isolated_registry.scene.revision("job-fixture-001", "rev-002") is None
+
+
+@pytest.mark.asyncio
+async def test_draft_scene_refuses_walk_collision_for_the_current_and_a_pinned_revision(
+    client, isolated_registry, monkeypatch
+) -> None:
+    _as_draft(isolated_registry, monkeypatch)
+    params = {
+        "artifact_uri": "artifact://jobs/job-fixture-001/rec05/abc/collision.glb",
+        "artifact_checksum": "sha256:" + "1" * 64,
+    }
+    current = await client.get(f"{_JOB}/walk-collision/collision.glb", params=params)
+    pinned = await client.get(f"{_JOB}/walk-collision/collision.glb", params={**params, "scene_revision": "rev-001"})
+
+    assert current.status_code == 409
+    assert current.json()["detail"] == "Cần tạo mesh trước khi Walk."
+    assert pinned.status_code == 409
+    assert pinned.json()["detail"] == "Cần tạo mesh trước khi Walk."

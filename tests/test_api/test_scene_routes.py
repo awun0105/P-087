@@ -444,6 +444,29 @@ async def test_legacy_scene_with_invalid_artifacts_is_a_conflict_with_a_user_mes
 
 
 @pytest.mark.asyncio
+async def test_legacy_scene_with_invalid_artifacts_refuses_walk_with_the_same_user_message(
+    client, isolated_registry, tmp_path, monkeypatch
+) -> None:
+    await _make_headless(client, isolated_registry, tmp_path, monkeypatch)
+    resolver = isolated_registry.runtime_resolver
+    uri = resolver.list_uris("artifact://jobs/job-fixture-001/scene/")[0]
+    artifact = resolver.resolve(uri)
+    artifact.write_bytes(artifact.read_bytes().replace(b"scene-fixture-001", b"scene-fixture-999"))
+
+    response = await client.get(
+        f"{_JOB}/walk-collision/collision.glb",
+        params={
+            "artifact_uri": "artifact://jobs/job-fixture-001/rec05/abc/collision.glb",
+            "artifact_checksum": "sha256:" + "1" * 64,
+        },
+    )
+
+    # Chưa rõ scene đang chờ duyệt hay không thì không cho Walk: cùng câu cho người dùng như các route scene khác.
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Dữ liệu scene này không qua được bước kiểm tra. Nhờ quản trị kiểm tra scene."
+
+
+@pytest.mark.asyncio
 async def test_collision_surface_mark_fill_remove_and_stale_revision(client) -> None:
     current = await _scene(client)
     checksum = current["scene"]["environment"]["geometry_ref"]["artifact_checksum"]
