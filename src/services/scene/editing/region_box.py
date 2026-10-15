@@ -1,13 +1,21 @@
 """Region boxes → Gaussian membership for one object (T-004). Pure functions: no I/O, no scene state."""
 
 import math
+from dataclasses import dataclass
 
 import numpy as np
 
-from src.models.contracts.object_membership import RegionBox
+from src.models.contracts.coordinates import Transform
+from src.models.contracts.object_membership import ObjectMembershipArtifact, ObjectRegionCommand, RegionBox
+from src.services.reconstruction.alignment.similarity import rotation_matrix
+from src.services.scene.editing.membership import ObjectMembershipValidationError
 
 #: Dung sai tuyệt đối khi kiểm điểm nằm trên mặt box; khớp `CONTAINS_TOLERANCE_M` của frontend (box-model.ts).
 CONTAINS_TOLERANCE_M = 1e-6
+#: Nhãn nền trong membership (`-1`), khớp `_BACKGROUND_LABEL` của membership.py.
+BACKGROUND_LABEL = -1
+#: Vật còn dưới mức này sau khi áp box bị từ chối; người dùng nên xoá vật thay vì thu box.
+MIN_OBJECT_ROWS = 50
 
 
 def _box_contains(points_local: np.ndarray, box: RegionBox) -> np.ndarray:
@@ -37,3 +45,91 @@ def boxes_contain(points_local: np.ndarray, boxes: list[RegionBox]) -> np.ndarra
         if box.op == "subtract":
             inside &= ~_box_contains(points_local, box)
     return inside
+
+
+@dataclass(frozen=True)
+class RegionResolution:
+    """Kết quả áp box lên một vật: hàng thuộc vật sau khi áp, hàng thêm/bớt và thống kê cho preview."""
+
+    object_mask: np.ndarray  # bool (gaussian_count,)
+    added: np.ndarray  # int64: source row được thêm vào vật
+    removed: np.ndarray  # int64: source row bị trả về nền
+    claimed: dict[str, int]  # object_id → số hàng lấy từ vật đó
+    overlaps: dict[str, int]  # object_id → số hàng vật đó nằm trong box nhưng không được lấy
+    protected_floor_count: int  # số hàng sàn nằm trong box mà không được lấy
+
+
+def _labels_of(manifest: ObjectMembershipArtifact, object_id: str) -> list[int]:
+    labels = [int(label) for label, owner in manifest.label_to_object_id.items() if owner == object_id]
+    if not labels:
+        raise ObjectMembershipValidationError(f"vật {object_id} không có trong membership")
+    return labels
+
+
+def resolve_region(
+    *,
+    positions_world: np.ndarray,
+    labels: np.ndarray,
+    manifest: ObjectMembershipArtifact,
+    object_id: str,
+    source_world_from_object: Transform,
+    command: ObjectRegionCommand,
+    floor_protected: np.ndarray | None,
+) -> RegionResolution:
+    """Hàng mới = inside ∩ eligible; eligible = nền không thuộc sàn ∪ hàng của vật ∪ hàng của vật trong claim_from.
+
+    Box là object-local. Đổi sang world bằng pose nguồn lúc tách (`source_world_from_object`), không dùng pose hiện tại.
+    """
+    count = manifest.gaussian_count
+    if positions_world.shape != (count, 3) or not np.isfinite(positions_world).all():
+        raise ObjectMembershipValidationError("source Gaussian positions do not match membership")
+    if labels.shape != (count,):
+        raise ObjectMembershipValidationError("membership labels must be one integer per source Gaussian row")
+    floor = np.zeros(count, dtype=bool) if floor_protected is None else np.asarray(floor_protected, dtype=bool)
+    if floor.shape != (count,):
+        raise ObjectMembershipValidationError("floor protection must be one flag per source Gaussian row")
+    if object_id in command.claim_from:
+        raise ObjectMembershipValidationError("claim_from không được chứa chính vật đang sửa")
+
+    own_labels = _labels_of(manifest, object_id)
+    claimed_ids = list(command.claim_from)
+    claim_labels = [label for other in claimed_ids for label in _labels_of(manifest, other)]
+
+    rotation = rotation_matrix(source_world_from_object.rotation_quaternion_xyzw)
+    translation = np.asarray(source_world_from_object.translation_xyz, dtype=float)
+    points_local = (positions_world - translation) @ rotation
+    inside = boxes_contain(points_local, command.boxes)
+
+    own = np.isin(labels, own_labels)
+    background = labels == BACKGROUND_LABEL
+    eligible = (background & ~floor) | own | np.isin(labels, claim_labels)
+    object_mask = inside & eligible
+    added = np.flatnonzero(object_mask & ~own)
+    removed = np.flatnonzero(own & ~object_mask)
+    object_rows = int(np.count_nonzero(object_mask))
+    if object_rows < MIN_OBJECT_ROWS:
+        raise ObjectMembershipValidationError(
+            f"vật còn {object_rows} Gaussian sau khi áp box (tối thiểu {MIN_OBJECT_ROWS}); dùng Xoá vật thay vì thu box"
+        )
+
+    claimed: dict[str, int] = {}
+    for other in claimed_ids:
+        taken = int(np.count_nonzero(np.isin(labels[added], _labels_of(manifest, other))))
+        if taken:
+            claimed[other] = taken
+    overlaps: dict[str, int] = {}
+    inside_labels = labels[inside]
+    for label, owner in manifest.label_to_object_id.items():
+        if owner == object_id or owner in claimed_ids:
+            continue
+        hits = int(np.count_nonzero(inside_labels == int(label)))
+        if hits:
+            overlaps[owner] = overlaps.get(owner, 0) + hits
+    return RegionResolution(
+        object_mask=object_mask,
+        added=added,
+        removed=removed,
+        claimed=claimed,
+        overlaps=overlaps,
+        protected_floor_count=int(np.count_nonzero(inside & background & floor)),
+    )
