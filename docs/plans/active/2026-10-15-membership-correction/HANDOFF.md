@@ -1,5 +1,13 @@
 # Visual Gaussian membership correction → regeneration — implementation handoff
 
+## Superseded by geometry review
+
+Luồng xử lý mới được mô tả tại [Geometry review handoff](../2026-10-16-geometry-review/HANDOFF.md) và
+[deep review T-019](../../../../.ai/tasks/T-019/review.md). Draft dùng Region Editor rồi tạo mesh; Brush/Lasso chỉ áp dụng
+trên Ready. Rebuild một phần dùng vỏ Gaussian, không retrain ObjectGS toàn scene; evidence hiện tại là
+`membership_correction.evidence_ref`. Các kết quả kiểm thử ngày 15/10 bên dưới là lịch sử của implementation cũ.
+Handoff mới còn hai lỗi P1 cần xử lý trước khi nghiệm thu scene thật; không coi supersession là xác nhận GPU/browser/Isaac.
+
 Branch `mvp-pipeline-v2`, local commits only (no push/merge/PR). Implementation and automated CPU/fixture
 verification are complete. Real GPU, browser-on-ObjectGS-scene and Isaac acceptance are NOT done; they
 require running the full pipeline on a new capture.
