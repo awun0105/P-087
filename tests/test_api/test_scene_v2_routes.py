@@ -622,3 +622,65 @@ async def test_draft_scene_refuses_simulation_package_without_publishing(
     assert response.status_code == 409
     assert response.json()["detail"] == "Cần tạo mesh trước khi xuất USD."
     assert isolated_registry.scene.revision("job-fixture-001", "rev-002") is None
+
+
+@pytest.mark.asyncio
+async def test_draft_scene_refuses_adding_a_box_after_the_ready_path_passes(
+    client, isolated_registry, monkeypatch
+) -> None:
+    payload = {"name": "Thùng", "dimensions_xyz_m": [0.6, 0.4, 0.5], "position_xyz": [1.0, 2.0, 0.25]}
+    added = await client.post(f"{_JOB}/scene/objects", json={**payload, "expected_scene_revision": "rev-001"})
+    assert added.status_code == 201
+    _as_draft(isolated_registry, monkeypatch)
+
+    refused = await client.post(f"{_JOB}/scene/objects", json={**payload, "expected_scene_revision": "rev-002"})
+
+    assert refused.status_code == 422
+    assert refused.json()["detail"] == "Cần tạo mesh trước khi thêm vật."
+    assert isolated_registry.scene.revision("job-fixture-001", "rev-003") is None
+
+
+@pytest.mark.asyncio
+async def test_draft_scene_refuses_adding_a_catalog_asset(client, isolated_registry, monkeypatch) -> None:
+    body = {"family": "SM_CardBoxA", "position_xyz": [2.0, 3.0, 0.0]}
+    added = await client.post(f"{_JOB}/scene/catalog-objects", json={**body, "expected_scene_revision": "rev-001"})
+    assert added.status_code == 201
+    _as_draft(isolated_registry, monkeypatch)
+
+    refused = await client.post(f"{_JOB}/scene/catalog-objects", json={**body, "expected_scene_revision": "rev-002"})
+
+    assert refused.status_code == 422
+    assert refused.json()["detail"] == "Cần tạo mesh trước khi thêm vật từ thư viện."
+    assert isolated_registry.scene.revision("job-fixture-001", "rev-003") is None
+
+
+@pytest.mark.asyncio
+async def test_draft_scene_refuses_duplicating_an_object(client, isolated_registry, monkeypatch) -> None:
+    duplicated = await client.post(
+        f"{_JOB}/scene/objects/{_PALLET}/duplicate", json={"expected_scene_revision": "rev-001"}
+    )
+    assert duplicated.status_code == 201
+    _as_draft(isolated_registry, monkeypatch)
+
+    refused = await client.post(
+        f"{_JOB}/scene/objects/{_PALLET}/duplicate", json={"expected_scene_revision": "rev-002"}
+    )
+
+    assert refused.status_code == 422
+    assert refused.json()["detail"] == "Cần tạo mesh trước khi nhân bản vật."
+    assert isolated_registry.scene.revision("job-fixture-001", "rev-003") is None
+
+
+@pytest.mark.asyncio
+async def test_draft_scene_refuses_collision_surface_marks(client, isolated_registry, monkeypatch) -> None:
+    checksum = isolated_registry.scene.current("job-fixture-001").scene.environment.geometry_ref.artifact_checksum
+    body = {"source_checksum": checksum, "kind": "floor", "points": [[0, 0, 0], [1, 0, 0], [0, 1, 0]]}
+    marked = await client.post(f"{_JOB}/scene/collision-surfaces", json={**body, "expected_scene_revision": "rev-001"})
+    assert marked.status_code == 201
+    _as_draft(isolated_registry, monkeypatch)
+
+    refused = await client.post(f"{_JOB}/scene/collision-surfaces", json={**body, "expected_scene_revision": "rev-002"})
+
+    assert refused.status_code == 422
+    assert refused.json()["detail"] == "Cần tạo mesh trước khi sửa bề mặt va chạm."
+    assert isolated_registry.scene.revision("job-fixture-001", "rev-003") is None

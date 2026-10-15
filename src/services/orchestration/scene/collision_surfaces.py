@@ -12,6 +12,7 @@ from src.services.orchestration.scene.editor import SceneEditor
 from src.services.orchestration.scene.errors import SceneEditRejectedError, SceneRevisionConflictError
 from src.services.orchestration.scene.models import SceneEditResult
 from src.services.scene.collision_surfaces import CollisionSurfacePlane, surface_planes
+from src.services.scene.geometry_state import require_geometry_ready
 
 
 class CollisionSurfaceCommand(ContractModel):
@@ -34,6 +35,7 @@ class CollisionSurfaceCommand(ContractModel):
 def edit_collision_surfaces(scene: SceneIR, command: CollisionSurfaceCommand) -> SceneIR:
     if command.expected_scene_revision != scene.scene_revision:
         raise SceneRevisionConflictError("surface annotation requires the current SceneIR revision")
+    require_geometry_ready(scene, "sửa bề mặt va chạm")
     if command.action != "remove" and (
         scene.coordinate_system.unit != "meter"
         or scene.coordinate_system.up_axis != "Z"

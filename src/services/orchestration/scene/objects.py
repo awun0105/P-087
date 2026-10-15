@@ -96,6 +96,7 @@ def apply_object_action(
                 else restore_object(scene, object_id)
             )
         elif action == "duplicate":
+            require_geometry_ready(scene, "nhân bản vật")
             updated = duplicate_object(scene, object_id, _next_id(scene, "user"), _DUPLICATE_OFFSET_M)
         elif action == "label":
             target = next(item for item in scene.objects if item.id == object_id)
@@ -175,6 +176,7 @@ def add_box_object(
 ) -> SceneEditResult:
     """Thêm vật cản hộp do người dùng đặt (PRODUCT-07A): CONFIRMED, tâm hộp tại `center_xyz` (mét, world)."""
     scene = _current(editor, job_id, expected_revision)
+    require_geometry_ready(scene, "thêm vật")
     if min(dimensions_xyz_m) <= 0:
         raise SceneEditRejectedError("kích thước hộp phải dương")
     taken = {item.id for item in scene.objects}
@@ -229,6 +231,7 @@ def add_catalog_object(
     `position_xyz` là điểm đặt trên sàn (đáy hộp), tâm hộp được nâng nửa chiều cao.
     """
     scene = _current(editor, job_id, expected_revision)
+    require_geometry_ready(scene, "thêm vật từ thư viện")
     entry = load_catalog().family(family)
     if entry is None or not entry.placeable:
         raise SceneEditRejectedError(f"họ asset {family} không có trong danh mục đặt được")
