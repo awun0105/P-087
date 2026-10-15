@@ -14,7 +14,7 @@ T-013 | API client + banner Draft + tiến độ build | accepted | -
 T-014 | Box model TypeScript thuần | accepted | -
 T-015 | Box overlay + tay nắm + góc nhìn | accepted | -
 T-016 | Region Editor panel | accepted | —
-T-017 | Vỏ phát sáng + điểm thêm/bớt | planned | engineer
+T-017 | Vỏ phát sáng + điểm thêm/bớt | in-progress | engineer
 T-020 | Lựa chọn Duyệt trước / Tạo mesh ngay khi tạo job | implemented | summarizer
 T-018 | Tương thích scene cũ + Walk/USD với collider vỏ | accepted | -
 T-019 | Full regression + handoff | planned | engineer
