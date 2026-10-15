@@ -62,3 +62,39 @@ Không chạy full suite. Phần backend không đổi trong T-013 đến hiện
 - "N vật" của banner đếm mọi vật chưa DELETED/MERGED/IGNORED. Backend chỉ dựng vật có nhãn Gaussian, nên con số có thể lớn hơn số vật được dựng (ví dụ sàn không có Gaussian). Cần reviewer xác nhận cách đếm.
 - Chưa kiểm bằng trình duyệt: vị trí banner trên viewport, nút Đi bộ khoá trên thanh điều khiển của viewer, và độ tương phản của cảnh báo vỏ lỗi. Theo quy ước, người dùng tự kiểm bằng mắt.
 - `ObjectifyNotice` nhánh region không có nút thử lại; sẽ bổ sung khi T-016 nối Region Editor.
+
+## Round 2 (review.md: "Làm thêm cùng bước 7")
+
+**Trạng thái: vẫn `in-progress`.** Phần 1 đã xong. Bước 7 (preset) chưa làm: commit `14e08357` đã đặt T-009 thành `changes-requested` (T-008 accepted, T-009 mở lại vì lỗi thứ tự config extraction). Chưa đặt implemented cho đến khi bước 7 xong.
+
+### Phần 1: khoá UI trong Draft — xong
+
+Các nút sau bị khoá, tooltip là `GEOMETRY_NOT_READY_REASON`, khi scene là Draft. Scene sẵn sàng giữ như cũ.
+
+| Thao tác | Nút bị khoá | Commit |
+| --- | --- | --- |
+| Thêm vật cản hộp | "Thêm vật cản hộp", "Thêm", "Đặt bằng chuột" (`AddObstacleForm`) | `8dd88623` |
+| Thêm vật từ thư viện | "Thêm từ thư viện", "Thêm", "Đặt bằng chuột" (`CatalogForm`) | `8dd88623` |
+| Nhân bản | "Nhân bản" trên thanh thao tác vật (`MetricSceneView`) | `229533cf` |
+| Đánh dấu, xoá, lấp bề mặt va chạm | "Đánh dấu sàn", "Đánh dấu tường", "Xóa mặt phẳng …", "Lấp theo mặt phẳng …" | `229533cf` |
+
+Thêm:
+- Khi khoá, công cụ đánh dấu bề mặt đang bật bị tắt, và click trên viewport không gửi lệnh. Commit `229533cf` có lỗi lint (`react-hooks/set-state-in-effect`), sửa ở `7b3b4965` bằng cách điều chỉnh state khi render.
+- Khi khoá, chế độ đặt vật đang chờ bị huỷ (`70e21d99`), để một cú bấm trên viewport không gửi lệnh bị chặn.
+- Các thao tác "chưa khoá trên UI" ở Round 1 nay đã được khoá.
+
+Test:
+- `tests/metric-effective-collision.test.tsx`: Draft → Nhân bản và các nút bề mặt disabled, có tooltip; scene sẵn sàng → enabled. 11 passed.
+- `tests/object-review.test.tsx`: Draft → Thêm vật cản hộp và Thêm từ thư viện disabled, có tooltip; scene sẵn sàng → enabled. 50 passed.
+- Chạy 5 file (`geometry-review-banner`, `object-review`, `progress-objectify`, `metric-effective-collision`, `stage-view-selection`): 90 passed. `npm run typecheck` exit 0. eslint các file đã sửa exit 0. `graphify update .` exit 0.
+
+### Phần 2: bước 7 (preset) — chưa làm
+
+- Khi bắt đầu bước 7, `status.md` ghi T-009 `accepted`, nên tôi đã áp thay đổi: 8 preset chuyển sang `scene.geometry_method = shell` và `scene.geometry_review = required`; thêm choice `shell` và param `scene.geometry_review`; đổi tên test thành `test_every_preset_seals_shell_geometry_review_and_multiview`. Bốn file test liên quan: 109 passed.
+- Sau đó `14e08357` mở lại T-009. Theo yêu cầu "chỉ làm khi T-009 accepted", tôi không commit bước 7, và khôi phục hai file về HEAD.
+- Patch đã lưu: `/tmp/claude-1000/-home-lqaq-PROJECT-AI20K-P-087/7792b60f-c313-47d1-8e79-e36c243e36c0/scratchpad/t013-step7.patch` (149 dòng).
+
+Việc còn lại khi T-009 `accepted`:
+1. `git apply` patch trên.
+2. Chạy `tests/test_orchestration/test_processing_config.py tests/test_orchestration/test_processing_presets_schema.py tests/test_scene/test_objectify_config_override.py tests/test_orchestration/test_scene_objectify_queue.py`, cộng `tests/test_orchestration/test_preset_recommender.py` và `tests/test_orchestration/test_resource_admission.py` vì hai file này cũng đọc preset.
+3. Commit bước 7, rồi đặt T-013 implemented.
