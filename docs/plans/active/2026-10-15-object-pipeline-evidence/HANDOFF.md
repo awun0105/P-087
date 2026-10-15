@@ -121,3 +121,10 @@ per-object linkage, ObjectGS lifecycle fixtures and strict/legacy collider regre
 
 Local implementation commits: `f9c1a42e` (segmentation evidence foundation), `512923ef` (durable attempt
 artifacts, runner instrumentation and read-only reports). Documentation is committed separately.
+
+## Refinement follow-up (2026-10-15)
+
+The opt-in algorithm and its synthetic quality evaluation are documented in the
+[segmentation refinement handoff](../2026-10-15-segmentation-refinement/HANDOFF.md).
+Existing evidence now includes refinement decisions and per-object prompt-list merge events.
+The evidence artifact format, quotas and publication/cancellation semantics are unchanged.

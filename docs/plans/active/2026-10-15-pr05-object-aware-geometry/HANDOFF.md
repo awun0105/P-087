@@ -411,3 +411,9 @@ Implementation and current verification are in
 [Object pipeline evidence handoff](../2026-10-15-object-pipeline-evidence/HANDOFF.md).
 Current branch is `mvp-pipeline-v2` after the user-requested branch rename. The follow-up adds traceability,
 not a quality fix or a new GPU/browser/Isaac acceptance result; the original quality gate above remains open.
+
+## Follow-up: segmentation refinement (2026-10-15)
+
+[Segmentation refinement handoff](../2026-10-15-segmentation-refinement/HANDOFF.md) records the opt-in
+`multiview_v1` algorithm, annotated synthetic before/after metrics and unresolved identity cases.
+Production defaults remain legacy; no new real-scene/GPU/browser/Isaac quality acceptance is implied.
