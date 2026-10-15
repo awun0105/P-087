@@ -1,7 +1,7 @@
 T-001 | Tách occupancy_surface() | accepted | -
 T-002 | Dựng vỏ Gaussian kín | changes-requested | architect
 T-003 | Contract vỏ + trạng thái hình học | accepted | -
-T-004 | Box → membership (region command + preview diff) | implemented | summarizer
+T-004 | Box → membership (region command + preview diff) | accepted | -
 T-005 | Tách vật dừng ở Draft SceneIR | planned | engineer
 T-006 | Tách helper dùng chung khỏi objectify() | planned | engineer
 T-007 | Build hình học từ vỏ (Draft → ready) | planned | engineer
