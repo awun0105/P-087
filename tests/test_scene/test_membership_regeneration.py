@@ -129,3 +129,23 @@ def test_load_membership_source_preserves_rows_labels_and_floor(tmp_path, monkey
     np.testing.assert_array_equal(source.labels, fixture.source_labels)
     np.testing.assert_array_equal(source.floor_protected, rows["z"] <= 1.05)
     assert source.manifest == fixture.membership
+
+
+def test_membership_source_cache_is_bounded_and_never_shares_edited_labels(tmp_path, monkeypatch):
+    module._SOURCE_CACHE.clear()
+    monkeypatch.setattr(module, "fit_canonical_floor_model", lambda *args: None)
+    monkeypatch.setattr(module, "above_floor_mask", lambda xyz, _: np.ones(len(xyz), dtype=bool))
+    sources = []
+    for index in range(3):
+        rows = _source_rows()
+        rows["x"] += index
+        fixture = _fixture(tmp_path / str(index), source_rows=rows)
+        registry = SimpleNamespace(scene=fixture.editor, runtime_resolver=fixture.editor.resolver)
+        source = module.load_membership_source(registry, "job-fixture-001", fixture.scene)
+        again = module.load_membership_source(registry, "job-fixture-001", fixture.scene)
+        assert again.rows is source.rows and again.positions is source.positions
+        assert not source.rows.flags.writeable and not source.positions.flags.writeable
+        source.labels[:] = -1
+        np.testing.assert_array_equal(again.labels, fixture.source_labels)
+        sources.append(source)
+    assert len(module._SOURCE_CACHE) == 2

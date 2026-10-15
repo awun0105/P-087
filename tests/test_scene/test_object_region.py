@@ -20,6 +20,7 @@ OTHER = "candidate-002"
 
 @pytest.fixture
 def draft(tmp_path, monkeypatch):
+    membership_regeneration._SOURCE_CACHE.clear()
     rng = np.random.default_rng(5)
     rows = np.repeat(_source_rows()[:1], 1000)
     xyz = np.concatenate(
@@ -37,7 +38,15 @@ def draft(tmp_path, monkeypatch):
     for item in fixture.scene.objects:
         pose = item.transform.model_copy(update={"rotation_quaternion_xyzw": (0, 0, 2**-0.5, 2**-0.5)})
         objects.append(
-            item.model_copy(update={"collider": None, "provenance": {"source_transform": pose.model_dump(mode="json")}})
+            item.model_copy(
+                update={
+                    "collider": None,
+                    "provenance": {
+                        "source_transform": pose.model_dump(mode="json"),
+                        "shell_error": "old preview failed",
+                    },
+                }
+            )
         )
     scene = fixture.scene.model_copy(update={"objects": objects, "provenance": {"object_geometry": "awaiting_review"}})
     scene = fixture.editor.publish_next(JOB, fixture.scene.scene_revision, scene, "draft-fixture").revision.scene
@@ -56,11 +65,12 @@ def files(registry):
     return sorted(registry.runtime_resolver.root.rglob("*"))
 
 
-def test_preview_is_read_only_and_uses_source_pose(draft):
+def test_preview_is_read_only_and_uses_source_pose(draft, tmp_path):
     from src.services.orchestration.scene.object_region import preview_region
 
     registry, scene, command, rows, labels = draft
     before = list(registry.runtime_resolver.list_uris(f"artifact://jobs/{JOB}/"))
+    before_files = set(tmp_path.rglob("*"))
     preview = preview_region(registry, JOB, TARGET, command)
     assert preview["added_count"] > 0 and preview["removed_count"] == 0
     assert preview["overlaps"][OTHER] > 0
@@ -68,6 +78,7 @@ def test_preview_is_read_only_and_uses_source_pose(draft):
     mesh = trimesh.load(io.BytesIO(base64.b64decode(preview["shell_glb_base64"])), file_type="glb", force="mesh")
     assert mesh.is_watertight and preview["shell_error"] is None
     assert registry.scene.current(JOB).scene == scene
+    assert set(tmp_path.rglob("*")) == before_files
     assert list(registry.runtime_resolver.list_uris(f"artifact://jobs/{JOB}/")) == before
     item = scene.objects[0]
     moved = item.model_copy(update={"transform": item.transform.model_copy(update={"translation_xyz": (20, 30, 40)})})
@@ -210,3 +221,40 @@ def test_apply_records_shell_failure_without_creating_collider(draft, monkeypatc
     assert item.collider is None and item.geometry_ref.artifact_type == "ObjectShellMesh"
     assert item.provenance["shell_error"] == "sparse region"
     assert item.provenance["shell_display"] == "bounding_box_placeholder"
+
+
+def test_preview_three_hundred_thousand_rows_budget(tmp_path, monkeypatch):
+    from time import perf_counter
+
+    from src.services.orchestration.scene.object_region import preview_region
+
+    rng = np.random.default_rng(90)
+    rows = np.repeat(_source_rows()[:1], 300_000)
+    xyz = rng.uniform(-0.2, 0.2, (len(rows), 3)) + (1.5, 0.1, 1.1)
+    for axis, name in enumerate(("x", "y", "z")):
+        rows[name] = xyz[:, axis]
+    fixture = _fixture(tmp_path, source_rows=rows, source_labels=np.zeros(len(rows), dtype=np.int32))
+    item = fixture.scene.objects[0]
+    item = item.model_copy(update={"provenance": {"source_transform": item.transform.model_dump(mode="json")}})
+    scene = fixture.editor.publish_next(
+        JOB,
+        fixture.scene.scene_revision,
+        fixture.scene.model_copy(update={"objects": [item, *fixture.scene.objects[1:]]}),
+        "benchmark-fixture",
+    ).revision.scene
+    registry = SimpleNamespace(scene=fixture.editor, runtime_resolver=fixture.editor.resolver)
+    monkeypatch.setattr(membership_regeneration, "fit_canonical_floor_model", lambda *args: None)
+    monkeypatch.setattr(membership_regeneration, "above_floor_mask", lambda xyz, _: np.ones(len(xyz), dtype=bool))
+    command = ObjectRegionCommand(
+        expected_scene_revision=scene.scene_revision,
+        membership_checksum=fixture.membership.labels_ref.artifact_checksum,
+        boxes=[RegionBox(op="add", center_m=(0, 0, 0), half_extents_m=(0.3, 0.3, 0.3), yaw_rad=0)],
+    )
+    started = perf_counter()
+    result = preview_region(registry, JOB, TARGET, command)
+    elapsed = perf_counter() - started
+    print(f"300k preview elapsed={elapsed:.3f}s")
+    assert result["object_gaussian_count"] == 300_000
+    assert result["shell_glb_base64"] is not None
+    assert result["shell_sample_rows"] <= 100_000
+    assert elapsed <= 1.5

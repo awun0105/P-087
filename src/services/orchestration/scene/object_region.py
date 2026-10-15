@@ -99,7 +99,11 @@ def _shell(points: np.ndarray, opacity: np.ndarray) -> tuple[bytes | None, dict,
 
 def preview_region(registry: ProjectRegistry, job_id: str, object_id: str, command: ObjectRegionCommand) -> dict:
     scene, _, source, resolution, local = _resolve(registry, job_id, object_id, command)
-    payload, _, error = _shell(local[resolution.object_mask], source.rows["opacity"][resolution.object_mask])
+    selected = np.flatnonzero(resolution.object_mask)
+    # Uniform deterministic stride bounds shell filtering cost; membership counts remain exact.
+    stride = max(1, (len(selected) + 99_999) // 100_000)
+    selected = selected[::stride]
+    payload, _, error = _shell(local[selected], source.rows["opacity"][selected])
     return {
         "scene_revision": scene.scene_revision,
         "membership_checksum": source.manifest.labels_ref.artifact_checksum,
@@ -107,6 +111,7 @@ def preview_region(registry: ProjectRegistry, job_id: str, object_id: str, comma
         **preview_payload(resolution, local),
         "shell_glb_base64": base64.b64encode(payload).decode("ascii") if payload is not None else None,
         "shell_error": error,
+        "shell_sample_rows": len(selected),
     }
 
 

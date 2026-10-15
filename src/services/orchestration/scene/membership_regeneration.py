@@ -2,10 +2,11 @@
 
 import hashlib
 import json
+from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from threading import Event
+from threading import Event, Lock
 
 import numpy as np
 
@@ -65,12 +66,31 @@ def _load_membership_source(
     return MembershipSource(xyz, rows, labels, membership, protected)
 
 
+_SOURCE_CACHE: OrderedDict[tuple[str, str, str], tuple[np.ndarray, np.ndarray, np.ndarray]] = OrderedDict()
+_SOURCE_LOCK = Lock()
+
+
 def load_membership_source(registry: ProjectRegistry, job_id: str, scene: SceneIR) -> MembershipSource:
-    """Read immutable source rows, current labels and the canonical floor mask."""
+    """Cache immutable world rows/floor only; always decode a fresh current label array."""
     membership = scene.environment.membership
     if membership is None:
         raise ObjectMembershipValidationError("scene has no persisted Gaussian membership")
-    return _load_membership_source(registry.runtime_resolver, membership, protect_floor=True)
+    key = (job_id, membership.labels_ref.artifact_checksum, membership.source_visual_ref.artifact_checksum)
+    with _SOURCE_LOCK:
+        cached = _SOURCE_CACHE.get(key)
+        if cached is None:
+            source = _load_membership_source(registry.runtime_resolver, membership, protect_floor=True)
+            cached = source.positions, source.rows, source.floor_protected
+            for array in cached:
+                array.setflags(write=False)
+            _SOURCE_CACHE[key] = cached
+            if len(_SOURCE_CACHE) > 2:
+                _SOURCE_CACHE.popitem(last=False)
+        _SOURCE_CACHE.move_to_end(key)
+    labels = decode_gaussian_membership_labels(
+        registry.runtime_resolver.require(membership.labels_ref).read_bytes(), membership
+    )
+    return MembershipSource(cached[0], cached[1], labels, membership, cached[2])
 
 
 def prepare_correction(
