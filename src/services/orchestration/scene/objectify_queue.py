@@ -119,6 +119,15 @@ class ObjectifyState(BaseModel):
     operation_id: str | None = None
     phase: str | None = None
     cancellation_requested: bool = False
+    #: Trạng thái hình học theo vật của scene hiện tại; None = scene không có khoá `object_geometry` (luồng cũ).
+    object_geometry: Literal["awaiting_review", "ready"] | None = None
+
+
+def _object_geometry(provenance: JsonObject) -> Literal["awaiting_review", "ready"] | None:
+    """Khoá thiếu → None; giá trị lạ → "awaiting_review", khớp quy tắc khoá lại của Studio."""
+    if "object_geometry" not in provenance or provenance["object_geometry"] is None:
+        return None
+    return "ready" if provenance["object_geometry"] == "ready" else "awaiting_review"
 
 
 class _Record(BaseModel):
@@ -269,6 +278,7 @@ def state(registry: ProjectRegistry, settings: Settings, job_id: str) -> Objecti
         scene_revision=scene.scene_revision,
         object_centric=provenance.get("object_extraction") == METHOD or provenance.get("geometry_method") == "objectgs",
         awaiting_choice=provenance.get("object_extraction") == AWAITING_CHOICE,
+        object_geometry=_object_geometry(provenance),
         available=runtime_available(settings) or settings.product_objectify_remote_worker,
         note=str(note) if note else None,
     )

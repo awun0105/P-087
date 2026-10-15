@@ -1148,3 +1148,26 @@ def test_membership_queue_accepts_ready_shell_without_objectgs_marker(world, mon
         registry, settings, job.job_id, base.scene_revision, "membership", correction=command, actor_id="reviewer"
     )
     assert queued.status == "queued" and queued.mode == "membership"
+
+
+def test_state_reports_object_geometry_for_the_ui(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    """T-021: ready, awaiting_review; a missing key is the legacy flow (None); an unknown value re-locks as awaiting_review."""
+    registry, job, _, settings = world
+    _geometry_draft(world, monkeypatch, tmp_path)
+    assert scene_objectify_queue.state(registry, settings, job.job_id).object_geometry == "awaiting_review"
+    for extra, expected in [
+        ({"object_geometry": "ready"}, "ready"),
+        ({"object_geometry": "building"}, "awaiting_review"),
+    ]:
+        current = registry.scene.current(job.job_id).scene
+        provenance = {**current.provenance, **extra}
+        registry.scene.publish_next(
+            job.job_id, current.scene_revision, current.model_copy(update={"provenance": provenance}), "fixture-state"
+        )
+        assert scene_objectify_queue.state(registry, settings, job.job_id).object_geometry == expected
+    current = registry.scene.current(job.job_id).scene
+    provenance = {k: v for k, v in current.provenance.items() if k != "object_geometry"}
+    registry.scene.publish_next(
+        job.job_id, current.scene_revision, current.model_copy(update={"provenance": provenance}), "fixture-legacy"
+    )
+    assert scene_objectify_queue.state(registry, settings, job.job_id).object_geometry is None

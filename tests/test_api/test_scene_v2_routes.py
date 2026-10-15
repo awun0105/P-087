@@ -875,3 +875,16 @@ async def test_region_fit_route_maps_stale_legacy_and_unknown_objects(client, mo
     monkeypatch.setattr(scene_api, "fit_region", unknown)
     gone = await client.get(url, params={"expected_scene_revision": "rev-001"})
     assert gone.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_objectify_state_exposes_object_geometry_as_null_for_legacy_scene(client, tmp_path, monkeypatch) -> None:
+    from src.api.product import deps as product_deps
+    from src.config import Settings
+
+    settings = Settings(database_url=f"sqlite:///{tmp_path / 'runtime.db'}")
+    monkeypatch.setattr(product_deps, "get_settings", lambda: settings)
+    response = await client.get(f"{_JOB}/scene/objectify")
+
+    assert response.status_code == 200
+    assert response.json()["object_geometry"] is None
