@@ -180,7 +180,8 @@ Gaussian (dưới mức đó → 422, gợi ý dùng Delete).
 
 ### Region Editor
 
-- Box chính tự khớp OBB của nhóm Gaussian hiện tại (yaw theo hướng chính, đáy bám sàn).
+- Box chính tự khớp theo kích thước nhóm Gaussian hiện tại. Không kẹp sàn phía client: server luôn bảo vệ hàng sàn và báo
+  `protected_floor_count`, nên box chìm dưới sàn không lấy thêm gì (review T-016).
 - Tay nắm: 6 mặt (kéo một mặt, mặt đối diện đứng yên), vòng xoay quanh Z, kéo tâm (translate).
 - Nút: `+ Box cộng`, `− Box trừ`, `Xoá box`, góc nhìn `Trên / Trước / Cạnh`, `Đặt lại`.
 - Vỏ phát sáng (emissive, hơi trong suốt) cập nhật sau mỗi lần thả tay nắm (debounce 250 ms).
