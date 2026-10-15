@@ -31,6 +31,17 @@ const PRESET_LABEL: Record<PresetKey, { title: string; hint: string }> = {
   machine_maximum: { title: "Tối đa cho máy này", hint: "Cao nhất mà máy xử lý chịu được" },
 };
 
+/** Lựa chọn duyệt tách vật là radio riêng, đặt ngay dưới preset; không nằm trong danh sách nâng cao. */
+export const GEOMETRY_REVIEW_KEY = "scene.geometry_review";
+const REVIEW_CHOICES: { value: string; title: string; hint?: string }[] = [
+  { value: "required", title: "Dừng để duyệt và chỉnh vùng vật (khuyên dùng)" },
+  {
+    value: "auto",
+    title: "Tạo mesh ngay, không duyệt",
+    hint: "Nhanh cho chạy hàng loạt. Vật tách sai vẫn sửa được sau, nhưng mỗi lần sửa phải dựng lại hình học.",
+  },
+];
+
 /**
  * Bảng thông số xử lý theo file cấu hình chung.
  *
@@ -71,6 +82,7 @@ export function ProcessingSettings({
 }) {
   const statusOf = (key: string) => evaluation?.parameters.find((item) => item.key === key);
   const flagged = evaluation?.parameters.some((item) => item.status !== "ok") ?? false;
+  const reviewSpec = parameters.find((spec) => spec.key === GEOMETRY_REVIEW_KEY);
   return (
     <Card className="p-5 sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -119,6 +131,15 @@ export function ProcessingSettings({
         </div>
       )}
       {editable && activePreset === null && !scenarioPreset && <p className="mt-2 text-xs text-ink-subtle">Đang dùng thông số tùy chỉnh.</p>}
+
+      {reviewSpec && (
+        <ReviewChoice
+          spec={reviewSpec}
+          value={values[GEOMETRY_REVIEW_KEY]}
+          editable={editable}
+          onChange={(value) => onChange?.(GEOMETRY_REVIEW_KEY, value)}
+        />
+      )}
 
       <MachinePanel capability={capability} machineLabel={machineLabel} evaluation={evaluation} editable={editable} />
 
@@ -298,6 +319,52 @@ function MachinePanel({
         </ul>
       )}
     </div>
+  );
+}
+
+function ReviewChoice({
+  spec,
+  value,
+  editable,
+  onChange,
+}: {
+  spec: ParameterSpec;
+  value: ParamValue | undefined;
+  editable: boolean;
+  onChange: (value: ParamValue) => void;
+}) {
+  const name = useId();
+  const offered = REVIEW_CHOICES.filter((choice) => spec.choices?.some((item) => item.value === choice.value));
+  return (
+    <fieldset disabled={!editable} className="mt-5">
+      <legend className="text-sm font-semibold text-ink">Sau khi tách vật</legend>
+      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+        {offered.map((choice) => (
+          <label
+            key={choice.value}
+            className={cn(
+              "flex items-start gap-2.5 rounded-xl border p-3 transition-colors duration-200",
+              editable ? "cursor-pointer" : "cursor-default",
+              value === choice.value ? "border-ember bg-ember-soft/60" : "border-line hover:border-line-strong",
+            )}
+          >
+            <input
+              type="radio"
+              name={name}
+              value={choice.value}
+              checked={value === choice.value}
+              disabled={!editable}
+              onChange={() => onChange(choice.value)}
+              className="mt-0.5 accent-ember-strong"
+            />
+            <span className="min-w-0">
+              <span className="block text-sm font-medium text-ink">{choice.title}</span>
+              {choice.hint && <span className="mt-0.5 block text-xs leading-relaxed text-ink-muted">{choice.hint}</span>}
+            </span>
+          </label>
+        ))}
+      </div>
+    </fieldset>
   );
 }
 

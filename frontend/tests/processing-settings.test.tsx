@@ -76,3 +76,25 @@ describe("scenario wizard", () => {
     expect(screen.getByLabelText("Cách ghép ảnh")).toHaveValue("sequential");
   });
 });
+
+const reviewParameters = [...parameters, choice("scene.geometry_review", "scene", "Duyệt tách vật trước khi tạo mesh", ["required", "auto"])];
+const reviewValues = { ...values, "scene.geometry_review": "required" };
+const REQUIRED_LABEL = "Dừng để duyệt và chỉnh vùng vật (khuyên dùng)";
+const AUTO_LABEL = /Tạo mesh ngay, không duyệt/;
+
+describe("lựa chọn duyệt tách vật", () => {
+  it("đặt ngoài thông số nâng cao và mặc định theo giá trị niêm phong", () => {
+    render(<ProcessingSettings parameters={reviewParameters} values={reviewValues} editable onChange={vi.fn()} />);
+    const group = screen.getByRole("group", { name: "Sau khi tách vật" });
+    expect(document.querySelector("details")).not.toContainElement(group);
+    expect(screen.getByRole("radio", { name: REQUIRED_LABEL })).toBeChecked();
+    expect(screen.getByRole("radio", { name: AUTO_LABEL })).not.toBeChecked();
+  });
+
+  it("chọn Tạo mesh ngay gửi scene.geometry_review = auto", () => {
+    const onChange = vi.fn();
+    render(<ProcessingSettings parameters={reviewParameters} values={reviewValues} editable onChange={onChange} />);
+    fireEvent.click(screen.getByRole("radio", { name: AUTO_LABEL }));
+    expect(onChange).toHaveBeenCalledWith("scene.geometry_review", "auto");
+  });
+});
