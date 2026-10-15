@@ -385,6 +385,11 @@ export class RegionOverlay {
     this.floorZ = floorZ;
   }
 
+  /** Đang có cử chỉ kéo (tay nắm hoặc gizmo): cập nhật box từ bên ngoài phải chờ đến khi thả. */
+  isGesturing(): boolean {
+    return this.faceDrag !== null || this.gizmoDrag !== null;
+  }
+
   /** Viewer đã sẵn sàng và lớp vẫn gắn trong scene. */
   private live(): boolean {
     return !this.disposed && this.host.isAlive() && this.root.parent !== null;
