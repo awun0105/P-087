@@ -15,6 +15,40 @@ class ObjectAwareGeometry:
     statistics: dict[str, int]
 
 
+def occupancy_surface(cells: set[tuple[int, int, int]], voxel_m: float) -> tuple[np.ndarray, np.ndarray]:
+    """Exposed voxel faces of an occupancy set, outward winding, metres. Raises ValueError if empty."""
+    if not cells:
+        raise ValueError("occupancy is empty")
+    if not np.isfinite(voxel_m) or voxel_m <= 0:
+        raise ValueError("voxel_m must be finite and positive")
+    corner_ids: dict[tuple[int, int, int], int] = {}
+    vertices = []
+    faces = []
+    for cell in sorted(cells):
+        for axis in range(3):
+            u, v = (axis + 1) % 3, (axis + 2) % 3
+            for sign in [-1, 1]:
+                neighbor = list(cell)
+                neighbor[axis] += sign
+                if tuple(neighbor) in cells:
+                    continue
+                corners = []
+                for a, b in [(0, 0), (1, 0), (1, 1), (0, 1)]:
+                    point = list(cell)
+                    point[axis] += int(sign > 0)
+                    point[u] += a
+                    point[v] += b
+                    key = tuple(point)
+                    if key not in corner_ids:
+                        corner_ids[key] = len(vertices)
+                        vertices.append(point)
+                    corners.append(corner_ids[key])
+                if sign < 0:
+                    corners.reverse()
+                faces.extend([(corners[0], corners[1], corners[2]), (corners[0], corners[2], corners[3])])
+    return np.asarray(vertices, dtype=float) * voxel_m, np.asarray(faces, dtype=np.int64)
+
+
 def build_background_collision(
     points: np.ndarray,
     labels: np.ndarray,
@@ -80,33 +114,7 @@ def build_background_collision(
     if np.prod(dimensions.astype(object)) > max_grid_cells:
         raise ValueError("object-aware occupancy exceeds the configured grid budget")
     # Emit only exposed voxel faces. No smoothing/fill step can reintroduce excluded occupancy.
-    corner_ids: dict[tuple[int, int, int], int] = {}
-    vertices = []
-    faces = []
-    for cell in sorted(kept):
-        for axis in range(3):
-            u, v = (axis + 1) % 3, (axis + 2) % 3
-            for sign in [-1, 1]:
-                neighbor = list(cell)
-                neighbor[axis] += sign
-                if tuple(neighbor) in kept:
-                    continue
-                corners = []
-                for a, b in [(0, 0), (1, 0), (1, 1), (0, 1)]:
-                    point = list(cell)
-                    point[axis] += int(sign > 0)
-                    point[u] += a
-                    point[v] += b
-                    key = tuple(point)
-                    if key not in corner_ids:
-                        corner_ids[key] = len(vertices)
-                        vertices.append(point)
-                    corners.append(corner_ids[key])
-                if sign < 0:
-                    corners.reverse()
-                faces.extend([(corners[0], corners[1], corners[2]), (corners[0], corners[2], corners[3])])
-    vertices = np.asarray(vertices, dtype=float) * voxel_m
-    faces = np.asarray(faces, dtype=np.int64)
+    vertices, faces = occupancy_surface(kept, voxel_m)
     digest = hashlib.sha256(
         json.dumps({"algorithm": "object_aware_occupancy_v1", "voxel_m": voxel_m}, sort_keys=True).encode()
     )

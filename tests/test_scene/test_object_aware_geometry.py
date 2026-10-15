@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import trimesh
 
-from src.services.scene.object_aware_geometry import build_background_collision
+from src.services.scene.object_aware_geometry import build_background_collision, occupancy_surface
 
 
 def fixture():
@@ -111,3 +111,29 @@ def test_background_collision_checksum_unchanged_after_refactor():
     mesh_digest = hashlib.sha256(result.vertices.astype("<f8").tobytes() + result.faces.astype("<i8").tobytes())
     assert result.occupancy_checksum == "sha256:caea4ebef4569c056cc8a0b551e8ced62e95a5234ae5826cb4c0f255cf7ae1ab"
     assert mesh_digest.hexdigest() == "a2bedb2a16b128bf4658b2760f5f00f1c6f38298b46652acc97dc0141af9850d"
+
+
+def test_occupancy_surface_single_cell_is_closed_unit_cube():
+    vertices, faces = occupancy_surface({(0, 0, 0)}, 0.1)
+    assert vertices.shape == (8, 3)
+    assert faces.shape == (12, 3)
+    mesh = trimesh.Trimesh(vertices, faces, process=False)
+    assert mesh.is_watertight
+    assert mesh.volume == pytest.approx(0.1**3)
+
+
+def test_occupancy_surface_adjacent_cells_share_internal_face():
+    vertices, faces = occupancy_surface({(0, 0, 0), (1, 0, 0)}, 0.1)
+    assert vertices.shape == (12, 3)
+    assert faces.shape == (20, 3)
+    mesh = trimesh.Trimesh(vertices, faces, process=False)
+    assert mesh.is_watertight
+    assert mesh.volume == pytest.approx(2 * 0.1**3)
+
+
+def test_occupancy_surface_rejects_empty_and_invalid_voxel():
+    with pytest.raises(ValueError, match="occupancy is empty"):
+        occupancy_surface(set(), 0.1)
+    for voxel_m in [0.0, -0.1, float("nan"), float("inf")]:
+        with pytest.raises(ValueError, match="voxel_m"):
+            occupancy_surface({(0, 0, 0)}, voxel_m)
