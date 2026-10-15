@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, type Mock } from "vitest";
 
 // Mesh/MeshInstance cần GPU; tests chỉ cần số đỉnh và chỉ số đã nạp, nên dùng bản giả ghi lại dữ liệu.
 vi.mock("playcanvas", async (importOriginal) => {
@@ -25,7 +25,51 @@ vi.mock("playcanvas", async (importOriginal) => {
     }
   }
 
-  return { ...actual, Mesh: FakeMesh, MeshInstance: FakeMeshInstance };
+  // Gizmo PlayCanvas: giữ đúng các điểm tiếp xúc mà overlay dùng (attach, enableShape, _shapes, sự kiện transform:*,
+  // và _onPointerUp kết thúc cử chỉ như thật, nên huỷ bằng Esc vẫn phát transform:end).
+  class FakeGizmo {
+    enabled = false;
+    coordSpace = "world";
+    attached: unknown[] = [];
+    _shapes: Record<string, { entity: { enabled: boolean } }> = {
+      x: { entity: { enabled: true } },
+      y: { entity: { enabled: true } },
+      z: { entity: { enabled: true } },
+      f: { entity: { enabled: true } },
+      xyz: { entity: { enabled: true } },
+    };
+    _getSelection = vi.fn(() => [] as unknown[]);
+    _onPointerDown = vi.fn();
+    _onPointerMove = vi.fn();
+    _onPointerUp = vi.fn(() => this.fire("transform:end"));
+    enableShape = vi.fn();
+    attach = vi.fn((nodes: unknown[]) => {
+      this.attached = nodes;
+      this.enabled = true;
+    });
+    detach = vi.fn(() => {
+      this.enabled = false;
+    });
+    destroy = vi.fn();
+    private handlers: Record<string, Array<() => void>> = {};
+    on(event: string, handler: () => void) {
+      (this.handlers[event] ??= []).push(handler);
+      return this;
+    }
+    fire(event: string) {
+      for (const handler of this.handlers[event] ?? []) handler();
+    }
+  }
+  class FakeRotateGizmo extends FakeGizmo {}
+  class FakeTranslateGizmo extends FakeGizmo {}
+
+  return {
+    ...actual,
+    Mesh: FakeMesh,
+    MeshInstance: FakeMeshInstance,
+    RotateGizmo: FakeRotateGizmo,
+    TranslateGizmo: FakeTranslateGizmo,
+  };
 });
 
 import {
@@ -347,5 +391,109 @@ describe("RegionOverlay face handles, drag and pick", () => {
     expect(onSelect).toHaveBeenCalledWith("b");
     expect(handleCount(object, "b")).toBe(6);
     expect(handleCount(object, "a")).toBe(0);
+  });
+});
+
+/** Các điểm của gizmo fake mà test dùng. */
+interface FakeGizmoLike {
+  enabled: boolean;
+  coordSpace: string;
+  attached: unknown[];
+  enableShape: Mock;
+  _shapes: Record<string, { entity: { enabled: boolean } }>;
+  _getSelection: Mock;
+  _onPointerMove: Mock;
+  fire(event: string): void;
+}
+
+function gizmosOf(overlay: RegionOverlay): { rotateGizmo: FakeGizmoLike; translateGizmo: FakeGizmoLike } {
+  return overlay as unknown as { rotateGizmo: FakeGizmoLike; translateGizmo: FakeGizmoLike };
+}
+
+const yawQuat = (yaw: number) => new Quat(0, 0, Math.sin(yaw / 2), Math.cos(yaw / 2));
+
+describe("RegionOverlay gizmos", () => {
+  it("attaches the rotate and translate gizmos to the selected box in local space", () => {
+    const { overlay } = scene();
+    overlay.setBoxes([box({ id: "a" }), box({ id: "b", center: [2, 0, 0] })], "b");
+    const { rotateGizmo, translateGizmo } = gizmosOf(overlay);
+    expect(rotateGizmo.coordSpace).toBe("local");
+    expect(translateGizmo.coordSpace).toBe("local");
+    expect((rotateGizmo.attached[0] as Entity).name).toBe("region-box-b");
+    expect((translateGizmo.attached[0] as Entity).name).toBe("region-box-b");
+
+    overlay.setBoxes([box({ id: "a" }), box({ id: "b", center: [2, 0, 0] })], "a");
+    expect((rotateGizmo.attached[0] as Entity).name).toBe("region-box-a");
+  });
+
+  it("limits the rotate gizmo to the Z ring and hides the other rings", () => {
+    const { overlay } = scene();
+    overlay.setBoxes([box()], "b1");
+    const { rotateGizmo } = gizmosOf(overlay);
+    // Tên công khai của PlayCanvas cho vòng mặt là "face"; trong _shapes vòng đó nằm ở khoá "f".
+    for (const [publicAxis, shape] of [
+      ["x", "x"],
+      ["y", "y"],
+      ["face", "f"],
+      ["xyz", "xyz"],
+    ]) {
+      expect(rotateGizmo.enableShape).toHaveBeenCalledWith(publicAxis, false);
+      expect(rotateGizmo._shapes[shape].entity.enabled).toBe(false);
+    }
+    expect(rotateGizmo.enableShape).not.toHaveBeenCalledWith("z", false);
+  });
+
+  it("rotates the box about its centre on release and reports the new yaw", () => {
+    const { object, overlay, onChange } = scene();
+    overlay.setBoxes([box()], "b1");
+    const { rotateGizmo } = gizmosOf(overlay);
+    rotateGizmo.fire("transform:start");
+    entityNamed(object, "region-box-b1").setLocalRotation(yawQuat(Math.PI / 6));
+    rotateGizmo.fire("transform:move");
+    expect(onChange).not.toHaveBeenCalled();
+    rotateGizmo.fire("transform:end");
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const [boxes] = onChange.mock.calls[0];
+    expect(boxes[0].yaw).toBeCloseTo(Math.PI / 6, 9);
+    expect(boxes[0].center).toEqual([0, 0, 0]);
+  });
+
+  it("moves the box centre on release of the translate gizmo", () => {
+    const { object, overlay, onChange } = scene();
+    overlay.setBoxes([box()], "b1");
+    const { translateGizmo } = gizmosOf(overlay);
+    translateGizmo.fire("transform:start");
+    entityNamed(object, "region-box-b1").setLocalPosition(0.4, 0.1, 0);
+    translateGizmo.fire("transform:end");
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const [boxes] = onChange.mock.calls[0];
+    expect(boxes[0].center[0]).toBeCloseTo(0.4, 9);
+    expect(boxes[0].center[1]).toBeCloseTo(0.1, 9);
+  });
+
+  it("keeps pointer moves away from the camera during a gizmo drag", () => {
+    const { canvas, overlay } = scene();
+    overlay.setBoxes([box()], "b1");
+    const { translateGizmo } = gizmosOf(overlay);
+    const cameraSees = vi.fn();
+    canvas.addEventListener("pointermove", cameraSees);
+    translateGizmo._getSelection.mockReturnValue([{}]);
+    pointer(canvas, "pointerdown", { x: 1, y: 1 });
+    pointer(canvas, "pointermove", { x: 2, y: 2 });
+    expect(cameraSees).not.toHaveBeenCalled();
+    expect(translateGizmo._onPointerMove).toHaveBeenCalled();
+  });
+
+  it("cancels a gizmo drag on Escape, restores the box and reports nothing", () => {
+    const { canvas, object, overlay, onChange } = scene();
+    overlay.setBoxes([box()], "b1");
+    const { translateGizmo } = gizmosOf(overlay);
+    translateGizmo._getSelection.mockReturnValue([{}]);
+    pointer(canvas, "pointerdown", { x: 1, y: 1 });
+    translateGizmo.fire("transform:start");
+    entityNamed(object, "region-box-b1").setLocalPosition(0.6, 0, 0);
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(onChange).not.toHaveBeenCalled();
+    expect(entityNamed(object, "region-box-b1").getLocalPosition().x).toBeCloseTo(0, 9);
   });
 });

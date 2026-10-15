@@ -15,7 +15,9 @@ import {
   MeshInstance as PcMeshInstance,
   PRIMITIVE_TRIANGLES,
   Quat,
+  RotateGizmo,
   StandardMaterial,
+  TranslateGizmo,
   Vec3 as PcVec3,
 } from "playcanvas";
 
@@ -24,12 +26,15 @@ import {
   dragFace,
   faceCenter,
   faceNormal,
+  rotateYaw,
+  translateBox,
   type BoxOp,
   type EditableBox,
   type FaceId,
   type Vec3,
 } from "@/features/studio/region/box-model";
 import {
+  isolateGizmoPointer,
   isolatePointerGesture,
   rayUnitBox,
   type PointerGesture,
@@ -88,6 +93,12 @@ function dot(a: Vec3, b: Vec3): number {
 /** Quaternion quay quanh +Z (xyzw), khớp quy ước yaw của box model. */
 function yawQuat(yaw: number): Quat {
   return new Quat(0, 0, Math.sin(yaw / 2), Math.cos(yaw / 2));
+}
+
+/** Yaw (quanh Z) của một entity, đọc từ quaternion của nó; đúng khi chỉ có quay quanh Z. */
+function yawOf(root: Entity): number {
+  const q = root.getLocalRotation();
+  return 2 * Math.atan2(q.z, q.w);
 }
 
 /** Màu theo thao tác: cộng xanh lục, trừ đỏ. */
@@ -239,6 +250,15 @@ export class RegionOverlay {
   private boxes: EditableBox[] = [];
   private selectedId: string | null = null;
   private disposed = false;
+  private rotateGizmo: RotateGizmo | null = null;
+  private translateGizmo: TranslateGizmo | null = null;
+  private rotateIsolation: PointerIsolation | null = null;
+  private translateIsolation: PointerIsolation | null = null;
+  /** Gốc của box đang gắn gizmo, hoặc null khi không chọn. */
+  private gizmoTarget: Entity | null = null;
+  /** Các box trước khi kéo gizmo, để trả lại nếu huỷ bằng Esc. */
+  private gizmoDrag: EditableBox[] | null = null;
+  private gizmoAborting = false;
 
   /** Gắn gốc overlay vào entity vật. Ném lỗi khi viewer chưa sẵn sàng hoặc vật chưa được nạp: không vẽ âm thầm. */
   constructor(
@@ -292,10 +312,12 @@ export class RegionOverlay {
     }
     for (const [id, visual] of this.visuals) {
       if (present.has(id)) continue;
+      if (visual.root === this.gizmoTarget) this.attachGizmos(null);
       visual.root.destroy();
       this.visuals.delete(id);
     }
     this.placeHandles();
+    this.attachGizmos(this.selectedRoot());
     this.host.requestFrame();
   }
 
@@ -433,6 +455,96 @@ export class RegionOverlay {
     return best;
   }
 
+  /** Gizmo xoay (chỉ vòng Z) và dịch tâm: tạo một lần khi có camera, rồi gắn hoặc gỡ theo box đang chọn. */
+  private ensureGizmos(): boolean {
+    if (this.rotateGizmo && this.translateGizmo) return true;
+    const camera = this.host.activeCamera();
+    if (!camera) return false;
+    const layer = this.host.sharedGizmoLayer();
+    const rotate = new RotateGizmo(camera, layer);
+    rotate.coordSpace = "local";
+    // Chỉ còn vòng Z: các vòng khác vừa tắt tương tác, vừa ẩn hình (PlayCanvas chỉ làm mờ khi tắt).
+    const shapes = (rotate as unknown as { _shapes: Record<string, { entity: Entity }> })._shapes;
+    for (const [publicAxis, shape] of [
+      ["x", "x"],
+      ["y", "y"],
+      ["face", "f"],
+      ["xyz", "xyz"],
+    ] as const) {
+      rotate.enableShape(publicAxis, false);
+      shapes[shape].entity.enabled = false;
+    }
+    const translate = new TranslateGizmo(camera, layer);
+    translate.coordSpace = "local";
+    rotate.on("transform:start", () => this.beginGizmoDrag());
+    rotate.on("transform:move", () => this.host.requestFrame());
+    rotate.on("transform:end", () => this.endGizmoDrag("rotate"));
+    translate.on("transform:start", () => this.beginGizmoDrag());
+    translate.on("transform:move", () => this.host.requestFrame());
+    translate.on("transform:end", () => this.endGizmoDrag("translate"));
+    this.rotateIsolation = isolateGizmoPointer(rotate, this.canvas);
+    this.translateIsolation = isolateGizmoPointer(translate, this.canvas);
+    this.rotateGizmo = rotate;
+    this.translateGizmo = translate;
+    return true;
+  }
+
+  /** Gắn gizmo vào gốc box đang chọn; `null` thì gỡ. Gốc giống lần trước thì không làm gì. */
+  private attachGizmos(target: Entity | null): void {
+    if (target === this.gizmoTarget) return;
+    this.gizmoTarget = target;
+    if (!target) {
+      this.rotateGizmo?.detach();
+      this.translateGizmo?.detach();
+      return;
+    }
+    if (!this.ensureGizmos()) return;
+    this.rotateGizmo?.attach([target]);
+    this.translateGizmo?.attach([target]);
+  }
+
+  private selectedRoot(): Entity | null {
+    const visual = this.selectedId ? this.visuals.get(this.selectedId) : undefined;
+    return visual ? visual.root : null;
+  }
+
+  /** Gizmo bắt đầu kéo: nhớ các box để trả lại nếu huỷ bằng Esc. */
+  private beginGizmoDrag(): void {
+    this.gizmoDrag = this.snapshot();
+    window.addEventListener("keydown", this.onEscape);
+  }
+
+  /**
+   * Gizmo thả hoặc bị huỷ. Huỷ: trả box về như cũ, không báo ra ngoài. Thả: pose của entity (object-local) thành box
+   * mới; chỉ báo ra ngoài khi box thật sự đổi.
+   */
+  private endGizmoDrag(kind: "rotate" | "translate"): void {
+    const before = this.gizmoDrag;
+    if (!before) return;
+    this.gizmoDrag = null;
+    window.removeEventListener("keydown", this.onEscape);
+    if (this.gizmoAborting) {
+      this.boxes = before;
+      this.sync();
+      return;
+    }
+    const selected = this.boxes.find((box) => box.id === this.selectedId);
+    const root = this.selectedRoot();
+    if (!selected || !root) return;
+    const position = root.getLocalPosition();
+    const moved =
+      kind === "rotate"
+        ? rotateYaw(selected, yawOf(root) - selected.yaw)
+        : translateBox(selected, [
+            position.x - selected.center[0],
+            position.y - selected.center[1],
+            position.z - selected.center[2],
+          ]);
+    this.boxes = this.boxes.map((box) => (box.id === moved.id ? moved : box));
+    this.sync();
+    if (boxesKey(this.boxes) !== boxesKey(before)) this.handlers.onChange(this.snapshot());
+  }
+
   private snapshot(): EditableBox[] {
     return this.boxes.map(copyBox);
   }
@@ -509,7 +621,13 @@ export class RegionOverlay {
     if (this.live()) this.scaleHandles();
   };
 
+  /** Esc huỷ mọi cử chỉ đang kéo: tay nắm mặt, hoặc gizmo (gizmo kết thúc qua transform:end và box được trả lại). */
   private readonly onEscape = (e: KeyboardEvent): void => {
-    if (e.key === "Escape") this.isolation.cancel();
+    if (e.key !== "Escape") return;
+    this.isolation.cancel();
+    this.gizmoAborting = true;
+    this.rotateIsolation?.cancel();
+    this.translateIsolation?.cancel();
+    this.gizmoAborting = false;
   };
 }
