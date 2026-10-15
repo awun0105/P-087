@@ -1,12 +1,14 @@
 """Isolated, revision-pinned ObjectGS dataset adapter and real train/export process runner."""
 
+import fcntl
 import hashlib
 import json
 import os
 import subprocess
 import sys
 import tarfile
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from threading import Event
 from typing import Literal
@@ -50,6 +52,7 @@ class ObjectGSRuntime(ContractModel):
     cuda_home: Path | None = None
     cxx: Path | None = None
     glm_repository: Path | None = None
+    extension_cache_dir: Path | None = None
     gpu_device: int = Field(default=0, ge=0, strict=True)
     iterations: int = Field(default=30000, ge=1, strict=True)
     timeout_seconds: FiniteFloat = Field(default=14400, gt=0)
@@ -151,6 +154,24 @@ def _revision(repository: Path) -> str:
     return subprocess.check_output(["git", "-C", str(repository), "rev-parse", "HEAD"], text=True).strip()
 
 
+@contextmanager
+def _extension_cache_lock(directory: Path | None) -> Iterator[None]:
+    """Serialize optional shared compiler caches; pinned upstream removes JIT lock files itself."""
+    if directory is None:
+        yield
+        return
+    directory.mkdir(parents=True, exist_ok=True)
+    with (directory / ".p087-process.lock").open("a") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise RuntimeError("ObjectGS extension cache is in use by another process") from error
+        try:
+            yield
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+
+
 def run_objectgs(
     runtime: ObjectGSRuntime,
     dataset: Path,
@@ -200,7 +221,7 @@ def run_objectgs(
     environment = {
         "CUDA_VISIBLE_DEVICES": str(runtime.gpu_device),
         "PYTHONPATH": str(runtime.gsplat_repository),
-        "TORCH_EXTENSIONS_DIR": str(workspace / "torch-extensions"),
+        "TORCH_EXTENSIONS_DIR": str((runtime.extension_cache_dir or workspace / "torch-extensions").resolve()),
         "MAX_JOBS": "2",
         # Python 3.8's Python.h includes crypt.h from the environment's include
         # root, which a separate Conda compiler sysroot does not search itself.
@@ -220,7 +241,7 @@ def run_objectgs(
     def execute(command: list[str], stage: str) -> None:
         if progress:
             progress(stage)
-        with (workspace / f"{stage}.log").open("w") as log:
+        with _extension_cache_lock(runtime.extension_cache_dir), (workspace / f"{stage}.log").open("w") as log:
             status = run_cancellable_process(
                 [str(runtime.python.absolute()), *command[1:]],
                 cwd=workspace,

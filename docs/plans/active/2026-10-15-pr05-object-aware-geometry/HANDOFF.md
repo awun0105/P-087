@@ -234,3 +234,20 @@ imports passed. A fresh train attempt failed at missing crypt.h under the isolat
 now includes the actual Python environment include root alongside GLM. Ten adapter/process tests PASS after
 this correction. Fresh real-GPU smoke 03 is compiling CUDA kernels; checkpoint and mesh export are still
 pending and must not be marked integrated/PASS on the strength of this progress alone.
+
+
+## Checkpoint: cache serialization and actual compiler cancellation
+
+The 900-second cold GPU smoke 03 timed out during extension compilation after 22 object files. No checkpoint
+or mesh was produced. Pinned upstream deletes partial extension caches, so smoke 04 uses a fresh training
+workspace and a 1800-second timeout and must finish its full first build. Reuse is supported only for a
+completed compiler cache; this is not checkpoint resume. Optional extension_cache_dir now has an exclusive
+per-process lock, rejecting concurrent users before starting an upstream process. Worker defaults remain
+per-invocation scratch. Twenty adapter/required-stage/objectify tests PASS after this change.
+
+An additional real OS regression reproduced compiler-style child process groups escaping the original
+killpg(leader) cleanup: cancel and timeout both failed before the fix (2 FAIL, child still sleeping).
+process_control now also kills groups within the private Linux session, with a second sweep for children
+created during the first sweep. No unrelated sessions are targeted. Both cases PASS after the fix; focused
+process/adapter/producer tests: 22 PASS / 3.17s. This shared helper is also used by SAM3D, Objectify and Isaac
+process control; callers were inspected with CodeGraph and their related regressions are rerun below.

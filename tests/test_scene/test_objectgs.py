@@ -89,7 +89,8 @@ def test_runner_requires_pinned_revisions_and_honors_cancellation(tmp_path, monk
     assert not (tmp_path / "work").exists()
 
 
-def test_runner_contract_calls_train_then_each_numeric_label_never_minus_one(tmp_path, monkeypatch):
+@pytest.mark.parametrize("shared_cache", [False, True])
+def test_runner_contract_calls_train_then_each_numeric_label_never_minus_one(tmp_path, monkeypatch, shared_cache):
     repo = tmp_path / "upstream"
     template = repo / "config/objectgs/2d/lerf_mask/config.yaml"
     template.parent.mkdir(parents=True)
@@ -100,7 +101,12 @@ def test_runner_contract_calls_train_then_each_numeric_label_never_minus_one(tmp
     python.parent.mkdir(parents=True)
     python.touch()
     runtime = objectgs.ObjectGSRuntime(
-        python=python, repository=repo, gsplat_repository=gsplat, iterations=2, gpu_device=3
+        python=python,
+        repository=repo,
+        gsplat_repository=gsplat,
+        iterations=2,
+        gpu_device=3,
+        extension_cache_dir=tmp_path / "compiler-cache" if shared_cache else None,
     )
     dataset = tmp_path / "data/job-test"
     objectgs.prepare_dataset(*inputs(tmp_path), dataset)
@@ -137,12 +143,31 @@ def test_runner_contract_calls_train_then_each_numeric_label_never_minus_one(tmp
     ]
     assert all(call[1]["environment"]["CUDA_VISIBLE_DEVICES"] == "3" for call in calls)
     assert all(call[1]["environment"]["CPLUS_INCLUDE_PATH"] == str(python.parent.parent / "include") for call in calls)
+    if shared_cache:
+        assert all(call[1]["environment"]["TORCH_EXTENSIONS_DIR"] == str(tmp_path / "compiler-cache") for call in calls)
     assert set(receipt["objects"]) == {"chair", "table"}
     assert receipt["coordinate_frame"] == "world"
     config = yaml.safe_load((tmp_path / "work/config.yaml").read_text())
     assert config["model_params"]["source_path"] == str(dataset.parent)
     assert config["optim_params"]["iterations"] == 2
     assert json.loads((tmp_path / "work/result.json").read_text())["upstream_commit"] == objectgs.OBJECTGS_COMMIT
+
+
+def test_shared_extension_cache_rejects_concurrent_process_and_releases_after_failure(tmp_path):
+    import fcntl
+
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    with (cache / ".p087-process.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        with pytest.raises(RuntimeError, match="cache is in use"):
+            with objectgs._extension_cache_lock(cache):
+                pytest.fail("must not execute against another process's cache")
+    with pytest.raises(ValueError):
+        with objectgs._extension_cache_lock(cache):
+            raise ValueError("fixture failure")
+    with objectgs._extension_cache_lock(cache):
+        pass
 
 
 def test_prepared_stage_converts_world_mesh_to_rotated_object_local_once(tmp_path, monkeypatch):

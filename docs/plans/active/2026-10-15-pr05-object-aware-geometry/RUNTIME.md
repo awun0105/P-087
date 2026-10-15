@@ -75,7 +75,7 @@ Create runtime.json using absolute deployment paths:
   "glm_repository": "/path/to/glm",
   "gpu_device": 0,
   "iterations": 100,
-  "timeout_seconds": 900,
+  "timeout_seconds": 1800,
   "voxel_size_m": 0.03,
   "depth_trunc_m": 8
 }
@@ -93,6 +93,12 @@ This generates eight calibrated 96x96 observations of a one-metre cube above a f
 metric anchors, runs actual upstream training and each numeric-label mesh export, then writes result.json.
 The workspace must not exist; retries require a fresh path. Logs are runtime/runtime-check.log, train.log,
 and export-1.log. A 100-iteration smoke tests execution, not trained mesh quality or CoACD acceptance.
+An optional `extension_cache_dir` in runtime.json reuses a completed CUDA extension for the same
+pinned source, Python/Torch/CUDA/compiler environment. Keep distinct directories for different runtimes.
+The default remains per-invocation scratch. A process-level lock rejects concurrent users of an explicitly
+shared cache, including export subprocesses. Pinned upstream deletes an incomplete cache without its .so;
+this option does not resume a failed compiler build or a neural checkpoint. The local 900-second cold build
+timed out; use a sufficiently long timeout for first compilation (the example now uses 1800 seconds).
 The production default remains 30,000 iterations. Empty exports fail; no fabricated result or fallback.
 
 ## Existing Room pipeline smoke (mutates the scene only when executed)
