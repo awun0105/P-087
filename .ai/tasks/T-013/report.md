@@ -1,6 +1,6 @@
 # Report T-013
 
-Trạng thái: **in-progress**. Bước 1–6 xong; bước 7 (preset) chưa làm, chờ T-009 accepted. Chi tiết ở "Deviations".
+Trạng thái: **implemented**. Bước 1–7 đều xong. Bước 7 (preset) làm ở Round 2 sau khi T-009 accepted; chi tiết ở "Round 2".
 
 ## Done
 
@@ -13,6 +13,7 @@ Trạng thái: **in-progress**. Bước 1–6 xong; bước 7 (preset) chưa là
   - Dịch/Xoay: hai nút disabled với `title` là lý do; `ObjectReviewView` không truyền gizmo khi bị khoá và tự đóng gizmo đang mở.
   - Xuất USD: `SimulationPackagePanel` nhận `lockedReason`, nút disabled với `title`; `ReviewTab` tính khoá từ scene đã tải.
 - **Bước 6 — `b7ff375f`**: panel vật đã dựng hiện dòng `Collider: Vỏ Gaussian` hoặc `Collider: ObjectGS` theo `provenance.surface_selection.chosen`, kèm `surface_selection.reason` nếu có.
+- **Bước 7 — `07ecbfcd`** (Round 2): 8 preset chuyển sang `scene.geometry_method = shell` và `scene.geometry_review = required`; schema khai báo choice `shell` và param `scene.geometry_review`. Chi tiết ở "Round 2".
 
 ## Files changed
 
@@ -27,11 +28,15 @@ Trạng thái: **in-progress**. Bước 1–6 xong; bước 7 (preset) chưa là
 - `frontend/src/features/studio/scene/ReviewTab.tsx`: truyền khoá xuất USD.
 - `frontend/tests/geometry-review-banner.test.tsx` (mới): 8 test (trạng thái, nhãn phase, banner).
 - `frontend/tests/progress-objectify.test.tsx`: thêm 4 test cho thông báo geometry và region.
-- `frontend/tests/object-review.test.tsx`: stub nhận `lockedReason`; thêm 3 test (Draft khoá và banner, khoá USD, nguồn collider).
-- `frontend/tests/metric-effective-collision.test.tsx`: thêm 3 test (Đi bộ khoá, Đi bộ không khoá ở ready, Dịch/Xoay khoá).
-- `.ai/tasks/T-013/report.md` (mới). `.ai/status.md` không đổi (vẫn in-progress).
+- `frontend/tests/object-review.test.tsx`: stub nhận `lockedReason`; thêm test (Draft khoá và banner, khoá USD, nguồn collider, khoá thêm vật).
+- `frontend/tests/metric-effective-collision.test.tsx`: thêm test (Đi bộ khoá, Đi bộ không khoá ở ready, Dịch/Xoay khoá, nhân bản và bề mặt khoá).
+- `configs/product/processing_presets_v1.json`: 8 preset có `shell` và `geometry_review = required`; param `scene.geometry_method` có choice `shell`; param mới `scene.geometry_review` (Round 2).
+- `tests/test_orchestration/test_processing_config.py`: đổi tên test preset thành `test_every_preset_seals_shell_geometry_review_and_multiview` (Round 2).
+- `.ai/tasks/T-013/report.md` (mới). `.ai/tasks/T-013/step7.patch` đã áp rồi xoá trong commit `07ecbfcd`. `.ai/status.md`: T-013 thành `implemented`.
 
 ## Tests
+
+Round 1:
 
 ```
 cd frontend
@@ -45,27 +50,27 @@ npm run typecheck      → exit 0
 ./node_modules/.bin/eslint <14 file đã sửa>   → exit 0
 ```
 
-Không chạy full suite. Phần backend không đổi trong T-013 đến hiện tại.
+Không chạy full suite. Round 2 có kết quả riêng ở mục Round 2.
 
 ## Deviations from plan
 
-- **Bước 7 (preset) chưa làm, bị chặn**: đổi mọi preset sang `scene.geometry_method = shell` và `scene.geometry_review = required` làm mọi job mới vào Draft. Lúc đó "Tạo mesh" phải chạy được end-to-end. Hiện route `scene/geometry/build` đã có trong HEAD (`c32ed6ba`), nhưng worker `object_geometry_build.py` và `objectify.py` còn thay đổi chưa commit ở phiên T-009, và T-009 chưa accepted (roadmap ghi T-013 "Cần" T-009). Đề xuất: làm bước 7 sau khi T-009 accepted, rồi đặt T-013 implemented. Đây là quyết định đổi hành vi mặc định, cần người dùng xác nhận.
+- **Bước 7 (preset) đã làm ở Round 2 (`07ecbfcd`)**. Trước đó bị chặn: đổi mọi preset sang `shell` và `geometry_review = required` làm mọi job mới vào Draft, nên cần T-009 accepted trước.
 - **Nút Đi bộ khoá là control riêng**: viewer chỉ hiện nút Đi bộ khi `walkAllowed` đúng, nên trong Draft nút đó không tồn tại. Thêm nút "Đi bộ" disabled vào thanh điều khiển của `MetricSceneView` (chỉ hiện khi khoá) để có tooltip như plan.
 - **Lớp "Collision mesh" trống trong Draft**: không gọi walk-collision khi khoá (server trả 409), nên lớp này không có dữ liệu. Trước đây lớp hiện thông báo lỗi 409.
-- **Thao tác khác chưa khoá trên UI**: thêm box, thêm asset thư viện, nhân bản và đánh dấu mặt collision đã bị server chặn ở T-012 round 2, nhưng nút vẫn bật trên UI. Plan không yêu cầu khoá các nút này, nên giữ nguyên; cần quyết định khoá ở T-013 hay T-016.
+- **Thao tác khác chưa khoá trên UI** (đã xử lý ở Round 2): thêm box, thêm asset thư viện, nhân bản và đánh dấu mặt collision.
 - **`region` vào type trước**: plan bước 2 cho phép (`geometry`, `region` nếu chưa có); T-011 gửi mode này.
 - **Test ngoài danh sách**: thêm test vào `metric-effective-collision.test.tsx` vì nút Đi bộ khoá nằm trong `MetricSceneView`. Test thuần và banner gom vào `geometry-review-banner.test.tsx` để lệnh "Tests required" phủ được.
 
 ## Known issues / TODO
 
-- Phụ thuộc: T-013 "Cần" T-009, hiện T-009 `implemented`, chưa `accepted`. Bước 7 chờ T-009 accepted.
-- "N vật" của banner đếm mọi vật chưa DELETED/MERGED/IGNORED. Backend chỉ dựng vật có nhãn Gaussian, nên con số có thể lớn hơn số vật được dựng (ví dụ sàn không có Gaussian). Cần reviewer xác nhận cách đếm.
+- Phụ thuộc: T-013 "Cần" T-009. T-009 đã `accepted` trong `status.md` tại thời điểm áp bước 7, nên bước 7 đã làm.
+- "N vật" của banner đếm mọi vật chưa DELETED/MERGED/IGNORED. Backend chỉ dựng vật có nhãn Gaussian, nên con số có thể lớn hơn số vật được dựng (ví dụ sàn không có Gaussian). Reviewer đã chấp nhận cách đếm ở review.md.
 - Chưa kiểm bằng trình duyệt: vị trí banner trên viewport, nút Đi bộ khoá trên thanh điều khiển của viewer, và độ tương phản của cảnh báo vỏ lỗi. Theo quy ước, người dùng tự kiểm bằng mắt.
 - `ObjectifyNotice` nhánh region không có nút thử lại; sẽ bổ sung khi T-016 nối Region Editor.
 
 ## Round 2 (review.md: "Làm thêm cùng bước 7")
 
-**Trạng thái: vẫn `in-progress`.** Phần 1 đã xong. Bước 7 (preset) chưa làm: commit `14e08357` đã đặt T-009 thành `changes-requested` (T-008 accepted, T-009 mở lại vì lỗi thứ tự config extraction). Chưa đặt implemented cho đến khi bước 7 xong.
+**Trạng thái: `implemented`.** Phần 1 và bước 7 đều xong. Bước 7 từng bị giữ vì commit `14e08357` mở lại T-009; khi T-009 được accept, patch được áp và commit `07ecbfcd`.
 
 ### Phần 1: khoá UI trong Draft — xong
 
@@ -88,13 +93,18 @@ Test:
 - `tests/object-review.test.tsx`: Draft → Thêm vật cản hộp và Thêm từ thư viện disabled, có tooltip; scene sẵn sàng → enabled. 50 passed.
 - Chạy 5 file (`geometry-review-banner`, `object-review`, `progress-objectify`, `metric-effective-collision`, `stage-view-selection`): 90 passed. `npm run typecheck` exit 0. eslint các file đã sửa exit 0. `graphify update .` exit 0.
 
-### Phần 2: bước 7 (preset) — chưa làm
+### Phần 2: bước 7 (preset) — xong
 
-- Khi bắt đầu bước 7, `status.md` ghi T-009 `accepted`, nên tôi đã áp thay đổi: 8 preset chuyển sang `scene.geometry_method = shell` và `scene.geometry_review = required`; thêm choice `shell` và param `scene.geometry_review`; đổi tên test thành `test_every_preset_seals_shell_geometry_review_and_multiview`. Bốn file test liên quan: 109 passed.
-- Sau đó `14e08357` mở lại T-009. Theo yêu cầu "chỉ làm khi T-009 accepted", tôi không commit bước 7, và khôi phục hai file về HEAD.
-- Patch đã lưu: `/tmp/claude-1000/-home-lqaq-PROJECT-AI20K-P-087/7792b60f-c313-47d1-8e79-e36c243e36c0/scratchpad/t013-step7.patch` (149 dòng).
-
-Việc còn lại khi T-009 `accepted`:
-1. `git apply` patch trên.
-2. Chạy `tests/test_orchestration/test_processing_config.py tests/test_orchestration/test_processing_presets_schema.py tests/test_scene/test_objectify_config_override.py tests/test_orchestration/test_scene_objectify_queue.py`, cộng `tests/test_orchestration/test_preset_recommender.py` và `tests/test_orchestration/test_resource_admission.py` vì hai file này cũng đọc preset.
-3. Commit bước 7, rồi đặt T-013 implemented.
+- Điều kiện: `status.md` ghi T-009 `accepted`. Patch `.ai/tasks/T-013/step7.patch` áp bằng `git apply` sau khi dry-run pass. `git apply --numstat`: `processing_presets_v1.json` 38/9, `test_processing_config.py` 9/4, khớp bản đã lưu.
+- Thay đổi:
+  - 8 preset: `scene.geometry_method = shell`, thêm `scene.geometry_review = required`, giữ `scene.refinement = multiview_v1`.
+  - Param `scene.geometry_method`: thêm choice `shell` "Vỏ Gaussian (mặc định)"; mô tả mới.
+  - Param mới `scene.geometry_review`: `required` "Dừng để duyệt tách vật", `auto` "Tạo mesh ngay".
+  - Test đổi tên thành `test_every_preset_seals_shell_geometry_review_and_multiview`: khẳng định shell, required, multiview_v1; `SceneObjectifyConfig()` mặc định vẫn legacy.
+- Test:
+  - `tests/test_orchestration/test_processing_config.py`, `test_processing_presets_schema.py`, `tests/test_scene/test_objectify_config_override.py`, `tests/test_orchestration/test_scene_objectify_queue.py`, `test_preset_recommender.py`, `test_resource_admission.py`: **202 passed**.
+  - API liên quan preset (`tests/test_api/test_studio_routes.py`, `test_guest_quota.py`, `test_error_view.py`, lọc `-k "preset or processing or option or geometry or objectify"`): 3 passed.
+  - `ruff check` và `ruff format --check` sạch trên file test.
+- Commit `07ecbfcd`: presets, test và xoá `.ai/tasks/T-013/step7.patch` trong cùng commit.
+- Hệ quả hành vi: job tạo từ preset mới vào Draft và phải bấm "Tạo mesh" để có collider theo vật. Đây là mặc định mới theo plan bước 7.
+- Không chạy full suite.

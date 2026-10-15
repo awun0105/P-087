@@ -10,7 +10,7 @@ T-009 | Hàng đợi mode geometry + API build | accepted | -
 T-010 | API region preview/apply trên Draft | accepted | -
 T-011 | Sửa vùng sau khi ready → rebuild vật bị ảnh hưởng | in-progress | engineer
 T-012 | Khoá Walk/USD/Move khi Draft | accepted | -
-T-013 | API client + banner Draft + tiến độ build | in-progress | engineer
+T-013 | API client + banner Draft + tiến độ build | implemented | summarizer
 T-014 | Box model TypeScript thuần | accepted | -
 T-015 | Box overlay + tay nắm + góc nhìn | accepted | -
 T-016 | Region Editor panel | planned | engineer
