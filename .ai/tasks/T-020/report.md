@@ -66,4 +66,29 @@ Không sửa file nào của T-016 (region editor, `ObjectReviewView`).
   "required" và "auto" thay vì nhãn tiếng Việt. Không thuộc T-020; có thể sửa sau.
 - Màn xem lại job đã tạo chưa có consumer chỉ đọc của `ProcessingSettings`. Nếu cần, phải thêm ở task riêng.
 
+## Round 2
+
+Sửa hai điểm trong `review.md` (CHANGES REQUESTED). Mỗi điểm là một commit riêng.
+
+1. **Tóm tắt hiện nhãn lựa chọn thay vì giá trị thô** (`28cf8de8`). Trong "Xem thông số đã chọn" ở `UnifiedInputFlow.tsx`,
+   tham số `kind === "choice"` hiện `choices[].label`; hàm `summaryValue` ở mức module. Áp cho mọi tham số choice, nên
+   `shell`, `multiview_v1`, `required`, `auto` không còn hiện thô. Test mới dùng nhãn thật từ
+   `configs/product/processing_presets_v1.json`: tóm tắt phải hiện "Vỏ Gaussian (mặc định)" và "Dừng để duyệt tách vật",
+   và không còn "shell" hay "required" trong khối tóm tắt.
+2. **Câu chữ khi chỉ đọc mà thiếu giá trị** (`bfcdd86f`). Khối "Sau khi tách vật" hiện
+   "Job này tạo trước khi có lựa chọn này; dùng hành vi cũ (không dừng duyệt)." Chỉ đổi ở khối này. Dòng
+   "Không được ghi lại trong video mẫu." của các ô khác giữ nguyên, vì test cũ khoá chữ đó. Test
+   "không bịa lựa chọn..." đã cập nhật theo câu mới.
+
+Mục "Known issues" của Round 1 về tóm tắt hiện giá trị thô đã đóng ở đây.
+
+### Kiểm tra lại
+
+- `vitest run` trên `processing-settings`, `ux-processing-form`, `unified-input-flow` và thêm `studio-sample-pipeline`
+  (cùng render component): **51 passed** (9 + 8 + 30 + 4).
+- `npm run typecheck`: passed.
+- `eslint` trên ba file nguồn đã sửa (`ProcessingSettings.tsx`, `useProcessingForm.ts`, `UnifiedInputFlow.tsx`): clean.
+
+Giao diện vẫn chưa được xem bằng mắt; phần đó thuộc chủ dự án, như review đã ghi.
+
 Đã dừng chờ review.
