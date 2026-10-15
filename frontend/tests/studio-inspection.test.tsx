@@ -422,6 +422,6 @@ describe("Inspect theo giai đoạn", () => {
   });
 
   it("breadcrumb giữ scene parent và tên giai đoạn", () => {
-    expect(crumbsFor("/scenes/job-a/stages/ST-RGB-GEOMETRY", "Kho A")).toEqual([{ label: "Scenes từ video", href: "/scenes" }, { label: "Kho A", href: "/scenes/job-a?tab=progress" }, { label: "Hình học & collision" }]);
+    expect(crumbsFor("/scenes/job-a/stages/ST-RGB-GEOMETRY", "Kho A")).toEqual([{ label: "Scenes từ video", href: "/scenes" }, { label: "Kho A", href: "/scenes/job-a?tab=progress" }, { label: "Collision môi trường" }]);
   });
 });

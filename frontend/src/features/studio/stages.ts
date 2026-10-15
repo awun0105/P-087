@@ -58,10 +58,10 @@ export const METRIC_STAGE: StageMeta = {
 /** REC-06 canonical + REC-05 + REC-10: chạy tự động sau khi xác nhận tỉ lệ. */
 export const GEOMETRY_STAGE: StageMeta = {
   id: "ST-RGB-GEOMETRY",
-  title: "Hình học & collision",
+  title: "Collision môi trường",
   short: "Collision",
   description:
-    "Quy đổi 3DGS và camera sang mét, dựng collision mesh bằng voxel và khoét không gian cho robot, kiểm lại tỉ lệ bằng đoạn C–D rồi đóng gói bundle cho mô phỏng.",
+    "Quy đổi 3DGS và camera sang mét, dựng collision của cả không gian bằng voxel và khoét chỗ cho robot, kiểm lại tỉ lệ bằng đoạn C–D. Collider riêng của từng vật được tạo sau, ở bước Tạo mesh.",
 };
 
 /** ADR 0007 (v2): tách scene thành nền đã vá + từng vật có Gaussian/collider riêng; lỗi 3 lần thì người dùng chọn
@@ -71,7 +71,26 @@ export const OBJECT_STAGE: StageMeta = {
   title: "Tách vật thể",
   short: "Vật thể",
   description:
-    "Tách scene thành nền đã vá và từng vật có hình 3DGS + collider riêng (SAM2 phân đoạn, gán nhãn theo đóng góp render) để bạn xác nhận. Thử tối đa 3 lần; vẫn lỗi thì bạn chọn chạy lại hoặc dùng hộp ứng viên. Máy không có runtime tách theo vật thì dùng hộp.",
+    "Tách scene thành từng vật ứng viên (SAM2 phân đoạn, gán nhãn theo đóng góp render) kèm vỏ thô để bạn duyệt. Chưa vá nền và chưa có collider. Thử tối đa 3 lần; vẫn lỗi thì bạn chọn chạy lại hoặc dùng hộp ứng viên.",
+};
+
+/** Id chỉ có ở giao diện (không có trong contracts/StageId): hàng ảo "Duyệt vật & Tạo mesh" (T-021). */
+export const GEOMETRY_REVIEW_STAGE_ID = "UI-GEOMETRY-REVIEW" as const;
+
+/** Id của một hàng trên timeline: stage thật của API, hoặc hàng ảo phía giao diện. */
+export type TimelineStageId = StageId | typeof GEOMETRY_REVIEW_STAGE_ID;
+
+export interface TimelineStageMeta extends Omit<StageMeta, "id"> {
+  id: TimelineStageId;
+}
+
+/** Hàng ảo sau "Tách vật thể": không có route inspect, trạng thái lấy từ `ObjectifyState` (xem `geometryReviewStep`). */
+export const GEOMETRY_REVIEW_STAGE: TimelineStageMeta = {
+  id: GEOMETRY_REVIEW_STAGE_ID,
+  title: "Duyệt vật & Tạo mesh",
+  short: "Tạo mesh",
+  description:
+    "Bạn xác nhận vật, chỉnh vùng nếu cần, rồi bấm Tạo mesh: hệ thống dựng vỏ mịn, collider CoACD, vá nền và collision môi trường theo vật. Chưa xong bước này thì chưa Walk hay xuất USD được.",
 };
 
 export const STUDIO_STAGES: readonly StageMeta[] = [...MVP_STAGES, METRIC_STAGE, GEOMETRY_STAGE, OBJECT_STAGE];

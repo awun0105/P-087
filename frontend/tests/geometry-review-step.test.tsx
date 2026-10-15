@@ -5,6 +5,10 @@
 
 import { describe, expect, it } from "vitest";
 
+import { fireEvent, render, screen } from "@testing-library/react";
+
+import { PipelineTimeline } from "@/features/studio/PipelineTimeline";
+import { GEOMETRY_REVIEW_STAGE, GEOMETRY_STAGE, OBJECT_STAGE } from "@/features/studio/stages";
 import { geometryReviewStep, objectifyStageOverride } from "@/features/studio/scene/useObjectify";
 import type { ObjectifyState } from "@/lib/api/studio";
 
@@ -112,5 +116,35 @@ describe("hàng Tách vật thể không chạy lại vì việc dựng", () => 
   it("tách vật và hộp ứng viên đang chạy vẫn làm hàng Tách vật thể chạy", () => {
     expect(objectifyStageOverride(objectify({ status: "running", mode: "objectify" }))).toEqual({ state: "running" });
     expect(objectifyStageOverride(objectify({ status: "queued", mode: "boxes" }))).toEqual({ state: "running" });
+  });
+});
+
+describe("chữ mô tả bước và hàng ảo trên timeline", () => {
+  it("bước Collision và Tách vật thể mô tả đúng việc từng bước làm; hàng ảo có tên Duyệt vật & Tạo mesh", () => {
+    expect(GEOMETRY_STAGE.title).toBe("Collision môi trường");
+    expect(GEOMETRY_STAGE.description).toContain("Collider riêng của từng vật được tạo sau, ở bước Tạo mesh.");
+    expect(OBJECT_STAGE.description).toContain("kèm vỏ thô để bạn duyệt. Chưa vá nền và chưa có collider.");
+    expect(OBJECT_STAGE.description).not.toContain("Máy không có runtime");
+    expect(GEOMETRY_REVIEW_STAGE).toMatchObject({ id: "UI-GEOMETRY-REVIEW", title: "Duyệt vật & Tạo mesh", short: "Tạo mesh" });
+    expect(GEOMETRY_REVIEW_STAGE.description).toContain("chưa Walk hay xuất USD được");
+  });
+
+  it("hàng ảo không có tiêu đề bấm được và không có link Xem giai đoạn; hàng stage thật vẫn có", () => {
+    render(
+      <PipelineTimeline
+        jobId="job-a"
+        stageList={[OBJECT_STAGE, GEOMETRY_REVIEW_STAGE]}
+        stages={[
+          { stage_id: OBJECT_STAGE.id, state: "succeeded", seconds: 12, fraction: null },
+          { stage_id: GEOMETRY_REVIEW_STAGE.id, state: "succeeded", seconds: null, fraction: null },
+        ]}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Duyệt vật & Tạo mesh" })).not.toBeInTheDocument();
+    expect(screen.getByText("Duyệt vật & Tạo mesh")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Tách vật thể/ }));
+    expect(screen.getByRole("link", { name: /Xem giai đoạn/ })).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: /Xem giai đoạn/ })).toHaveLength(1);
   });
 });

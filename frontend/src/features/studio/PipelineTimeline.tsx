@@ -5,7 +5,13 @@ import { useState } from "react";
 import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
 
 import { ProgressBar } from "@/components/studio/primitives";
-import { LIDAR_CALIBRATION_QA_STAGE, MVP_STAGES, type StageMeta } from "@/features/studio/stages";
+import {
+  GEOMETRY_REVIEW_STAGE_ID,
+  LIDAR_CALIBRATION_QA_STAGE,
+  MVP_STAGES,
+  type TimelineStageId,
+  type TimelineStageMeta,
+} from "@/features/studio/stages";
 import { inspectHref, inspectionStage } from "@/features/studio/inspection";
 import { guidanceFor } from "@/features/studio/errorGuidance";
 import { cn } from "@/lib/cn";
@@ -14,8 +20,13 @@ import type { StageState } from "@/lib/contracts/studio";
 import { formatDuration } from "@/lib/format";
 import { estimateRemainingTime, formatEtaDuration } from "@/features/studio/scene/estimation";
 
+/** Hàng trên timeline: như `StageView`, nhưng có thêm hàng ảo phía giao diện (T-021). */
+export interface TimelineStageView extends Omit<StageView, "stage_id"> {
+  stage_id: TimelineStageId;
+}
+
 export interface StageAction {
-  stageId: StageId;
+  stageId: TimelineStageId;
   label: string;
   onClick: () => void;
   /** Nút vẫn hiện nhưng khoá (vd. đang gửi, hết lượt Guest); `hint` nói lý do khi rê chuột. */
@@ -56,10 +67,10 @@ export function PipelineTimeline({
   onSelectStage,
   stageActions,
 }: {
-  stages: readonly StageView[];
+  stages: readonly TimelineStageView[];
   timeNote?: string;
   /** Danh sách stage hiển thị; mặc định 5 stage tới preview (video mẫu). */
-  stageList?: readonly StageMeta[];
+  stageList?: readonly TimelineStageMeta[];
   /** Mẫu replay không có job nên không tạo link Inspect job giả. */
   jobId?: string;
   /** True nếu job đang RUNNING nhưng heartbeat đã quá hạn (mất kết nối hoặc worker chết). */
@@ -113,7 +124,10 @@ export function PipelineTimeline({
           const stage = stages.find((item) => item.stage_id === meta.id);
           const state = stage?.state ?? "pending";
           const isCurrentStale = state === "running" && isStale;
-          const inspectable = state === "succeeded" || (meta.id === LIDAR_CALIBRATION_QA_STAGE.id && state === "failed");
+          // Hàng ảo (Duyệt vật & Tạo mesh) không có route inspect và không chọn được: chỉ hiện trạng thái và nút hành động.
+          const apiStageId = meta.id === GEOMETRY_REVIEW_STAGE_ID ? null : meta.id;
+          const inspectable =
+            apiStageId !== null && (state === "succeeded" || (apiStageId === LIDAR_CALIBRATION_QA_STAGE.id && state === "failed"));
           const Icon = isCurrentStale ? AlertTriangle : ICONS[state];
           return (
             <li
@@ -143,16 +157,16 @@ export function PipelineTimeline({
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
                     <p className={cn("text-sm font-medium", state === "pending" ? "text-ink-subtle" : "text-ink")}>
-                      {(jobId && inspectable) || onSelectStage ? (
+                      {apiStageId !== null && ((jobId && inspectable) || onSelectStage) ? (
                         <button
                           type="button"
-                          aria-expanded={selected === meta.id}
-                          aria-controls={`stage-detail-${meta.id}`}
+                          aria-expanded={selected === apiStageId}
+                          aria-controls={`stage-detail-${apiStageId}`}
                           onClick={() => {
                             if (onSelectStage) {
-                              onSelectStage(meta.id);
+                              onSelectStage(apiStageId);
                             } else {
-                              setSelected((value) => (value === meta.id ? null : meta.id));
+                              setSelected((value) => (value === apiStageId ? null : apiStageId));
                             }
                           }}
                           className="cursor-pointer text-left underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-ember"
@@ -236,12 +250,12 @@ export function PipelineTimeline({
                       </div>
                     );
                   })()}
-                  {jobId && inspectable && selected === meta.id && (
-                    <div id={`stage-detail-${meta.id}`} className="mt-3 space-y-2 border-t border-line pt-3">
+                  {jobId && inspectable && apiStageId !== null && selected === apiStageId && (
+                    <div id={`stage-detail-${apiStageId}`} className="mt-3 space-y-2 border-t border-line pt-3">
                       <p className="text-sm leading-relaxed text-ink-muted">{meta.description}</p>
                       {/* Đường vào view kết quả nằm trong phần mở của bước; mũi tên cạnh tên bước báo có phần này. */}
-                      {inspectionStage(meta.id) && (
-                        <Link href={inspectHref(jobId, meta.id)} className={STAGE_BUTTON}>
+                      {inspectionStage(apiStageId) && (
+                        <Link href={inspectHref(jobId, apiStageId)} className={STAGE_BUTTON}>
                           Xem giai đoạn<span className="sr-only">: {meta.title}</span>
                         </Link>
                       )}
