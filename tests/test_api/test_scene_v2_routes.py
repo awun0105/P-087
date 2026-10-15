@@ -724,3 +724,56 @@ async def test_geometry_build_route_returns_typed_queue_status(
         assert set(body) == {"detail"}
         if case == "ready":
             assert body["detail"] == "Scene đã có hình học; dùng chỉnh vùng để dựng lại vật."
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["preview", "apply"])
+@pytest.mark.parametrize("case", ["success", "stale", "checksum", "invalid", "ready"])
+async def test_region_routes(client, tmp_path, monkeypatch, operation, case):
+    from src.api.product import scene as scene_api
+    from tests.test_scene.test_object_region import JOB, TARGET
+    from tests.test_scene.test_object_region import draft as draft_fixture
+
+    registry, scene, command, *_ = draft_fixture.__wrapped__(tmp_path, monkeypatch)
+    monkeypatch.setattr(scene_api.deps, "registry", lambda: registry)
+    monkeypatch.setattr(scene_api.deps, "job_or_404", lambda _: None)
+    authorized = []
+    monkeypatch.setattr(
+        scene_api, "authorize_job_mutation", lambda user, reg, job_id, **kwargs: authorized.append((reg, job_id))
+    )
+    body = command.model_dump(mode="json")
+    if case == "stale":
+        body["expected_scene_revision"] = "rev-999"
+    elif case == "checksum":
+        body["membership_checksum"] = "sha256:" + "a" * 64
+    elif case == "invalid":
+        body["boxes"] = []
+    elif case == "ready":
+        current = registry.scene.publish_next(
+            JOB,
+            scene.scene_revision,
+            scene.model_copy(update={"provenance": {"object_geometry": "ready"}}),
+            "ready-fixture",
+        ).revision.scene
+        body["expected_scene_revision"] = current.scene_revision
+    response = await client.post(f"{_JOB}/scene/objects/{TARGET}/region/{operation}", json=body)
+    expected = (
+        409
+        if case in {"stale", "checksum"}
+        else 422
+        if case == "invalid" or (case == "ready" and operation == "apply")
+        else 200
+        if operation == "preview"
+        else 201
+    )
+    assert response.status_code == expected, response.text
+    if case != "invalid":
+        assert authorized == [(registry, JOB)]
+    if expected == 201:
+        assert response.json()["scene"]["scene_revision"] != scene.scene_revision
+    elif expected == 200:
+        assert response.json()["shell_glb_base64"]
+    elif case != "invalid":
+        assert set(response.json()) == {"detail"}
+        if case == "ready":
+            assert response.json()["detail"] == "Scene đã có hình học; tính năng dựng lại vật sẽ có ở bước sau."

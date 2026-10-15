@@ -16,6 +16,7 @@ from src.models.contracts.object_membership import (
     ObjectMembershipMergeCommand,
     ObjectMembershipPreview,
     ObjectMembershipReassignCommand,
+    ObjectRegionCommand,
 )
 from src.services.orchestration.artifacts import ArtifactNotFoundError, ArtifactStoreError
 from src.services.orchestration.auth import UserRecord
@@ -33,6 +34,7 @@ from src.services.orchestration.scene.collision_surfaces import CollisionSurface
 from src.services.orchestration.scene.errors import SceneNotAvailableError
 from src.services.orchestration.scene.membership_regeneration import preview_correction
 from src.services.orchestration.scene.object_correction import merge_object_candidates, reassign_object_membership
+from src.services.orchestration.scene.object_region import apply_region_draft, preview_region
 from src.services.orchestration.scene.objectify import ObjectifyError
 from src.services.orchestration.scene.objectify_queue import (
     ObjectGeometryAlreadyReadyError,
@@ -690,3 +692,46 @@ def mark_collision_surface(
         raise HTTPException(status_code=409, detail=str(error)) from error
     except (SceneError, ArtifactStoreError, ValueError) as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@router.post("/jobs/{job_id}/scene/objects/{object_id}/region/preview")
+def preview_object_region(
+    job_id: str,
+    object_id: str,
+    request: ObjectRegionCommand,
+    user: UserRecord | None = Depends(require_contributor),
+) -> dict:
+    registry = deps.registry()
+    authorize_job_mutation(user, registry, job_id, operation="xem vùng Gaussian vật của")
+    deps.job_or_404(job_id)
+    try:
+        return preview_region(registry, job_id, object_id, request)
+    except StaleObjectMembershipRevisionError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except ObjectMembershipValidationError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except (ArtifactStoreError, SceneError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.post(
+    "/jobs/{job_id}/scene/objects/{object_id}/region/apply", response_model=schemas.SceneEditResponse, status_code=201
+)
+def apply_object_region(
+    job_id: str,
+    object_id: str,
+    request: ObjectRegionCommand,
+    user: UserRecord | None = Depends(require_contributor),
+) -> schemas.SceneEditResponse:
+    registry = deps.registry()
+    authorize_job_mutation(user, registry, job_id, operation="sửa vùng Gaussian vật của")
+    deps.job_or_404(job_id)
+    try:
+        result = apply_region_draft(registry, job_id, object_id, request, actor_id=user.user_id if user else "local")
+        return schemas.scene_edit_response(result)
+    except (StaleObjectMembershipRevisionError, SceneRevisionConflictError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except ObjectMembershipValidationError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except (ArtifactStoreError, SceneError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
