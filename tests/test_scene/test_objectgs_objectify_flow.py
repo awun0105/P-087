@@ -24,7 +24,10 @@ pytestmark = pytest.mark.skipif(not RUNTIME.is_file(), reason="isolated CoACD ru
 
 
 @pytest.mark.parametrize("collider_fail", [False, True])
-def test_objectgs_surface_reaches_real_coacd_and_publishes_separate_background(tmp_path, monkeypatch, collider_fail):
+@pytest.mark.parametrize("refinement", ["legacy", "multiview_v1"])
+def test_objectgs_surface_reaches_real_coacd_and_publishes_separate_background(
+    tmp_path, monkeypatch, collider_fail, refinement
+):
     registry, job = _scene_job(tmp_path / "registry")
     base = registry.scene.current(job.job_id).scene
     dtype = [
@@ -192,11 +195,16 @@ def test_objectgs_surface_reaches_real_coacd_and_publishes_separate_background(t
     arguments = (registry, job, bundle, settings, tmp_path / "attempt", publish)
     if collider_fail:
         with pytest.raises(module.ObjectifyError, match="fallback is forbidden"):
-            module.objectify(*arguments, scene_config={"scene": {"geometry_method": "objectgs"}})
+            module.objectify(
+                *arguments, scene_config={"scene": {"geometry_method": "objectgs", "refinement": refinement}}
+            )
         assert not any("colliders/" in uri for uri in published)
         return
-    result = module.objectify(*arguments, scene_config={"scene": {"geometry_method": "objectgs"}})
+    result = module.objectify(
+        *arguments, scene_config={"scene": {"geometry_method": "objectgs", "refinement": refinement}}
+    )
     assert set(seen) == {"lift", "objectgs", "convex", "inpaint"}
+    assert result.provenance["segmentation_refinement"] == refinement
     assert result.environment.geometry_ref == base.environment.geometry_ref
     assert result.environment.collider_ref.artifact_type == "ObjectAwareEnvironmentCollision"
     assert result.environment.object_aware_collision_ref.artifact_type == "ObjectAwareEnvironmentManifest"

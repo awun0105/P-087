@@ -14,6 +14,7 @@ class SegmentationCase:
     points: np.ndarray
     truth: np.ndarray
     proposal: Proposal
+    known_limit: bool = False
 
 
 def cases() -> list[SegmentationCase]:
@@ -70,6 +71,20 @@ def cases() -> list[SegmentationCase]:
         "complementary_prompts",
         [(v, int(a[0]), 0.95, a[:45]) for v in range(3)] + [(v, int(a[-1]), 0.94, a[15:]) for v in range(3)] + stable_b,
     )
+    # A large mask bridges two otherwise distinct prompt tracks. Transitive union is unsafe.
+    add(
+        "transitive_bridge",
+        [(v, int(owner[0]), 0.95, owner) for v in range(3) for owner in (a, b)]
+        + [(v, int(a[1]), 0.94, np.r_[a, b]) for v in range(3)],
+        xyz=nearby,
+    )
+    # No view contains evidence tying these fragments to one identity. Keep this as an unresolved holdout.
+    add(
+        "disjoint_identity_unresolved",
+        [(v, int(part[0]), 0.95, part) for v in range(3) for part in (a[:30], a[30:], b)],
+    )
+    last = result[-1]
+    result[-1] = SegmentationCase(last.name, last.points, last.truth, last.proposal, known_limit=True)
     low = points.copy()
     low[a, 2] = np.where(np.arange(60) % 2, 0.003, 0.04)
     add("near_floor", [(v, int(a[0]), 0.95, np.r_[a, np.arange(10)]) for v in range(3)] + stable_b, xyz=low)

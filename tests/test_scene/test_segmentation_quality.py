@@ -17,12 +17,14 @@ def test_legacy_quality_characterization(case):
         nearby_fused_view=0,
         complementary_prompts=0,
         near_floor=30,
+        transitive_bridge=0,
+        disjoint_identity_unresolved=0,
     )
     instances = segment(case.proposal, case.points, floor_model(case))
     metrics = ownership_metrics(case.truth, instance_labels(instances, len(case.points)))
     assert metrics["object_to_background"] == expected_missing[case.name]
     assert metrics["background_leakage"] == 0
-    assert metrics["merge_errors"] == (1 if case.name == "nearby_fused_view" else 0)
+    assert metrics["merge_errors"] == (1 if case.name in {"nearby_fused_view", "transitive_bridge"} else 0)
 
 
 def test_metrics_penalize_merge_split_and_background_instead_of_candidate_count():
@@ -49,6 +51,10 @@ def test_multiview_refinement_recovers_annotation_without_purity_tradeoff(case, 
         case.proposal, case.points, floor_model(case), config, evidence=EvidenceRecorder(tmp_path, "segmentation")
     )
     metrics = ownership_metrics(case.truth, instance_labels(refined, len(case.points)))
+    if case.known_limit:
+        assert metrics == baseline
+        assert metrics["split_errors"] == 1
+        return
     assert metrics["completeness"] == metrics["purity"] == 1
     assert metrics["completeness"] >= baseline["completeness"]
     assert metrics["purity"] >= baseline["purity"]

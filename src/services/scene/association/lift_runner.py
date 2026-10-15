@@ -390,7 +390,9 @@ def run(request: dict) -> dict:
     )
     np.savez(request["output_npz"], labels=labels)
     return {
-        "method": "render_contribution_lift_v1",
+        "method": "render_contribution_lift_multiview_v1"
+        if config.get("refinement", "legacy") == "multiview_v1"
+        else "render_contribution_lift_v1",
         "gaussians": count,
         "objects": objects,
         "assigned": int((labels >= 0).sum()),

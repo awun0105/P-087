@@ -823,6 +823,7 @@ def objectify(
         "inpaint_method": inpaint["method"],
         "inpaint_note": "Gaussian vá nằm cuối file nền; là hình suy đoán cho vùng chưa từng được quay",
         "lift_views": int(lift["views"]),
+        "segmentation_refinement": config.scene.refinement,
         "floor_model_status": floor_model.status,
         "floor_fallback_reason": floor_model.fallback_reason,
         "floor_profile_checksum": floor_model.profile_checksum,

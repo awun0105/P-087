@@ -365,8 +365,22 @@ def _segment_multiview(
             target.append(index)
     group_scores = np.stack([score[group].max(axis=0) for group in groups])
     best = group_scores.max(axis=0)
-    owners = group_scores.argmax(axis=0)
-    exclusive = (best > config.vote_thres) & ((group_scores == best).sum(axis=0) == 1)
+    tied_best = group_scores == best
+    # A broad bridge prompt must not erase a distinct, consistently supported object.
+    # Resolve equal maxima using all tracks in each identity group; do not lower the vote threshold.
+    agreement = np.stack([score[group].mean(axis=0) for group in groups])
+    agreement[~tied_best] = -np.inf
+    owners = agreement.argmax(axis=0)
+    exclusive = (best > config.vote_thres) & ((agreement == agreement.max(axis=0)).sum(axis=0) == 1)
+    if evidence is not None:
+        ambiguous = (tied_best.sum(axis=0) > 1) & (best > config.vote_thres)
+        evidence.emit(
+            "ownership_resolution",
+            tied_points=int(ambiguous.sum()),
+            resolved_by_group_agreement=int((ambiguous & exclusive).sum()),
+            unresolved=int((ambiguous & ~exclusive).sum()),
+            reason="cross_prompt_group_agreement",
+        )
     eligible = object_point_mask(points, floor_model)
     instances = []
     for owner, group in enumerate(groups):

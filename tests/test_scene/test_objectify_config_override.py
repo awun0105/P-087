@@ -220,3 +220,30 @@ def test_small_volumetric_candidate_retained_without_admitting_planar_wall(tmp_p
     refined = module._seeds(*arguments, refinement="multiview_v1")
     assert len(refined) == 1
     np.testing.assert_array_equal(refined[0], instances[0])
+
+
+def test_low_object_survives_prompt_candidate_floor_split_and_membership_encoding(tmp_path, monkeypatch):
+    from eval.fixtures.segmentation import cases, floor_model
+    from src.services.scene.editing.membership import encode_gaussian_membership_labels
+    from src.services.scene.sampro3d.consolidate import Proposal, Sampro3dConfig, select_prompts
+    from tests.test_scene.test_membership_refinement import rows_for
+
+    model = floor_model(cases()[0])
+    points = np.array(
+        [(x, y, z) for x in np.linspace(0, 0.08, 5) for y in np.linspace(0, 0.08, 5) for z in (0.003, 0.004)]
+    )
+    rows = rows_for(points)
+    assert len(select_prompts(points, model)) == 0
+    assert len(select_prompts(points, model, Sampro3dConfig(refinement="multiview_v1"))) > 0
+    proposal = Proposal(np.arange(3), np.zeros(3, dtype=int), np.ones(3), [np.arange(50)] * 3, [np.arange(50)] * 3)
+    monkeypatch.setattr(module, "run_sam2", lambda *args, **kwargs: proposal)
+    args = (rows, [], np.array([[0, 0, 0]]), None, tmp_path, model)
+    assert module._seeds(*args) == []
+    (members,) = module._seeds(*args, refinement="multiview_v1")
+    labels = np.full(50, -1, dtype=np.int32)
+    labels[members] = 0
+    labels = module.gaussian_split.assign_floor_gaussians_to_background(rows, labels, model, refinement=True)
+    background, parts = module.gaussian_split.split(rows, labels)
+    assert len(background) == 0 and len(parts) == 1 and len(parts[0].rows) == 50
+    payload = encode_gaussian_membership_labels(labels, gaussian_count=50, label_to_object_id={"0": "candidate-001"})
+    np.testing.assert_array_equal(np.frombuffer(payload, dtype="<i4"), np.zeros(50, dtype=int))
