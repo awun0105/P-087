@@ -29,6 +29,7 @@ import torch
 from gsplat import rasterization
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from association.refinement import exclusive_mask_labels, refine_owners  # noqa: E402
 from diagnostics import recorder  # noqa: E402
 
 _PLY_TYPES = {"float": "f4", "float32": "f4", "double": "f8", "uchar": "u1", "int": "i4", "uint": "u4"}
@@ -118,6 +119,8 @@ def run(request: dict) -> dict:
 
     trace = recorder(request.get("evidence_dir"), "lift")
     config = request.get("config") or {}
+    if config.get("refinement", "legacy") not in {"legacy", "multiview_v1"}:
+        raise ValueError("unsupported membership refinement")
     trace.emit("config", thresholds=config)
     device = torch.device("cuda")
     rows = read_ply(Path(request["gaussians_ply"]))
@@ -273,13 +276,21 @@ def run(request: dict) -> dict:
         for index, mask in accepted:
             label_image[mask] = index
             masks_per_object[index] += 1
+        if config.get("refinement", "legacy") == "multiview_v1":
+            label_image = exclusive_mask_labels(accepted, (h, w))
+            trace.emit(
+                "overlap_refinement",
+                view=number,
+                ambiguous_pixels=int((label_image == -2).sum()),
+                reason="conflicting_masks_abstain",
+            )
         if observations_dir is not None:
             observations_dir.mkdir(parents=True, exist_ok=True)
             image_path = observations_dir / f"view-{number:06d}.png"
             mask_path = observations_dir / f"view-{number:06d}.labels.npy"
             if not cv2.imwrite(str(image_path), image[..., ::-1]):
                 raise RuntimeError("could not persist calibrated ObjectGS observation")
-            np.save(mask_path, label_image, allow_pickle=False)
+            np.save(mask_path, np.maximum(label_image, -1), allow_pickle=False)
             objectgs_views.append(
                 {
                     "image_path": str(image_path),
@@ -308,6 +319,10 @@ def run(request: dict) -> dict:
             for channel, index in enumerate(chunk_ids):
                 target[..., channel] = label_tensor == index
             target[..., -1] = 1.0 - target[..., :-1].sum(dim=-1)
+            if config.get("refinement", "legacy") == "multiview_v1":
+                # Ambiguous overlap has no valid target, including background: it must not
+                # enter the per-object contribution denominator as negative evidence.
+                target[label_tensor == -2] = 0
             colors = torch.zeros((count, channels), device=device, requires_grad=True)
             image_out, _, _ = rasterization(
                 means, quats, scales, opacities, colors, viewmat[None], intrinsics[None], w, h, sh_degree=None
@@ -356,6 +371,15 @@ def run(request: dict) -> dict:
     best_share, best = share.max(dim=1)
     assigned = best_share > float(config.get("majority", 0.5))
     labels = torch.where(assigned, best, torch.full_like(best, -1)).numpy().astype(np.int32)
+    if config.get("refinement", "legacy") == "multiview_v1":
+        original = labels
+        labels = refine_owners(share.numpy(), seeds, float(config.get("majority", 0.5)))
+        trace.emit(
+            "ownership_refinement",
+            changed=int((labels != original).sum()),
+            anchored_seed_count=int(len(seed_index)),
+            reason="exclusive_seeds_and_tie_abstention",
+        )
     trace.emit(
         "membership",
         assigned=int((labels >= 0).sum()),

@@ -77,4 +77,5 @@ def cases() -> list[SegmentationCase]:
 
 
 def floor_model(case: SegmentationCase):
-    return fit_canonical_floor_model(case.points, point_cloud_checksum(case.points))
+    points = case.points[case.truth < 0]
+    return fit_canonical_floor_model(points, point_cloud_checksum(points))

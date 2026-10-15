@@ -85,6 +85,7 @@ Publish = Callable[[ProductArtifactRef, bytes], ProductArtifactRef]
 class SceneObjectifyConfig(ContractModel):
     """Validated seed count and render-lift controls; defaults match the runners."""
 
+    refinement: Literal["legacy", "multiview_v1"] = "legacy"
     max_objects: int = Field(default=60, ge=1, strict=True)
     min_score: FiniteFloat = Field(default=0.6, ge=0, le=1)
     max_area: FiniteFloat = Field(default=0.35, gt=0, le=1)
@@ -208,6 +209,7 @@ def _seeds(
     cancel_event: Event | None = None,
     *,
     max_objects: int = 60,
+    refinement: Literal["legacy", "multiview_v1"] = "legacy",
 ) -> list[np.ndarray]:
     """Hạt giống từng vật (chỉ số vào `rows`) từ SAMPro3D; bỏ khối không phải vật (kệ dài, mảnh vụn)."""
     low, high = centers.min(axis=0)[:2] - _CROP_MARGIN_M, centers.max(axis=0)[:2] + _CROP_MARGIN_M
@@ -233,11 +235,12 @@ def _seeds(
                 workspace / "sampro3d",
                 floor_model=floor_model,
                 evidence_dir=workspace / "evidence",
+                **({"refinement": refinement} if refinement != "legacy" else {}),
                 cancel_event=cancel_event,
             ),
             points,
             floor_model,
-            Sampro3dConfig(),
+            Sampro3dConfig(refinement=refinement),
             evidence=EvidenceRecorder(workspace / "evidence", "segmentation"),
         )
     except Sampro3dInputError as error:
@@ -246,14 +249,41 @@ def _seeds(
         raise ObjectifyError(f"SAMPro3D lỗi: {error}") from error
     limits = GeometricConfig()
     kept = []
+    floor_allowed = None
+    if refinement == "multiview_v1":
+        mask_labels = np.full(len(rows), -1, dtype=np.int32)
+        for members in instances:
+            mask_labels[work[members]] = 0
+        floor_allowed = (
+            gaussian_split.assign_floor_gaussians_to_background(rows, mask_labels, floor_model, refinement=True) >= 0
+        )
     for members in instances:
-        box = box_from_points(points[members], len(members))
+        selected = members
+        if floor_allowed is not None:
+            selected = members[floor_allowed[work[members]]]
+            if len(selected) < Sampro3dConfig().min_instance_points:
+                trace.emit(
+                    "seed_decision",
+                    instance_key=hashlib.sha256(members.astype("<i8").tobytes()).hexdigest(),
+                    accepted=False,
+                    seed=None,
+                    reason="insufficient_points_after_floor_shape_guard",
+                )
+                continue
+        box = box_from_points(points[selected], len(selected))
         footprint = max(box.dimensions[0], box.dimensions[1])
+        small_supported = False
+        if refinement == "multiview_v1" and footprint < limits.min_footprint_m:
+            xyz = points[selected]
+            spread = np.linalg.svd(xyz - xyz.mean(axis=0), compute_uv=False) / np.sqrt(len(xyz))
+            noise = floor_model.robust_noise_sigma_m
+            small_supported = noise is not None and spread.min() > noise
         if (
-            limits.min_footprint_m <= footprint <= limits.max_footprint_m
+            (limits.min_footprint_m <= footprint or small_supported)
+            and footprint <= limits.max_footprint_m
             and box.dimensions[2] <= limits.max_object_height_m
         ):
-            kept.append(work[members])
+            kept.append(work[selected])
             reason = None if len(kept) <= max_objects else "object_limit"
         else:
             reason = "footprint_or_height_limits"
@@ -262,6 +292,9 @@ def _seeds(
             instance_key=hashlib.sha256(members.astype("<i8").tobytes()).hexdigest(),
             points=len(members),
             dimensions=list(box.dimensions),
+            refinement=refinement,
+            floor_shape_removed=len(members) - len(selected),
+            small_candidate_supported=small_supported,
             seed=len(kept) - 1 if reason is None else None,
             accepted=reason is None,
             reason=reason,
@@ -345,6 +378,7 @@ def objectify(
             floor_model,
             cancel_event,
             **({"max_objects": config.scene.max_objects} if scene_config is not None else {}),
+            **({"refinement": config.scene.refinement} if config.scene.refinement != "legacy" else {}),
         )
     except ObjectifyError as error:
         error.floor_fit = floor_fit
@@ -385,14 +419,19 @@ def objectify(
     labels = np.load(workspace / "labels.npz")["labels"]
     trace = EvidenceRecorder(workspace / "evidence", "membership")
     before_floor_labels = labels
-    labels = gaussian_split.assign_floor_gaussians_to_background(rows, labels, floor_model)
+    labels = gaussian_split.assign_floor_gaussians_to_background(
+        rows, labels, floor_model, **({"refinement": True} if config.scene.refinement == "multiview_v1" else {})
+    )
     for label in np.unique(before_floor_labels[before_floor_labels >= 0]):
         trace.emit(
             "floor_filter",
             seed=int(label),
             before=int((before_floor_labels == label).sum()),
             returned_to_background=int(((before_floor_labels == label) & (labels < 0)).sum()),
-            reason="floor_protection",
+            reason="floor_noise_and_covariance_guard"
+            if config.scene.refinement == "multiview_v1"
+            else "floor_protection",
+            refinement=config.scene.refinement,
         )
     background, parts = gaussian_split.split(rows, labels)
     if not parts:
@@ -890,6 +929,7 @@ def objectify_with_retry(
     cancel_event: Event | None = None,
     scene_config: dict[str, object] | None = None,
     geometry_method: Literal["legacy", "objectgs"] | None = None,
+    refinement: Literal["legacy", "multiview_v1"] | None = None,
 ) -> ObjectifyResult:
     """Thử `objectify` tối đa `product_objectify_attempts` lần, mỗi lần một workspace riêng (giữ log từng lần).
 
@@ -904,10 +944,13 @@ def objectify_with_retry(
                 group, name = key.split("_", 1) if key.startswith(("coacd_", "inpaint_")) else ("scene", key)
                 groups[group][name] = value
             scene_config = ObjectifyConfig.model_validate(groups).model_dump(exclude_unset=True)
-    if geometry_method is not None:
+    if geometry_method is not None or refinement is not None:
         values = {} if scene_config is None else dict(scene_config)
         scene_values = dict(values.get("scene", {}))
-        scene_values["geometry_method"] = geometry_method
+        if geometry_method is not None:
+            scene_values["geometry_method"] = geometry_method
+        if refinement is not None:
+            scene_values["refinement"] = refinement
         values["scene"] = scene_values
         scene_config = ObjectifyConfig.model_validate(values).model_dump(exclude_unset=True)
     attempts = settings.product_objectify_attempts
@@ -958,6 +1001,7 @@ def reobjectify(
     commit_guard: Callable[[RuntimeTransaction], bool] | None = None,
     cancel_event: Event | None = None,
     geometry_method: Literal["legacy", "objectgs"] | None = None,
+    refinement: Literal["legacy", "multiview_v1"] | None = None,
 ) -> str:
     """Chạy lại tách theo vật cho job đã có SceneIR; ghi **revision kế tiếp** (không sửa revision cũ).
 
@@ -993,6 +1037,8 @@ def reobjectify(
     arguments = {"cancel_event": cancel_event} if cancel_event is not None else {}
     if geometry_method is not None:
         arguments["geometry_method"] = geometry_method
+    if refinement is not None:
+        arguments["refinement"] = refinement
     result = objectify_with_retry(
         registry,
         job,

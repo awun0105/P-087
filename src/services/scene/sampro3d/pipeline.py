@@ -8,6 +8,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Event
+from typing import Literal
 
 import numpy as np
 
@@ -55,6 +56,7 @@ def run_sam2(
     floor_model: FloorModel,
     cancel_event: Event | None = None,
     evidence_dir: Path | None = None,
+    refinement: Literal["legacy", "multiview_v1"] = "legacy",
 ) -> Proposal:
     """Gọi runtime SAM2 trên toàn bộ frame; lỗi/timeout → ValueError có ngữ cảnh."""
     workspace.mkdir(parents=True, exist_ok=True)
@@ -69,7 +71,7 @@ def run_sam2(
         raise Sampro3dInputError(f"{detail}; cần kiểm tra dữ liệu, tỉ lệ và mốc sàn trước khi chạy lại")
     if not len(points):
         raise Sampro3dInputError("vùng tách vật không có điểm đủ điều kiện; cần kiểm tra vùng quan sát và độ đục")
-    prompts = select_prompts(points, floor_model)
+    prompts = select_prompts(points, floor_model, Sampro3dConfig(refinement=refinement))
     if not len(prompts):
         raise Sampro3dInputError("không có điểm phía trên dải bảo vệ sàn để đặt prompt")
     np.savez(workspace / "points.npz", points=points.astype(np.float32), prompts=prompts)

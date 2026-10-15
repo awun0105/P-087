@@ -8,12 +8,14 @@ prompt cùng vật). Floor mask dùng FloorModel bị ràng buộc bởi prior R
 
 import hashlib
 from dataclasses import dataclass, field
+from typing import Literal
 
 import numpy as np
 from scipy.sparse.csgraph import connected_components
 from scipy.spatial import cKDTree
 
 from src.models.contracts.floor_model import FloorModel
+from src.services.scene.association.refinement import object_point_mask
 from src.services.scene.diagnostics import EvidenceRecorder
 from src.services.scene.floor_model import above_floor_mask
 
@@ -33,6 +35,7 @@ class Sampro3dConfig:
     merge_thres: float = 0.5
     cluster_radius_m: float = 0.15
     min_instance_points: int = 30
+    refinement: Literal["legacy", "multiview_v1"] = "legacy"
 
 
 @dataclass(frozen=True)
@@ -76,7 +79,12 @@ def select_prompts(
     points: np.ndarray, floor_model: FloorModel, config: Sampro3dConfig = Sampro3dConfig()
 ) -> np.ndarray:
     """Số prompt = số voxel có điểm phía trên fitted floor, chặn trên `max_prompts`."""
-    above = np.nonzero(above_floor_mask(points, floor_model))[0]
+    eligible = (
+        object_point_mask(points, floor_model)
+        if config.refinement == "multiview_v1"
+        else above_floor_mask(points, floor_model)
+    )
+    above = np.nonzero(eligible)[0]
     if not len(above):
         return above
     voxels = np.unique(np.floor(points[above] / config.prompt_voxel_m).astype(np.int64), axis=0)
@@ -106,7 +114,9 @@ def _surviving_records(
         chosen: list[int] = []
         for record in in_view:
             if all(
-                _jaccard(proposal.members[record], proposal.members[other]) < config.mask_nms_thres for other in chosen
+                (config.refinement == "multiview_v1" and proposal.prompt[record] != proposal.prompt[other])
+                or _jaccard(proposal.members[record], proposal.members[other]) < config.mask_nms_thres
+                for other in chosen
             ):
                 chosen.append(record)
         kept.extend(chosen)
@@ -144,6 +154,8 @@ def segment(
     evidence: EvidenceRecorder | None = None,
 ) -> list[np.ndarray]:
     """Trả danh sách instance (chỉ số điểm), đã dọn nhiễu và bỏ sàn."""
+    if config.refinement == "multiview_v1":
+        return _segment_multiview(proposal, points, floor_model, config, evidence)
     kept = _surviving_records(proposal, config, evidence)
     prompts = np.unique(proposal.prompt)
     visible_per_prompt = {p: int((proposal.prompt == p).sum()) for p in prompts}
@@ -262,3 +274,135 @@ def _largest_cluster(points: np.ndarray, members: np.ndarray, config: Sampro3dCo
     count, labels = connected_components(graph, directed=False)
     largest = np.bincount(labels).argmax()
     return members[labels == largest]
+
+
+def _segment_multiview(
+    proposal: Proposal,
+    points: np.ndarray,
+    floor_model: FloorModel,
+    config: Sampro3dConfig,
+    evidence: EvidenceRecorder | None,
+) -> list[np.ndarray]:
+    """Visibility-conditional voting and complete-link, co-view-consistent identity groups."""
+    from dataclasses import asdict
+
+    if not proposal.visible:
+        raise ValueError("multiview refinement requires per-view visibility evidence")
+    if evidence is not None:
+        evidence.emit("config", thresholds=asdict(config), input_points=len(points))
+    kept = _surviving_records(proposal, config, evidence)
+    by_prompt: dict[int, dict[int, int]] = {}
+    for record in kept:
+        prompt, view = int(proposal.prompt[record]), int(proposal.view[record])
+        previous = by_prompt.setdefault(prompt, {}).get(view)
+        if previous is None or proposal.iou[record] > proposal.iou[previous]:
+            by_prompt[prompt][view] = record
+    valid = []
+    for prompt in sorted(by_prompt):
+        observations = len(np.unique(proposal.view[proposal.prompt == prompt]))
+        retained = len(by_prompt[prompt])
+        accepted = retained >= config.min_views and retained / observations >= config.keep_thres
+        if evidence is not None:
+            evidence.emit(
+                "prompt_decision",
+                prompt=prompt,
+                observations=observations,
+                kept_masks=retained,
+                accepted=accepted,
+                reasons=[] if accepted else ["insufficient_multiview_support"],
+            )
+        if accepted:
+            valid.append(prompt)
+    if not valid:
+        return []
+    hits = np.zeros((len(valid), len(points)), dtype=np.float32)
+    seen = np.zeros_like(hits)
+    for index, prompt in enumerate(valid):
+        for view, record in by_prompt[prompt].items():
+            seen[index, proposal.visible[view]] += 1
+            hits[index, proposal.members[record]] += 1
+    score = np.divide(hits, seen, out=np.zeros_like(hits), where=seen > 0)
+    # An observed tie is not a positive majority. Occlusion adds no negative vote.
+    support = score > config.vote_thres
+    if evidence is not None:
+        for index, prompt in enumerate(valid):
+            evidence.emit(
+                "voting",
+                prompt=prompt,
+                assigned_points=int(support[index].sum()),
+                single_view_points=int((support[index] & (seen[index] == 1)).sum()),
+                reason="visibility_conditional_strict_majority",
+            )
+    compatible = np.eye(len(valid), dtype=bool)
+    for i, left in enumerate(valid):
+        for j in range(i + 1, len(valid)):
+            right = valid[j]
+            overlap = _jaccard(np.flatnonzero(support[i]), np.flatnonzero(support[j]))
+            if overlap < config.merge_thres:
+                continue
+            views = sorted(by_prompt[left].keys() & by_prompt[right].keys())
+            agreements = [
+                _jaccard(proposal.members[by_prompt[left][view]], proposal.members[by_prompt[right][view]])
+                for view in views
+            ]
+            agree = len(views) >= config.min_views and all(value >= config.merge_thres for value in agreements)
+            compatible[i, j] = compatible[j, i] = agree
+            if evidence is not None:
+                evidence.emit(
+                    "merge_decision",
+                    prompts=[left, right],
+                    accepted=agree,
+                    shared_views=len(views),
+                    minimum_view_overlap=min(agreements, default=0.0),
+                    reason="consistent_coview_support" if agree else "conflicting_or_missing_coview_support",
+                )
+    groups: list[list[int]] = []
+    for index in range(len(valid)):
+        target = next((group for group in groups if compatible[index, group].all()), None)
+        if target is None:
+            groups.append([index])
+        else:
+            target.append(index)
+    group_scores = np.stack([score[group].max(axis=0) for group in groups])
+    best = group_scores.max(axis=0)
+    owners = group_scores.argmax(axis=0)
+    exclusive = (best > config.vote_thres) & ((group_scores == best).sum(axis=0) == 1)
+    eligible = object_point_mask(points, floor_model)
+    instances = []
+    for owner, group in enumerate(groups):
+        members = np.flatnonzero(exclusive & (owners == owner) & eligible)
+        if len(members):
+            pairs = cKDTree(points[members]).query_pairs(config.cluster_radius_m, output_type="ndarray")
+            from scipy.sparse import coo_matrix
+
+            graph = coo_matrix((np.ones(len(pairs)), (pairs[:, 0], pairs[:, 1])), shape=(len(members), len(members)))
+            count, components = connected_components(graph, directed=False)
+            retained = []
+            for component in range(count):
+                part = members[components == component]
+                # Components need repeated mask support, not just spatial proximity to a large body.
+                views = {
+                    view
+                    for index in group
+                    for view, record in by_prompt[valid[index]].items()
+                    if np.intersect1d(part, proposal.members[record]).size
+                }
+                if len(part) >= config.min_mask_points and len(views) >= config.min_views:
+                    retained.append(part)
+            cleaned = np.sort(np.concatenate(retained)) if retained else members[:0]
+        else:
+            cleaned = members
+        accepted = len(cleaned) >= config.min_instance_points
+        if evidence is not None:
+            evidence.emit(
+                "instance_decision",
+                instance_key=hashlib.sha256(cleaned.astype("<i8").tobytes()).hexdigest(),
+                prompts=[valid[index] for index in group],
+                retained=len(cleaned),
+                cluster_removed=len(members) - len(cleaned),
+                accepted=accepted,
+                reason=None if accepted else "too_few_multiview_component_points",
+            )
+        if accepted:
+            instances.append(cleaned)
+    return sorted(instances, key=lambda members: (-len(members), int(members[0])))

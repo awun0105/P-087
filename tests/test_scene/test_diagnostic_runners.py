@@ -25,6 +25,7 @@ torch.set_num_threads(1)
 original_device = torch.device
 torch.device = lambda *a, **kw: original_device('cpu')
 torch.autocast = lambda *a, **kw: contextlib.nullcontext()
+force_fused = False
 class Predictor:
  def __init__(self, *a): pass
  def set_image(self, image): self.shape=image.shape[:2]
@@ -33,8 +34,9 @@ class Predictor:
   masks=[]; scores=[]
   for points in point_coords:
    mask=np.zeros(self.shape, dtype=bool)
-   mask[:, :4] = True
-   masks.append(mask); scores.append(.9 if points[0, 0] < 4 else .2)
+   mask[:, 2:6] = True if force_fused else False
+   if not force_fused: mask[:, :4] = True
+   masks.append(mask); scores.append(.9 if force_fused or points[0, 0] < 4 else .2)
   return np.array(masks)[:,None], np.array(scores)[:,None], None
 sys.modules['sam2.build_sam']=types.SimpleNamespace(build_sam2=lambda *a, **kw: object())
 sys.modules['sam2.sam2_image_predictor']=types.SimpleNamespace(SAM2ImagePredictor=Predictor)
@@ -72,6 +74,18 @@ assert np.array_equal(np.load(work/'labels-before.npz')['labels'],np.load(work/'
 events=[json.loads(line) for line in (work/'evidence/lift.jsonl').read_text().splitlines()]
 assert any('low_score' in event.get('reasons',[]) for event in events)
 assert any(event['kind']=='membership' for event in events)
+force_fused = True
+fused = lift.run(dict(req,output_npz=str(work/'labels-fused.npz')))
+refined = lift.run(dict(req,config=dict(req['config'], refinement='multiview_v1'),
+ evidence_dir=str(work/'refined-evidence'), objectgs_observations_dir=str(work/'observations'),
+ output_npz=str(work/'labels-refined.npz')))
+expected=np.r_[np.zeros(10,dtype=np.int32),np.ones(10,dtype=np.int32)]
+assert not np.array_equal(np.load(work/'labels-fused.npz')['labels'],expected)
+assert np.array_equal(np.load(work/'labels-refined.npz')['labels'],expected)
+assert set(np.unique(np.load(work/'observations/view-000000.labels.npy'))) <= {-1,0,1}
+refined_events=[json.loads(line) for line in (work/'refined-evidence/lift.jsonl').read_text().splitlines()]
+assert any(event['kind']=='overlap_refinement' and event['ambiguous_pixels']>0 for event in refined_events)
+assert any(event['kind']=='ownership_refinement' and event['changed']>0 for event in refined_events)
 print('CPU_RUNNERS_PRESERVED')
 """
     result = subprocess.run(

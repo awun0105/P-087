@@ -121,6 +121,7 @@ def test_defaults_match_provider_fallbacks() -> None:
     config = module.ObjectifyConfig()
     assert config.scene.max_objects == 60
     assert config.scene.model_dump(exclude={"max_objects"}) == dict(
+        refinement="legacy",
         min_score=0.6,
         max_area=0.35,
         box_margin_m=0.15,
@@ -171,3 +172,51 @@ def test_retry_preserves_provider_configuration(tmp_path: Path, monkeypatch: pyt
     )
     assert actual is result
     assert [entry["scene_config"] for entry in seen] == [override, override]
+
+
+def test_multiview_choice_is_explicit_and_preserves_other_provider_controls(tmp_path, monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        module, "load_job_config", lambda *args: SimpleNamespace(scene={"sam_batch": 4, "coacd_threshold": 0.03})
+    )
+
+    def objectify(*args, **kwargs):
+        captured.update(kwargs["scene_config"])
+        return SimpleNamespace(provenance={})
+
+    monkeypatch.setattr(module, "objectify", objectify)
+    module.objectify_with_retry(
+        SimpleNamespace(runtime_resolver=None),
+        SimpleNamespace(job_id="job-test", config_checksum="unused"),
+        SimpleNamespace(),
+        SimpleNamespace(product_objectify_attempts=1),
+        tmp_path,
+        lambda ref, data: ref,
+        refinement="multiview_v1",
+    )
+    assert captured["scene"] == {"sam_batch": 4, "refinement": "multiview_v1"}
+    assert captured["coacd"] == {"threshold": 0.03}
+    assert module.SceneObjectifyConfig().refinement == "legacy"
+    with pytest.raises(ValueError):
+        module.SceneObjectifyConfig(refinement="unreviewed")
+
+
+def test_small_volumetric_candidate_retained_without_admitting_planar_wall(tmp_path, monkeypatch):
+    from eval.fixtures.segmentation import cases, floor_model
+    from tests.test_scene.test_membership_refinement import rows_for
+
+    model = floor_model(cases()[0])
+    small = np.array([(x, y, z) for x in np.linspace(0, 0.08, 5) for y in np.linspace(0, 0.08, 5) for z in (0.1, 0.14)])
+    wall = small.copy()
+    wall[:, 0] += 1
+    wall[:, 2] = 0.1
+    points = np.vstack([small, wall])
+    rows = rows_for(points)
+    instances = [np.arange(len(small)), np.arange(len(small), len(points))]
+    monkeypatch.setattr(module, "run_sam2", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module, "segment", lambda *args, **kwargs: instances)
+    arguments = (rows, [], np.array([[0, 0, 0]]), None, tmp_path, model)
+    assert module._seeds(*arguments) == []
+    refined = module._seeds(*arguments, refinement="multiview_v1")
+    assert len(refined) == 1
+    np.testing.assert_array_equal(refined[0], instances[0])

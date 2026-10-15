@@ -30,6 +30,11 @@ def main() -> int:
         choices=["legacy", "objectgs"],
         help="explicit audited producer choice for this scene operation",
     )
+    parser.add_argument(
+        "--refinement",
+        choices=["legacy", "multiview_v1"],
+        help="experimental multiview refinement; production defaults remain legacy",
+    )
     parser.add_argument("--expected-revision", help="refuse to replace a scene edited since this revision")
     args = parser.parse_args()
     workspace = args.workspace or Path(tempfile.mkdtemp(prefix=f"reobjectify-{args.job_id}-"))
@@ -41,6 +46,7 @@ def main() -> int:
             workspace,
             expected_revision=args.expected_revision,
             geometry_method=args.geometry_method,
+            refinement=args.refinement,
         )
     except ObjectifyError as error:
         print(f"[!] Tách theo vật lỗi: {error} (log trong {workspace})", file=sys.stderr)

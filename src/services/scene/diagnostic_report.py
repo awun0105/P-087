@@ -51,6 +51,7 @@ def trace_object(manifest: ObjectPipelineEvidence, object_id: str) -> list[dict]
         or event.get("seed") in seeds
         or event.get("instance_key") in keys
         or event.get("prompt") in prompts
+        or bool(set(event.get("prompts", [])) & prompts)
         or event.get("kind") in {"failure", "stage_started", "stage_failed", "stage_completed", "configured"}
     ]
     return [

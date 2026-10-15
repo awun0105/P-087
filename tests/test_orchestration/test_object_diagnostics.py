@@ -154,6 +154,13 @@ def test_object_report_links_prompt_instance_seed_and_exports_without_other_obje
         bundle_checksum="sha256:" + "0" * 64,
         events=[
             dict(stage="sam2", kind="mask_decision", prompt=17, accepted=False),
+            dict(
+                stage="segmentation",
+                kind="merge_decision",
+                prompts=[17, 19],
+                accepted=False,
+                reason="conflicting_coview",
+            ),
             dict(stage="segmentation", kind="instance_decision", instance_key="key", prompts=[17]),
             dict(stage="seeds", kind="seed_decision", instance_key="key", seed=3),
             dict(stage="membership", kind="object_binding", seed=3, object_id="candidate-001"),
@@ -165,6 +172,7 @@ def test_object_report_links_prompt_instance_seed_and_exports_without_other_obje
     report = render_report(manifest, "candidate-001")
     assert '"prompt": 17' in report and '"seed": 3' in report
     assert "export-1" in report and "export-2" not in report
+    assert "conflicting_coview" in report
     assert "Quyết định loại/cảnh báo đầu tiên" in report
 
 
