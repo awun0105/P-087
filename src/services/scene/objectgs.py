@@ -202,6 +202,9 @@ def run_objectgs(
         "PYTHONPATH": str(runtime.gsplat_repository),
         "TORCH_EXTENSIONS_DIR": str(workspace / "torch-extensions"),
         "MAX_JOBS": "2",
+        # Python 3.8's Python.h includes crypt.h from the environment's include
+        # root, which a separate Conda compiler sysroot does not search itself.
+        "CPLUS_INCLUDE_PATH": str(runtime.python.absolute().parent.parent / "include"),
     }
     if runtime.cuda_home:
         environment.update(
@@ -212,7 +215,7 @@ def run_objectgs(
         environment["CXX"] = str(runtime.cxx.absolute())
         environment["CC"] = str(runtime.cxx.absolute())
     if runtime.glm_repository:
-        environment["CPLUS_INCLUDE_PATH"] = str(runtime.glm_repository.resolve())
+        environment["CPLUS_INCLUDE_PATH"] += os.pathsep + str(runtime.glm_repository.resolve())
 
     def execute(command: list[str], stage: str) -> None:
         if progress:

@@ -136,6 +136,7 @@ def test_runner_contract_calls_train_then_each_numeric_label_never_minus_one(tmp
         "2",
     ]
     assert all(call[1]["environment"]["CUDA_VISIBLE_DEVICES"] == "3" for call in calls)
+    assert all(call[1]["environment"]["CPLUS_INCLUDE_PATH"] == str(python.parent.parent / "include") for call in calls)
     assert set(receipt["objects"]) == {"chair", "table"}
     assert receipt["coordinate_frame"] == "world"
     config = yaml.safe_load((tmp_path / "work/config.yaml").read_text())
