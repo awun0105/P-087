@@ -23,6 +23,7 @@ import {
 
 import {
   boxesKey,
+  clampToFloor,
   dragFace,
   faceCenter,
   faceNormal,
@@ -249,6 +250,7 @@ export class RegionOverlay {
   private faceDrag: FaceDrag | null = null;
   private boxes: EditableBox[] = [];
   private selectedId: string | null = null;
+  private floorZ: number | null = null;
   private disposed = false;
   private rotateGizmo: RotateGizmo | null = null;
   private translateGizmo: TranslateGizmo | null = null;
@@ -290,6 +292,11 @@ export class RegionOverlay {
     this.boxes = boxes.map(copyBox);
     this.selectedId = this.boxes.some((box) => box.id === selectedId) ? selectedId : null;
     this.sync();
+  }
+
+  /** Mặt sàn (z, object-local). Khi thả, box không được xuống dưới sàn; chưa đặt sàn thì không kẹp. */
+  setFloorZ(floorZ: number): void {
+    this.floorZ = floorZ;
   }
 
   /** Viewer đã sẵn sàng và lớp vẫn gắn trong scene. */
@@ -540,9 +547,14 @@ export class RegionOverlay {
             position.y - selected.center[1],
             position.z - selected.center[2],
           ]);
-    this.boxes = this.boxes.map((box) => (box.id === moved.id ? moved : box));
+    this.boxes = this.boxes.map((box) => (box.id === moved.id ? this.settled(moved) : box));
     this.sync();
     if (boxesKey(this.boxes) !== boxesKey(before)) this.handlers.onChange(this.snapshot());
+  }
+
+  /** Box sau khi thả: không xuống dưới sàn nếu đã đặt sàn (đỉnh giữ nguyên, xem `clampToFloor`). */
+  private settled(box: EditableBox): EditableBox {
+    return this.floorZ === null ? box : clampToFloor(box, this.floorZ);
   }
 
   private snapshot(): EditableBox[] {
@@ -594,6 +606,8 @@ export class RegionOverlay {
     if (!drag) return;
     this.faceDrag = null;
     window.removeEventListener("keydown", this.onEscape);
+    this.boxes = this.boxes.map((box) => (box.id === drag.original.id ? this.settled(box) : box));
+    this.sync();
     if (boxesKey(this.boxes) !== boxesKey(drag.before)) this.handlers.onChange(this.snapshot());
   }
 
