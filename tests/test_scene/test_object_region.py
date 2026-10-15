@@ -10,7 +10,7 @@ import trimesh
 
 from src.models.contracts.object_membership import ObjectRegionCommand, RegionBox
 from src.services.orchestration.scene import membership_regeneration
-from src.services.scene.editing.membership import StaleObjectMembershipRevisionError
+from src.services.scene.editing.membership import ObjectMembershipValidationError, StaleObjectMembershipRevisionError
 from tests.test_scene.test_object_correction import _fixture, _source_rows
 
 JOB = "job-fixture-001"
@@ -106,3 +106,107 @@ def test_shell_failure_keeps_preview_available(draft, monkeypatch):
     monkeypatch.setattr(module, "build_gaussian_shell", fail)
     preview = module.preview_region(registry, JOB, TARGET, command)
     assert preview["shell_glb_base64"] is None and preview["shell_error"] == "sparse region"
+
+
+def test_apply_updates_membership_and_claimed_objects_without_recentering(draft):
+    from scipy.spatial.transform import Rotation
+
+    from src.services.orchestration.scene.object_region import apply_region_draft
+    from src.services.scene.decomposition.gaussian_split import positions, read_gaussian_ply
+    from src.services.scene.editing.membership import decode_gaussian_membership_labels
+
+    registry, scene, command, rows, old_labels = draft
+    command = command.model_copy(update={"claim_from": [OTHER]})
+    result = apply_region_draft(registry, JOB, TARGET, command, actor_id="reviewer")
+    updated = result.revision.scene
+    assert updated.scene_revision != scene.scene_revision
+    manifest = updated.environment.membership
+    assert manifest.source_visual_ref == scene.environment.membership.source_visual_ref
+    assert manifest.source_geometry_ref == scene.environment.membership.source_geometry_ref
+    assert manifest.extraction_revision == scene.environment.membership.extraction_revision
+    labels = decode_gaussian_membership_labels(
+        registry.runtime_resolver.require(manifest.labels_ref).read_bytes(), manifest
+    )
+    assert np.count_nonzero(labels == 2) < np.count_nonzero(old_labels == 2)
+    for old, item in zip(scene.objects[:2], updated.objects[:2], strict=True):
+        assert item.visual_ref != old.visual_ref and item.geometry_ref != old.geometry_ref
+        assert item.collider is None and item.provenance.get("shell_error") is None
+        assert item.geometry_ref.artifact_type == "ObjectShellMesh"
+        local_rows = read_gaussian_ply(registry.runtime_resolver.require(item.visual_ref).read_bytes())
+        pose = item.provenance["source_transform"]
+        assert pose == old.provenance["source_transform"] and item.transform == old.transform
+        reconstructed = (
+            Rotation.from_quat(pose["rotation_quaternion_xyzw"]).apply(positions(local_rows)) + pose["translation_xyz"]
+        )
+        selected = np.isin(labels, [int(k) for k, v in manifest.label_to_object_id.items() if v == item.id])
+        np.testing.assert_allclose(reconstructed, positions(rows[selected]), atol=2e-7)
+        assert item.primitive_dimensions_xyz_m == pytest.approx(np.maximum(np.ptp(positions(local_rows), axis=0), 0.05))
+    assert updated.objects[2] == scene.objects[2]
+    evidence = updated.provenance["object_region_edit"]
+    assert evidence["actor_id"] == "reviewer"
+    import json
+
+    from src.models.contracts.artifacts import ProductArtifactRef
+
+    payload = json.loads(
+        registry.runtime_resolver.require(ProductArtifactRef.model_validate(evidence["evidence_ref"])).read_bytes()
+    )
+    assert payload["command"] == command.model_dump(mode="json")
+    assert "added_sample_m" not in payload["preview"]
+
+
+@pytest.mark.parametrize("failure", ["ready", "claim_empty", "too_small", "ignored", "unmapped", "stale"])
+def test_apply_rejects_before_any_artifact_publish(draft, failure):
+    from src.services.orchestration.scene.object_region import apply_region_draft
+
+    registry, scene, command, *_ = draft
+    target = TARGET
+    if failure == "ready":
+        scene = registry.scene.publish_next(
+            JOB,
+            scene.scene_revision,
+            scene.model_copy(update={"provenance": {"object_geometry": "ready"}}),
+            "ready-fixture",
+        ).revision.scene
+        command = command.model_copy(update={"expected_scene_revision": scene.scene_revision})
+    elif failure == "claim_empty":
+        command = command.model_copy(
+            update={
+                "claim_from": [OTHER],
+                "boxes": [RegionBox(op="add", center_m=(0, -1, 0), half_extents_m=(1, 2, 1), yaw_rad=0)],
+            }
+        )
+    elif failure == "too_small":
+        command = command.model_copy(
+            update={"boxes": [RegionBox(op="add", center_m=(0, 0, 0), half_extents_m=(0.005, 0.005, 0.005), yaw_rad=0)]}
+        )
+    elif failure == "ignored":
+        first = scene.objects[0].model_copy(update={"provenance": {**scene.objects[0].provenance, "review": "IGNORED"}})
+        scene = registry.scene.publish_next(
+            JOB,
+            scene.scene_revision,
+            scene.model_copy(update={"objects": [first, *scene.objects[1:]]}),
+            "ignored-fixture",
+        ).revision.scene
+        command = command.model_copy(update={"expected_scene_revision": scene.scene_revision})
+    elif failure == "unmapped":
+        target = "missing"
+    else:
+        command = command.model_copy(update={"expected_scene_revision": "rev-999"})
+    before = list(registry.runtime_resolver.list_uris(f"artifact://jobs/{JOB}/"))
+    with pytest.raises(ObjectMembershipValidationError):
+        apply_region_draft(registry, JOB, target, command, actor_id="reviewer")
+    assert list(registry.runtime_resolver.list_uris(f"artifact://jobs/{JOB}/")) == before
+    assert registry.scene.current(JOB).scene == scene
+
+
+def test_apply_records_shell_failure_without_creating_collider(draft, monkeypatch):
+    from src.services.orchestration.scene import object_region as module
+
+    registry, scene, command, *_ = draft
+    monkeypatch.setattr(module, "_shell", lambda *args: (None, {}, "sparse region"))
+    updated = module.apply_region_draft(registry, JOB, TARGET, command, actor_id="reviewer").revision.scene
+    item = updated.objects[0]
+    assert item.collider is None and item.geometry_ref.artifact_type == "ObjectShellMesh"
+    assert item.provenance["shell_error"] == "sparse region"
+    assert item.provenance["shell_display"] == "bounding_box_placeholder"
