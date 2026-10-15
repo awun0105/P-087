@@ -22,3 +22,17 @@ T-009 chỉ còn một sửa nhỏ trong `extraction.py`.
 - Khoá thêm box/thư viện/nhân bản/bề mặt va chạm khi Draft, huỷ công cụ đang bật khi khoá xuất hiện: **đạt** (75 test liên quan PASS).
 - Bước 7 chưa commit vì T-009 bị mở lại: đúng. Patch đã chép vào `.ai/tasks/T-013/step7.patch` (bản ở /tmp có thể bị dọn).
   Khi T-009 accepted: `git apply .ai/tasks/T-013/step7.patch`, chạy test preset, commit, xoá file patch trong cùng commit, đặt implemented.
+
+---
+
+# Review T-013 — kết luận
+
+Verdict: ACCEPTED
+
+- Bước 7: 8/8 preset = `shell` + `required` + `multiview_v1`; param `scene.geometry_method` có thêm `shell`, param mới
+  `scene.geometry_review` (`required`/`auto`). Patch áp sạch, file patch đã xoá trong cùng commit `07ecbfcd`.
+- Chạy lại: test preset/schema/config override/recommender/studio routes 177 passed; frontend banner/object-review/progress 75 passed.
+- Bước 1–6 và phần khoá nút Draft: đạt (nhận xét ở trên).
+
+Thay đổi hành vi: mọi job mới dừng ở Draft và cần "Tạo mesh". Scene cũ không đổi.
+Việc của chủ dự án: nhìn banner, các nút bị khoá và tiến độ build trên browser.
