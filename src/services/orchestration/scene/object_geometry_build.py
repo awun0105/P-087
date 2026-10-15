@@ -1,27 +1,29 @@
 """Build reviewed object geometry and publish it through the existing SceneIR revision fence."""
 
 from collections.abc import Callable
-from dataclasses import asdict
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import Event
 
 import numpy as np
 import trimesh
+from PIL import Image
 from scipy.spatial.transform import Rotation
 
 from src.config import Settings
 from src.models.contracts.artifacts import ProductArtifactRef
 from src.models.contracts.coordinates import Transform
 from src.models.contracts.manifests import StageId
-from src.models.contracts.object_geometry import ObjectShellManifest
+from src.models.contracts.object_geometry import ObjectShellManifest, ObjectSurfaceManifest
 from src.models.contracts.object_membership import ObjectMembershipArtifact
 from src.models.contracts.scene import ColliderSpec, ColliderType, SceneEnvironment, SceneIR, SceneObject
-from src.services.orchestration.artifacts import FilesystemArtifactStore, sha256_bytes
+from src.services.orchestration.artifacts import ArtifactStoreError, FilesystemArtifactStore, sha256_bytes
 from src.services.orchestration.jobs.database import RuntimeTransaction
 from src.services.orchestration.jobs.stage_views import job_bundle
 from src.services.orchestration.processing.config import load_job_config
 from src.services.orchestration.projects.registry import ProjectRegistry
+from src.services.orchestration.scene import objectify
 from src.services.orchestration.scene.floor_evidence import publish_floor_fit_evidence, scene_floor_fit_summary
 from src.services.orchestration.scene.object_geometry_steps import (
     SurfaceInput,
@@ -29,6 +31,7 @@ from src.services.orchestration.scene.object_geometry_steps import (
     run_inpaint_and_package,
     run_surface_colliders,
 )
+from src.services.orchestration.scene.objectgs_observations import unpack_observations
 from src.services.orchestration.scene.objectify import (
     ObjectifyConfig,
     ObjectifyError,
@@ -36,6 +39,8 @@ from src.services.orchestration.scene.objectify import (
     _ensure_not_cancelled,
     _reference,
 )
+from src.services.orchestration.scene.surface_evidence import publish_surface_artifacts
+from src.services.process_control import ProcessCancelledError
 from src.services.reconstruction import camera_views
 from src.services.scene.collision_ownership import bind_source_collision_ownership
 from src.services.scene.decomposition.gaussian_split import positions, read_gaussian_ply, write_gaussian_ply
@@ -43,6 +48,7 @@ from src.services.scene.editing.membership import StaleObjectMembershipRevisionE
 from src.services.scene.floor_model import fit_canonical_floor_model, point_cloud_checksum
 from src.services.scene.gaussian_shell import GaussianShellError, ShellParams, build_gaussian_shell
 from src.services.scene.geometry_state import object_geometry_state
+from src.services.scene.objectgs import ObjectGSRuntime, ObjectGSView, PreparedObjectGSRequest, run_prepared_objectgs
 
 
 class ObjectGeometryBuildError(RuntimeError):
@@ -52,6 +58,283 @@ class ObjectGeometryBuildError(RuntimeError):
         super().__init__(message)
         self.object_id = object_id
         self.retryable = retryable
+
+
+@dataclass(frozen=True)
+class _Surface:
+    """Surface chosen for one object's collider; `surface_ref` is what the scene records as surface_mesh_ref."""
+
+    origin: str  # "gaussian_shell" | "objectgs"
+    # None for a shell: its ref is read from the GLB only after CoACD succeeds, as before.
+    surface_ref: ProductArtifactRef | None
+    collider_input: SurfaceInput
+    selection: dict
+    provenance: dict = field(default_factory=dict)
+
+
+_SURFACE_LABEL = {"gaussian_shell": "Gaussian shell", "objectgs": "ObjectGS surface"}
+_SURFACE_ORIGIN = {"gaussian_shell": "gaussian_shell_v1", "objectgs": "objectgs_v1"}
+
+
+def _objectgs_runtime(settings: Settings, config: ObjectifyConfig) -> ObjectGSRuntime:
+    try:
+        return objectify.objectgs_runtime_for(settings, config)
+    except ObjectifyError as error:
+        raise ObjectGeometryBuildError(
+            "ObjectGS được chọn nhưng runtime/checkout chưa cấu hình; scene duyệt vẫn được giữ. "
+            "Cấu hình runtime rồi thử lại, hoặc đổi geometry_method sang shell.",
+            retryable=False,
+        ) from error
+
+
+def _observations_ref(scene: SceneIR) -> ProductArtifactRef:
+    raw = scene.provenance.get("objectgs_observations_ref")
+    if not isinstance(raw, dict):
+        raise ObjectGeometryBuildError(
+            "Scene không có quan sát ObjectGS; tạo lại scene duyệt với geometry_method=objectgs.", retryable=False
+        )
+    try:
+        return ProductArtifactRef.model_validate(raw)
+    except ValueError as error:
+        raise ObjectGeometryBuildError(
+            "Tham chiếu quan sát ObjectGS trong scene hỏng; tạo lại scene duyệt.", retryable=False
+        ) from error
+
+
+def _source_pose(item: SceneObject) -> Transform:
+    try:
+        pose = Transform.model_validate(item.provenance.get("source_transform"))
+    except ValueError as error:
+        raise ObjectGeometryBuildError(
+            f"{item.id}: source_transform không hợp lệ: {error}", object_id=item.id
+        ) from error
+    if pose.parent_frame != "world" or pose.local_frame != item.id:
+        raise ObjectGeometryBuildError(
+            f"{item.id}: source_transform phải nối world với khung của vật", object_id=item.id
+        )
+    return pose
+
+
+def _publish_verified(
+    receipt: dict, kind: str, job_id: str, tail: str, artifact_type: str, publish: Publish
+) -> ProductArtifactRef:
+    payload = Path(receipt[f"{kind}_path"]).read_bytes()
+    if sha256_bytes(payload) != receipt[f"{kind}_checksum"]:
+        raise ObjectGeometryBuildError(f"ObjectGS {kind} không khớp checksum trong biên nhận.", retryable=False)
+    return publish(_reference(job_id, tail, artifact_type, StageId.SCENE_DECOMPOSE, payload), payload)
+
+
+def _rasterize_current_labels(
+    observed: list[dict],
+    membership: ObjectMembershipArtifact,
+    labels_file: Path,
+    source_ply: Path,
+    settings: Settings,
+    workspace: Path,
+    cancel_event: Event | None,
+) -> list[dict]:
+    """Render hàng nguồn theo nhãn hiện tại lên từng quan sát, bằng đúng bộ render của correction_observations."""
+    if settings.product_scene_runtime_python is None:
+        raise ObjectGeometryBuildError("Chưa cấu hình runtime scene để render mask ObjectGS.", retryable=False)
+    try:
+        result = objectify._run(
+            settings.product_scene_runtime_python,
+            objectify.CORRECTION_OBSERVATIONS_RUNNER,
+            {
+                "gaussians_ply": str(source_ply),
+                "labels_path": str(labels_file),
+                "label_to_object_id": membership.label_to_object_id,
+                "views": observed,
+                "output_dir": str(workspace / "objectgs-masks"),
+            },
+            workspace,
+            "correction-observations",
+            settings.product_scene_timeout_seconds,
+            cancel_event=cancel_event,
+        )
+    except ObjectifyError as error:
+        raise ObjectGeometryBuildError(
+            f"Không render được mask ObjectGS từ nhãn hiện tại: {error}", retryable=error.retryable
+        ) from error
+    rendered = result.get("objectgs_views", [])
+    if len(rendered) != len(observed):
+        raise ObjectGeometryBuildError("Bộ render mask trả số quan sát khác gói quan sát.", retryable=False)
+    return rendered
+
+
+def _compact_masks(rendered: list[dict], membership: ObjectMembershipArtifact, workspace: Path) -> list[ObjectGSView]:
+    """Đổi nhãn nguồn sang id compact 1..N theo membership hiện tại, cùng quy ước với prepare_dataset."""
+    object_ids = sorted(set(membership.label_to_object_id.values()))
+    compact = {object_id: index + 1 for index, object_id in enumerate(object_ids)}
+    views = []
+    for index, view in enumerate(rendered):
+        raw = np.load(view["mask_path"], allow_pickle=False)
+        mask = np.zeros(raw.shape, dtype=np.uint8)
+        for source_label, object_id in membership.label_to_object_id.items():
+            mask[raw == int(source_label)] = compact[object_id]
+        path = (workspace / f"objectgs-mask-{index:06d}.png").resolve()
+        Image.fromarray(mask).save(path)
+        views.append(ObjectGSView.model_validate({**view, "mask_path": str(path)}))
+    return views
+
+
+def _objectgs_surfaces(
+    *,
+    registry: ProjectRegistry,
+    settings: Settings,
+    runtime: ObjectGSRuntime,
+    job_id: str,
+    membership: ObjectMembershipArtifact,
+    selected: list[SceneObject],
+    observations_ref: ProductArtifactRef,
+    workspace: Path,
+    publish: Publish,
+    cancel_event: Event | None,
+) -> dict[str, _Surface]:
+    """Chạy ObjectGS trên quan sát với mask dựng từ nhãn hiện tại. Lỗi toàn cục làm build thất bại, không có fallback."""
+    resolve = registry.runtime_resolver.require
+    try:
+        # The store verifies the declared checksum on read; a mismatch or missing file never reaches ObjectGS.
+        payload = resolve(observations_ref).read_bytes()
+    except ArtifactStoreError as error:
+        raise ObjectGeometryBuildError(
+            "Quan sát ObjectGS không đọc được hoặc sai checksum; tạo lại scene duyệt.", retryable=False
+        ) from error
+    try:
+        observed = unpack_observations(payload, workspace / "objectgs-observations")
+    except ValueError as error:
+        raise ObjectGeometryBuildError(f"Gói quan sát ObjectGS hỏng: {error}", retryable=False) from error
+    if not observed:
+        raise ObjectGeometryBuildError(
+            "Gói quan sát ObjectGS rỗng; tạo lại scene duyệt với geometry_method=objectgs.", retryable=False
+        )
+    labels_file = workspace / "source-labels.i32le"
+    labels_file.write_bytes(resolve(membership.labels_ref).read_bytes())
+    source_ply = resolve(membership.source_visual_ref)
+    rendered = _rasterize_current_labels(
+        observed, membership, labels_file, source_ply, settings, workspace, cancel_event
+    )
+    views = _compact_masks(rendered, membership, workspace)
+    poses = {item.id: _source_pose(item) for item in selected}
+    if set(poses) != set(membership.label_to_object_id.values()):
+        raise ObjectGeometryBuildError("Scene thiếu vật của membership nên không thể chạy ObjectGS.", retryable=False)
+    expected = {object_id: pose.model_dump(mode="json") for object_id, pose in poses.items()}
+    try:
+        request = PreparedObjectGSRequest(
+            job_id=job_id,
+            source_ply=source_ply,
+            source_labels=labels_file,
+            membership=membership,
+            source_poses=poses,
+            views=views,
+            runtime=runtime,
+            workspace=workspace / "objectgs-run",
+        )
+        receipt = run_prepared_objectgs(
+            request,
+            cancel_event=cancel_event,
+            evidence_dir=workspace / "evidence" / "objectgs",
+            surface_artifact_callback=lambda object_id, item: publish_surface_artifacts(
+                job_id, object_id, item, publish
+            ),
+        )
+    except ProcessCancelledError:
+        raise
+    except (RuntimeError, ValueError, OSError) as error:
+        raise ObjectGeometryBuildError(
+            f"ObjectGS lỗi: {error}. Scene duyệt vẫn được giữ; thử lại, hoặc đổi geometry_method sang shell "
+            "nếu muốn bỏ ObjectGS.",
+            retryable=isinstance(error, (RuntimeError, OSError)),
+        ) from error
+    if (
+        receipt.get("coordinate_frame") != "object_local"
+        or receipt.get("distance_unit") != "m"
+        or receipt.get("source_membership") != membership.model_dump(mode="json")
+        or receipt.get("source_poses") != expected
+        or set(receipt.get("objects", {})) != set(membership.label_to_object_id.values())
+    ):
+        raise ObjectGeometryBuildError("Biên nhận ObjectGS không khớp membership hoặc pose nguồn.", retryable=False)
+    checkpoint_ref = _publish_verified(
+        receipt, "checkpoint", job_id, "objectgs/{digest}/checkpoint.tar.gz", "ObjectGSCheckpoint", publish
+    )
+    dataset_ref = _publish_verified(
+        receipt, "dataset", job_id, "objectgs/{digest}/dataset.tar.gz", "ObjectGSDataset", publish
+    )
+    surfaces: dict[str, _Surface] = {}
+    for item in selected:
+        info = receipt["objects"][item.id]
+        if info.get("quality_passed") is not True:
+            raise ObjectGeometryBuildError(f"{item.id}: surface ObjectGS chưa đạt QA", object_id=item.id)
+        surface_payload = Path(info["path"]).read_bytes()
+        if sha256_bytes(surface_payload) != info["checksum"]:
+            raise ObjectGeometryBuildError("Surface ObjectGS không khớp checksum", object_id=item.id)
+        surface_ref = ProductArtifactRef.model_validate(info["evidence_refs"]["surface"])
+        if (
+            surface_ref.artifact_type != "ObjectSurfaceMesh"
+            or surface_ref.job_id != job_id
+            or surface_ref.artifact_checksum != info["checksum"]
+        ):
+            raise ObjectGeometryBuildError("Evidence surface ObjectGS không ràng buộc đúng vật", object_id=item.id)
+        manifest = ObjectSurfaceManifest(
+            object_id=item.id,
+            objectgs_label_id=info["label"],
+            surface_mesh_ref=surface_ref,
+            source_checkpoint_ref=checkpoint_ref,
+            source_dataset_ref=dataset_ref,
+            source_membership=membership,
+            upstream_commit=receipt["upstream_commit"],
+            canonical_world_from_training=Transform(
+                parent_frame="world",
+                local_frame="objectgs_training",
+                translation_xyz=(0, 0, 0),
+                rotation_quaternion_xyzw=(0, 0, 0, 1),
+            ),
+            vertex_count=info["vertex_count"],
+            triangle_count=info["triangle_count"],
+            quality={
+                "watertight": info["watertight"],
+                "passed": True,
+                "report_ref": info["evidence_refs"].get("quality_report"),
+            },
+            provenance={
+                "upstream_commit": receipt["upstream_commit"],
+                "gsplat_commit": receipt["gsplat_commit"],
+                "glm_commit": receipt.get("glm_commit"),
+                "training_config_checksum": receipt["config_checksum"],
+                "export_config": receipt["export_config"],
+                "runtime": receipt["runtime"],
+                "source_world_from_object": expected[item.id],
+                "surface_evidence": info["evidence_refs"],
+            },
+        )
+        manifest_payload = manifest.model_dump_json().encode()
+        manifest_ref = publish(
+            _reference(
+                job_id,
+                "objectgs/surfaces/{digest}.json",
+                "ObjectSurfaceManifest",
+                StageId.SCENE_DECOMPOSE,
+                manifest_payload,
+            ),
+            manifest_payload,
+        )
+        surfaces[item.id] = _Surface(
+            origin="objectgs",
+            surface_ref=surface_ref,
+            collider_input=SurfaceInput(
+                item.id, Path(info["path"]), info["checksum"], workspace / f"{item.id}-collider.glb"
+            ),
+            selection={"chosen": "objectgs"},
+            provenance={
+                "objectgs_surface_manifest_ref": manifest_ref.model_dump(mode="json"),
+                "objectgs_evidence": {
+                    "checkpoint": checkpoint_ref.model_dump(mode="json"),
+                    "dataset": dataset_ref.model_dump(mode="json"),
+                    "surface_evidence": info["evidence_refs"],
+                },
+            },
+        )
+    return surfaces
 
 
 def _build_shell(
@@ -130,55 +413,82 @@ def _build_colliders(
     job_id: str,
     cancel_event: Event | None = None,
 ) -> dict[str, tuple[ProductArtifactRef, ColliderSpec]]:
+    """Shell-only colliders (T-007 contract): each input is a Gaussian shell GLB already on disk."""
+    surfaces = {
+        item.key: _Surface(
+            origin="gaussian_shell",
+            surface_ref=None,
+            collider_input=item,
+            selection={"chosen": "gaussian_shell"},
+        )
+        for item in inputs
+    }
+    return _publish_colliders(surfaces, settings, coacd_config, workspace, publish, job_id, cancel_event)
+
+
+def _publish_colliders(
+    surfaces: dict[str, _Surface],
+    settings: Settings,
+    coacd_config: dict,
+    workspace: Path,
+    publish: Publish,
+    job_id: str,
+    cancel_event: Event | None = None,
+) -> dict[str, tuple[ProductArtifactRef, ColliderSpec]]:
     if settings.product_scene_runtime_python is None:
         raise ObjectGeometryBuildError("Chưa cấu hình runtime CoACD.")
-    try:
-        result = run_surface_colliders(
-            settings.product_scene_runtime_python,
-            inputs,
-            coacd_config,
-            workspace,
-            settings.product_scene_timeout_seconds,
-            cancel_event,
-            surface_label="Gaussian shell",
-        )
-    except ObjectifyError as error:
-        raise ObjectGeometryBuildError(str(error), retryable=error.retryable) from error
+    results: dict[str, dict] = {}
+    for origin in dict.fromkeys(surface.origin for surface in surfaces.values()):
+        group = [surface.collider_input for surface in surfaces.values() if surface.origin == origin]
+        try:
+            results.update(
+                run_surface_colliders(
+                    settings.product_scene_runtime_python,
+                    group,
+                    coacd_config,
+                    workspace,
+                    settings.product_scene_timeout_seconds,
+                    cancel_event,
+                    surface_label=_SURFACE_LABEL[origin],
+                )
+            )
+        except ObjectifyError as error:
+            raise ObjectGeometryBuildError(str(error), retryable=error.retryable) from error
     colliders = {}
-    for item in inputs:
+    for key, surface in surfaces.items():
         _ensure_not_cancelled(cancel_event)
-        payload = item.output_glb.read_bytes()
+        payload = surface.collider_input.output_glb.read_bytes()
         geometry = publish(
             _reference(job_id, "colliders/{digest}.glb", "ObjectCollider", StageId.COLLIDER, payload), payload
         )
-        shell_ref = _reference(
+        surface_ref = surface.surface_ref or _reference(
             job_id,
             "objects/shells/{digest}.glb",
             "ObjectShellMesh",
             StageId.SCENE_DECOMPOSE,
-            item.surface_path.read_bytes(),
+            surface.collider_input.surface_path.read_bytes(),
         )
-        collider_id = f"{item.key}-collider"
+        collider_id = f"{key}-collider"
         collider = ColliderSpec(
             collider_id=collider_id,
             collider_type=ColliderType.CONVEX_DECOMPOSITION,
             local_transform=Transform(
-                parent_frame=item.key,
+                parent_frame=key,
                 local_frame=collider_id,
                 translation_xyz=(0, 0, 0),
                 rotation_quaternion_xyzw=(0, 0, 0, 1),
             ),
             geometry_ref=geometry,
-            parameters={"parts": int(result[item.key]["parts"])},
+            parameters={"parts": int(results[key]["parts"])},
             provenance={
                 "generator": "coacd",
-                "surface_origin": "gaussian_shell_v1",
-                "surface_mesh_ref": shell_ref.model_dump(mode="json"),
+                "surface_origin": _SURFACE_ORIGIN[surface.origin],
+                "surface_mesh_ref": surface_ref.model_dump(mode="json"),
                 "coacd_config": coacd_config,
                 "strict_surface_input": True,
             },
         )
-        colliders[item.key] = (geometry, collider)
+        colliders[key] = (geometry, collider)
     return colliders
 
 
@@ -302,6 +612,13 @@ def build_object_geometry(
         group, name = key.split("_", 1) if key.startswith(("coacd_", "inpaint_")) else ("scene", key)
         groups[group][name] = value
     config = ObjectifyConfig.model_validate(groups)
+    objectgs_mode = config.scene.geometry_method == "objectgs"
+    if objectgs_mode and object_ids is not None:
+        raise ObjectGeometryBuildError(
+            "Dựng riêng từng vật bằng ObjectGS chưa được hỗ trợ; hãy dựng toàn bộ scene.", retryable=False
+        )
+    objectgs_runtime = _objectgs_runtime(settings, config) if objectgs_mode else None
+    observations_ref = _observations_ref(scene) if objectgs_mode else None
     if object_ids is not None and not object_ids <= {item.id for item in scene.objects}:
         raise ObjectGeometryBuildError("Geometry build requested unknown objects")
     selected = [
@@ -332,11 +649,36 @@ def build_object_geometry(
         _ensure_not_cancelled(cancel_event)
         keys = [int(key) for key, owner in membership.label_to_object_id.items() if owner == item.id]
         shells[item.id] = _build_shell(item, rows[np.isin(labels, keys)], membership, workspace, publish)
+    if objectgs_mode:
+        # ObjectGS chạy trước mọi collider: nếu nó lỗi toàn cục thì không có collider nào được dựng từ vỏ.
+        phase("objectgs")
+        surfaces = _objectgs_surfaces(
+            registry=registry,
+            settings=settings,
+            runtime=objectgs_runtime,
+            job_id=job_id,
+            membership=membership,
+            selected=selected,
+            observations_ref=observations_ref,
+            workspace=workspace,
+            publish=publish,
+            cancel_event=cancel_event,
+        )
+    else:
+        surfaces = {
+            item.id: _Surface(
+                origin="gaussian_shell",
+                surface_ref=shells[item.id][0],
+                collider_input=shells[item.id][2],
+                selection={"chosen": "gaussian_shell"},
+            )
+            for item in selected
+        }
     phase("quality")
     phase("collider")
     colliders = (
-        _build_colliders(
-            [shells[item.id][2] for item in selected],
+        _publish_colliders(
+            surfaces,
             settings,
             config.coacd.model_dump(exclude_unset=True),
             workspace,
@@ -344,7 +686,7 @@ def build_object_geometry(
             job_id,
             cancel_event,
         )
-        if selected
+        if surfaces
         else {}
     )
     phase("environment")
@@ -360,16 +702,18 @@ def build_object_geometry(
             objects.append(item)
             continue
         geometry, collider = colliders[item.id]
-        shell_ref, manifest_ref, _ = shells[item.id]
+        _, manifest_ref, _ = shells[item.id]
+        surface = surfaces[item.id]
         updated = item.model_copy(
             update={
                 "geometry_ref": geometry,
-                "surface_mesh_ref": shell_ref,
+                "surface_mesh_ref": surface.surface_ref,
                 "collider": collider,
                 "provenance": {
                     **item.provenance,
                     "shell_manifest_ref": manifest_ref.model_dump(mode="json"),
-                    "surface_selection": {"chosen": "gaussian_shell"},
+                    "surface_selection": surface.selection,
+                    **surface.provenance,
                 },
             },
             deep=True,

@@ -442,6 +442,30 @@ def _publish_draft(
     )
 
 
+def objectgs_runtime_for(settings: Settings, config: ObjectifyConfig) -> ObjectGSRuntime:
+    """Runtime ObjectGS cách ly theo cấu hình deployment; thiếu đường dẫn thì ném ObjectifyError."""
+    paths = (
+        settings.product_objectgs_runtime_python,
+        settings.product_objectgs_repository,
+        settings.product_objectgs_gsplat_repository,
+    )
+    if any(path is None for path in paths):
+        raise ObjectifyError(
+            "ObjectGS was selected but its isolated runtime/checkouts are not configured", retryable=False
+        )
+    return ObjectGSRuntime(
+        python=paths[0].absolute(),
+        repository=paths[1].resolve(),
+        gsplat_repository=paths[2].resolve(),
+        iterations=config.scene.objectgs_iterations,
+        timeout_seconds=settings.product_objectgs_timeout_seconds,
+        gpu_device=settings.product_objectgs_gpu_device,
+        cuda_home=settings.product_objectgs_cuda_home,
+        cxx=settings.product_objectgs_cxx,
+        glm_repository=settings.product_objectgs_glm_repository,
+    )
+
+
 def objectify(
     registry: ProjectRegistry,
     job: JobManifest,
@@ -468,26 +492,7 @@ def objectify(
     report_progress = progress or (lambda stage: None)
     objectgs_runtime = None
     if config.scene.geometry_method == "objectgs" and not draft:
-        paths = (
-            settings.product_objectgs_runtime_python,
-            settings.product_objectgs_repository,
-            settings.product_objectgs_gsplat_repository,
-        )
-        if any(path is None for path in paths):
-            raise ObjectifyError(
-                "ObjectGS was selected but its isolated runtime/checkouts are not configured", retryable=False
-            )
-        objectgs_runtime = ObjectGSRuntime(
-            python=paths[0].absolute(),
-            repository=paths[1].resolve(),
-            gsplat_repository=paths[2].resolve(),
-            iterations=config.scene.objectgs_iterations,
-            timeout_seconds=settings.product_objectgs_timeout_seconds,
-            gpu_device=settings.product_objectgs_gpu_device,
-            cuda_home=settings.product_objectgs_cuda_home,
-            cxx=settings.product_objectgs_cxx,
-            glm_repository=settings.product_objectgs_glm_repository,
-        )
+        objectgs_runtime = objectgs_runtime_for(settings, config)
     python, checkpoint = settings.product_scene_runtime_python, settings.product_sam2_checkpoint
     if python is None or (checkpoint is None and correction is None):
         raise ObjectifyError("chưa cấu hình runtime scene (PRODUCT_SCENE_RUNTIME_PYTHON / PRODUCT_SAM2_CHECKPOINT)")
