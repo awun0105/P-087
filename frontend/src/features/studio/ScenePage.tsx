@@ -362,6 +362,7 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
             canCancel={canCancelJob}
             canAccept={canMutateJob}
             onConfirmMetric={canMutateJob && preview ? () => openTab("studio", "metric") : undefined}
+            onOpenStudio={canMutateJob ? () => openTab("studio", "scene") : undefined}
             onRetry={canRetryJob && !retryPending ? startRetry : undefined}
             retryDisabled={busy || guestQuotaExhausted}
             retryHint={guestQuotaExhausted ? "Đã hết lượt Guest hôm nay; lượt được đặt lại lúc 00:00." : undefined}

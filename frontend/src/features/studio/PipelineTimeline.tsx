@@ -23,6 +23,8 @@ import { estimateRemainingTime, formatEtaDuration } from "@/features/studio/scen
 /** Hàng trên timeline: như `StageView`, nhưng có thêm hàng ảo phía giao diện (T-021). */
 export interface TimelineStageView extends Omit<StageView, "stage_id"> {
   stage_id: TimelineStageId;
+  /** Phụ đề một dòng dưới tên bước (vd. hàng ảo: phase đang chạy, lý do lỗi). */
+  note?: string | null;
 }
 
 export interface StageAction {
@@ -199,7 +201,8 @@ export function PipelineTimeline({
                       </span>
                     )}
                     {/* Chỉ thao tác người dùng cần làm (thử lại, xác nhận…) mới hiện sẵn cùng hàng tên bước. */}
-                    {state !== "succeeded" && stageActions?.filter((action) => action.stageId === meta.id).map((action) => (
+                    {/* Hàng ảo "Duyệt vật & Tạo mesh" còn nút khi đã xong (Mở Studio sau dựng lại lỗi). */}
+                    {(state !== "succeeded" || apiStageId === null) && stageActions?.filter((action) => action.stageId === meta.id).map((action) => (
                       <button key={action.label} type="button" onClick={action.onClick} disabled={action.disabled} title={action.hint} className={cn(STAGE_BUTTON, "disabled:cursor-not-allowed disabled:opacity-50")}>
                         {action.label}
                       </button>
@@ -210,6 +213,9 @@ export function PipelineTimeline({
                     <p className="mt-1 text-sm text-amber-500">
                       Tiến trình bị gián đoạn. Bấm thử lại để tiếp tục huấn luyện từ checkpoint đã lưu.
                     </p>
+                  )}
+                  {!isCurrentStale && stage?.note && (
+                    <p className={cn("mt-1 text-sm", state === "failed" ? "text-rust" : "text-ink-muted")}>{stage.note}</p>
                   )}
                   {!isCurrentStale && (state === "running" || state === "failed" || state === "waiting") && (
                     <p className="mt-1 text-sm leading-relaxed text-ink-muted">{meta.description}</p>
