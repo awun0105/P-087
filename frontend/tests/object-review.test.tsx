@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ObjectReviewView, type SaveState } from "@/features/studio/ObjectReviewView";
 import { SimulationPackagePanel } from "@/features/studio/SimulationPackagePanel";
+import { ObjectifyContext, type ObjectifyHandle } from "@/features/studio/scene/objectifyContext";
 
 vi.mock("@/features/studio/StageViewer", () => ({
   CollisionMeshCanvas: () => <div data-testid="mesh" />,
@@ -1283,5 +1284,126 @@ describe("ObjectReviewView", () => {
     render(<ObjectReviewView jobId="job-a" />);
     expect(await screen.findByRole("button", { name: "Thêm từ thư viện" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Thêm vật cản hộp" })).toBeEnabled();
+  });
+});
+
+/** Scene theo vật có membership, collision theo vật và khoá object_geometry: nút Chỉnh vùng hiện khi chọn vật. */
+function regionScene(revision = "rev-001") {
+  const result = membershipScene(revision);
+  return {
+    ...result,
+    environment: { ...result.environment, object_aware_collision_ref: ref },
+    provenance: { ...result.provenance, object_geometry: "ready" },
+  };
+}
+
+const regionPreview = {
+  scene_revision: "rev-001",
+  membership_checksum: `sha256:${"b".repeat(64)}`,
+  object_id: "candidate-001",
+  added_count: 3,
+  removed_count: 0,
+  object_gaussian_count: 120,
+  protected_floor_count: 0,
+  overlaps: {},
+  claimed: {},
+  added_sample_m: [],
+  removed_sample_m: [],
+  shell_glb_base64: null,
+  shell_error: null,
+};
+
+describe("ObjectReviewView chỉnh vùng (T-016)", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    global.fetch = vi.fn();
+  });
+
+  it("scene có object_geometry: Chỉnh vùng mở panel của vật đang chọn; Brush/Lasso vẫn là trình sửa chi tiết", async () => {
+    routeFetch({
+      "/region/preview": Array.from({ length: 4 }, () => reply(regionPreview)),
+      "/scene": [reply({ scene: regionScene() })],
+    });
+    render(<ObjectReviewView jobId="job-a" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Chọn Vật thể 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Chỉnh vùng" }));
+
+    expect(screen.getByRole("region", { name: "Chỉnh vùng" })).toHaveTextContent("Chỉnh vùng · Vật thể 1");
+    expect(screen.getByRole("list", { name: "Box vùng" })).toHaveTextContent("Cộng #1");
+
+    fireEvent.click(screen.getByRole("button", { name: "Chỉnh chi tiết (Brush/Lasso)" }));
+    expect(screen.queryByRole("region", { name: "Chỉnh vùng" })).not.toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Chỉnh vùng Gaussian nguồn" })).toBeInTheDocument();
+  });
+
+  it("scene cũ chưa có object_geometry giữ nút Chỉnh vùng Gaussian cũ", async () => {
+    const legacy = membershipScene();
+    routeFetch({
+      "/scene": [reply({ scene: { ...legacy, environment: { ...legacy.environment, object_aware_collision_ref: ref } } })],
+    });
+    render(<ObjectReviewView jobId="job-a" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Chọn Vật thể 1" }));
+
+    expect(screen.getByRole("button", { name: "Chỉnh vùng Gaussian · Box / Brush / Lasso" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Chỉnh vùng" })).not.toBeInTheDocument();
+  });
+
+  it("Apply trên Draft (201) gửi revision và membership, đóng panel rồi tải lại scene", async () => {
+    const routes = {
+      "/region/preview": Array.from({ length: 4 }, () => reply(regionPreview)),
+      "/region/apply": [reply({ job_id: "job-a", previous_scene_revision: "rev-001", scene_revision: "rev-002", scene: {} }, 201)],
+      "/scene": [reply({ scene: regionScene() }), reply({ scene: regionScene("rev-002") })],
+    };
+    routeFetch(routes);
+    render(<ObjectReviewView jobId="job-a" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Chọn Vật thể 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Chỉnh vùng" }));
+    expect(await screen.findByText("+3 / −0 · tổng 120")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Chỉnh vùng" })).not.toBeInTheDocument());
+    await waitFor(() => expect(routes["/scene"]).toHaveLength(0));
+    const apply = vi.mocked(global.fetch).mock.calls.find(([url]) => String(url).includes("/region/apply"));
+    expect(JSON.parse((apply![1] as RequestInit).body as string)).toMatchObject({
+      expected_scene_revision: "rev-001",
+      membership_checksum: `sha256:${"b".repeat(64)}`,
+      claim_from: [],
+    });
+  });
+
+  it("Apply trên Ready (202) đóng panel và yêu cầu đọc lại tiến độ qua trạng thái tách vật chung", async () => {
+    const refresh = vi.fn();
+    const handle = { state: null, error: null, sending: false, pending: false, send: vi.fn(), cancel: vi.fn(), refresh };
+    routeFetch({
+      "/region/preview": Array.from({ length: 4 }, () => reply(regionPreview)),
+      "/region/apply": [reply({ status: "queued", mode: "region", scene_revision: "rev-001", operation_id: "op-1" }, 202)],
+      "/scene": [reply({ scene: regionScene() })],
+    });
+    render(
+      <ObjectifyContext.Provider value={handle as unknown as ObjectifyHandle}>
+        <ObjectReviewView jobId="job-a" />
+      </ObjectifyContext.Provider>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Chọn Vật thể 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Chỉnh vùng" }));
+    expect(await screen.findByText("+3 / −0 · tổng 120")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Chỉnh vùng" })).not.toBeInTheDocument());
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("chọn vật khác thì panel chỉnh vùng của vật cũ đóng", async () => {
+    routeFetch({
+      "/region/preview": Array.from({ length: 4 }, () => reply(regionPreview)),
+      "/scene": [reply({ scene: regionScene() })],
+    });
+    render(<ObjectReviewView jobId="job-a" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Chọn Vật thể 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Chỉnh vùng" }));
+    expect(screen.getByRole("region", { name: "Chỉnh vùng" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Chọn Vật thể 2" }));
+    expect(screen.queryByRole("region", { name: "Chỉnh vùng" })).not.toBeInTheDocument();
   });
 });
