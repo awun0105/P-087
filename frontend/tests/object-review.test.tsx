@@ -1246,4 +1246,22 @@ describe("ObjectReviewView", () => {
     expect(create).toHaveAttribute("title", "Cần tạo mesh trước");
     expect(calls("/simulation-package").some(([, init]) => (init as RequestInit | undefined)?.method === "POST")).toBe(false);
   });
+
+  it("vật đã dựng hiện nguồn collider là vỏ Gaussian, kèm lý do máy chủ ghi", async () => {
+    const policy = { object_id: "candidate-001", visual_policy: "source", source_visual_required: false, source_transform: null, readiness_blockers: [] };
+    const base = scene("rev-001", "CONFIRMED", undefined, undefined, [0.1, 0, 0]);
+    const built = {
+      ...base,
+      objects: base.objects.map((item) => ({
+        ...item,
+        provenance: { ...item.provenance, surface_selection: { chosen: "gaussian_shell", reason: "ObjectGS không đạt QA" } },
+      })),
+    };
+    routeFetch({ "/scene": [reply({ scene: built, representations: [policy] })] });
+    render(<ObjectReviewView jobId="job-a" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Chọn Vật thể 1" }));
+    expect(screen.getByText("Collider: Vỏ Gaussian")).toBeInTheDocument();
+    expect(screen.getByText("ObjectGS không đạt QA")).toBeInTheDocument();
+  });
 });

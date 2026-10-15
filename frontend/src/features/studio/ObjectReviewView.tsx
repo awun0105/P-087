@@ -129,6 +129,16 @@ function eulerDegreesToQuaternion([x, y, z]: Vec3Tuple): QuaternionTuple {
   ];
 }
 
+/** Nguồn collider đã dựng của vật (vỏ Gaussian hoặc ObjectGS), kèm lý do máy chủ ghi nếu có. */
+function colliderSourceLine(object: SceneObject): { label: string; reason: string | null } | null {
+  const selection = object.provenance.surface_selection;
+  if (!selection || typeof selection !== "object") return null;
+  const { chosen, reason } = selection as { chosen?: unknown; reason?: unknown };
+  const label = chosen === "gaussian_shell" ? "Vỏ Gaussian" : chosen === "objectgs" ? "ObjectGS" : null;
+  if (!label) return null;
+  return { label, reason: typeof reason === "string" && reason.trim() ? reason : null };
+}
+
 function colliderFormValues(object: SceneObject): ColliderFormValues | null {
   const collider = object.collider;
   if (!collider?.dimensions_xyz_m) return null;
@@ -1370,6 +1380,7 @@ function Inspector({
   const massValid = massValue === null || (Number.isFinite(massValue) && massValue > 0);
   const [x, y, z] = object.transform.translation_xyz;
   const size = object.primitive_dimensions_xyz_m;
+  const colliderSource = object.collider ? colliderSourceLine(object) : null;
   const rename = (event: FormEvent) => {
     event.preventDefault();
     const trimmed = name.trim();
@@ -1403,6 +1414,12 @@ function Inspector({
           </>
         )}
       </dl>
+      {colliderSource && (
+        <p className="text-xs text-on-dark/80">
+          Collider: {colliderSource.label}
+          {colliderSource.reason && <span className="block text-on-dark/60">{colliderSource.reason}</span>}
+        </p>
+      )}
       <ColliderEditor
         key={`${object.id}:${sceneRevision}:${colliderFormReset}`}
         object={object}
