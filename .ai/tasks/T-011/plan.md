@@ -50,6 +50,9 @@ Route `region/apply` trên Ready → 202 `ObjectifyState(mode="region")`. Lưu c
 
 ## Acceptance criteria
 0. Vật bị ảnh hưởng ở trạng thái IGNORED/DELETED/MERGED vẫn được dựng lại collider (xem review T-007).
+0b. `geometry_method=objectgs` + rebuild một phần: không chạy ObjectGS; vật bị ảnh hưởng dùng vỏ với
+    `surface_selection.reason = "partial_rebuild_uses_shell"`; vật khác giữ surface ObjectGS cũ. Thay lỗi "từ chối rebuild một phần"
+    mà T-008 đã đặt bằng quy tắc này (review T-008, quyết định 2). Test cho cả hai nhóm vật.
 1. Scene ready 3 vật, sửa vùng vật A (shell): chỉ A có `collider.geometry_ref` mới; B, C giữ ref cũ (so checksum);
    collision môi trường + nền có ref mới; một revision duy nhất được publish.
 2. Không gọi ObjectGS khi `geometry_method = shell` (monkeypatch raise).

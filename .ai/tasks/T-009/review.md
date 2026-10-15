@@ -46,3 +46,22 @@ ArtifactStoreError)`, ghi `logger.warning` kèm job_id và lý do, stage vẫn t
 `test_scene_objectify_queue.py`: 44 passed.
 
 T-013 được phép làm bước 7 (presets).
+
+---
+
+# Review T-009 — Round 3 (hồi quy phát hiện sau khi accept)
+
+Verdict: CHANGES REQUESTED
+
+`tests/test_scene/test_objectify_draft.py` có 2 test hỏng từ commit `3b109112` (auto mode): `extract_scene` gọi
+`load_job_config(job.job_id, job.config_checksum, …)` **trước** bước kiểm runtime nghiêm ngặt. Test 1 truyền `job=None`, test 2 dùng job
+giả thiếu `config_checksum`. Job thật luôn có field này nên production không hỏng, nhưng thứ tự là sai: lỗi "thiếu runtime" phải được
+báo trước khi đọc config. Architect cũng bỏ sót vì file test này không nằm trong Tests required của T-009.
+
+## Required changes
+1. `extract_scene`: chỉ đọc job config và tính `auto_geometry` **bên trong** nhánh sẽ chạy objectify, sau kiểm `strict_geometry_required`
+   và runtime. Không đổi hành vi auto.
+2. `test_extraction_publishes_draft_with_source_ownership`: thêm `config_checksum` cho job giả (hoặc monkeypatch `extraction.load_job_config`
+   trả `None`), để test mô tả đúng job thật.
+3. Chạy: `tests/test_scene/test_objectify_draft.py`, `tests/test_orchestration/test_scene_extraction.py`,
+   `tests/test_orchestration/test_scene_objectify_queue.py` + ruff. Thêm "Round 3" vào report, đặt `implemented`.

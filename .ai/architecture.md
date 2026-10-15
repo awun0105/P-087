@@ -146,7 +146,10 @@ Gaussian (dưới mức đó → 422, gợi ý dùng Delete).
 
 - `POST /api/v1/jobs/{job_id}/scene/geometry/build` body `{expected_scene_revision}` → 202 `ObjectifyState`
   (`mode = "geometry"`). Hủy: route `objectify/cancel` có sẵn kèm `operation_id`.
-- Phase tiến độ: `shell` → `quality` → `collider` → `objectgs` (nếu có) → `environment` → `publish`.
+- Phase tiến độ: `shell` → `quality` → `objectgs` (nếu có) → `collider` → `environment` → `publish`. ObjectGS chạy trước
+  collider vì surface được chọn theo vật quyết định đầu vào CoACD.
+- Dựng lại một phần (`object_ids`, sửa vùng sau Ready) **không** chạy ObjectGS kể cả khi `geometry_method=objectgs`; vật bị
+  ảnh hưởng dùng vỏ với `reason = "partial_rebuild_uses_shell"` (review T-008).
 
 ## 8. Quy tắc hình học (bắt buộc)
 
