@@ -124,6 +124,8 @@ def run_surface_colliders(
     workspace: Path,
     timeout: float,
     cancel_event: Event | None,
+    *,
+    surface_label: str = "ObjectGS surface",
 ) -> dict[str, dict]:
     """Run strict surface CoACD and reject missing, failed or empty collider output."""
     from src.services.orchestration.scene.objectify import CONVEX_RUNNER, ObjectifyError, _run
@@ -151,7 +153,7 @@ def run_surface_colliders(
         for item in inputs
     ):
         raise ObjectifyError(
-            "ObjectGS surface collider generation failed; Gaussian/OBB fallback is forbidden", retryable=False
+            f"{surface_label} collider generation failed; Gaussian/OBB fallback is forbidden", retryable=False
         )
     return colliders
 

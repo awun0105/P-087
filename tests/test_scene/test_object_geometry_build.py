@@ -180,3 +180,27 @@ def test_fine_shell_manifest_is_source_bound_and_qa_passed(draft_scene: SimpleNa
     assert manifest.source_world_from_object == selected.transform
     assert manifest.voxel_m == 0.02
     assert "solidity" in manifest.statistics
+
+
+def test_zero_part_shell_collider_fails_without_new_revision(
+    draft_scene: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from src.services.orchestration.scene import object_geometry_build as module
+    from src.services.orchestration.scene import objectify
+    from src.services.orchestration.scene.object_geometry_steps import SurfaceInput
+
+    def run(*args: object, **kwargs: object) -> dict:
+        return {"objects": [{"id": "candidate-001", "parts": 0}]}
+
+    monkeypatch.setattr(objectify, "_run", run)
+    item = SurfaceInput(
+        "candidate-001",
+        draft_scene.workspace / "shell.glb",
+        "sha256:" + "0" * 64,
+        draft_scene.workspace / "collider.glb",
+    )
+    with pytest.raises(module.ObjectGeometryBuildError, match="Gaussian shell collider generation failed"):
+        module._build_colliders(
+            [item], draft_scene.settings, {}, draft_scene.workspace, lambda ref, payload: ref, draft_scene.job_id
+        )
+    assert draft_scene.registry.scene.current(draft_scene.job_id).scene == draft_scene.scene

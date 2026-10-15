@@ -15,11 +15,11 @@ from src.models.contracts.coordinates import Transform
 from src.models.contracts.manifests import StageId
 from src.models.contracts.object_geometry import ObjectShellManifest
 from src.models.contracts.object_membership import ObjectMembershipArtifact
-from src.models.contracts.scene import SceneObject
+from src.models.contracts.scene import ColliderSpec, ColliderType, SceneObject
 from src.services.orchestration.jobs.database import RuntimeTransaction
 from src.services.orchestration.projects.registry import ProjectRegistry
-from src.services.orchestration.scene.object_geometry_steps import SurfaceInput
-from src.services.orchestration.scene.objectify import Publish, _ensure_not_cancelled, _reference
+from src.services.orchestration.scene.object_geometry_steps import SurfaceInput, run_surface_colliders
+from src.services.orchestration.scene.objectify import ObjectifyError, Publish, _ensure_not_cancelled, _reference
 from src.services.scene.decomposition.gaussian_split import positions
 from src.services.scene.editing.membership import StaleObjectMembershipRevisionError
 from src.services.scene.gaussian_shell import GaussianShellError, ShellParams, build_gaussian_shell
@@ -100,6 +100,67 @@ def _build_shell(
         manifest_ref,
         SurfaceInput(item.id, path, shell_ref.artifact_checksum, workspace / f"{item.id}-collider.glb"),
     )
+
+
+def _build_colliders(
+    inputs: list[SurfaceInput],
+    settings: Settings,
+    coacd_config: dict,
+    workspace: Path,
+    publish: Publish,
+    job_id: str,
+    cancel_event: Event | None = None,
+) -> dict[str, tuple[ProductArtifactRef, ColliderSpec]]:
+    if settings.product_scene_runtime_python is None:
+        raise ObjectGeometryBuildError("Chưa cấu hình runtime CoACD.")
+    try:
+        result = run_surface_colliders(
+            settings.product_scene_runtime_python,
+            inputs,
+            coacd_config,
+            workspace,
+            settings.product_scene_timeout_seconds,
+            cancel_event,
+            surface_label="Gaussian shell",
+        )
+    except ObjectifyError as error:
+        raise ObjectGeometryBuildError(str(error), retryable=error.retryable) from error
+    colliders = {}
+    for item in inputs:
+        _ensure_not_cancelled(cancel_event)
+        payload = item.output_glb.read_bytes()
+        geometry = publish(
+            _reference(job_id, "colliders/{digest}.glb", "ObjectCollider", StageId.COLLIDER, payload), payload
+        )
+        shell_ref = _reference(
+            job_id,
+            "objects/shells/{digest}.glb",
+            "ObjectShellMesh",
+            StageId.SCENE_DECOMPOSE,
+            item.surface_path.read_bytes(),
+        )
+        collider_id = f"{item.key}-collider"
+        collider = ColliderSpec(
+            collider_id=collider_id,
+            collider_type=ColliderType.CONVEX_DECOMPOSITION,
+            local_transform=Transform(
+                parent_frame=item.key,
+                local_frame=collider_id,
+                translation_xyz=(0, 0, 0),
+                rotation_quaternion_xyzw=(0, 0, 0, 1),
+            ),
+            geometry_ref=geometry,
+            parameters={"parts": int(result[item.key]["parts"])},
+            provenance={
+                "generator": "coacd",
+                "surface_origin": "gaussian_shell_v1",
+                "surface_mesh_ref": shell_ref.model_dump(mode="json"),
+                "coacd_config": coacd_config,
+                "strict_surface_input": True,
+            },
+        )
+        colliders[item.key] = (geometry, collider)
+    return colliders
 
 
 def build_object_geometry(
