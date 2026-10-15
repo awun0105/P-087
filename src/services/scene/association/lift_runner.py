@@ -20,12 +20,16 @@ Script độc lập (torch, gsplat, sam2, cv2), chạy trong `data/scene_runtime
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 import cv2
 import numpy as np
 import torch
 from gsplat import rasterization
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from diagnostics import recorder  # noqa: E402
 
 _PLY_TYPES = {"float": "f4", "float32": "f4", "double": "f8", "uchar": "u1", "int": "i4", "uint": "u4"}
 #: Số kênh gsplat hỗ trợ sẵn gần nhất: 31 vật + 1 kênh "còn lại".
@@ -112,7 +116,9 @@ def run(request: dict) -> dict:
     from sam2.build_sam import build_sam2
     from sam2.sam2_image_predictor import SAM2ImagePredictor
 
+    trace = recorder(request.get("evidence_dir"), "lift")
     config = request.get("config") or {}
+    trace.emit("config", thresholds=config)
     device = torch.device("cuda")
     rows = read_ply(Path(request["gaussians_ply"]))
     count = len(rows)
@@ -154,6 +160,15 @@ def run(request: dict) -> dict:
 
     for number, view in enumerate(views):
         viewmat_np, intrinsics_np, distortion, w, h = pinhole(view, width)
+        trace.emit(
+            "view_binding",
+            view=number,
+            input_view_index=number * max(1, int(config.get("view_step", 1))),
+            frame_id=view.get("frame_id", Path(view["image_path"]).name),
+            width=w,
+            height=h,
+            camera_model=view.get("model"),
+        )
         viewmat = torch.from_numpy(viewmat_np).float().to(device)
         intrinsics = torch.from_numpy(intrinsics_np).float().to(device)
         with torch.no_grad():
@@ -186,6 +201,10 @@ def run(request: dict) -> dict:
             chosen = visible_np & (labels_of_visible == index)
             if chosen.sum() >= min_visible:
                 candidates.append((index, pixels[chosen]))
+            else:
+                trace.emit(
+                    "visibility_rejection", view=number, seed=index, visible=int(chosen.sum()), threshold=min_visible
+                )
         if not candidates:
             continue
         image = undistorted_image(view, distortion, w, h)
@@ -206,6 +225,7 @@ def run(request: dict) -> dict:
                     # Hết VRAM: giảm nửa lô và làm lại đúng lô này; lô nhỏ hơn được giữ cho các view sau.
                     if sam_batch == 1:
                         raise
+                    trace.emit("oom_retry", view=number, previous_batch=sam_batch, next_batch=max(1, sam_batch // 2))
                     torch.cuda.empty_cache()
                     sam_batch = max(1, sam_batch // 2)
                     continue
@@ -214,6 +234,31 @@ def run(request: dict) -> dict:
                 for (index, points), mask, score in zip(chunk, masks, scores.reshape(-1), strict=True):
                     hit = mask[points[:, 1].astype(int), points[:, 0].astype(int)].mean()
                     area = mask.mean()
+                    trace.emit(
+                        "mask_decision",
+                        accepted=bool(
+                            score >= float(config.get("min_score", 0.6))
+                            and hit >= 0.5
+                            and area <= float(config.get("max_area", 0.35))
+                        ),
+                        view=number,
+                        seed=index,
+                        score=float(score),
+                        seed_hit=float(hit),
+                        area=float(area),
+                        reasons=[
+                            reason
+                            for condition, reason in [
+                                (not np.isfinite(score), "nonfinite_score"),
+                                (score < float(config.get("min_score", 0.6)), "low_score"),
+                                (hit < 0.5, "low_seed_hit"),
+                                (area > float(config.get("max_area", 0.35)), "excessive_area"),
+                            ]
+                            if condition
+                        ],
+                    )
+                    if trace.enabled:
+                        trace.mask(f"view:{number}/seed:{index}", np.packbits(mask).tobytes(), mask.shape)
                     if (
                         score >= float(config.get("min_score", 0.6))
                         and hit >= 0.5
@@ -279,6 +324,14 @@ def run(request: dict) -> dict:
             cv2.imwrite(str(debug_dir / f"masks_{number:04d}.jpg"), np.concatenate([image, overlay], axis=1)[..., ::-1])
 
     share = contribution / seen_with.clamp(min=1e-6)
+    if trace.enabled:
+        for index in range(objects):
+            trace.emit(
+                "contribution_filter",
+                seed=index,
+                threshold=float(config.get("min_contribution", 0.05)),
+                rejected_weights=int((contribution[:, index] < float(config.get("min_contribution", 0.05))).sum()),
+            )
     share[contribution < float(config.get("min_contribution", 0.05))] = 0.0
     # Ràng buộc không gian: đóng góp render tính cả Gaussian nằm xa phía sau trên cùng tia nhìn (nền, đốm
     # lơ lửng). Chỉ nhận Gaussian nằm trong hộp bao hạt giống của vật, nới mỗi phía max(biên tối thiểu, tỉ lệ cạnh).
@@ -290,10 +343,27 @@ def run(request: dict) -> dict:
         low, high = points.min(dim=0).values, points.max(dim=0).values
         margin = torch.clamp((high - low) * margin_ratio, min=margin_min)
         outside = ((positions < low - margin) | (positions > high + margin)).any(dim=1)
+        if trace.enabled:
+            trace.emit(
+                "spatial_filter",
+                seed=index,
+                reason="outside_seed_bounds",
+                removed_positive_weights=int((outside & (share[:, index] > 0)).sum()),
+                margin_min=margin_min,
+                margin_ratio=margin_ratio,
+            )
         share[outside, index] = 0.0
     best_share, best = share.max(dim=1)
     assigned = best_share > float(config.get("majority", 0.5))
     labels = torch.where(assigned, best, torch.full_like(best, -1)).numpy().astype(np.int32)
+    trace.emit(
+        "membership",
+        assigned=int((labels >= 0).sum()),
+        background=int((labels < 0).sum()),
+        per_object=np.bincount(labels[labels >= 0], minlength=objects).tolist(),
+        background_reason="no_remaining_contribution_or_majority_not_met",
+        majority=float(config.get("majority", 0.5)),
+    )
     np.savez(request["output_npz"], labels=labels)
     return {
         "method": "render_contribution_lift_v1",

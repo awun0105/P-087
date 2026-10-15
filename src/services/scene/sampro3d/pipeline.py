@@ -54,6 +54,7 @@ def run_sam2(
     *,
     floor_model: FloorModel,
     cancel_event: Event | None = None,
+    evidence_dir: Path | None = None,
 ) -> Proposal:
     """Gọi runtime SAM2 trên toàn bộ frame; lỗi/timeout → ValueError có ngữ cảnh."""
     workspace.mkdir(parents=True, exist_ok=True)
@@ -79,6 +80,7 @@ def run_sam2(
         "zbuffer_cell_px": 4,
         "depth_tolerance_m": 0.1,
         "batch": 64,
+        "evidence_dir": str(evidence_dir) if evidence_dir is not None else None,
         "views": [{**frame.view, "image_path": str(frame.image_path)} for frame in frames],
     }
     (workspace / "request.json").write_text(json.dumps(request))

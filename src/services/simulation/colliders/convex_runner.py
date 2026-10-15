@@ -14,6 +14,7 @@ import argparse
 import hashlib
 import json
 import os
+import sys
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
@@ -22,6 +23,9 @@ import numpy as np
 import trimesh
 from scipy import ndimage
 from skimage import measure
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scene"))
+from diagnostics import recorder  # noqa: E402
 
 _PLY_TYPES = {"float": "f4", "float32": "f4", "double": "f8", "uchar": "u1", "int": "i4", "uint": "u4"}
 
@@ -64,8 +68,12 @@ def _limit(hulls: list[trimesh.Trimesh], limit: int) -> list[trimesh.Trimesh]:
     return [*ordered[: limit - 1], rest]
 
 
-def convex_parts(mesh: trimesh.Trimesh, config: dict, *, strict: bool = False) -> list[trimesh.Trimesh]:
+def convex_parts(
+    mesh: trimesh.Trimesh, config: dict, *, strict: bool = False, diagnostics: dict | None = None
+) -> list[trimesh.Trimesh]:
     """CoACD; lỗi hoặc mesh suy biến → một convex hull (vẫn hợp lệ cho Isaac)."""
+    if diagnostics is not None:
+        diagnostics.update(method="coacd", fallback_reason=None)
     limit = int(config.get("max_convex_hull", 8))
     try:
         parts = coacd.run_coacd(
@@ -79,10 +87,14 @@ def convex_parts(mesh: trimesh.Trimesh, config: dict, *, strict: bool = False) -
         valid = [
             hull for hull in hulls if len(hull.faces) >= 4 and hull.volume > 0 and np.isfinite(hull.vertices).all()
         ]
+        if diagnostics is not None:
+            diagnostics.update(raw_parts=len(hulls), invalid_parts_discarded=len(hulls) - len(valid))
         if strict and len(valid) != len(hulls):
             raise ValueError("CoACD returned invalid convex parts")
         hulls = valid
-    except (RuntimeError, ValueError):
+    except (RuntimeError, ValueError) as error:
+        if diagnostics is not None:
+            diagnostics.update(fallback_reason="coacd_error", error_type=type(error).__name__)
         if strict:
             raise
         hulls = []
@@ -90,10 +102,18 @@ def convex_parts(mesh: trimesh.Trimesh, config: dict, *, strict: bool = False) -
         if not hulls or len(hulls) > limit:
             raise ValueError("CoACD returned no parts or exceeded the part budget; hull fallback is forbidden")
         return hulls
+    if diagnostics is not None:
+        diagnostics["raw_valid_parts"] = len(hulls)
+        if not hulls:
+            diagnostics.update(
+                method="convex_hull", fallback_reason=diagnostics.get("fallback_reason") or "no_valid_coacd_parts"
+            )
+        elif len(hulls) > limit:
+            diagnostics.update(method="coacd_with_hull_budget", fallback_reason="part_budget")
     return _limit(hulls, limit) or [mesh.convex_hull]
 
 
-def surface_parts(item: dict, config: dict) -> list[trimesh.Trimesh]:
+def surface_parts(item: dict, config: dict, diagnostics: dict | None = None) -> list[trimesh.Trimesh]:
     """Decompose verified object-local metre surface components without bridging their gaps."""
     if item.get("coordinate_frame") != "object_local" or item.get("distance_unit") != "m":
         raise ValueError("surface mesh input requires explicit object_local frame and metre units")
@@ -108,6 +128,13 @@ def surface_parts(item: dict, config: dict) -> list[trimesh.Trimesh]:
     mesh.merge_vertices()
     mesh.remove_unreferenced_vertices()
     components = mesh.split(only_watertight=False, repair=False)
+    if diagnostics is not None:
+        diagnostics["surface_validation"] = {
+            "components": len(components),
+            "open_components": sum(not component.is_watertight for component in components),
+            "vertices": len(mesh.vertices),
+            "triangles": len(mesh.faces),
+        }
     if not len(components) or any(not component.is_watertight for component in components):
         raise ValueError("surface mesh requires controlled repair before CoACD; open components are unsupported")
     hulls: list[trimesh.Trimesh] = []
@@ -116,7 +143,12 @@ def surface_parts(item: dict, config: dict) -> list[trimesh.Trimesh]:
             component.invert()
         if component.volume <= 0:
             raise ValueError("surface component has no positive volume")
-        hulls.extend(convex_parts(component, config, strict=True))
+        component_diagnostics = {} if diagnostics is not None else None
+        try:
+            hulls.extend(convex_parts(component, config, strict=True, diagnostics=component_diagnostics))
+        finally:
+            if diagnostics is not None:
+                diagnostics.setdefault("component_decompositions", []).append(component_diagnostics)
     if len(hulls) > int(config.get("max_convex_hull", 8)):
         raise ValueError("surface parts exceed budget; merging disconnected components is forbidden")
     return hulls
@@ -125,7 +157,7 @@ def surface_parts(item: dict, config: dict) -> list[trimesh.Trimesh]:
 def build_one(item: dict, config: dict) -> dict:
     """Collider của một vật; lỗi của một vật không làm hỏng cả lượt."""
     coacd.set_log_level("error")
-    entry: dict = {"id": item["id"], "parts": 0, "volume_m3": 0.0}
+    entry: dict = {"id": item["id"], "parts": 0, "volume_m3": 0.0, "method": "coacd", "fallback_reason": None}
     if "surface_mesh" in item:
         if "gaussians_ply" in item:
             return {**entry, "error": "ambiguous surface and Gaussian collider inputs"}
@@ -133,14 +165,20 @@ def build_one(item: dict, config: dict) -> dict:
             return {**entry, "error": "surface input and collider output paths must differ"}
         Path(item["output_glb"]).unlink(missing_ok=True)
         try:
-            hulls = surface_parts(item, config)
+            hulls = surface_parts(item, config, entry)
         except (ValueError, RuntimeError, OSError) as error:
-            return {**entry, "error": str(error), "source": "surface_mesh"}
+            return {
+                **entry,
+                "error": str(error),
+                "source": "surface_mesh",
+                "method": "failed",
+                "fallback_allowed": False,
+            }
     else:
         points = object_points(Path(item["gaussians_ply"]), float(config.get("min_opacity", 0.3)))
         if len(points) < int(config.get("min_points", 30)):
-            return {**entry, "error": "too_few_points"}
-        hulls = convex_parts(occupancy_mesh(points, float(config.get("voxel_m", 0.04))), config)
+            return {**entry, "error": "too_few_points", "method": "failed"}
+        hulls = convex_parts(occupancy_mesh(points, float(config.get("voxel_m", 0.04))), config, diagnostics=entry)
     scene = trimesh.Scene()
     for number, hull in enumerate(hulls):
         scene.add_geometry(hull, geom_name=f"part_{number:03d}")
@@ -155,7 +193,20 @@ def build_one(item: dict, config: dict) -> dict:
 
 def build(request: dict) -> dict:
     """Dựng collider cho mọi vật trong request (song song theo vật); trả tóm tắt từng vật."""
+    trace = recorder(request.get("evidence_dir"), "collider")
     config = request.get("config") or {}
+    trace.emit(
+        "config",
+        thresholds=config,
+        inputs=[
+            {
+                "seed": item["id"],
+                "source": "surface_mesh" if "surface_mesh" in item else "gaussians",
+                "surface_checksum": item.get("surface_checksum"),
+            }
+            for item in request["objects"]
+        ],
+    )
     # Mặc định dùng gần hết số nhân được cấp (theo affinity/cgroup của tiến trình), chừa 1 nhân cho bước GPU
     # chạy song song; không cần nhiều tiến trình hơn số vật.
     cores = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 2)
@@ -166,6 +217,8 @@ def build(request: dict) -> dict:
     else:
         with ProcessPoolExecutor(max_workers=workers) as pool:
             results = list(pool.map(build_one, items, [config] * len(items)))
+    for item in results:
+        trace.emit("result", **item)
     return {"voxel_m": float(config.get("voxel_m", 0.04)), "objects": results}
 
 

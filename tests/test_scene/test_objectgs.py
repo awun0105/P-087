@@ -137,7 +137,10 @@ def test_runner_contract_calls_train_then_each_numeric_label_never_minus_one(tmp
         return 0
 
     monkeypatch.setattr(objectgs, "run_cancellable_process", process)
-    receipt = objectgs.run_objectgs(runtime, dataset, tmp_path / "work")
+    receipt = objectgs.run_objectgs(runtime, dataset, tmp_path / "work", evidence_dir=tmp_path / "evidence")
+    events = [json.loads(line) for line in (tmp_path / "evidence/objectgs.jsonl").read_text().splitlines()]
+    assert any(event["kind"] == "runtime_metadata" for event in events)
+    assert {event["object_id"] for event in events if event["kind"] == "mesh_validation"} == {"chair", "table"}
     assert [call[0][call[0].index("--query_label_id") + 1] for call in calls if "--query_label_id" in call[0]] == [
         "1",
         "2",

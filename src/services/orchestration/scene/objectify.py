@@ -45,12 +45,14 @@ from src.models.contracts.scene import (
 from src.services.orchestration.jobs.database import RuntimeTransaction
 from src.services.orchestration.processing.config import load_job_config
 from src.services.orchestration.projects.registry import ProjectRegistry
+from src.services.orchestration.scene.diagnostics import capture_attempt
 from src.services.orchestration.scene.errors import SceneRevisionConflictError
 from src.services.orchestration.scene.floor_evidence import publish_floor_fit_evidence, scene_floor_fit_summary
 from src.services.process_control import ProcessCancelledError, ProcessTimeoutError, run_cancellable_process
 from src.services.reconstruction import camera_views, metric_visual_master, package_splat
 from src.services.scene.collision_ownership import bind_source_collision_ownership
 from src.services.scene.decomposition import gaussian_split
+from src.services.scene.diagnostics import EvidenceRecorder
 from src.services.scene.editing.membership import (
     encode_gaussian_membership_labels,
     membership_labels_for_parts,
@@ -153,6 +155,10 @@ def _run(
     """Chạy một provider trong runtime; lỗi/timeout → ObjectifyError có ngữ cảnh, log nằm trong workspace."""
     _ensure_not_cancelled(cancel_event)
     workspace.mkdir(parents=True, exist_ok=True)
+    trace = EvidenceRecorder(workspace / "evidence", "provider-" + name)
+    trace.emit("started", provider=name)
+    if name in {"lift", "convex"}:
+        request = {**request, "evidence_dir": str(workspace / "evidence")}
     request_path, result_path = workspace / f"{name}.request.json", workspace / f"{name}.result.json"
     request_path.write_text(json.dumps(request), encoding="utf-8")
     result_path.unlink(missing_ok=True)
@@ -166,10 +172,17 @@ def _run(
                 cancel_event=cancel_event,
             )
         except ProcessTimeoutError as error:
+            trace.emit("failed", provider=name, reason="timeout")
             raise ObjectifyError(f"{name} quá thời gian cho phép") from error
     if returncode != 0 or not result_path.is_file():
+        trace.emit("failed", provider=name, returncode=returncode, reason="provider_exit_or_missing_result")
         raise ObjectifyError(f"{name} lỗi (exit {returncode}); xem {name}.log")
-    return json.loads(result_path.read_text(encoding="utf-8"))
+    result = json.loads(result_path.read_text(encoding="utf-8"))
+    trace.emit("completed", provider=name)
+    if name == "convex":
+        for item in result.get("objects", []):
+            trace.emit("collider", **item)
+    return result
 
 
 def _reference(job_id: str, tail: str, artifact_type: str, stage: StageId, payload: bytes) -> ProductArtifactRef:
@@ -198,7 +211,18 @@ def _seeds(
 ) -> list[np.ndarray]:
     """Hạt giống từng vật (chỉ số vào `rows`) từ SAMPro3D; bỏ khối không phải vật (kệ dài, mảnh vụn)."""
     low, high = centers.min(axis=0)[:2] - _CROP_MARGIN_M, centers.max(axis=0)[:2] + _CROP_MARGIN_M
+    trace = EvidenceRecorder(workspace / "evidence", "seeds")
     work = gaussian_split.working_set(rows, low, high, _CROP_Z)
+    trace.emit(
+        "working_set",
+        total_gaussians=len(rows),
+        retained=len(work),
+        low_xy=low.tolist(),
+        high_xy=high.tolist(),
+        z_range=list(_CROP_Z),
+        min_opacity=0.3,
+        max_objects=max_objects,
+    )
     points = gaussian_split.positions(rows)[work]
     try:
         instances = segment(
@@ -208,11 +232,13 @@ def _seeds(
                 runtime,
                 workspace / "sampro3d",
                 floor_model=floor_model,
+                evidence_dir=workspace / "evidence",
                 cancel_event=cancel_event,
             ),
             points,
             floor_model,
             Sampro3dConfig(),
+            evidence=EvidenceRecorder(workspace / "evidence", "segmentation"),
         )
     except Sampro3dInputError as error:
         raise ObjectifyError(f"SAMPro3D lỗi: {error}", retryable=False) from error
@@ -228,6 +254,18 @@ def _seeds(
             and box.dimensions[2] <= limits.max_object_height_m
         ):
             kept.append(work[members])
+            reason = None if len(kept) <= max_objects else "object_limit"
+        else:
+            reason = "footprint_or_height_limits"
+        trace.emit(
+            "seed_decision",
+            instance_key=hashlib.sha256(members.astype("<i8").tobytes()).hexdigest(),
+            points=len(members),
+            dimensions=list(box.dimensions),
+            seed=len(kept) - 1 if reason is None else None,
+            accepted=reason is None,
+            reason=reason,
+        )
     return kept[:max_objects]
 
 
@@ -279,6 +317,12 @@ def objectify(
 
     source_visual_ref = metric_visual_master(bundle, resolve)
     master = resolve(source_visual_ref)
+    if isinstance(source_visual_ref, ProductArtifactRef):
+        EvidenceRecorder(workspace / "evidence", "inputs").emit(
+            "source_binding",
+            source_visual_ref=source_visual_ref.model_dump(mode="json"),
+            extraction_revision=extraction_revision,
+        )
     rows = gaussian_split.read_gaussian_ply(master.read_bytes())
     source_points = gaussian_split.positions(rows)
     floor_model = fit_canonical_floor_model(source_points, point_cloud_checksum(source_points))
@@ -339,7 +383,17 @@ def objectify(
         cancel_event=cancel_event,
     )
     labels = np.load(workspace / "labels.npz")["labels"]
+    trace = EvidenceRecorder(workspace / "evidence", "membership")
+    before_floor_labels = labels
     labels = gaussian_split.assign_floor_gaussians_to_background(rows, labels, floor_model)
+    for label in np.unique(before_floor_labels[before_floor_labels >= 0]):
+        trace.emit(
+            "floor_filter",
+            seed=int(label),
+            before=int((before_floor_labels == label).sum()),
+            returned_to_background=int(((before_floor_labels == label) & (labels < 0)).sum()),
+            reason="floor_protection",
+        )
     background, parts = gaussian_split.split(rows, labels)
     if not parts:
         raise ObjectifyError("gán nhãn không cho ra vật nào đủ lớn")
@@ -353,6 +407,23 @@ def objectify(
 
     job_id = job.job_id
     label_to_object_id = {str(part.index): f"candidate-{number:03d}" for number, part in enumerate(parts, start=1)}
+    for label in np.unique(labels[labels >= 0]):
+        object_id = label_to_object_id.get(str(label))
+        trace.emit(
+            "object_binding",
+            seed=int(label),
+            object_id=object_id,
+            gaussian_count=int((labels == label).sum()),
+            retained=object_id is not None,
+            returned_to_background=0 if object_id else int((labels == label).sum()),
+            reason=None if object_id else "too_few_object_gaussians",
+        )
+    trace.emit(
+        "conservation",
+        source=len(rows),
+        background=len(background),
+        object_gaussians=sum(len(part.rows) for part in parts),
+    )
     membership_labels = membership_labels_for_parts(labels, [part.index for part in parts])
     membership_payload = encode_gaussian_membership_labels(
         membership_labels,
@@ -420,6 +491,7 @@ def objectify(
             )
             objectgs_receipt = run_prepared_objectgs(
                 prepared,
+                evidence_dir=workspace / "evidence",
                 cancel_event=cancel_event,
                 progress=lambda stage: logger.info("ObjectGS stage=%s job=%s", stage, job_id),
             )
@@ -608,6 +680,7 @@ def objectify(
             )
 
     objects: list[SceneObject] = []
+    binding_trace = EvidenceRecorder(workspace / "evidence", "object_binding")
     for number, part in enumerate(parts, start=1):
         _ensure_not_cancelled(cancel_event)
         object_id = f"candidate-{number:03d}"
@@ -627,6 +700,15 @@ def objectify(
         geometry = publish(
             _reference(job_id, "colliders/{digest}.glb", "ObjectCollider", StageId.COLLIDER, collider_payload),
             collider_payload,
+        )
+        binding_trace.emit(
+            "collider_binding",
+            object_id=object_id,
+            seed=part.index,
+            method=str(collider_info.get("method", "coacd")) if collider_type != ColliderType.OBB else "aabb",
+            parts=int(collider_info.get("parts", 1)) if collider_type != ColliderType.OBB else 1,
+            fallback_reason=collider_info.get("fallback_reason") or collider_info.get("error"),
+            collider_checksum=geometry.artifact_checksum,
         )
         objects.append(
             SceneObject(
@@ -658,11 +740,15 @@ def objectify(
                     dimensions_xyz_m=part.dimensions if collider_type == ColliderType.OBB else None,
                     geometry_ref=geometry,
                     parameters={
-                        "parts": int(collider_info.get("parts", 1)),
+                        "parts": int(collider_info.get("parts", 1)) if collider_type != ColliderType.OBB else 1,
                         "volume_m3": float(collider_info.get("volume_m3", 0.0)),
                     },
                     provenance={
-                        "generator": "coacd" if collider_type == ColliderType.CONVEX_DECOMPOSITION else "aabb",
+                        "generator": str(collider_info.get("method", "coacd"))
+                        if collider_type == ColliderType.CONVEX_DECOMPOSITION
+                        else "aabb",
+                        "fallback_reason": collider_info.get("fallback_reason")
+                        or (collider_info.get("error") if collider_type == ColliderType.OBB else None),
                         **(
                             {
                                 "surface_mesh_ref": surface_refs[object_id].model_dump(mode="json"),
@@ -831,15 +917,23 @@ def objectify_with_retry(
             arguments = {"cancel_event": cancel_event} if cancel_event is not None else {}
             if scene_config is not None:
                 arguments["scene_config"] = scene_config
-            return objectify(
-                registry,
-                job,
-                bundle,
-                settings,
-                workspace / f"attempt-{number}",
-                publish,
-                extraction_revision=extraction_revision,
-                **arguments,
+            attempt_workspace = workspace / f"attempt-{number}"
+            return capture_attempt(
+                lambda: objectify(
+                    registry,
+                    job,
+                    bundle,
+                    settings,
+                    attempt_workspace,
+                    publish,
+                    extraction_revision=extraction_revision,
+                    **arguments,
+                ),
+                job=job,
+                bundle=bundle,
+                workspace=attempt_workspace,
+                publish=publish,
+                input_revision=extraction_revision,
             )
         except ProcessCancelledError:
             raise

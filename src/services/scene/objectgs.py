@@ -24,6 +24,7 @@ from src.models.contracts.coordinates import Transform
 from src.models.contracts.object_membership import ObjectMembershipArtifact
 from src.services.process_control import ProcessCancelledError, run_cancellable_process
 from src.services.scene.decomposition.gaussian_split import positions, read_gaussian_ply
+from src.services.scene.diagnostics import EvidenceRecorder
 from src.services.scene.editing.membership import decode_gaussian_membership_labels
 from src.services.simulation.colliders.carve import _rotation
 
@@ -179,6 +180,7 @@ def run_objectgs(
     *,
     cancel_event: Event | None = None,
     progress: Callable[[str], None] | None = None,
+    evidence_dir: Path | None = None,
 ) -> dict[str, object]:
     """Train a fresh upstream model and export each explicit object ID, with no legacy fallback.
 
@@ -208,6 +210,16 @@ def run_objectgs(
         raise ValueError("invalid explicit object label mapping")
     workspace.mkdir(parents=True, exist_ok=False)
     workspace = workspace.resolve()
+    trace = EvidenceRecorder(evidence_dir, "objectgs")
+    trace.emit(
+        "configured",
+        label_to_object_id={str(label): object_id for object_id, label in mapping.items()},
+        iterations=runtime.iterations,
+        upstream_commit=OBJECTGS_COMMIT,
+        gsplat_commit=GSPLAT_COMMIT,
+        voxel_size_m=runtime.voxel_size_m,
+        depth_trunc_m=runtime.depth_trunc_m,
+    )
     # Upstream appends model_path.parent.name to source_path during export.
     scene_name = dataset.name
     config = yaml.safe_load((runtime.repository / "config/objectgs/2d/lerf_mask/config.yaml").read_text())
@@ -244,6 +256,7 @@ def run_objectgs(
         environment["CPLUS_INCLUDE_PATH"] += os.pathsep + str(runtime.glm_repository.resolve())
 
     def execute(command: list[str], stage: str) -> None:
+        trace.emit("stage_started", phase=stage)
         if progress:
             progress(stage)
         with _extension_cache_lock(runtime.extension_cache_dir), (workspace / f"{stage}.log").open("w") as log:
@@ -256,7 +269,9 @@ def run_objectgs(
                 environment=environment,
             )
         if status:
+            trace.emit("stage_failed", phase=stage, returncode=status)
             raise RuntimeError(f"ObjectGS {stage} failed (exit {status}); see {stage}.log")
+        trace.emit("stage_completed", phase=stage)
 
     metadata_path = workspace / "runtime.json"
     probe = """import json, os, sys, torch, gsplat, open3d
@@ -270,6 +285,7 @@ with open(sys.argv[1], 'w') as f:
         [str(runtime.python), "-c", probe, str(metadata_path), str(runtime.gsplat_repository.resolve())],
         "runtime-check",
     )
+    trace.emit("runtime_metadata", metadata=json.loads(metadata_path.read_text()))
     execute(
         [
             str(runtime.python),
@@ -319,6 +335,15 @@ with open(sys.argv[1], 'w') as f:
         # Raw export retains all connected components; upstream *_post.ply can drop small parts.
         path = model / f"train/id_{label}/mesh/fuse.ply"
         mesh = trimesh.load(path, force="mesh", process=False)
+        trace.emit(
+            "mesh_validation",
+            object_id=object_id,
+            label=label,
+            vertices=len(mesh.vertices),
+            triangles=len(mesh.faces),
+            finite=bool(np.isfinite(mesh.vertices).all()),
+            watertight=bool(mesh.is_watertight),
+        )
         if not len(mesh.faces) or not np.isfinite(mesh.vertices).all():
             raise RuntimeError(f"ObjectGS exported an empty/nonfinite surface for {object_id}")
         surfaces[object_id] = {
@@ -366,6 +391,7 @@ def run_prepared_objectgs(
     *,
     cancel_event: Event | None = None,
     progress: Callable[[str], None] | None = None,
+    evidence_dir: Path | None = None,
 ) -> dict[str, object]:
     if Path(request.job_id).name != request.job_id or request.membership.source_visual_ref.job_id != request.job_id:
         raise ValueError("ObjectGS job ID and immutable membership source must agree")
@@ -390,6 +416,7 @@ def run_prepared_objectgs(
         request.workspace / "runtime",
         progress=progress,
         cancel_event=cancel_event,
+        **({"evidence_dir": evidence_dir} if evidence_dir is not None else {}),
     )
     model = Path(receipt["model"])
     checkpoint = request.workspace / "objectgs-checkpoint.tar.gz"

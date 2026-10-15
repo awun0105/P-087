@@ -65,6 +65,7 @@ def test_real_coacd_preserves_two_legs_gap_frame_and_metric_dimensions(tmp_path)
     result = run(tmp_path, item)
     assert "error" not in result
     assert result["parts"] == 2
+    assert result["method"] == "coacd" and result["fallback_reason"] is None
     scene = trimesh.load(item["output_glb"], force="scene", process=False)
     assert len(scene.geometry) == 2
     mesh = scene.to_geometry()
@@ -74,6 +75,25 @@ def test_real_coacd_preserves_two_legs_gap_frame_and_metric_dimensions(tmp_path)
         assert hull.bounds[1, 0] < 0 or hull.bounds[0, 0] > 0
         assert hull.is_watertight
     assert result["volume_m3"] == pytest.approx(0.6, abs=1e-4)
+
+
+def test_legacy_hull_fallback_reports_actual_method_without_changing_geometry(tmp_path):
+    script = """
+import importlib.util, numpy as np, trimesh
+spec=importlib.util.spec_from_file_location('runner','src/services/simulation/colliders/convex_runner.py')
+r=importlib.util.module_from_spec(spec);spec.loader.exec_module(r)
+def broken(*a,**kw): raise RuntimeError('injected failure')
+r.coacd.run_coacd=broken
+mesh=trimesh.creation.box(extents=[1,2,3])
+baseline=r.convex_parts(mesh,{})
+trace={}; observed=r.convex_parts(mesh,{},diagnostics=trace)
+assert trace['method']=='convex_hull' and trace['fallback_reason']=='coacd_error'
+assert len(baseline)==len(observed)==1
+assert np.array_equal(baseline[0].vertices,observed[0].vertices)
+assert np.array_equal(baseline[0].faces,observed[0].faces)
+"""
+    result = subprocess.run([str(RUNTIME), "-c", script], cwd=ROOT, capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr
 
 
 @pytest.mark.parametrize("failure", ["coacd", "checksum", "frame", "budget", "open"])

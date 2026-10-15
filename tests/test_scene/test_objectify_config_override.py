@@ -139,7 +139,7 @@ def test_seed_count_override_limits_instances(tmp_path: Path, monkeypatch: pytes
     monkeypatch.setattr(module.gaussian_split, "working_set", lambda *args: np.arange(12))
     monkeypatch.setattr(module.gaussian_split, "positions", lambda rows: points)
     monkeypatch.setattr(module, "run_sam2", lambda *args, **kwargs: None)
-    monkeypatch.setattr(module, "segment", lambda *args: instances)
+    monkeypatch.setattr(module, "segment", lambda *args, **kwargs: instances)
     monkeypatch.setattr(module, "box_from_points", lambda *args: SimpleNamespace(dimensions=(0.5, 0.5, 0.5)))
     args = (points, [], points, None, tmp_path, None)
     assert len(module._seeds(*args)) == 4

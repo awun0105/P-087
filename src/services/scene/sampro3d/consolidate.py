@@ -6,6 +6,7 @@ prompt cùng vật). Floor mask dùng FloorModel bị ràng buộc bởi prior R
 được thay bằng đồ thị bán kính `scipy.spatial.cKDTree`; không cần CUDA ext.
 """
 
+import hashlib
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -113,6 +114,8 @@ def _surviving_records(
         good_set, kept_set = set(good), set(kept)
         for i in range(len(proposal.iou)):
             reasons = []
+            if not np.isfinite(proposal.iou[i]):
+                reasons.append("nonfinite_iou")
             if proposal.iou[i] < config.pred_iou_thres:
                 reasons.append("predicted_iou_below_threshold")
             if len(proposal.members[i]) < config.min_mask_points:
@@ -232,6 +235,7 @@ def segment(
         if evidence is not None:
             evidence.emit(
                 "instance_decision",
+                instance_key=hashlib.sha256(cleaned.astype("<i8").tobytes()).hexdigest(),
                 prompts=[int(valid[i]) for i in range(len(valid)) if find(i) == group],
                 before_floor=before_floor,
                 floor_removed=before_floor - len(members),

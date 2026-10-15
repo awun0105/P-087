@@ -13,9 +13,13 @@ Script độc lập: chỉ dùng numpy/torch/PIL/sam2, không import code app (r
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 import numpy as np
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from diagnostics import recorder  # noqa: E402
 
 
 def _rotation(quaternion: list[float]) -> np.ndarray:
@@ -85,6 +89,8 @@ def run(request: dict, output: Path) -> None:
     from sam2.build_sam import build_sam2
     from sam2.sam2_image_predictor import SAM2ImagePredictor
 
+    trace = recorder(request.get("evidence_dir"), "sam2")
+    trace.emit("started", views=len(request["views"]), checkpoint_name=Path(request["checkpoint"]).name)
     data = np.load(request["points_npz"])
     points, prompts = data["points"].astype(float), data["prompts"].astype(np.int64)
     model = build_sam2(request["config"], request["checkpoint"], device="cuda")
@@ -94,6 +100,14 @@ def run(request: dict, output: Path) -> None:
     vis_offsets, vis_members = [0], []
     batch = int(request.get("batch", 64))
     for view_index, view in enumerate(request["views"]):
+        trace.emit(
+            "view_binding",
+            view=view_index,
+            frame_id=view.get("frame_id", Path(view["image_path"]).name),
+            width=view.get("width"),
+            height=view.get("height"),
+            camera_model=view.get("model"),
+        )
         kept, pixels = visible_points(
             points, view, int(request["zbuffer_cell_px"]), float(request["depth_tolerance_m"])
         )
@@ -114,8 +128,17 @@ def run(request: dict, output: Path) -> None:
                 )
                 masks = masks.reshape(len(chunk), masks.shape[-2], masks.shape[-1]) > 0
                 hits = masks[:, pixels[:, 1], pixels[:, 0]]  # (chunk, visible points)
-                for (prompt_id, _), hit, score in zip(chunk, hits, scores.reshape(-1), strict=True):
+                for (prompt_id, _), hit, score, mask in zip(chunk, hits, scores.reshape(-1), masks, strict=True):
                     selected = kept[hit]
+                    trace.emit(
+                        "mask_generated",
+                        view=view_index,
+                        prompt=int(prompt_id),
+                        predicted_iou=float(score),
+                        points=len(selected),
+                    )
+                    if trace.enabled:
+                        trace.mask(f"view:{view_index}/prompt:{prompt_id}", np.packbits(mask).tobytes(), mask.shape)
                     rec_view.append(view_index)
                     rec_prompt.append(prompt_id)
                     rec_iou.append(float(score))
@@ -123,6 +146,7 @@ def run(request: dict, output: Path) -> None:
                     offsets.append(offsets[-1] + len(selected))
         predictor.reset_predictor()
         print(json.dumps({"view": view_index, "visible": int(len(kept)), "prompts": len(prompt_rows)}), flush=True)
+    trace.emit("completed", records=len(rec_view))
     np.savez_compressed(
         output,
         view=np.asarray(rec_view, dtype=np.int32),
