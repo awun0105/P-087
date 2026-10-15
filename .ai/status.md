@@ -20,6 +20,6 @@ T-021 | Tiến trình, chuông, đầu trang hiểu Draft | planned | engineer
 T-018 | Tương thích scene cũ + Walk/USD với collider vỏ | accepted | -
 T-019 | Full regression + handoff | changes-requested | engineer (round 2 sau T-023, T-024, T-021, T-025)
 T-022 | Giữ số vá nền khi Tạo mesh (GR-01) | accepted | —
-T-023 | Box ban đầu khớp nhóm Gaussian (GR-02) | in-progress | engineer
+T-023 | Box ban đầu khớp nhóm Gaussian (GR-02) | implemented | summarizer
 T-024 | Chỉ dẫn lỗi banner/donor/409 (GR-03/04/06) | planned | engineer
 T-025 | Hiệu năng preview (GR-05) | planned | engineer
