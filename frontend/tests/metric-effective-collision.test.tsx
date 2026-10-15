@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest";
 import { MetricSceneView } from "@/features/studio/MetricSceneView";
 import type { PhysicsObjectInput } from "@/features/viewer/usePhysicsPlay";
+import type { CollisionSurfacePlane } from "@/lib/api/studio";
 
 const renderViewer = vi.hoisted(() => vi.fn());
 const gizmo = vi.hoisted(() => vi.fn());
@@ -167,6 +168,35 @@ describe("MetricSceneView khoá Draft (T-013)", () => {
       const button = screen.getByRole("button", { name });
       expect(button).toBeDisabled();
       expect(button).toHaveAttribute("title", "Cần tạo mesh trước");
+    }
+  });
+
+  it("khoá Nhân bản và các nút mặt va chạm trong Draft; scene sẵn sàng vẫn bấm được", () => {
+    const surfacePlanes = [{ id: "surface-1", kind: "floor", points: [[0, 0, 0], [1, 0, 0], [0, 1, 0]], fill_regions: false }] as CollisionSurfacePlane[];
+    const props = {
+      jobId: "j",
+      visual,
+      cameras,
+      sceneRevision: "rev-1",
+      selectedObject: { id: "A", name: "Pallet", viewportHidden: false, canTransform: true },
+      surfacePlanes,
+      onMarkSurface: vi.fn(),
+      onRemoveSurface: vi.fn(),
+      onFillSurface: vi.fn(),
+      onDuplicate: vi.fn(),
+    };
+    const controlNames = ["Nhân bản", "Đánh dấu sàn", "Đánh dấu tường", "Xóa mặt phẳng sàn 1", "Lấp theo mặt phẳng sàn 1"];
+
+    const { unmount } = render(<MetricSceneView {...props} lockedReason="Cần tạo mesh trước" />);
+    for (const name of controlNames) {
+      expect(screen.getByRole("button", { name })).toBeDisabled();
+    }
+    expect(screen.getByRole("button", { name: "Nhân bản" })).toHaveAttribute("title", "Cần tạo mesh trước");
+    unmount();
+
+    render(<MetricSceneView {...props} />);
+    for (const name of controlNames) {
+      expect(screen.getByRole("button", { name })).toBeEnabled();
     }
   });
 });

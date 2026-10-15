@@ -137,6 +137,10 @@ export function MetricSceneView({
   const fail = useCallback(() => setCapability("failed"), [setCapability]);
   const [overlay, setOverlay] = useState<SceneOverlay | null>(null);
   const [surfaceTool, setSurfaceTool] = useState<"floor" | "wall" | null>(null);
+  // Draft: không đánh dấu mặt va chạm; bỏ công cụ đang chọn khi scene bị khoá.
+  useEffect(() => {
+    if (lockedReason) setSurfaceTool(null);
+  }, [lockedReason]);
   const [surfacePickError, setSurfacePickError] = useState<string | null>(null);
   const [layers, setLayers] = useState({ ...defaultLayers, lidar: false, triangles: false });
   const [, setLidarState] = useState<{ points?: number; error?: string } | null>(null);
@@ -232,7 +236,7 @@ export function MetricSceneView({
     const point = canvasPoint(event);
     if (!start || !overlay || !point) return;
     if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > 5 || event.timeStamp - start.time > 400) return;
-    if (surfaceTool && onMarkSurface) {
+    if (surfaceTool && onMarkSurface && !lockedReason) {
       const triangle = overlay.pickCollisionTriangle(point[0], point[1], collisionUrl ?? undefined);
       if (!triangle) { setSurfacePickError("Chưa chọn trúng tam giác môi trường. Bấm vào mặt sàn hoặc tường."); return; }
       onMarkSurface(surfaceTool, triangle);
@@ -610,8 +614,9 @@ export function MetricSceneView({
             <button
               type="button"
               onClick={onDuplicate}
-              className="flex items-center gap-1 rounded px-2 py-1 text-on-dark/80 hover:bg-on-dark/10 hover:text-on-dark transition-colors"
-              title="Nhân bản vật thể"
+              disabled={Boolean(lockedReason)}
+              className="flex items-center gap-1 rounded px-2 py-1 text-on-dark/80 enabled:hover:bg-on-dark/10 enabled:hover:text-on-dark transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+              title={lockedReason ?? "Nhân bản vật thể"}
             >
               <Copy className="size-3.5" aria-hidden />
               <span>Nhân bản</span>
@@ -677,7 +682,7 @@ export function MetricSceneView({
           {toggle("boxes", "Khung vật thể", !boxes.length)}
           {lidarUrl && toggle("lidar", "Đám mây LiDAR")}
           {onMarkSurface && (["floor","wall"] as const).map(kind => (
-            <button key={kind} type="button" aria-pressed={surfaceTool === kind} onClick={() => {
+            <button key={kind} type="button" aria-pressed={surfaceTool === kind} disabled={Boolean(lockedReason)} title={lockedReason ?? undefined} className="disabled:cursor-not-allowed disabled:opacity-40" onClick={() => {
               setSurfaceTool(surfaceTool === kind ? null : kind);
               setSurfacePickError(null);
               onTool?.("none");
@@ -686,10 +691,10 @@ export function MetricSceneView({
             }}>{kind === "floor" ? "Đánh dấu sàn" : "Đánh dấu tường"}</button>
           ))}
           {surfacePlanes.map((plane,index) => <span key={plane.id} className="flex items-center gap-2">
-            <button type="button" onClick={() => onRemoveSurface?.(plane.id)} aria-label={`Xóa mặt phẳng ${plane.kind === "floor" ? "sàn" : "tường"} ${index+1}`}>
+            <button type="button" onClick={() => onRemoveSurface?.(plane.id)} disabled={Boolean(lockedReason)} title={lockedReason ?? undefined} className="disabled:cursor-not-allowed disabled:opacity-40" aria-label={`Xóa mặt phẳng ${plane.kind === "floor" ? "sàn" : "tường"} ${index+1}`}>
               {plane.kind === "floor" ? "Sàn" : "Tường"} {index+1} ×
             </button>
-            {!plane.fill_regions && <button type="button" onClick={() => onFillSurface?.(plane.id)} aria-label={`Lấp theo mặt phẳng ${plane.kind === "floor" ? "sàn" : "tường"} ${index+1}`}>Lấp theo mặt phẳng</button>}
+            {!plane.fill_regions && <button type="button" onClick={() => onFillSurface?.(plane.id)} disabled={Boolean(lockedReason)} title={lockedReason ?? undefined} className="disabled:cursor-not-allowed disabled:opacity-40" aria-label={`Lấp theo mặt phẳng ${plane.kind === "floor" ? "sàn" : "tường"} ${index+1}`}>Lấp theo mặt phẳng</button>}
             {plane.fill_regions && <span>Đã lấp theo mặt phẳng</span>}
           </span>)}
         </div>
