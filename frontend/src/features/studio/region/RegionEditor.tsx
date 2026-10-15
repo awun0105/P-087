@@ -20,7 +20,7 @@ import {
 import { useRegionPreview } from "@/features/studio/region/useRegionPreview";
 import type { ViewPreset } from "@/features/viewer/region-overlay";
 import { ApiError } from "@/lib/api/client";
-import { applyObjectRegion } from "@/lib/api/studio";
+import { applyObjectRegion, type RegionPreview } from "@/lib/api/studio";
 import type { SceneObject } from "@/lib/contracts/api";
 
 const VIEWS: { preset: ViewPreset; label: string }[] = [
@@ -37,6 +37,43 @@ type ApplyResult = Awaited<ReturnType<typeof applyObjectRegion>>;
 /** Phím Delete đang gõ trong ô nhập thì không được xoá box. */
 function isTextField(target: EventTarget | null): boolean {
   return target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
+}
+
+/** Một dòng "Vật chồng lấn": vật đã lấy về, vật còn chồng lên box, hoặc vật đang tick mà không còn trong box. */
+interface OverlapRow {
+  id: string;
+  kind: "claimed" | "overlap" | "stale";
+  count: number;
+}
+
+/**
+ * Dòng hiện trong panel: hợp của `claimed`, `overlaps` và `claimFrom`. Máy chủ chuyển vật đã lấy về sang `claimed` và
+ * bỏ mọi vật trong `claim_from` khỏi `overlaps`, nên chỉ lấy từ `overlaps` thì dòng biến mất ngay sau khi tick.
+ */
+function overlapRows(preview: RegionPreview | null, claimFrom: readonly string[]): OverlapRow[] {
+  if (!preview) return [];
+  const rows: OverlapRow[] = [];
+  const seen = new Set<string>();
+  const add = (row: OverlapRow) => {
+    if (seen.has(row.id)) return;
+    seen.add(row.id);
+    rows.push(row);
+  };
+  for (const [id, count] of Object.entries(preview.claimed)) {
+    if (count > 0) add({ id, kind: "claimed", count });
+  }
+  for (const [id, count] of Object.entries(preview.overlaps)) {
+    if (count > 0) add({ id, kind: "overlap", count });
+  }
+  for (const id of claimFrom) add({ id, kind: "stale", count: 0 });
+  return rows;
+}
+
+/** Chữ của một dòng; `claimed` là vật đang được tick (nằm trong `claimFrom`). */
+function rowText({ kind, count }: OverlapRow, name: string, claimed: boolean): string {
+  if (kind === "claimed") return `Box lấy ${count} Gaussian từ ${name} — sẽ lấy về vật này`;
+  if (kind === "stale") return `${name} không còn trong box`;
+  return `Box chồng lên ${name} (${count} Gaussian) — ${claimed ? "sẽ lấy về vật này" : "giữ chủ cũ"}`;
 }
 
 /**
@@ -89,7 +126,7 @@ export function RegionEditor({
   });
   // Kết quả chỉ có khi khớp box hiện tại; đổi box thì bộ đếm cũ ẩn đi trong lúc tính lại.
   const preview = region.preview;
-  const overlaps = preview ? Object.entries(preview.overlaps).filter(([, count]) => count > 0) : [];
+  const rows = overlapRows(preview, session.claimFrom);
   const [applying, setApplying] = useState(false);
   const [applyError, setApplyError] = useState<string | null>(null);
   const [conflict, setConflict] = useState(false);
@@ -233,22 +270,20 @@ export function RegionEditor({
             <p className="text-on-dark/70">Bảo vệ sàn: {preview.protected_floor_count}</p>
           </div>
         )}
-        {overlaps.length > 0 && (
+        {rows.length > 0 && (
           <ul aria-label="Vật chồng lấn" className="space-y-2">
-            {overlaps.map(([id, count]) => {
-              const name = nameOf(id);
-              const claimed = session.claimFrom.includes(id);
+            {rows.map((row) => {
+              const name = nameOf(row.id);
+              const claimed = session.claimFrom.includes(row.id);
               return (
-                <li key={id} className="space-y-1 rounded border border-line-dark p-2">
-                  <p>
-                    Box chồng lên {name} ({count} Gaussian) — {claimed ? "sẽ lấy về vật này" : "giữ chủ cũ"}
-                  </p>
+                <li key={row.id} className="space-y-1 rounded border border-line-dark p-2">
+                  <p>{rowText(row, name, claimed)}</p>
                   <label className="flex items-center gap-2">
                     <input
                       type="checkbox"
                       aria-label={`Lấy luôn từ ${name}`}
                       checked={claimed}
-                      onChange={(event) => onSession(setRegionClaim(session, id, event.target.checked))}
+                      onChange={(event) => onSession(setRegionClaim(session, row.id, event.target.checked))}
                     />
                     Lấy luôn
                   </label>

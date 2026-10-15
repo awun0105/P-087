@@ -464,6 +464,39 @@ describe("panel chỉnh vùng", () => {
     expect(vi.mocked(previewObjectRegion).mock.lastCall![2].claim_from).toEqual(["chair"]);
   });
 
+  it("Lấy luôn: vật đã lấy về vẫn hiện và đang tick sau xem trước kế tiếp; bỏ tick thì yêu cầu sau không còn claim", async () => {
+    // Máy chủ chuyển vật đã lấy về từ overlaps sang claimed, nên dòng phải lấy từ cả hai nguồn.
+    vi.mocked(previewObjectRegion).mockImplementation(async (_job, _object, command): Promise<RegionPreview> =>
+      command.claim_from.includes("chair")
+        ? { ...preview, overlaps: {}, claimed: { chair: 12 } }
+        : { ...preview, overlaps: { chair: 12 } },
+    );
+    render(<Panel />);
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Lấy luôn từ Ghế" }));
+    expect(await screen.findByText("Box lấy 12 Gaussian từ Ghế — sẽ lấy về vật này")).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Lấy luôn từ Ghế" })).toBeChecked();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Lấy luôn từ Ghế" }));
+    expect(await screen.findByText("Box chồng lên Ghế (12 Gaussian) — giữ chủ cũ")).toBeInTheDocument();
+    await waitFor(() => expect(vi.mocked(previewObjectRegion).mock.lastCall![2].claim_from).toEqual([]));
+  });
+
+  it("vật đang tick mà box không còn chồng lên thì hiện 'không còn trong box' và vẫn bỏ tick được", async () => {
+    vi.mocked(previewObjectRegion).mockImplementation(async (_job, _object, command): Promise<RegionPreview> =>
+      command.claim_from.includes("chair")
+        ? { ...preview, overlaps: {}, claimed: {} }
+        : { ...preview, overlaps: { chair: 12 } },
+    );
+    render(<Panel />);
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Lấy luôn từ Ghế" }));
+    expect(await screen.findByText("Ghế không còn trong box")).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Lấy luôn từ Ghế" })).toBeChecked();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Lấy luôn từ Ghế" }));
+    await waitFor(() => expect(vi.mocked(previewObjectRegion).mock.lastCall![2].claim_from).toEqual([]));
+    expect(await screen.findByText("Box chồng lên Ghế (12 Gaussian) — giữ chủ cũ")).toBeInTheDocument();
+  });
+
   it("vỏ chưa dựng được thì nêu lý do trong cảnh báo", async () => {
     vi.mocked(previewObjectRegion).mockResolvedValue({ ...preview, shell_error: "lưới vỏ rỗng" });
     render(<Panel />);
