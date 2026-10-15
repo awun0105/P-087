@@ -42,11 +42,12 @@ from src.services.orchestration.scene.extraction import box_candidates_require_g
 from src.services.orchestration.scene.membership_regeneration import preview_correction, regenerate_membership
 from src.services.orchestration.scene.objectify import AWAITING_CHOICE, METHOD, ObjectifyError, reobjectify
 from src.services.process_control import ProcessCancelledError
+from src.services.scene.geometry_state import object_geometry_state
 
 logger = logging.getLogger(__name__)
 
 ObjectifyStatus = Literal["idle", "queued", "running", "done", "failed", "cancelled"]
-ObjectifyMode = Literal["objectify", "boxes", "membership"]
+ObjectifyMode = Literal["objectify", "boxes", "membership", "geometry"]
 _LEASE_TTL = timedelta(seconds=90)
 _LEASE_HEARTBEAT_SECONDS = 20.0
 _CANCEL_POLL_SECONDS = 0.5
@@ -57,6 +58,10 @@ _LEGACY_STALE_AFTER = timedelta(hours=3)
 
 class ObjectifyRequestError(ValueError):
     """The request cannot be accepted; the message can be shown to the user."""
+
+
+class ObjectGeometryAlreadyReadyError(ObjectifyRequestError):
+    """The full geometry build endpoint requires an awaiting-review scene."""
 
 
 class ObjectifyResourceWait(BaseModel):
@@ -272,6 +277,8 @@ def request(
         raise SceneRevisionConflictError(
             f"scene đã ở {current.scene_revision}, không phải {expected_revision}; tải lại rồi thử lại"
         )
+    if mode == "geometry" and object_geometry_state(current) != "awaiting_review":
+        raise ObjectGeometryAlreadyReadyError("Scene đã có hình học; dùng chỉnh vùng để dựng lại vật.")
     if mode == "objectify" and not (runtime_available(settings) or settings.product_objectify_remote_worker):
         raise ObjectifyRequestError("Máy xử lý chưa cài runtime tách theo vật (xem scripts/gpu/README.md)")
     if mode == "objectify" and state(registry, settings, job_id).retryable is False:
@@ -297,7 +304,7 @@ def request(
         config_checksum=_config_checksum(job, settings, mode, correction),
         correction_command=correction,
         actor_id=actor_id,
-        phase="queued",
+        phase=None if mode == "geometry" else "queued",
     )
     with _database(settings).transaction(write=True) as tx:
         previous = _read(tx, job_id, lock=True)

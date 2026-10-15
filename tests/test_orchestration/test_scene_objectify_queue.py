@@ -856,3 +856,40 @@ def test_membership_queue_reuses_admission_revision_fence_and_cancellation(world
             ).status
             == "queued"
         )
+
+
+def _geometry_draft(world, monkeypatch, tmp_path):  # noqa: ANN001, ANN202
+    registry, job, bundle, settings = world
+    monkeypatch.setattr(scene_extraction, "objectify_with_retry", _always_fail)
+    extract_scene(registry, job, bundle, settings, tmp_path / "geometry-source")
+    current = registry.scene.current(job.job_id).scene
+    draft = current.model_copy(
+        update={"provenance": {**current.provenance, "object_geometry": "awaiting_review", "geometry_method": "shell"}}
+    )
+    return registry.scene.publish_next(job.job_id, current.scene_revision, draft, "fixture-draft").revision.scene
+
+
+def test_geometry_request_freezes_draft_and_excludes_other_modes(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    registry, job, _, settings = world
+    base = _geometry_draft(world, monkeypatch, tmp_path)
+    # Geometry needs no SAM2 checkpoint; it uses the existing scene membership.
+    settings = settings.model_copy(update={"product_sam2_checkpoint": None})
+    queued = scene_objectify_queue.request(
+        registry, settings, job.job_id, base.scene_revision, "geometry", actor_id="local"
+    )
+    assert queued.status == "queued" and queued.mode == "geometry"
+    assert queued.base_revision == base.scene_revision and queued.operation_id
+    assert queued.phase is None
+    with pytest.raises(ObjectifyRequestError):
+        scene_objectify_queue.request(registry, settings, job.job_id, base.scene_revision, "boxes")
+    with pytest.raises(SceneRevisionConflictError):
+        scene_objectify_queue.request(registry, settings, job.job_id, "rev-stale", "geometry")
+
+
+def test_geometry_request_rejects_ready_scene(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    registry, job, bundle, settings = world
+    monkeypatch.setattr(scene_extraction, "objectify_with_retry", _always_fail)
+    extract_scene(registry, job, bundle, settings, tmp_path / "ready")
+    current = registry.scene.current(job.job_id).scene
+    with pytest.raises(ObjectifyRequestError, match="Scene đã có hình học; dùng chỉnh vùng để dựng lại vật."):
+        scene_objectify_queue.request(registry, settings, job.job_id, current.scene_revision, "geometry")
