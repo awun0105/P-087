@@ -103,3 +103,47 @@ Các test worker/build wiring dùng service/provider thay thế và registry/DB 
 ## Architect review
 
 Không có quyết định contract cần chốt thêm. T-008, T-010/T-011 và UI T-013 không được triển khai trong task này.
+
+
+## Round 2 — Required change từ review
+
+### Outcome và changed files
+
+- `src/services/orchestration/scene/extraction.py`: bắt `ObjectifyRequestError`, `SceneError`, `ArtifactStoreError` quanh bước đọc queue/enqueue geometry sau `publish_initial`. Ghi warning chứa job_id và lý do; tiếp tục trả `StageArtifact` SUCCEEDED với reference Draft đã publish. Lỗi publication vẫn truyền ra như trước.
+- `tests/test_orchestration/test_scene_extraction.py`: thêm hai trường hợp auto shell/ObjectGS với `request()` raise `ObjectifyRequestError`. Kiểm stage SUCCEEDED, Draft rev-001 còn được đọc từ registry, queue idle và warning có job_id/lý do. Giữ các trường hợp auto enqueue thành công, retry không xếp trùng và required không enqueue.
+- `.ai/status.md`: chỉ dòng T-009 chuyển in-progress rồi implemented.
+
+### Verification
+
+Test-first, trước sửa source:
+
+```bash
+.venv/bin/python -m pytest tests/test_orchestration/test_scene_extraction.py -q
+```
+
+**2 failed, 5 passed in 1.00s**: cả shell và ObjectGS bị `ObjectifyRequestError` truyền ra từ request sau publication.
+
+Sau sửa, chạy cùng lệnh: **7 passed in 0.96s**, không skip. Không chạy full suite.
+
+```bash
+.venv/bin/ruff check src/services/orchestration/scene/extraction.py tests/test_orchestration/test_scene_extraction.py
+.venv/bin/ruff format --check src/services/orchestration/scene/extraction.py tests/test_orchestration/test_scene_extraction.py
+```
+
+`All checks passed!`; `2 files already formatted`. `git diff --check`: sạch.
+
+### Decisions và pre-flight
+
+- Không đổi contract, schema, artifact hay queue lifecycle. Catch bao gồm `state()` vì bước này cũng chạy sau publication và có thể phát sinh SceneError/ArtifactStoreError. Không xử lý suggestion refactor config ngoài phạm vi Required change.
+- codegraph: đọc extract_scene, queue state, các lớp lỗi và callers extract_scene; caller chính là jobs/runner._extract_scene_stage. Đã chạy graphify query để định hướng.
+- understand: thay đổi cục bộ vào flow đã đọc, Draft publication → auto queue → StageArtifact; không cần tra business context mới.
+- minimal-code: dùng các lớp lỗi và logger hiện có, không thêm helper hay fallback.
+- checks: pytest 7 passed; ruff check/format sạch. DevTools n/a — service không sửa UI. Đây là fixture proof, không phải GPU/live deployment evidence.
+- Architect: không có quyết định cần chốt thêm.
+
+### Commits Round 2
+
+- `c547184b` Mark T-009 review fix in progress
+- `afe537e1` Preserve extraction success when automatic geometry enqueue fails
+
+`graphify update .`: exit 0; 25.205 nodes, 78.255 edges, 823 communities. Đã cập nhật graph.json/graph.html/GRAPH_REPORT.md; không chạy LLM label.
