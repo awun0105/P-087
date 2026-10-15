@@ -4,6 +4,9 @@ Only observed surface is closed. A face the scan never saw (a bottom resting on 
 stays open, so the shell is hollow on that side. It is still watertight and passes QA, and for collision it behaves
 like a solid, because nothing can enter the hollow. The shell never guesses a closure: a closure rule would also fill
 under tables. Shell meshes use a larger intersection budget than other surfaces, and large objects use coarser voxels.
+
+`statistics["solidity"]` is the shell volume over the volume of its convex hull. It only traces hollow faces and never
+gates the shell. A shell scanned without one face has about 55-60% of the true volume, so mass must not come from it.
 """
 
 import hashlib
@@ -230,6 +233,7 @@ def build_gaussian_shell(
     quality = assess_surface(mesh, intersection_budget=SHELL_INTERSECTION_BUDGET)
     if not quality["passed"]:
         raise GaussianShellError("gaussian shell failed surface QA: " + ", ".join(quality["reasons"]))
+    solidity = float(mesh.volume / mesh.convex_hull.volume)
     return GaussianShell(
         vertices=np.asarray(mesh.vertices, dtype=np.float64),
         faces=np.asarray(mesh.faces, dtype=np.int64),
@@ -245,6 +249,7 @@ def build_gaussian_shell(
             "diagonal_fixes": diagonal_fixes,
             "voxel_m_effective": voxel_m,
             "component_genus": quality["metrics"]["component_genus"],
+            "solidity": solidity,
         },
         quality=quality,
     )

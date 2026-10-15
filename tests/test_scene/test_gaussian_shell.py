@@ -199,6 +199,7 @@ def test_open_bottom_scan_gives_watertight_shell_that_passes_qa():
     shell = build_gaussian_shell(open_face_points(rng, BOX_LOW, BOX_HIGH, 20000, axis=2, side=0), None)
     assert mesh_of(shell).is_watertight
     assert shell.quality["passed"]
+    assert 0 < shell.statistics["solidity"] < 1
 
 
 def test_missing_back_face_gives_watertight_shell_that_passes_qa():
@@ -206,6 +207,7 @@ def test_missing_back_face_gives_watertight_shell_that_passes_qa():
     shell = build_gaussian_shell(open_face_points(rng, BOX_LOW, BOX_HIGH, 20000, axis=1, side=1), None)
     assert mesh_of(shell).is_watertight
     assert shell.quality["passed"]
+    assert 0 < shell.statistics["solidity"] < 1
 
 
 def test_table_underside_stays_open():
@@ -311,3 +313,9 @@ def test_large_object_uses_adaptive_voxel_and_passes_qa():
     assert shell.statistics["voxel_m_effective"] > 0.02
     assert shell.quality["passed"]
     assert mesh_of(shell).is_watertight
+
+
+def test_solidity_is_close_to_one_for_filled_box():
+    rng = np.random.default_rng(11)
+    shell = build_gaussian_shell(rng.uniform(BOX_LOW, BOX_HIGH, size=(20000, 3)), None)
+    assert shell.statistics["solidity"] > 0.9
