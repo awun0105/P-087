@@ -3,7 +3,7 @@
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse, JSONResponse
 
 from src.api import schemas
@@ -34,7 +34,12 @@ from src.services.orchestration.scene.collision_surfaces import CollisionSurface
 from src.services.orchestration.scene.errors import SceneNotAvailableError
 from src.services.orchestration.scene.membership_regeneration import preview_correction
 from src.services.orchestration.scene.object_correction import merge_object_candidates, reassign_object_membership
-from src.services.orchestration.scene.object_region import apply_region_draft, preview_region
+from src.services.orchestration.scene.object_region import (
+    ObjectRegionNotFoundError,
+    apply_region_draft,
+    fit_region,
+    preview_region,
+)
 from src.services.orchestration.scene.objectify import ObjectifyError
 from src.services.orchestration.scene.objectify_queue import (
     ObjectGeometryAlreadyReadyError,
@@ -707,6 +712,29 @@ def preview_object_region(
     deps.job_or_404(job_id)
     try:
         return preview_region(registry, job_id, object_id, request)
+    except StaleObjectMembershipRevisionError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except ObjectMembershipValidationError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except (ArtifactStoreError, SceneError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.get("/jobs/{job_id}/scene/objects/{object_id}/region/fit")
+def fit_object_region(
+    job_id: str,
+    object_id: str,
+    expected_scene_revision: str = Query(...),
+    user: UserRecord | None = Depends(require_contributor),
+) -> dict:
+    """Box ban đầu của "Chỉnh vùng": bao đúng các Gaussian hiện có của vật (T-023)."""
+    registry = deps.registry()
+    authorize_job_mutation(user, registry, job_id, operation="xem vùng Gaussian vật của")
+    deps.job_or_404(job_id)
+    try:
+        return fit_region(registry, job_id, object_id, expected_scene_revision)
+    except ObjectRegionNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
     except StaleObjectMembershipRevisionError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     except ObjectMembershipValidationError as error:

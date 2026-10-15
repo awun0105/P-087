@@ -853,3 +853,25 @@ async def test_ready_region_apply_through_real_durable_queue(client, tmp_path, m
         assert result.json()["mode"] == "region" and result.json()["operation_id"]
     else:
         assert set(result.json()) == {"detail"}
+
+
+@pytest.mark.asyncio
+async def test_region_fit_route_maps_stale_legacy_and_unknown_objects(client, monkeypatch) -> None:
+    from src.api.product import scene as scene_api
+    from src.services.orchestration.scene.object_region import ObjectRegionNotFoundError
+
+    url = f"{_JOB}/scene/objects/{_PALLET}/region/fit"
+    stale = await client.get(url, params={"expected_scene_revision": "rev-stale"})
+    legacy = await client.get(url, params={"expected_scene_revision": "rev-001"})
+
+    assert stale.status_code == 409
+    assert "scene đã đổi" in stale.json()["detail"]
+    assert legacy.status_code == 422
+    assert "no persisted Gaussian membership" in legacy.json()["detail"]
+
+    def unknown(*args, **kwargs):
+        raise ObjectRegionNotFoundError("vật object-x không có trong membership")
+
+    monkeypatch.setattr(scene_api, "fit_region", unknown)
+    gone = await client.get(url, params={"expected_scene_revision": "rev-001"})
+    assert gone.status_code == 404

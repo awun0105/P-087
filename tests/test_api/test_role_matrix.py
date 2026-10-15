@@ -107,6 +107,7 @@ AUTHENTICATED = {
     ("POST", "/jobs/{job_id}/scene/edits"),
     ("POST", "/jobs/{job_id}/scene/geometry/build"),
     ("POST", "/jobs/{job_id}/scene/objects/{object_id}/region/preview"),
+    ("GET", "/jobs/{job_id}/scene/objects/{object_id}/region/fit"),
     ("POST", "/jobs/{job_id}/scene/objects/{object_id}/region/apply"),
     ("POST", "/jobs/{job_id}/scene/membership/preview"),
     ("POST", "/jobs/{job_id}/scene/membership/regenerate"),
