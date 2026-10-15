@@ -1,7 +1,7 @@
 """Versioned ownership map from source Gaussian rows to scene objects."""
 
-from math import isfinite
-from typing import Literal, Self
+from math import isfinite, pi
+from typing import Annotated, Literal, Self
 
 from pydantic import Field, FiniteFloat, StrictInt, model_validator
 
@@ -131,3 +131,31 @@ class ObjectMembershipPreview(ContractModel):
     wrong_owner_count: int = Field(ge=0, strict=True)
     source_gaussian_indices: list[StrictInt] = Field(min_length=1, max_length=250_000)
     remaining_gaussians: dict[Identifier, int]
+
+
+#: Nửa kích thước box theo trục cục bộ: khoảng đóng [0.005, 20] m (architecture §7.3).
+HalfExtentM = Annotated[FiniteFloat, Field(ge=0.005, le=20)]
+
+
+class RegionBox(ContractModel):
+    """Object-local box that adds or subtracts source rows; yaw turns right-handed about +Z."""
+
+    op: Literal["add", "subtract"]
+    center_m: tuple[FiniteFloat, FiniteFloat, FiniteFloat]
+    half_extents_m: tuple[HalfExtentM, HalfExtentM, HalfExtentM]
+    yaw_rad: FiniteFloat = Field(default=0.0, ge=-2 * pi, le=2 * pi)
+
+
+class ObjectRegionCommand(MembershipCommandBase):
+    """Box edit of one object's source rows, shared by preview and apply."""
+
+    boxes: list[RegionBox] = Field(min_length=1, max_length=16)
+    claim_from: list[Identifier] = Field(default_factory=list, max_length=32)
+
+    @model_validator(mode="after")
+    def _require_add_box_and_unique_claims(self) -> Self:
+        if not any(box.op == "add" for box in self.boxes):
+            raise ValueError("region command requires at least one add box")
+        if len(set(self.claim_from)) != len(self.claim_from):
+            raise ValueError("claim_from must not repeat object ids")
+        return self
