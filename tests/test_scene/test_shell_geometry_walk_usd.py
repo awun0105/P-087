@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import subprocess
+import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -327,3 +328,42 @@ def test_objectgs_era_scene_without_geometry_key_keeps_walk_and_surface_refs(tmp
     np.testing.assert_array_equal(after.faces, before.faces)
     _, geometry, _ = _collect_scene_refs(moved)
     assert surface in geometry
+
+
+@pytest.mark.skipif(not RUNTIME.is_file(), reason="isolated CoACD/USD runtime data/scene_runtime is not installed")
+def test_reviewed_shell_scene_builds_a_sealed_simulation_package(
+    ready_with_real_coacd: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A reviewed shell must reach the public package builder with its actual collider in the sealed inventory."""
+    from src.models.contracts.identity import verify_candidate_inventory, verify_content_checksum
+    from src.models.contracts.validation import RuleResult
+    from src.services.orchestration.review import simulation_package as service
+
+    fixture = ready_with_real_coacd
+    registry, job_id = fixture.registry, fixture.job_id
+    ready = registry.scene.current(job_id).scene
+    confirmed = apply_object_action(
+        registry.scene, job_id, ready.objects[0].id, "confirm", ready.scene_revision
+    ).revision.scene
+    obj, pending = confirmed.objects
+    monkeypatch.setattr(service, "get_settings", lambda: fixture.settings)
+
+    package = service.build_simulation_package(registry, job_id)
+
+    assert package.preflight.blocking_result == RuleResult.PASS, package.preflight.model_dump(mode="json")
+    assert package.package_ref is not None and package.candidate is not None
+    assert package.source_scene_revision == confirmed.scene_revision
+    assert package.confirmed_objects == 1
+    candidate = package.candidate
+    assert obj.surface_mesh_ref in candidate.geometry
+    assert obj.collider.geometry_ref in candidate.colliders
+    assert pending.collider.geometry_ref not in candidate.colliders
+    verify_candidate_inventory(candidate)
+    verify_content_checksum(candidate, "candidate_checksum")
+    with zipfile.ZipFile(io.BytesIO(registry.runtime_resolver.require(package.package_ref).read_bytes())) as archive:
+        manifest = json.loads(archive.read("candidate_manifest.json"))
+        assert obj.collider.geometry_ref.model_dump(mode="json") in manifest["collider_refs"]
+        assert archive.read("scene.usda").startswith(b"#usda 1.0")
+    repeated = service.build_simulation_package(registry, job_id)
+    assert repeated.package_ref == package.package_ref
+    assert registry.scene.current(job_id).scene.scene_revision == package.scene_revision

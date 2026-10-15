@@ -74,7 +74,13 @@ def draft_scene(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamesp
     centers = [(1, 1, 0.2), (-1, 1, 0.2)]
     floor = np.array([[x, y, 0] for x in np.linspace(-2, 2, 21) for y in np.linspace(-1, 2, 16)])
     points = np.vstack([grid + center for center in centers] + [floor])
-    rows = np.zeros(len(points), dtype=_source_rows().dtype)
+    dtype = np.dtype(
+        [
+            *_source_rows().dtype.descr,
+            *((name, "<f4") for name in ("scale_1", "scale_2", "rot_1", "rot_2", "rot_3", "f_dc_1", "f_dc_2")),
+        ]
+    )
+    rows = np.zeros(len(points), dtype=dtype)
     for axis, name in enumerate(("x", "y", "z")):
         rows[name] = points[:, axis]
     rows["opacity"] = 5
@@ -99,6 +105,10 @@ def draft_scene(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamesp
         pose = Transform(
             parent_frame="world", local_frame=object_id, translation_xyz=center, rotation_quaternion_xyzw=(0, 0, 0, 1)
         )
+        local_rows = rows[labels == (0 if index == 1 else 2)].copy()
+        for axis, name in enumerate(("x", "y", "z")):
+            local_rows[name] -= center[axis]
+        visual = publish("ObjectGaussians", gaussian_split.write_gaussian_ply(local_rows), "test-objects/{digest}.ply")
         objects.append(
             SceneObject(
                 id=object_id,
@@ -108,7 +118,7 @@ def draft_scene(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamesp
                 active=False,
                 local_frame=object_id,
                 transform=pose,
-                visual_ref=preview,
+                visual_ref=visual,
                 geometry_ref=preview,
                 primitive_dimensions_xyz_m=(0.24, 0.32, 0.4),
                 provenance={"source_transform": pose.model_dump(mode="json")},
