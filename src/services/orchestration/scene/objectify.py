@@ -55,6 +55,7 @@ from src.services.orchestration.scene.object_geometry_steps import (
     run_inpaint_and_package,
     run_surface_colliders,
 )
+from src.services.orchestration.scene.objectgs_observations import package_observations
 from src.services.orchestration.scene.surface_evidence import publish_surface_artifacts
 from src.services.process_control import ProcessCancelledError, ProcessTimeoutError, run_cancellable_process
 from src.services.reconstruction import camera_views, metric_visual_master
@@ -400,6 +401,21 @@ def _publish_draft(
                 provenance=provenance,
             )
         )
+    observations: dict[str, object] = {}
+    if config.scene.geometry_method == "objectgs":
+        # Quan sát được đóng gói bất biến để build dùng lại; danh sách rỗng vẫn được ghi và build sẽ từ chối rõ ràng.
+        payload = package_observations(lift.get("objectgs_views", []))
+        observations_ref = publish(
+            _reference(
+                job_id,
+                "objects/observations/{digest}.tar",
+                "ObjectGSObservations",
+                StageId.SCENE_DECOMPOSE,
+                payload,
+            ),
+            payload,
+        )
+        observations["objectgs_observations_ref"] = observations_ref.model_dump(mode="json")
     return ObjectifyResult(
         environment=SceneEnvironment(
             visual_ref=bundle.visual_artifact_ref,
@@ -421,6 +437,7 @@ def _publish_draft(
             "floor_fallback_reason": floor_model.fallback_reason,
             "floor_profile_checksum": floor_model.profile_checksum,
             "floor_fit": floor_fit,
+            **observations,
         },
     )
 
@@ -555,7 +572,7 @@ def objectify(
                 },
                 **(
                     {"objectgs_observations_dir": str((workspace / "objectgs-observations").resolve())}
-                    if objectgs_runtime
+                    if config.scene.geometry_method == "objectgs"
                     else {}
                 ),
             },

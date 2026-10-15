@@ -257,3 +257,48 @@ def test_extraction_publishes_draft_with_source_ownership(
         assert item.collider is None
         assert item.source_collision.source_transform == item.transform
         assert item.source_collision.source_geometry_ref == result.environment.geometry_ref
+
+
+def test_objectgs_draft_publishes_observations_with_matching_checksum(
+    draft_inputs: SimpleNamespace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import hashlib
+
+    from src.models.contracts.artifacts import ProductArtifactRef
+    from src.services.orchestration.scene.objectgs_observations import unpack_observations
+
+    def run(python: Path, script: Path, request: dict, workspace: Path, name: str, *args: object, **kwargs: object):
+        assert name == "lift", f"Draft called {name}"
+        directory = Path(request["objectgs_observations_dir"])
+        directory.mkdir(parents=True, exist_ok=True)
+        views = []
+        for index in range(2):
+            image = directory / f"view-{index:06d}.png"
+            mask = directory / f"view-{index:06d}.labels.npy"
+            image.write_bytes(b"rgb-%d" % index)
+            np.save(mask, np.full((4, 4), 2 if index == 0 else 5, dtype=np.int32), allow_pickle=False)
+            views.append(
+                {
+                    "image_path": str(image),
+                    "mask_path": str(mask),
+                    "width": 4,
+                    "height": 4,
+                    "center": [0.0, 0.0, 1.0],
+                    "rotation_xyzw": [0.0, 0.0, 0.0, 1.0],
+                    "parameters": [3.0, 3.0, 2.0, 2.0],
+                    "camera_model": "PINHOLE",
+                    "coordinate_frame": "world",
+                    "distance_unit": "m",
+                }
+            )
+        np.savez(workspace / "labels.npz", labels=draft_inputs.labels)
+        return {"views": 2, "masks_per_object": {"2": 1, "5": 1}, "objectgs_views": views}
+
+    monkeypatch.setattr(module, "_run", run)
+    result = draft_inputs.extract("objectgs")
+    ref = ProductArtifactRef.model_validate(result.provenance["objectgs_observations_ref"])
+    payload = draft_inputs.published[ref.artifact_uri]
+    assert ref.artifact_type == "ObjectGSObservations"
+    assert ref.artifact_checksum == "sha256:" + hashlib.sha256(payload).hexdigest()
+    restored = unpack_observations(payload, tmp_path / "restored")
+    assert [Path(item["image_path"]).read_bytes() for item in restored] == [b"rgb-0", b"rgb-1"]
