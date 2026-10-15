@@ -8,13 +8,13 @@ import { useObjectifyState } from "@/features/studio/scene/useObjectify";
 import { ObjectifyNotice } from "@/features/studio/ObjectifyNotice";
 import { ApiError } from "@/lib/api/client";
 import { STUDIO_STAGES } from "@/features/studio/stages";
-import { cancelObjectify, getObjectifyState, requestObjectify, type ObjectifyState } from "@/lib/api/studio";
+import { buildObjectGeometry, cancelObjectify, getObjectifyState, requestObjectify, type ObjectifyState } from "@/lib/api/studio";
 import type { JobProgress } from "@/lib/contracts/studio";
 
 vi.mock("@/features/studio/scene/AttemptHistory", () => ({ AttemptHistory: () => <div /> }));
 vi.mock("@/lib/api/studio", async (original) => ({
   ...(await original<typeof import("@/lib/api/studio")>()),
-  getObjectifyState: vi.fn(), requestObjectify: vi.fn(), cancelObjectify: vi.fn(),
+  getObjectifyState: vi.fn(), requestObjectify: vi.fn(), cancelObjectify: vi.fn(), buildObjectGeometry: vi.fn(),
 }));
 
 const done: JobProgress = {
@@ -196,5 +196,43 @@ describe("nhãn đầu trang scene khi đang chạy lại", () => {
     expect(progressSceneStatus(done, false)).toMatchObject({ label: "Đã dựng scene", group: "done" });
     // Job chưa xong thì giữ nhãn pipeline dù scene đang chờ chọn.
     expect(progressSceneStatus({ ...done, status: "RUNNING" }, true).group).toBe("running");
+  });
+});
+
+describe("thông báo tạo mesh theo vật (T-013)", () => {
+  it("đang tạo mesh hiện nhãn phase tiếng Việt, và huỷ đúng operation_id của yêu cầu đang hiện", async () => {
+    vi.mocked(getObjectifyState).mockResolvedValue(objectify({ status: "running", mode: "geometry", phase: "collider", operation_id: "op-7" }));
+    vi.mocked(cancelObjectify).mockResolvedValue(objectify({ status: "running", mode: "geometry", phase: "collider", operation_id: "op-7", cancellation_requested: true }));
+    render(<ObjectifyNotice jobId="job-1" revision="rev-001" onRevision={vi.fn()} />);
+
+    expect(await screen.findByText(/Đang tạo mesh · Tạo collider \(CoACD\)/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Hủy yêu cầu" }));
+    await waitFor(() => expect(cancelObjectify).toHaveBeenCalledWith("job-1", "op-7"));
+  });
+
+  it("tạo mesh thất bại báo lỗi, và Thử lại gửi lại đúng revision đang hiển thị", async () => {
+    vi.mocked(getObjectifyState).mockResolvedValue(objectify({ status: "failed", mode: "geometry", error: "vỏ rỗng ở Kệ" }));
+    vi.mocked(buildObjectGeometry).mockResolvedValue(objectify({ status: "queued", mode: "geometry", operation_id: "op-8" }));
+    render(<ObjectifyNotice jobId="job-1" revision="rev-001" onRevision={vi.fn()} />);
+
+    expect(await screen.findByText(/Tạo mesh thất bại\. Scene duyệt được giữ nguyên\. vỏ rỗng ở Kệ/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Thử lại" }));
+    await waitFor(() => expect(buildObjectGeometry).toHaveBeenCalledWith("job-1", "rev-001"));
+  });
+
+  it("tạo mesh đã huỷ không còn nút hủy", async () => {
+    vi.mocked(getObjectifyState).mockResolvedValue(objectify({ status: "cancelled", mode: "geometry" }));
+    render(<ObjectifyNotice jobId="job-1" revision="rev-001" onRevision={vi.fn()} />);
+
+    expect(await screen.findByText(/Tạo mesh đã huỷ\. Scene duyệt được giữ nguyên\./)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Hủy yêu cầu" })).toBeNull();
+  });
+
+  it("áp vùng thất bại chỉ báo lỗi, không có Thử lại vì vùng sửa ở Region Editor", async () => {
+    vi.mocked(getObjectifyState).mockResolvedValue(objectify({ status: "failed", mode: "region", error: "box ngoài sàn" }));
+    render(<ObjectifyNotice jobId="job-1" revision="rev-001" onRevision={vi.fn()} />);
+
+    expect(await screen.findByText(/Áp vùng thất bại\. Scene hiện tại được giữ nguyên\. box ngoài sàn/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Thử lại" })).toBeNull();
   });
 });
