@@ -34,6 +34,7 @@
 | T-016 | Region Editor panel | Box cộng/trừ, preview debounce, bộ đếm, chồng lấn, Apply/Huỷ | T-010, T-015 | M |
 | T-017 | Vỏ phát sáng + điểm thêm/bớt | Vỏ emissive, điểm xanh/đỏ, Draft không vẽ Gaussian vật chồng | T-016 | M |
 | T-020 | Lựa chọn Duyệt trước / Tạo mesh ngay khi tạo job | Radio riêng cho `scene.geometry_review` | T-013 | S |
+| T-021 | Tiến trình, chuông, đầu trang hiểu Draft | Hàng ảo "Duyệt vật & Tạo mesh", nhánh Draft của chuông, nhãn đầu trang, sửa mô tả bước | T-013, T-020 | M |
 
 ## Sprint 4: Bàn giao
 
