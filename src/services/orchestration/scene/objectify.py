@@ -51,11 +51,14 @@ from src.services.orchestration.scene.floor_evidence import publish_floor_fit_ev
 from src.services.orchestration.scene.object_geometry_steps import (
     SurfaceInput,
     build_environment_collision,
+    run_inpaint,
+    run_inpaint_and_package,
     run_surface_colliders,
 )
 from src.services.orchestration.scene.surface_evidence import publish_surface_artifacts
 from src.services.process_control import ProcessCancelledError, ProcessTimeoutError, run_cancellable_process
-from src.services.reconstruction import camera_views, metric_visual_master, package_splat
+from src.services.reconstruction import camera_views, metric_visual_master
+from src.services.reconstruction import package_splat as package_splat
 from src.services.scene.collision_ownership import bind_source_collision_ownership
 from src.services.scene.decomposition import gaussian_split
 from src.services.scene.diagnostics import EvidenceRecorder
@@ -765,6 +768,17 @@ def objectify(
 
     report_progress("collider_and_background")
     # Collider chỉ dùng CPU, vá nền chỉ dùng GPU, và hai bước không đọc kết quả của nhau → chạy song song.
+    coacd_config = config.coacd.model_dump(exclude_unset=True)
+    inpaint_arguments = {
+        "background_ply": workspace / "background.ply",
+        "objects_ply": workspace / "objects_world.ply",
+        "views": view_requests,
+        "settings": settings,
+        "inpaint_config": config.inpaint.model_dump(exclude_unset=True),
+        "workspace": workspace,
+        "timeout": timeout,
+        "cancel_event": cancel_event,
+    }
     convex_request = {
         "objects": [
             {
@@ -774,15 +788,7 @@ def objectify(
             }
             for part in parts
         ],
-        "config": config.coacd.model_dump(exclude_unset=True),
-    }
-    inpaint_request = {
-        "background_ply": str(workspace / "background.ply"),
-        "objects_ply": str(workspace / "objects_world.ply"),
-        "output_ply": str(workspace / "background_inpainted.ply"),
-        "lama_checkpoint": str(settings.product_lama_checkpoint) if settings.product_lama_checkpoint else None,
-        "views": view_requests,
-        "config": config.inpaint.model_dump(exclude_unset=True),
+        "config": coacd_config,
     }
     with ThreadPoolExecutor(max_workers=2) as pool:
         if objectgs_receipt is not None:
@@ -799,7 +805,7 @@ def objectify(
                 run_surface_colliders,
                 python,
                 inputs,
-                config.coacd.model_dump(exclude_unset=True),
+                coacd_config,
                 workspace,
                 timeout,
                 cancel_event,
@@ -815,48 +821,26 @@ def objectify(
                 timeout,
                 cancel_event=cancel_event,
             )
-        inpaint_job = pool.submit(
-            _run,
-            python,
-            INPAINT_RUNNER,
-            inpaint_request,
-            workspace,
-            "inpaint",
-            timeout,
-            cancel_event=cancel_event,
-        )
+        inpaint_job = pool.submit(run_inpaint, python, **inpaint_arguments)
         convex, inpaint = convex_job.result(), inpaint_job.result()
     colliders = (
         {int(key): item for key, item in convex.items()}
         if objectgs_receipt is not None
         else {int(item["id"]): item for item in convex["objects"]}
     )
-    try:
-        sog = package_splat(
-            workspace / "background_inpainted.ply",
-            workspace / "sog",
-            settings.product_geometry_gpu_index,
-            cancel_event=cancel_event,
-        )
-    except (ValueError, OSError) as error:
-        raise ObjectifyError(f"nén SOG nền lỗi: {error}") from error
 
-    if membership is None:
-        membership = publish_membership()
-    _ensure_not_cancelled(cancel_event)
-    background_payload = (workspace / "background_inpainted.ply").read_bytes()
-    master_ref = publish(
-        _reference(
-            job_id, "environment/{digest}/background.ply", "GaussianPLY", StageId.SCENE_DECOMPOSE, background_payload
-        ),
-        background_payload,
-    )
-    sog_payload = sog.read_bytes()
-    visual_ref = publish(
-        _reference(
-            job_id, "environment/{digest}/background.sog", "VisualArtifact", StageId.SCENE_DECOMPOSE, sog_payload
-        ),
-        sog_payload,
+    def ensure_membership() -> None:
+        nonlocal membership
+        if membership is None:
+            membership = publish_membership()
+
+    master_ref, visual_ref, inpaint = run_inpaint_and_package(
+        python,
+        **inpaint_arguments,
+        publish=publish,
+        job_id=job_id,
+        inpaint_result=inpaint,
+        before_publish=ensure_membership,
     )
 
     surface_refs: dict[str, ProductArtifactRef] = {}

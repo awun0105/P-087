@@ -8,6 +8,7 @@ from threading import Event
 import numpy as np
 import trimesh
 
+from src.config import Settings
 from src.models.contracts.artifacts import JsonObject, ProductArtifactRef
 from src.models.contracts.floor_model import FloorModel
 from src.models.contracts.manifests import StageId
@@ -153,3 +154,99 @@ def run_surface_colliders(
             "ObjectGS surface collider generation failed; Gaussian/OBB fallback is forbidden", retryable=False
         )
     return colliders
+
+
+def run_inpaint(
+    python: Path,
+    *,
+    background_ply: Path,
+    objects_ply: Path,
+    views: list[dict],
+    settings: Settings,
+    inpaint_config: dict,
+    workspace: Path,
+    timeout: float,
+    cancel_event: Event | None,
+) -> dict:
+    """Run only inpaint so extraction can wait for CoACD before packaging and publication."""
+    from src.services.orchestration.scene.objectify import INPAINT_RUNNER, _run
+
+    inpaint_request = {
+        "background_ply": str(background_ply),
+        "objects_ply": str(objects_ply),
+        "output_ply": str(workspace / "background_inpainted.ply"),
+        "lama_checkpoint": str(settings.product_lama_checkpoint) if settings.product_lama_checkpoint else None,
+        "views": views,
+        "config": inpaint_config,
+    }
+    return _run(python, INPAINT_RUNNER, inpaint_request, workspace, "inpaint", timeout, cancel_event=cancel_event)
+
+
+def run_inpaint_and_package(
+    python: Path,
+    *,
+    background_ply: Path,
+    objects_ply: Path,
+    views: list[dict],
+    settings: Settings,
+    inpaint_config: dict,
+    workspace: Path,
+    timeout: float,
+    cancel_event: Event | None,
+    publish: Publish,
+    job_id: str,
+    inpaint_result: dict | None = None,
+    before_publish: Callable[[], None] | None = None,
+) -> tuple[ProductArtifactRef, ProductArtifactRef, dict]:
+    """Inpaint, package SOG and publish background artifacts using the existing content paths.
+
+    Extraction supplies its parallel inpaint result and publishes membership after packaging succeeds.
+    """
+    from src.services.orchestration.scene.objectify import (
+        ObjectifyError,
+        _ensure_not_cancelled,
+        _reference,
+        package_splat,
+    )
+
+    if inpaint_result is None:
+        inpaint_result = run_inpaint(
+            python,
+            background_ply=background_ply,
+            objects_ply=objects_ply,
+            views=views,
+            settings=settings,
+            inpaint_config=inpaint_config,
+            workspace=workspace,
+            timeout=timeout,
+            cancel_event=cancel_event,
+        )
+    try:
+        sog = package_splat(
+            workspace / "background_inpainted.ply",
+            workspace / "sog",
+            settings.product_geometry_gpu_index,
+            cancel_event=cancel_event,
+        )
+    except (ValueError, OSError) as error:
+        raise ObjectifyError(f"nén SOG nền lỗi: {error}") from error
+
+    if before_publish is not None:
+        before_publish()
+    _ensure_not_cancelled(cancel_event)
+    background_payload = (workspace / "background_inpainted.ply").read_bytes()
+    master_ref = publish(
+        _reference(
+            job_id, "environment/{digest}/background.ply", "GaussianPLY", StageId.SCENE_DECOMPOSE, background_payload
+        ),
+        background_payload,
+    )
+    sog_payload = sog.read_bytes()
+    visual_ref = publish(
+        _reference(
+            job_id, "environment/{digest}/background.sog", "VisualArtifact", StageId.SCENE_DECOMPOSE, sog_payload
+        ),
+        sog_payload,
+    )
+
+    return master_ref, visual_ref, inpaint_result

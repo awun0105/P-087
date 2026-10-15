@@ -185,3 +185,148 @@ def test_surface_colliders_send_strict_local_mesh_request(tmp_path: Path, monkey
         ],
         "config": {"threshold": 0.03},
     }
+
+
+def test_inpaint_packages_and_publishes_original_background_artifacts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from threading import Event
+
+    from src.services.orchestration.scene.object_geometry_steps import run_inpaint_and_package
+
+    events = []
+    cancel = Event()
+    settings = SimpleNamespace(product_lama_checkpoint=tmp_path / "lama.pt", product_geometry_gpu_index=2)
+    background, objects = tmp_path / "background.ply", tmp_path / "objects_world.ply"
+    views = [{"image_path": "frame.png"}]
+    result = {"method": "fixture", "original_gaussians": 5, "inpainted_gaussians": 3}
+
+    def run(
+        python: Path, script: Path, request: dict, workspace: Path, name: str, timeout: float, **kwargs: object
+    ) -> dict:
+        events.append("inpaint")
+        assert script == pipeline.INPAINT_RUNNER and name == "inpaint"
+        assert timeout == 10 and kwargs["cancel_event"] is cancel
+        assert request == {
+            "background_ply": str(background),
+            "objects_ply": str(objects),
+            "output_ply": str(tmp_path / "background_inpainted.ply"),
+            "lama_checkpoint": str(settings.product_lama_checkpoint),
+            "views": views,
+            "config": {"max_new_gaussians": 100},
+        }
+        (workspace / "background_inpainted.ply").write_bytes(b"background")
+        return result
+
+    def package(source: Path, workspace: Path, device: int, **kwargs: object) -> Path:
+        events.append("package")
+        assert source == tmp_path / "background_inpainted.ply"
+        assert workspace == tmp_path / "sog" and device == 2
+        assert kwargs["cancel_event"] is cancel
+        sog = tmp_path / "background.sog"
+        sog.write_bytes(b"sog")
+        return sog
+
+    def prepare() -> None:
+        events.append("membership")
+
+    def publish(ref: pipeline.ProductArtifactRef, payload: bytes) -> pipeline.ProductArtifactRef:
+        events.append(ref.artifact_type)
+        expected = "GaussianPLY" if payload == b"background" else "VisualArtifact"
+        tail = "background.ply" if payload == b"background" else "background.sog"
+        assert ref == pipeline._reference(
+            "job-steps", "environment/{digest}/" + tail, expected, pipeline.StageId.SCENE_DECOMPOSE, payload
+        )
+        return ref
+
+    monkeypatch.setattr(pipeline, "_run", run)
+    monkeypatch.setattr(pipeline, "package_splat", package)
+    master, visual, actual = run_inpaint_and_package(
+        tmp_path / "python",
+        background_ply=background,
+        objects_ply=objects,
+        views=views,
+        settings=settings,
+        inpaint_config={"max_new_gaussians": 100},
+        workspace=tmp_path,
+        timeout=10,
+        cancel_event=cancel,
+        publish=publish,
+        job_id="job-steps",
+        before_publish=prepare,
+    )
+    assert actual == result
+    assert master.artifact_type == "GaussianPLY" and visual.artifact_type == "VisualArtifact"
+    assert events == ["inpaint", "package", "membership", "GaussianPLY", "VisualArtifact"]
+
+
+@pytest.mark.parametrize("error_type", [ValueError, OSError])
+def test_package_error_preserves_message_and_does_not_publish(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error_type: type[Exception]
+) -> None:
+    from src.services.orchestration.scene.object_geometry_steps import run_inpaint_and_package
+
+    def fail(*args: object, **kwargs: object) -> None:
+        raise error_type("fixture failure")
+
+    def forbidden(*args: object, **kwargs: object) -> None:
+        pytest.fail("Precomputed inpaint must not rerun; failed package must not publish")
+
+    monkeypatch.setattr(pipeline, "_run", forbidden)
+    monkeypatch.setattr(pipeline, "package_splat", fail)
+    with pytest.raises(pipeline.ObjectifyError, match="nén SOG nền lỗi: fixture failure"):
+        run_inpaint_and_package(
+            tmp_path / "python",
+            background_ply=tmp_path / "background.ply",
+            objects_ply=tmp_path / "objects.ply",
+            views=[],
+            settings=SimpleNamespace(product_geometry_gpu_index=0),
+            inpaint_config={},
+            workspace=tmp_path,
+            timeout=10,
+            cancel_event=None,
+            publish=forbidden,
+            job_id="job-steps",
+            inpaint_result={"method": "fixture"},
+            before_publish=forbidden,
+        )
+
+
+def test_precomputed_inpaint_is_packaged_once_and_cancellation_blocks_publication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from threading import Event
+
+    from src.services.orchestration.scene.object_geometry_steps import run_inpaint_and_package
+    from src.services.process_control import ProcessCancelledError
+
+    cancel = Event()
+    packaged = []
+
+    def forbidden(*args: object, **kwargs: object) -> None:
+        pytest.fail("No repeated inpaint or background publication after cancellation")
+
+    def package(*args: object, **kwargs: object) -> Path:
+        packaged.append(True)
+        assert kwargs["cancel_event"] is cancel
+        cancel.set()
+        return tmp_path / "unused.sog"
+
+    monkeypatch.setattr(pipeline, "_run", forbidden)
+    monkeypatch.setattr(pipeline, "package_splat", package)
+    with pytest.raises(ProcessCancelledError, match="Objectify operation was cancelled"):
+        run_inpaint_and_package(
+            tmp_path / "python",
+            background_ply=tmp_path / "background.ply",
+            objects_ply=tmp_path / "objects.ply",
+            views=[],
+            settings=SimpleNamespace(product_geometry_gpu_index=0),
+            inpaint_config={},
+            workspace=tmp_path,
+            timeout=10,
+            cancel_event=cancel,
+            publish=forbidden,
+            job_id="job-steps",
+            inpaint_result={"method": "fixture"},
+        )
+    assert packaged == [True]
