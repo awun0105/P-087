@@ -684,3 +684,43 @@ async def test_draft_scene_refuses_collision_surface_marks(client, isolated_regi
     assert refused.status_code == 422
     assert refused.json()["detail"] == "Cần tạo mesh trước khi sửa bề mặt va chạm."
     assert isolated_registry.scene.revision("job-fixture-001", "rev-003") is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", ["queued", "ready", "stale", "busy", "anonymous"])
+async def test_geometry_build_route_returns_typed_queue_status(
+    client, isolated_registry, tmp_path, monkeypatch, case
+) -> None:
+    from src.api import auth
+    from src.api.product import deps as product_deps
+    from src.api.product import scene as scene_api
+    from src.config import Settings
+    from src.models.contracts.reconstruction import ReconstructionBundle
+    from tests.test_orchestration.test_scene_extraction import _FIXTURE
+
+    settings = Settings(
+        database_url=f"sqlite:///{tmp_path / 'geometry-queue.db'}", product_objectify_remote_worker=True
+    )
+    monkeypatch.setattr(product_deps, "get_settings", lambda: settings)
+    monkeypatch.setattr(scene_api, "record_gpu_run", lambda *args: None)
+    bundle = ReconstructionBundle.model_validate_json(_FIXTURE.read_bytes())
+    monkeypatch.setattr(scene_api.objectify_queue, "job_bundle", lambda *args: bundle)
+    if case != "ready":
+        _as_draft(isolated_registry, monkeypatch)
+    if case == "busy":
+        scene_api.objectify_queue.request(isolated_registry, settings, "job-fixture-001", "rev-001", "boxes")
+    if case == "anonymous":
+        monkeypatch.setattr(auth, "settings", lambda: settings.model_copy(update={"auth_required": True}))
+        monkeypatch.setattr(auth, "current_user", lambda request: None)
+    response = await client.post(
+        f"{_JOB}/scene/geometry/build", json={"expected_scene_revision": "rev-009" if case == "stale" else "rev-001"}
+    )
+    assert response.status_code == {"queued": 202, "ready": 422, "stale": 409, "busy": 409, "anonymous": 401}[case]
+    body = response.json()
+    if case == "queued":
+        assert body["status"] == "queued" and body["mode"] == "geometry"
+        assert body["operation_id"] and body["base_revision"] == "rev-001" and body["phase"] is None
+    else:
+        assert set(body) == {"detail"}
+        if case == "ready":
+            assert body["detail"] == "Scene đã có hình học; dùng chỉnh vùng để dựng lại vật."

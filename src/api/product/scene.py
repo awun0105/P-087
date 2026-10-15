@@ -11,6 +11,7 @@ from src.api.auth import enforce_gpu_quota, record_gpu_run, require_contributor
 from src.api.ownership import authorize_job_mutation
 from src.api.product import deps
 from src.config import Settings
+from src.models.contracts.artifacts import Identifier
 from src.models.contracts.object_membership import (
     ObjectMembershipMergeCommand,
     ObjectMembershipPreview,
@@ -33,7 +34,11 @@ from src.services.orchestration.scene.errors import SceneNotAvailableError
 from src.services.orchestration.scene.membership_regeneration import preview_correction
 from src.services.orchestration.scene.object_correction import merge_object_candidates, reassign_object_membership
 from src.services.orchestration.scene.objectify import ObjectifyError
-from src.services.orchestration.scene.objectify_queue import ObjectifyRequestError, ObjectifyState
+from src.services.orchestration.scene.objectify_queue import (
+    ObjectGeometryAlreadyReadyError,
+    ObjectifyRequestError,
+    ObjectifyState,
+)
 from src.services.orchestration.scene.objects import (
     OBJECT_ACTIONS,
     add_box_object,
@@ -386,6 +391,44 @@ def regenerate_scene_membership(
     except (ArtifactStoreError, SceneError) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     record_gpu_run(user, job_id, {"kind": "scene.membership_regeneration"})
+    return result
+
+
+class GeometryBuildRequest(schemas.ApiModel):
+    """Build the reviewed membership bound to this exact scene revision."""
+
+    expected_scene_revision: Identifier
+
+
+@router.post(
+    "/jobs/{job_id}/scene/geometry/build",
+    response_model=ObjectifyState,
+    status_code=202,
+    responses={409: {"model": schemas.ApiErrorResponse}, 422: {"model": schemas.ApiErrorResponse}},
+)
+def request_geometry_build(
+    job_id: str,
+    request: GeometryBuildRequest,
+    user: UserRecord | None = Depends(require_contributor),
+) -> ObjectifyState:
+    registry, settings = deps.registry(), deps.settings()
+    authorize_job_mutation(user, registry, job_id, operation="tạo hình học vật của")
+    deps.job_or_404(job_id)
+    enforce_gpu_quota(user)
+    try:
+        result = objectify_queue.request(
+            registry,
+            settings,
+            job_id,
+            request.expected_scene_revision,
+            "geometry",
+            actor_id=user.user_id if user else "local",
+        )
+    except ObjectGeometryAlreadyReadyError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except (ObjectifyRequestError, SceneRevisionConflictError, ArtifactStoreError, SceneError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    record_gpu_run(user, job_id, {"kind": "scene.geometry_build"})
     return result
 
 
