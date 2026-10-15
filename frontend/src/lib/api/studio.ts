@@ -658,6 +658,30 @@ export function previewObjectRegion(
   );
 }
 
+/** Box ban đầu của "Chỉnh vùng": bao đúng các Gaussian hiện có của vật, object-local (T-023). Chỉ đọc. */
+export interface RegionFit {
+  scene_revision: string;
+  membership_checksum: string;
+  object_id: string;
+  center_m: [number, number, number];
+  half_extents_m: [number, number, number];
+  yaw_rad: number;
+  rows: number;
+}
+
+export function fetchRegionFit(
+  jobId: string,
+  objectId: string,
+  revision: string,
+  signal?: AbortSignal,
+): Promise<RegionFit> {
+  const query = new URLSearchParams({ expected_scene_revision: revision });
+  return apiFetch<RegionFit>(
+    `${API}/jobs/${encodeURIComponent(jobId)}/scene/objects/${encodeURIComponent(objectId)}/region/fit?${query}`,
+    { signal },
+  );
+}
+
 /** Draft: 201 với revision mới. Ready: 202 với tiến độ dựng lại (T-011). Dùng `isSceneEditResponse` để phân biệt. */
 export function applyObjectRegion(
   jobId: string,

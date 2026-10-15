@@ -248,6 +248,11 @@ function routeFetch(routes: Record<string, Response[]>) {
       const queued = routes["/scene/objectify"];
       return queued?.length ? queued.shift()! : reply(objectify({ object_centric: true }));
     }
+    // Box ban đầu của Chỉnh vùng (T-023): mặc định trả box đã tính; test có thể xếp hàng phản hồi riêng.
+    if (url.includes("/region/fit")) {
+      const queued = routes["/region/fit"];
+      return queued?.length ? queued.shift()! : reply(regionFit);
+    }
     const key = Object.keys(routes).find((pattern) => url.includes(pattern));
     if (key && routes[key].length) return routes[key].shift()!;
     if (url.includes("/simulation-package")) return reply(null);
@@ -1322,6 +1327,17 @@ const regionPreview = {
   shell_error: null,
 };
 
+/** Box ban đầu máy chủ trả về: lệch tâm so với gốc để chứng minh panel dùng đúng box này (T-023). */
+const regionFit = {
+  scene_revision: "rev-001",
+  membership_checksum: `sha256:${"b".repeat(64)}`,
+  object_id: "candidate-001",
+  center_m: [0.12, -0.05, 0.3],
+  half_extents_m: [0.3, 0.2, 0.15],
+  yaw_rad: 0,
+  rows: 120,
+};
+
 describe("ObjectReviewView chỉnh vùng (T-016)", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -1337,7 +1353,7 @@ describe("ObjectReviewView chỉnh vùng (T-016)", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Chọn Vật thể 1" }));
     fireEvent.click(screen.getByRole("button", { name: "Chỉnh vùng" }));
 
-    expect(screen.getByRole("region", { name: "Chỉnh vùng" })).toHaveTextContent("Chỉnh vùng · Vật thể 1");
+    expect(await screen.findByRole("region", { name: "Chỉnh vùng" })).toHaveTextContent("Chỉnh vùng · Vật thể 1");
     expect(screen.getByRole("list", { name: "Box vùng" })).toHaveTextContent("Cộng #1");
 
     expect(screen.getByRole("button", { name: "Chỉnh chi tiết (Brush/Lasso)" })).toBeEnabled();
@@ -1359,7 +1375,7 @@ describe("ObjectReviewView chỉnh vùng (T-016)", () => {
     expect(brush).toHaveAttribute("title", "Dùng Chỉnh vùng khi đang duyệt; Brush/Lasso dùng được sau khi Tạo mesh");
 
     fireEvent.click(screen.getByRole("button", { name: "Chỉnh vùng" }));
-    expect(screen.getByRole("region", { name: "Chỉnh vùng" })).toHaveTextContent("Chỉnh vùng · Vật thể 1");
+    expect(await screen.findByRole("region", { name: "Chỉnh vùng" })).toHaveTextContent("Chỉnh vùng · Vật thể 1");
   });
 
   it("scene cũ chưa có object_geometry giữ nút Chỉnh vùng Gaussian cũ", async () => {
@@ -1427,7 +1443,7 @@ describe("ObjectReviewView chỉnh vùng (T-016)", () => {
     render(<ObjectReviewView jobId="job-a" />);
     fireEvent.click(await screen.findByRole("button", { name: "Chọn Vật thể 1" }));
     fireEvent.click(screen.getByRole("button", { name: "Chỉnh vùng" }));
-    expect(screen.getByRole("region", { name: "Chỉnh vùng" })).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "Chỉnh vùng" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Chọn Vật thể 2" }));
     expect(screen.queryByRole("region", { name: "Chỉnh vùng" })).not.toBeInTheDocument();
@@ -1480,5 +1496,61 @@ describe("ObjectReviewView vỏ và Gaussian theo Draft/Ready (T-017)", () => {
     const visual = { ...ref, artifact_type: "ObjectGaussians" } as never;
     expect(objects.find((item) => item.id === "candidate-002")?.url).toBe(jobArtifactContentUrl("job-a", visual));
     expect(stage.getAttribute("data-shells")).toBe("[]");
+  });
+
+  it("mở panel gọi fit đúng một lần và panel hiện box của máy chủ, không dựng từ kích thước", async () => {
+    routeFetch({
+      "/region/preview": Array.from({ length: 4 }, () => reply(regionPreview)),
+      "/scene": [reply({ scene: regionScene() })],
+    });
+    render(<ObjectReviewView jobId="job-a" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Chọn Vật thể 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Chỉnh vùng" }));
+    expect(await screen.findByRole("region", { name: "Chỉnh vùng" })).toBeInTheDocument();
+
+    const fits = vi.mocked(global.fetch).mock.calls.filter(([url]) => String(url).includes("/region/fit"));
+    expect(fits).toHaveLength(1);
+    expect(String(fits[0][0])).toContain("expected_scene_revision=rev-001");
+    expect(await screen.findByText("+3 / −0 · tổng 120")).toBeInTheDocument();
+    const previews = vi.mocked(global.fetch).mock.calls.filter(([url]) => String(url).includes("/region/preview"));
+    expect(JSON.parse(previews[0][1]!.body as string).boxes[0]).toMatchObject({
+      center_m: [0.12, -0.05, 0.3],
+      half_extents_m: [0.3, 0.2, 0.15],
+    });
+  });
+
+  it("fit lỗi: không có box và không có Apply; Thử lại gọi lại máy chủ rồi mới mở panel", async () => {
+    routeFetch({
+      "/region/fit": [reply({ detail: "vật còn 10 Gaussian (tối thiểu 50) nên không lấy được vùng hiện tại" }, 422), reply(regionFit)],
+      "/region/preview": Array.from({ length: 4 }, () => reply(regionPreview)),
+      "/scene": [reply({ scene: regionScene() })],
+    });
+    render(<ObjectReviewView jobId="job-a" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Chọn Vật thể 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Chỉnh vùng" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("tối thiểu 50");
+    expect(screen.queryByRole("list", { name: "Box vùng" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Apply" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Thử lại" }));
+    expect(await screen.findByRole("region", { name: "Chỉnh vùng" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cộng #1" })).toBeInTheDocument();
+    const fits = vi.mocked(global.fetch).mock.calls.filter(([url]) => String(url).includes("/region/fit"));
+    expect(fits).toHaveLength(2);
+  });
+
+  it("Chỉnh vùng không cần kích thước primitive: vật không có kích thước vẫn mở được", async () => {
+    const scene = regionScene();
+    routeFetch({
+      "/region/preview": Array.from({ length: 4 }, () => reply(regionPreview)),
+      "/scene": [reply({ scene: { ...scene, objects: scene.objects.map((item) => ({ ...item, primitive_dimensions_xyz_m: null })) } })],
+    });
+    render(<ObjectReviewView jobId="job-a" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Chọn Vật thể 1" }));
+    const open = screen.getByRole("button", { name: "Chỉnh vùng" });
+    expect(open).toBeEnabled();
+    fireEvent.click(open);
+    expect(await screen.findByRole("region", { name: "Chỉnh vùng" })).toBeInTheDocument();
   });
 });

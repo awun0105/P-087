@@ -20,7 +20,7 @@ import {
 import { useRegionPreview } from "@/features/studio/region/useRegionPreview";
 import type { ViewPreset } from "@/features/viewer/region-overlay";
 import { ApiError } from "@/lib/api/client";
-import { applyObjectRegion, type RegionPreview } from "@/lib/api/studio";
+import { applyObjectRegion, type RegionFit, type RegionPreview } from "@/lib/api/studio";
 import type { SceneObject } from "@/lib/contracts/api";
 
 const VIEWS: { preset: ViewPreset; label: string }[] = [
@@ -84,6 +84,7 @@ function rowText({ kind, count }: OverlapRow, name: string, claimed: boolean): s
 export function RegionEditor({
   jobId,
   object,
+  fit,
   sceneRevision,
   membershipChecksum,
   nameOf,
@@ -96,6 +97,8 @@ export function RegionEditor({
 }: {
   jobId: string;
   object: SceneObject;
+  /** Box ban đầu do máy chủ tính (T-023); "Đặt lại" trở về đúng box này. */
+  fit: RegionFit;
   /** Revision của scene khi mở panel: máy chủ từ chối (409) nếu scene đã đổi. */
   sceneRevision: string;
   /** Checksum membership đang dùng: máy chủ từ chối (409) nếu membership đã đổi. */
@@ -244,8 +247,7 @@ export function RegionEditor({
           size="sm"
           variant="ghost"
           onClick={() => {
-            const initial = initialRegionSession(object);
-            if (initial) onSession(initial);
+            onSession(initialRegionSession(object, fit));
           }}
         >
           Đặt lại

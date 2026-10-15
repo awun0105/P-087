@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vite
 
 import { MetricSceneView } from "@/features/studio/MetricSceneView";
 import { RegionEditor } from "@/features/studio/region/RegionEditor";
+import { RegionFitGate } from "@/features/studio/region/RegionFitGate";
 import type { EditableBox } from "@/features/studio/region/box-model";
 import {
   addAddBox,
@@ -25,7 +26,13 @@ import { PREVIEW_DEBOUNCE_MS, regionKey, useRegionPreview } from "@/features/stu
 import type { RegionOverlayHandlers } from "@/features/viewer/region-overlay";
 import type { ShellSpec } from "@/features/viewer/shell-glow";
 import { ApiError } from "@/lib/api/client";
-import { applyObjectRegion, isSceneEditResponse, previewObjectRegion, type RegionPreview } from "@/lib/api/studio";
+import {
+  applyObjectRegion,
+  isSceneEditResponse,
+  previewObjectRegion,
+  type RegionFit,
+  type RegionPreview,
+} from "@/lib/api/studio";
 import type { ObjectRegionCommand, SceneObject } from "@/lib/contracts/api";
 
 // Các test API dùng bản thật; test hook thay bằng bản giả và trả về bản thật sau mỗi test.
@@ -226,15 +233,29 @@ describe("hook xem trước vùng", () => {
 
 const pallet = { id: "pallet", name: "Pallet gỗ", primitive_dimensions_xyz_m: [1.2, 0.8, 0.15] } as SceneObject;
 const addBox: EditableBox = { id: "add-1", op: "add", center: [0, 0, 0], half: [0.6, 0.4, 0.075], yaw: 0 };
-const initial = initialRegionSession(pallet)!;
+/** Box do máy chủ tính (T-023); ở đây bằng box cũ của vật 1.2 × 0.8 × 0.15 để các test cũ giữ nguyên ý nghĩa. */
+const fit: RegionFit = {
+  scene_revision: "rev-001",
+  membership_checksum: `sha256:${"b".repeat(64)}`,
+  object_id: "pallet",
+  center_m: [0, 0, 0],
+  half_extents_m: [0.6, 0.4, 0.075],
+  yaw_rad: 0,
+  rows: 120,
+};
+const initial = initialRegionSession(pallet, fit);
 
 describe("phiên chỉnh vùng", () => {
-  it("vật có kích thước: một box cộng, tâm gốc, nửa kích thước bằng nửa vật", () => {
+  it("box cộng ban đầu là box của máy chủ: tâm, nửa kích thước và yaw", () => {
     expect(initial).toEqual({ objectId: "pallet", boxes: [addBox], selectedId: "add-1", claimFrom: [] });
+    const offset: RegionFit = { ...fit, center_m: [0.3, -0.1, 0.05], half_extents_m: [0.5, 0.25, 0.1], yaw_rad: 0.4 };
+    expect(initialRegionSession(pallet, offset)?.boxes).toEqual([
+      { id: "add-1", op: "add", center: [0.3, -0.1, 0.05], half: [0.5, 0.25, 0.1], yaw: 0.4 },
+    ]);
   });
 
-  it("vật không có kích thước thì chưa có phiên", () => {
-    expect(initialRegionSession({ ...pallet, primitive_dimensions_xyz_m: null })).toBeNull();
+  it("không dựng box từ kích thước primitive: vật không có kích thước vẫn theo box của máy chủ", () => {
+    expect(initialRegionSession({ ...pallet, primitive_dimensions_xyz_m: null }, fit)).toEqual(initial);
   });
 
   it("+ Box cộng: box mới thu còn 80% box đang chọn, cùng tâm và yaw, rồi được chọn", () => {
@@ -309,6 +330,7 @@ function Panel({
     <RegionEditor
       jobId="job-a"
       object={pallet}
+      fit={fit}
       sceneRevision="rev-001"
       membershipChecksum={command.membership_checksum}
       nameOf={(id) => (id === "chair" ? "Ghế" : id)}
@@ -884,5 +906,41 @@ describe("MetricSceneView nối overlay vùng", () => {
     api.current!.showPreview("pallet", null, true);
     expect(layer.setTone).toHaveBeenLastCalledWith("pallet", "pending");
     expect(layer.setPointSets).not.toHaveBeenCalled();
+  });
+});
+
+describe("cổng lấy box ban đầu (T-023)", () => {
+  beforeEach(() => {
+    global.fetch = vi.fn();
+  });
+
+  it("mở gọi fit đúng một lần; đang chờ chỉ có trạng thái tải, rồi báo box khi về", async () => {
+    let finish!: (response: Response) => void;
+    vi.mocked(global.fetch).mockImplementationOnce(() => new Promise<Response>((done) => (finish = done)));
+    const onReady = vi.fn();
+    render(<RegionFitGate jobId="job-a" object={pallet} sceneRevision="rev-001" onReady={onReady} onClose={() => {}} />);
+
+    expect(screen.getByRole("status")).toHaveTextContent("Đang lấy vùng hiện tại");
+    expect(screen.queryByRole("region", { name: "Chỉnh vùng" })).not.toBeInTheDocument();
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(String(vi.mocked(global.fetch).mock.calls[0][0])).toContain(
+      "/jobs/job-a/scene/objects/pallet/region/fit?expected_scene_revision=rev-001",
+    );
+    await act(async () => finish(reply(fit)));
+    await waitFor(() => expect(onReady).toHaveBeenCalledWith(fit));
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("lỗi hiện thông báo, không tạo box; Thử lại gọi lại máy chủ", async () => {
+    vi.mocked(global.fetch).mockResolvedValueOnce(reply({ detail: "vật còn 10 Gaussian" }, 422));
+    vi.mocked(global.fetch).mockResolvedValueOnce(reply(fit));
+    const onReady = vi.fn();
+    render(<RegionFitGate jobId="job-a" object={pallet} sceneRevision="rev-001" onReady={onReady} onClose={() => {}} />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("vật còn 10 Gaussian");
+    expect(onReady).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Thử lại" }));
+    await waitFor(() => expect(onReady).toHaveBeenCalledWith(fit));
+    expect(global.fetch).toHaveBeenCalledTimes(2);
   });
 });

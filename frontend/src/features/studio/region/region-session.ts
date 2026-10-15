@@ -5,7 +5,7 @@
 
 import type { EditableBox } from "@/features/studio/region/box-model";
 import type { ViewPreset } from "@/features/viewer/region-overlay";
-import type { RegionPreview } from "@/lib/api/studio";
+import type { RegionFit, RegionPreview } from "@/lib/api/studio";
 import type { SceneObject } from "@/lib/contracts/api";
 
 export interface RegionSession {
@@ -27,16 +27,17 @@ export interface RegionViewApi {
   showPreview(objectId: string, preview: RegionPreview | null, pending: boolean): void;
 }
 
-/** Box cộng ban đầu: tâm 0, yaw 0, nửa kích thước bằng một nửa kích thước của vật. Vật không có kích thước thì không có phiên. */
-export function initialRegionSession(object: SceneObject): RegionSession | null {
-  const dims = object.primitive_dimensions_xyz_m;
-  if (!dims) return null;
+/**
+ * Box cộng ban đầu: bao đúng các Gaussian hiện có của vật (máy chủ tính, T-023). Không dựng từ kích thước primitive:
+ * sau khi chỉnh lệch một phía, tâm nhóm không còn ở gốc nên box tâm 0 sẽ trả hàng về nền.
+ */
+export function initialRegionSession(object: SceneObject, fit: RegionFit): RegionSession {
   const box: EditableBox = {
     id: "add-1",
     op: "add",
-    center: [0, 0, 0],
-    half: [dims[0] / 2, dims[1] / 2, dims[2] / 2],
-    yaw: 0,
+    center: [...fit.center_m],
+    half: [...fit.half_extents_m],
+    yaw: fit.yaw_rad,
   };
   return { objectId: object.id, boxes: [box], selectedId: box.id, claimFrom: [] };
 }

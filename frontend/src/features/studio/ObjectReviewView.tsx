@@ -30,6 +30,7 @@ import { MetricSceneView } from "@/features/studio/MetricSceneView";
 import { ObjectifyNotice } from "@/features/studio/ObjectifyNotice";
 import { GeometryReviewBanner } from "@/features/studio/GeometryReviewBanner";
 import { RegionEditor } from "@/features/studio/region/RegionEditor";
+import { RegionFitGate } from "@/features/studio/region/RegionFitGate";
 import { initialRegionSession, selectRegionBox, type RegionSession, type RegionViewApi } from "@/features/studio/region/region-session";
 import { ObjectifyContext } from "@/features/studio/scene/objectifyContext";
 import { composeColliderTransform } from "@/features/viewer/layers";
@@ -56,6 +57,7 @@ import {
   selectLidarCollisionSource,
   setObjectTransform,
   type ObjectAction,
+  type RegionFit,
   type SceneCatalog,
 } from "@/lib/api/studio";
 import { cn } from "@/lib/cn";
@@ -314,6 +316,9 @@ export function ObjectReviewView({
   const [membershipEditorOpen, setMembershipEditorOpen] = useState(false);
   // Chỉnh vùng (T-016): phiên của vật đang chọn. Chọn vật khác thì phiên bị bỏ; chọn lại đúng vật đó thì giữ phiên.
   const [regionSession, setRegionSession] = useState<RegionSession | null>(null);
+  // Box ban đầu của phiên (T-023) và vật đang chờ máy chủ tính box: panel chỉ mở sau khi có fit.
+  const [regionFit, setRegionFit] = useState<RegionFit | null>(null);
+  const [regionRequest, setRegionRequest] = useState<string | null>(null);
   const regionApi = useRef<RegionViewApi | null>(null);
   // Trang scene chia sẻ trạng thái tách vật qua ObjectifyContext; sau khi áp vùng nhận 202 thì đọc lại để hiện tiến độ.
   const sharedObjectify = useContext(ObjectifyContext);
@@ -364,6 +369,7 @@ export function ObjectReviewView({
     if (id !== selected) setColliderDraft(null);
     setSelected(id);
     setRegionSession((session) => (session?.objectId === id ? session : null));
+    setRegionRequest((request) => (request === id ? request : null));
   };
 
   useEffect(() => {
@@ -674,7 +680,8 @@ export function ObjectReviewView({
   const awaitingGeometry = objectGeometryState(scene) === "awaiting_review";
   const openRegionEditor = () => {
     if (!current || !membership) return;
-    setRegionSession((session) => (session?.objectId === current.id ? session : initialRegionSession(current)));
+    if (regionSession?.objectId === current.id) return;
+    setRegionRequest(current.id);
   };
   const candidateCorrections = scene.objects
     .filter((object) => object.state === "CANDIDATE")
@@ -735,11 +742,27 @@ export function ObjectReviewView({
             </div>
           </div>
         )}
-        {regionOpen && current && membership && (
+        {regionRequest === selected && !regionOpen && current && membership && (
+          <div className="pointer-events-none absolute top-3 right-3 z-20">
+            <RegionFitGate
+              jobId={jobId}
+              object={current}
+              sceneRevision={scene.scene_revision}
+              onReady={(fit) => {
+                setRegionFit(fit);
+                setRegionSession(initialRegionSession(current, fit));
+                setRegionRequest(null);
+              }}
+              onClose={() => setRegionRequest(null)}
+            />
+          </div>
+        )}
+        {regionOpen && regionFit && current && membership && (
           <div className="pointer-events-none absolute top-3 right-3 z-20">
             <RegionEditor
               jobId={jobId}
               object={current}
+              fit={regionFit}
               sceneRevision={scene.scene_revision}
               membershipChecksum={membership.labels_ref.artifact_checksum}
               nameOf={(id) => scene.objects.find((item) => item.id === id)?.name ?? id}
@@ -1029,7 +1052,7 @@ export function ObjectReviewView({
               {selected && membership && Object.values(membership.label_to_object_id).includes(selected) && (
                 "object_geometry" in scene.provenance ? (
                   <div className="flex flex-wrap gap-2">
-                    <Button size="sm" disabled={busy || !current?.primitive_dimensions_xyz_m} onClick={openRegionEditor}>Chỉnh vùng</Button>
+                    <Button size="sm" disabled={busy} onClick={openRegionEditor}>Chỉnh vùng</Button>
                     <Button
                       size="sm"
                       variant="ghost"
