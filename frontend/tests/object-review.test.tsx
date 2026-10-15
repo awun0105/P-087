@@ -9,6 +9,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ObjectReviewView, type SaveState } from "@/features/studio/ObjectReviewView";
 import { SimulationPackagePanel } from "@/features/studio/SimulationPackagePanel";
 import { ObjectifyContext, type ObjectifyHandle } from "@/features/studio/scene/objectifyContext";
+import { jobArtifactContentUrl } from "@/lib/api/endpoints";
 
 vi.mock("@/features/studio/StageViewer", () => ({
   CollisionMeshCanvas: () => <div data-testid="mesh" />,
@@ -17,6 +18,7 @@ vi.mock("@/features/studio/MetricSceneView", () => ({
   MetricSceneView: ({
     boxes,
     objects = [],
+    shells = [],
     physicsObjects = [],
     gizmo,
     onTool,
@@ -32,6 +34,7 @@ vi.mock("@/features/studio/MetricSceneView", () => ({
       dimensions: [number, number, number];
     }[];
     objects?: { id: string; url: string | null; visible: boolean }[];
+    shells?: { id: string; url: string; style: string }[];
     physicsObjects?: {
       id: string;
       position: [number, number, number];
@@ -44,7 +47,7 @@ vi.mock("@/features/studio/MetricSceneView", () => ({
     onTransform?: (id: string, position: [number, number, number], rotation: [number, number, number, number]) => void;
     lockedReason?: string | null;
   }) => (
-    <div data-testid="metric-scene" data-objects={JSON.stringify(objects)} data-boxes={JSON.stringify(boxes)} data-physics-objects={JSON.stringify(physicsObjects)}>
+    <div data-testid="metric-scene" data-objects={JSON.stringify(objects)} data-boxes={JSON.stringify(boxes)} data-physics-objects={JSON.stringify(physicsObjects)} data-shells={JSON.stringify(shells)}>
       {boxes.map((box) => `${box.id}:${box.color}`).join(",")}
       <span data-testid="splats">{objects.map((item) => `${item.id}:${item.url ? "ply" : "none"}:${item.visible}`).join(",")}</span>
       <span data-testid="gizmo">{gizmo ? `${gizmo.id}:${gizmo.mode}` : "none"}</span>
@@ -1428,5 +1431,54 @@ describe("ObjectReviewView chỉnh vùng (T-016)", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Chọn Vật thể 2" }));
     expect(screen.queryByRole("region", { name: "Chỉnh vùng" })).not.toBeInTheDocument();
+  });
+});
+
+/** Vật thứ hai đã xác nhận có Gaussian riêng: Draft không được vẽ Gaussian của nó (tránh chồng với môi trường). */
+function shellScene(objectGeometry: "awaiting_review" | "ready") {
+  const result = membershipScene();
+  return {
+    ...result,
+    provenance: { ...result.provenance, object_geometry: objectGeometry },
+    objects: result.objects.map((object) => ({
+      ...object,
+      visual_ref: { ...ref, artifact_type: "ObjectGaussians" },
+      ...((object as unknown as { id: string }).id === "candidate-002" ? { state: "CONFIRMED", active: true } : {}),
+    })),
+  };
+}
+
+describe("ObjectReviewView vỏ và Gaussian theo Draft/Ready (T-017)", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    global.fetch = vi.fn();
+  });
+
+  it("Draft: không nạp Gaussian của vật nào; mọi vật có vỏ, vật đang chọn là selected", async () => {
+    routeFetch({ "/scene": [reply({ scene: shellScene("awaiting_review") })] });
+    render(<ObjectReviewView jobId="job-a" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Chọn Vật thể 1" }));
+
+    const stage = screen.getByTestId("metric-scene");
+    const objects = JSON.parse(stage.getAttribute("data-objects") ?? "[]") as { url: string | null }[];
+    expect(objects.every((item) => item.url === null)).toBe(true);
+    const shells = JSON.parse(stage.getAttribute("data-shells") ?? "[]") as { id: string; url: string; style: string }[];
+    expect(shells.map((shell) => [shell.id, shell.style])).toEqual([
+      ["candidate-001", "selected"],
+      ["candidate-002", "idle"],
+    ]);
+    expect(shells[0].url).toBe(jobArtifactContentUrl("job-a", ref));
+  });
+
+  it("Ready: vật đã xác nhận nạp Gaussian như trước và không có vỏ vẽ riêng", async () => {
+    routeFetch({ "/scene": [reply({ scene: shellScene("ready") })] });
+    render(<ObjectReviewView jobId="job-a" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Chọn Vật thể 1" }));
+
+    const stage = screen.getByTestId("metric-scene");
+    const objects = JSON.parse(stage.getAttribute("data-objects") ?? "[]") as { id: string; url: string | null }[];
+    const visual = { ...ref, artifact_type: "ObjectGaussians" } as never;
+    expect(objects.find((item) => item.id === "candidate-002")?.url).toBe(jobArtifactContentUrl("job-a", visual));
+    expect(stage.getAttribute("data-shells")).toBe("[]");
   });
 });

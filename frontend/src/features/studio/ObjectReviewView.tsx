@@ -34,6 +34,7 @@ import { initialRegionSession, selectRegionBox, type RegionSession, type RegionV
 import { ObjectifyContext } from "@/features/studio/scene/objectifyContext";
 import { composeColliderTransform } from "@/features/viewer/layers";
 import type { GizmoMode, OverlayBox, OverlayObject } from "@/features/viewer/scene-overlay";
+import type { ShellSpec } from "@/features/viewer/shell-glow";
 import type { PhysicsObjectInput } from "@/features/viewer/usePhysicsPlay";
 import { ApiError } from "@/lib/api/client";
 import { jobArtifactContentUrl, listJobArtifacts } from "@/lib/api/endpoints";
@@ -432,6 +433,22 @@ export function ObjectReviewView({
     object.state === "CANDIDATE" && object.visual_ref?.artifact_type === "ObjectGaussians" &&
     !["DELETED", "MERGED"].includes(String(object.provenance.review)) &&
     !representations.some((item) => item.object_id === object.id));
+  // Draft: không vẽ Gaussian của vật (môi trường đã là 3DGS đầy đủ, vẽ thêm là chồng hai lần); vỏ thay cho Gaussian.
+  const draftScene = scene !== null && objectGeometryState(scene) === "awaiting_review";
+  // Vỏ của từng vật trong Draft (T-017): vỏ thô `geometry_ref`, vật đang chọn sáng hơn. Ready không vẽ vỏ riêng.
+  const shells = useMemo<ShellSpec[]>(
+    () =>
+      draftScene
+        ? (scene?.objects ?? [])
+            .filter((object) => !["DELETED", "MERGED"].includes(String(object.provenance.review)) && object.geometry_ref.artifact_uri.endsWith(".glb"))
+            .map((object): ShellSpec => ({
+              id: object.id,
+              url: jobArtifactContentUrl(jobId, object.geometry_ref),
+              style: object.id === selected ? "selected" : "idle",
+            }))
+        : [],
+    [scene, draftScene, jobId, selected],
+  );
   const splats = useMemo<OverlayObject[]>(
     () => (scene?.objects ?? []).map((object) => {
       const policy = representations.find((item) => item.object_id === object.id);
@@ -458,9 +475,11 @@ export function ObjectReviewView({
       } else if (policy?.visual_policy === "omit") {
         overlay.visible = false;
       }
+      // Draft: không nạp Gaussian của vật; entity vẫn có để vỏ và overlay vùng gắn vào.
+      if (draftScene && object.visual_ref?.artifact_type === "ObjectGaussians") overlay.url = null;
       return overlay;
     }),
-    [scene, representations, jobId, previews, hiddenIds],
+    [scene, draftScene, representations, jobId, previews, hiddenIds],
   );
 
   // Vật động (vật lý của SceneIR) đang đặt trong scene: khi Đi bộ, người đi đẩy được chúng (ADR 0010).
@@ -767,6 +786,7 @@ export function ObjectReviewView({
             cameras={cameras}
             boxes={boxes}
             objects={splats}
+            shells={shells}
             regionEdit={regionOpen ? {
               objectId: regionOpen.objectId,
               boxes: regionOpen.boxes,
