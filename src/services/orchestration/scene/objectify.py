@@ -331,11 +331,16 @@ def objectify(
 ) -> ObjectifyResult:
     """Chạy toàn bộ chặng 4–7 cho một bundle hệ mét; publish artifact và trả phần SceneIR."""
     config = ObjectifyConfig.model_validate({} if scene_config is None else scene_config)
+    draft = (
+        config.scene.geometry_review == "required"
+        and config.scene.geometry_method in {"shell", "objectgs"}
+        and correction is None
+    )
     if correction is not None and config.scene.geometry_method != "objectgs":
         raise ObjectifyError("corrected membership requires strict ObjectGS geometry", retryable=False)
     report_progress = progress or (lambda stage: None)
     objectgs_runtime = None
-    if config.scene.geometry_method == "objectgs":
+    if config.scene.geometry_method == "objectgs" and not draft:
         paths = (
             settings.product_objectgs_runtime_python,
             settings.product_objectgs_repository,
