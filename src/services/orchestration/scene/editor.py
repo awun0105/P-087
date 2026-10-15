@@ -243,7 +243,7 @@ class SceneEditor:
         if isinstance(correction, dict) and isinstance(correction.get("evidence_ref"), dict):
             reference = ProductArtifactRef.model_validate(correction["evidence_ref"])
             if (
-                reference.artifact_type != "ObjectMembershipCorrection"
+                reference.artifact_type not in {"ObjectMembershipCorrection", "ObjectRegionEdit"}
                 or reference.job_id != scene.environment.geometry_ref.job_id
             ):
                 raise SceneEditRejectedError("membership correction evidence does not belong to this scene")

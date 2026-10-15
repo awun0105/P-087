@@ -725,3 +725,184 @@ def test_explicit_object_ids_build_only_requested_reviewed_objects(
     assert current.objects[0].provenance["review"] == "IGNORED"
     assert current.objects[0].collider is not None
     assert current.objects[1] == draft_scene.scene.objects[1]
+
+
+def _ready_override(fixture):
+    import numpy as np
+
+    from src.models.contracts.manifests import StageId
+    from src.services.orchestration.artifacts import FilesystemArtifactStore
+    from src.services.orchestration.scene import object_geometry_build as module
+    from src.services.orchestration.scene.objectify import _reference
+
+    store = FilesystemArtifactStore(fixture.registry.runtime_resolver)
+    labels = fixture.labels.copy()
+    labels[(labels == 2) & (fixture.rows["z"] > 0.2)] = 3
+    payload = labels.astype("<i4").tobytes()
+    initial_ref = store.publish(
+        _reference(
+            fixture.job_id, "test-three/{digest}.i32le", "ObjectMembershipLabels", StageId.SCENE_DECOMPOSE, payload
+        ),
+        payload,
+    )
+    base = fixture.scene
+    pose = base.objects[1].transform.model_copy(update={"local_frame": "candidate-003"})
+    third = base.objects[1].model_copy(
+        update={
+            "id": "candidate-003",
+            "local_frame": "candidate-003",
+            "transform": pose,
+            "source_collision": None,
+            "provenance": {"source_transform": pose.model_dump(mode="json")},
+        }
+    )
+    manifest = base.environment.membership.model_copy(
+        update={
+            "labels_ref": initial_ref,
+            "label_to_object_id": {**base.environment.membership.label_to_object_id, "3": third.id},
+        }
+    )
+    fixture.scene = fixture.registry.scene.publish_next(
+        fixture.job_id,
+        base.scene_revision,
+        base.model_copy(
+            update={
+                "objects": [*base.objects, third],
+                "environment": base.environment.model_copy(update={"membership": manifest}),
+            }
+        ),
+        "fixture-three",
+    ).revision.scene
+    fixture.labels = labels
+    build(fixture)
+    fixture.scene = fixture.registry.scene.current(fixture.job_id).scene
+    labels = fixture.labels.copy()
+    own = np.flatnonzero(labels == 0)
+    labels[own[fixture.rows["x"][own] > 1.0]] = -1
+    store = FilesystemArtifactStore(fixture.registry.runtime_resolver)
+
+    def publish(kind, data, tail):
+        ref = _reference(fixture.job_id, tail, kind, StageId.SCENE_DECOMPOSE, data)
+        return store.publish(ref, data)
+
+    reference = publish("ObjectMembershipLabels", labels.astype("<i4").tobytes(), "test-override/{digest}.i32le")
+    manifest = fixture.scene.environment.membership.model_copy(update={"labels_ref": reference})
+    evidence = publish("ObjectRegionEdit", b'{"operation":"fixture"}', "test-override/{digest}.json")
+    return module.MembershipOverride(labels, manifest, evidence)
+
+
+@pytest.mark.parametrize("method", ["shell", "objectgs"])
+@pytest.mark.parametrize("review", ["IGNORED", "DELETED", "MERGED"])
+def test_partial_membership_build_keeps_other_geometry_and_uses_shell(
+    draft_scene, cpu_providers, monkeypatch, method, review
+):
+    import numpy as np
+
+    from src.services.orchestration.scene import object_geometry_build as module
+    from src.services.scene.decomposition.gaussian_split import positions, read_gaussian_ply
+
+    fixture = draft_scene
+    override = _ready_override(fixture)
+    first = fixture.scene.objects[0]
+    fixture.scene = fixture.registry.scene.publish_next(
+        fixture.job_id,
+        fixture.scene.scene_revision,
+        fixture.scene.model_copy(
+            update={
+                "objects": [
+                    first.model_copy(update={"provenance": {**first.provenance, "review": review}}),
+                    *fixture.scene.objects[1:],
+                ]
+            }
+        ),
+        "fixture-reviewed",
+    ).revision.scene
+    if method == "objectgs":
+        objects = [
+            item.model_copy(
+                update={
+                    "surface_mesh_ref": item.surface_mesh_ref.model_copy(update={"artifact_type": "ObjectSurfaceMesh"}),
+                    "provenance": {**item.provenance, "surface_selection": {"chosen": "objectgs"}},
+                }
+            )
+            for item in fixture.scene.objects
+        ]
+        fixture.scene = fixture.registry.scene.publish_next(
+            fixture.job_id,
+            fixture.scene.scene_revision,
+            fixture.scene.model_copy(update={"objects": objects}),
+            "fixture-objectgs-surfaces",
+        ).revision.scene
+    before = fixture.scene
+    monkeypatch.setattr(module, "load_job_config", lambda *args: SimpleNamespace(scene={"geometry_method": method}))
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("partial rebuild must never enter ObjectGS")
+
+    monkeypatch.setattr(module, "_objectgs_runtime", forbidden)
+    monkeypatch.setattr(module, "_objectgs_surfaces", forbidden)
+    revision = build(fixture, object_ids={first.id}, membership_override=override)
+    current = fixture.registry.scene.current(fixture.job_id).scene
+    assert current.scene_revision == revision
+    assert current.scene_revision == f"rev-{int(before.scene_revision.split('-')[1]) + 1:03d}"
+    assert current.environment.membership == override.manifest
+    assert len(current.objects) == 3
+    assert current.objects[1:] == before.objects[1:]
+    target = current.objects[0]
+    assert target.provenance["review"] == review
+    assert target.collider.geometry_ref != before.objects[0].collider.geometry_ref
+    assert target.provenance["surface_selection"]["chosen"] == "gaussian_shell"
+    if method == "objectgs":
+        assert target.provenance["surface_selection"]["reason"] == "partial_rebuild_uses_shell"
+    assert current.environment.visual_master_ref != before.environment.visual_master_ref
+    assert current.environment.collider_ref != before.environment.collider_ref
+    local = read_gaussian_ply(fixture.registry.runtime_resolver.require(target.visual_ref).read_bytes())
+    np.testing.assert_allclose(
+        positions(local) + target.provenance["source_transform"]["translation_xyz"],
+        positions(fixture.rows[override.labels == 0]),
+        atol=1e-7,
+    )
+    assert current.provenance["membership_correction"]["evidence_ref"] == override.evidence_ref.model_dump(mode="json")
+    assert override.evidence_ref in fixture.registry.scene.artifact_references(current)
+
+
+@pytest.mark.parametrize(
+    "outcome", ["cancelled", "shell_failure", "stale", "wrong_labels", "wrong_source", "missing_ids"]
+)
+def test_partial_build_failure_keeps_ready_head(draft_scene, cpu_providers, monkeypatch, outcome):
+    from dataclasses import replace
+    from threading import Event
+
+    from src.services.orchestration.scene import object_geometry_build as module
+    from src.services.process_control import ProcessCancelledError
+    from src.services.scene.editing.membership import StaleObjectMembershipRevisionError
+
+    fixture = draft_scene
+    override = _ready_override(fixture)
+    before = fixture.scene
+    kwargs = {"object_ids": {"candidate-001"}, "membership_override": override}
+    error = module.ObjectGeometryBuildError
+    if outcome == "cancelled":
+        cancel = Event()
+        kwargs.update(cancel_event=cancel, progress=lambda phase: cancel.set() if phase == "environment" else None)
+        error = ProcessCancelledError
+    elif outcome == "shell_failure":
+
+        def fail(*args, **kwargs):
+            raise module.GaussianShellError("fixture failed shell")
+
+        monkeypatch.setattr(module, "build_gaussian_shell", fail)
+    elif outcome == "stale":
+        fixture.scene = before.model_copy(update={"scene_revision": "rev-000"})
+        error = StaleObjectMembershipRevisionError
+    elif outcome == "wrong_labels":
+        kwargs["membership_override"] = replace(override, labels=fixture.labels)
+    elif outcome == "wrong_source":
+        kwargs["membership_override"] = replace(
+            override, manifest=override.manifest.model_copy(update={"extraction_revision": "rev-999"})
+        )
+    else:
+        kwargs["object_ids"] = None
+    with pytest.raises(error):
+        build(fixture, **kwargs)
+    assert fixture.registry.scene.current(fixture.job_id).scene == before
