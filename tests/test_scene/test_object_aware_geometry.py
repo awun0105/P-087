@@ -1,5 +1,7 @@
 """Connected floor/table/wall fixture tests ownership before meshing, not triangle carving."""
 
+import hashlib
+
 import numpy as np
 import pytest
 import trimesh
@@ -99,3 +101,13 @@ def test_budget_and_invalid_membership_fail_without_mesh_or_fill_fallback():
         build_background_collision(points, labels.astype(float), {1}, voxel_m=0.1)
     with pytest.raises(ValueError, match="background cannot"):
         build_background_collision(points, labels, {-1}, voxel_m=0.1)
+
+
+def test_background_collision_checksum_unchanged_after_refactor():
+    points, labels = fixture()
+    result = build_background_collision(points, labels, {1}, voxel_m=0.1)
+    # Golden values captured before occupancy_surface() was extracted. occupancy_checksum hashes only the kept
+    # cells, so the mesh digest is what pins the emitted vertices and faces.
+    mesh_digest = hashlib.sha256(result.vertices.astype("<f8").tobytes() + result.faces.astype("<i8").tobytes())
+    assert result.occupancy_checksum == "sha256:caea4ebef4569c056cc8a0b551e8ced62e95a5234ae5826cb4c0f255cf7ae1ab"
+    assert mesh_digest.hexdigest() == "a2bedb2a16b128bf4658b2760f5f00f1c6f38298b46652acc97dc0141af9850d"
