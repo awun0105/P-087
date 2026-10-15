@@ -411,7 +411,32 @@ interface FakeGizmoLike {
   _shapes: Record<string, { entity: { enabled: boolean } }>;
   _getSelection: Mock;
   _onPointerMove: Mock;
+  destroy: Mock;
   fire(event: string): void;
+}
+
+/** Ghi lại listener canvas còn đang đăng ký (cộng trừ theo loại, hàm, pha capture). */
+function trackCanvasListeners(canvas: HTMLCanvasElement): () => number {
+  type Listener = EventListenerOrEventListenerObject;
+  const live: Array<[string, Listener, boolean]> = [];
+  const captureOf = (options?: boolean | AddEventListenerOptions | EventListenerOptions) =>
+    typeof options === "boolean" ? options : Boolean(options?.capture);
+  const target = canvas as unknown as {
+    addEventListener(type: string, listener: Listener, options?: boolean | AddEventListenerOptions): void;
+    removeEventListener(type: string, listener: Listener, options?: boolean | EventListenerOptions): void;
+  };
+  const add = target.addEventListener.bind(canvas);
+  const remove = target.removeEventListener.bind(canvas);
+  target.addEventListener = (type, listener, options) => {
+    add(type, listener, options);
+    live.push([type, listener, captureOf(options)]);
+  };
+  target.removeEventListener = (type, listener, options) => {
+    remove(type, listener, options);
+    const at = live.findIndex(([t, l, c]) => t === type && l === listener && c === captureOf(options));
+    if (at >= 0) live.splice(at, 1);
+  };
+  return () => live.length;
 }
 
 function gizmosOf(overlay: RegionOverlay): { rotateGizmo: FakeGizmoLike; translateGizmo: FakeGizmoLike } {
@@ -595,6 +620,59 @@ describe("RegionOverlay.viewFrom", () => {
     const { overlay, gotoPose } = scene();
     gotoPose.mockReturnValueOnce(false);
     overlay.setBoxes([box()], "b1");
+    expect(overlay.viewFrom("top")).toBe(false);
+  });
+});
+
+describe("RegionOverlay.destroy", () => {
+  it("takes every entity it added out of the scene graph", () => {
+    const { object, overlay } = scene();
+    overlay.setBoxes([box({ id: "a" }), box({ id: "b", op: "subtract" })], "a");
+    overlay.destroy();
+    expect(object.findByName("r2s-region")).toBeNull();
+    expect(object.findByName("region-box-a")).toBeNull();
+    expect(object.children.length).toBe(0);
+  });
+
+  it("removes every pointer listener it added to the canvas", () => {
+    const canvas = document.createElement("canvas");
+    const liveListeners = trackCanvasListeners(canvas);
+    const app = fakeApp(canvas);
+    const object = new Entity("obj-1", app);
+    app.root.addChild(object);
+    const overlay = new RegionOverlay(fakeHost(app, object, pinholeCamera(app)), "obj-1", handlers());
+    overlay.setBoxes([box()], "b1");
+    expect(liveListeners()).toBeGreaterThan(0);
+    overlay.destroy();
+    expect(liveListeners()).toBe(0);
+  });
+
+  it("unregisters its frame handler and removes the Escape listener if a drag was running", () => {
+    const { app, canvas, camera, overlay } = scene();
+    const onUpdate = (app.on as Mock).mock.calls.find(([name]) => name === "update")![1];
+    overlay.setBoxes([box()], "b1");
+    pointer(canvas, "pointerdown", screenOf(camera, [0.5, 0, 0]));
+    const removeWindow = vi.spyOn(window, "removeEventListener");
+    overlay.destroy();
+    expect(app.off).toHaveBeenCalledWith("update", onUpdate);
+    expect(removeWindow).toHaveBeenCalledWith("keydown", expect.any(Function));
+  });
+
+  it("destroys the rotate and translate gizmos", () => {
+    const { overlay } = scene();
+    overlay.setBoxes([box()], "b1");
+    const { rotateGizmo, translateGizmo } = gizmosOf(overlay);
+    overlay.destroy();
+    expect(rotateGizmo.destroy).toHaveBeenCalledTimes(1);
+    expect(translateGizmo.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it("is safe to call twice and ignores calls made after it", () => {
+    const { object, overlay } = scene();
+    overlay.destroy();
+    overlay.destroy();
+    overlay.setBoxes([box()], "b1");
+    expect(object.children.length).toBe(0);
     expect(overlay.viewFrom("top")).toBe(false);
   });
 });

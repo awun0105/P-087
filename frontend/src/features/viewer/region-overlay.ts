@@ -350,6 +350,36 @@ export class RegionOverlay {
     return this.host.gotoPose(viewPose(preset, toVec3(root.getPosition()), axes, halfDiag, camera.fov));
   }
 
+  /**
+   * Gỡ mọi thứ overlay đã thêm: entity khỏi scene, gizmo, listener trên canvas, cửa sổ và app, vật liệu. Sau khi gọi,
+   * các lời gọi khác không làm gì; gọi lại cũng an toàn.
+   */
+  destroy(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.faceDrag = null;
+    this.gizmoDrag = null;
+    window.removeEventListener("keydown", this.onEscape);
+    this.app.off("update", this.onUpdate);
+    this.canvas.removeEventListener("pointerdown", this.onPointerDown);
+    this.isolation.dispose();
+    this.rotateIsolation?.dispose();
+    this.translateIsolation?.dispose();
+    this.rotateGizmo?.destroy();
+    this.translateGizmo?.destroy();
+    this.rotateGizmo = null;
+    this.translateGizmo = null;
+    this.rotateIsolation = null;
+    this.translateIsolation = null;
+    this.gizmoTarget = null;
+    for (const handle of this.handles) handle.entity.destroy();
+    for (const visual of this.visuals.values()) visual.root.destroy();
+    this.visuals.clear();
+    this.root.destroy();
+    for (const material of this.materials.values()) material.destroy();
+    this.materials.clear();
+  }
+
   /** Mặt sàn (z, object-local). Khi thả, box không được xuống dưới sàn; chưa đặt sàn thì không kẹp. */
   setFloorZ(floorZ: number): void {
     this.floorZ = floorZ;
