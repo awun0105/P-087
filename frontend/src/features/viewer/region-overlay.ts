@@ -16,10 +16,26 @@ import {
   PRIMITIVE_TRIANGLES,
   Quat,
   StandardMaterial,
+  Vec3 as PcVec3,
 } from "playcanvas";
 
-import type { BoxOp, EditableBox, Vec3 } from "@/features/studio/region/box-model";
-import type { SceneOverlay } from "@/features/viewer/scene-overlay";
+import {
+  boxesKey,
+  dragFace,
+  faceCenter,
+  faceNormal,
+  type BoxOp,
+  type EditableBox,
+  type FaceId,
+  type Vec3,
+} from "@/features/studio/region/box-model";
+import {
+  isolatePointerGesture,
+  rayUnitBox,
+  type PointerGesture,
+  type PointerIsolation,
+  type SceneOverlay,
+} from "@/features/viewer/scene-overlay";
 
 export interface RegionOverlayHandlers {
   /** Gọi khi thả tay nắm hoặc gizmo, không gọi lúc đang kéo. Nhận toàn bộ danh sách box, đã qua clamp sàn. */
@@ -37,19 +53,79 @@ export type RegionHost = Pick<
 
 const ADD_COLOR = "#22c55e";
 const SUBTRACT_COLOR = "#ef4444";
+const HANDLE_COLOR = "#ffffff";
 const FACE_OPACITY = 0.08;
 const EDGE_THICKNESS_M = 0.006;
 const SELECTED_EDGE_THICKNESS_M = 0.014;
 const DASH_LENGTH_M = 0.12;
 const DASH_GAP_M = 0.08;
+/** Tay nắm mặt rộng cỡ này trên màn hình, ở mọi khoảng cách. */
+const HANDLE_PX = 14;
+/** Bán kính bắt chuột quanh tâm tay nắm, theo pixel CSS. */
+const HANDLE_HIT_PX = 9;
+const FACE_IDS: readonly FaceId[] = ["+x", "-x", "+y", "-y", "+z", "-z"];
+const FACE_AXIS: Record<FaceId, { axis: 0 | 1 | 2; sign: 1 | -1 }> = {
+  "+x": { axis: 0, sign: 1 },
+  "-x": { axis: 0, sign: -1 },
+  "+y": { axis: 1, sign: 1 },
+  "-y": { axis: 1, sign: -1 },
+  "+z": { axis: 2, sign: 1 },
+  "-z": { axis: 2, sign: -1 },
+};
 
 function copyVec3(v: Vec3): Vec3 {
   return [v[0], v[1], v[2]];
 }
 
+function copyBox(box: EditableBox): EditableBox {
+  return { ...box, center: copyVec3(box.center), half: copyVec3(box.half) };
+}
+
+function dot(a: Vec3, b: Vec3): number {
+  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
 /** Quaternion quay quanh +Z (xyzw), khớp quy ước yaw của box model. */
 function yawQuat(yaw: number): Quat {
   return new Quat(0, 0, Math.sin(yaw / 2), Math.cos(yaw / 2));
+}
+
+/** Màu theo thao tác: cộng xanh lục, trừ đỏ. */
+function colorOf(op: BoxOp): string {
+  return op === "add" ? ADD_COLOR : SUBTRACT_COLOR;
+}
+
+/**
+ * Tham số t của điểm trên đường thẳng `linePoint + t·lineDir` gần tia `origin + s·direction` nhất. Null khi song song.
+ * Dùng để kéo tay nắm: khoảng dịch chuyển = t hiện tại − t lúc bấm.
+ */
+export function rayLineParam(origin: Vec3, direction: Vec3, linePoint: Vec3, lineDir: Vec3): number | null {
+  const w: Vec3 = [origin[0] - linePoint[0], origin[1] - linePoint[1], origin[2] - linePoint[2]];
+  const a = dot(direction, direction);
+  const b = dot(direction, lineDir);
+  const c = dot(lineDir, lineDir);
+  const d = dot(direction, w);
+  const e = dot(lineDir, w);
+  const denom = a * c - b * b;
+  if (Math.abs(denom) < 1e-12) return null;
+  return (a * e - b * d) / denom;
+}
+
+/** Đường kính (m) của tay nắm để rộng `HANDLE_PX` pixel ở `distanceM`, với FOV dọc và chiều cao viewport. */
+export function handleScale(distanceM: number, fovDeg: number, viewportHeightPx: number): number {
+  const metersPerPixel = (2 * distanceM * Math.tan((fovDeg * Math.PI) / 360)) / viewportHeightPx;
+  return HANDLE_PX * metersPerPixel;
+}
+
+/**
+ * Vị trí tay nắm trong khung của box trước khi xoay: tâm của mặt, tức ±half trên trục tương ứng. Yaw đã có sẵn trong
+ * transform của box nên không áp lại ở đây.
+ */
+function handleOffset(half: Vec3, face: FaceId): Vec3 {
+  const { axis, sign } = FACE_AXIS[face];
+  const offset: Vec3 = [0, 0, 0];
+  offset[axis] = sign * half[axis];
+  return offset;
 }
 
 /** Đoạn [from, to] của một cạnh; cạnh box trừ được chia thành nét đứt. */
@@ -112,7 +188,7 @@ export function edgeBars(half: Vec3, dashed: boolean, thickness: number): { posi
   return { positions, indices };
 }
 
-/** Vật liệu trong suốt (mặt) hoặc đặc (cạnh), không đổ bóng, hai mặt. Cùng kiểu với `material` của scene-overlay. */
+/** Vật liệu trong suốt (mặt) hoặc đặc (cạnh, tay nắm), không đổ bóng, hai mặt. Cùng kiểu với `material` của scene-overlay. */
 function regionMaterial(hex: string, opacity: number): StandardMaterial {
   const result = new StandardMaterial();
   result.diffuse = new Color(0, 0, 0);
@@ -134,15 +210,32 @@ interface BoxVisual {
   key: string;
 }
 
+interface Handle {
+  face: FaceId;
+  entity: Entity;
+}
+
+/** Một lần kéo tay nắm đang diễn ra: box gốc lúc bấm và tham số của tia lúc bấm. */
+interface FaceDrag {
+  face: FaceId;
+  original: EditableBox;
+  before: EditableBox[];
+  startParam: number;
+}
+
 function styleKey(box: EditableBox, selected: boolean): string {
   return `${box.op}|${selected}|${box.half.join(",")}`;
 }
 
 export class RegionOverlay {
   private readonly app: AppBase;
+  private readonly canvas: HTMLCanvasElement;
   private readonly root: Entity;
   private readonly visuals = new Map<string, BoxVisual>();
   private readonly materials = new Map<string, StandardMaterial>();
+  private readonly handles: Handle[];
+  private readonly isolation: PointerIsolation;
+  private faceDrag: FaceDrag | null = null;
   private boxes: EditableBox[] = [];
   private selectedId: string | null = null;
   private disposed = false;
@@ -157,14 +250,24 @@ export class RegionOverlay {
     const object = host.objectEntity(objectId);
     if (!object) throw new Error(`RegionOverlay: chưa có entity cho vật ${objectId}`);
     this.app = host.application();
+    this.canvas = this.app.graphicsDevice.canvas;
     this.root = new Entity("r2s-region", this.app);
     object.addChild(this.root);
+    this.handles = FACE_IDS.map((face) => {
+      const entity = new Entity(`region-handle-${face}`, this.app);
+      entity.addComponent("render", { type: "sphere", material: this.material("handle", HANDLE_COLOR, 1), castShadows: false });
+      entity.enabled = false;
+      return { face, entity };
+    });
+    this.isolation = isolatePointerGesture(this.canvas, this.faceGesture());
+    this.canvas.addEventListener("pointerdown", this.onPointerDown);
+    this.app.on("update", this.onUpdate);
   }
 
   /** Vẽ lại toàn bộ box; `selectedId` không có trong danh sách thì coi như không chọn. */
   setBoxes(boxes: readonly EditableBox[], selectedId: string | null): void {
     if (!this.live()) return;
-    this.boxes = boxes.map((box) => ({ ...box, center: copyVec3(box.center), half: copyVec3(box.half) }));
+    this.boxes = boxes.map(copyBox);
     this.selectedId = this.boxes.some((box) => box.id === selectedId) ? selectedId : null;
     this.sync();
   }
@@ -175,6 +278,7 @@ export class RegionOverlay {
   }
 
   private sync(): void {
+    this.detachHandles();
     const present = new Set<string>();
     for (const box of this.boxes) {
       present.add(box.id);
@@ -191,6 +295,7 @@ export class RegionOverlay {
       visual.root.destroy();
       this.visuals.delete(id);
     }
+    this.placeHandles();
     this.host.requestFrame();
   }
 
@@ -223,7 +328,7 @@ export class RegionOverlay {
   /** Mặt box: hộp đơn vị co giãn theo kích thước, trong suốt. */
   private createFaces(box: EditableBox): Entity {
     const faces = new Entity(`region-faces-${box.id}`, this.app);
-    faces.addComponent("render", { type: "box", material: this.material("face", box.op), castShadows: false });
+    faces.addComponent("render", { type: "box", material: this.material(`face-${box.op}`, colorOf(box.op), FACE_OPACITY), castShadows: false });
     faces.setLocalScale(2 * box.half[0], 2 * box.half[1], 2 * box.half[2]);
     return faces;
   }
@@ -237,20 +342,174 @@ export class RegionOverlay {
     mesh.update(PRIMITIVE_TRIANGLES);
     const edges = new Entity(`region-edges-${box.id}`, this.app);
     edges.addComponent("render", {
-      meshInstances: [new PcMeshInstance(mesh, this.material("edge", box.op))],
+      meshInstances: [new PcMeshInstance(mesh, this.material(`edge-${box.op}`, colorOf(box.op), 1))],
       castShadows: false,
     });
     return edges;
   }
 
-  private material(kind: "face" | "edge", op: BoxOp): StandardMaterial {
-    const key = `${kind}-${op}`;
+  private material(key: string, hex: string, opacity: number): StandardMaterial {
     let found = this.materials.get(key);
     if (!found) {
-      const hex = op === "add" ? ADD_COLOR : SUBTRACT_COLOR;
-      found = regionMaterial(hex, kind === "face" ? FACE_OPACITY : 1);
+      found = regionMaterial(hex, opacity);
       this.materials.set(key, found);
     }
     return found;
   }
+
+  /** Gỡ tay nắm khỏi cây scene trước khi dựng lại box, để xoá một box không kéo theo tay nắm. */
+  private detachHandles(): void {
+    for (const handle of this.handles) {
+      handle.entity.parent?.removeChild(handle.entity);
+      handle.entity.enabled = false;
+    }
+  }
+
+  /** Gắn tay nắm dưới box đang chọn, tại các mặt của nó, rồi chỉnh cỡ theo camera. */
+  private placeHandles(): void {
+    const box = this.boxes.find((item) => item.id === this.selectedId);
+    const visual = box ? this.visuals.get(box.id) : undefined;
+    if (!box || !visual) return;
+    for (const handle of this.handles) {
+      const offset = handleOffset(box.half, handle.face);
+      visual.root.addChild(handle.entity);
+      handle.entity.setLocalPosition(offset[0], offset[1], offset[2]);
+      handle.entity.enabled = true;
+    }
+    this.scaleHandles();
+  }
+
+  /** Giữ tay nắm ~14 px trên màn hình khi camera di chuyển. */
+  private scaleHandles(): void {
+    const camera = this.host.activeCamera();
+    const visual = this.selectedId ? this.visuals.get(this.selectedId) : undefined;
+    if (!camera || !visual) return;
+    const distance = camera.entity.getPosition().clone().distance(visual.root.getPosition());
+    const size = handleScale(distance, camera.fov, this.app.graphicsDevice.clientRect.height);
+    for (const handle of this.handles) handle.entity.setLocalScale(size, size, size);
+  }
+
+  /** Mặt có tay nắm nằm dưới con trỏ (trong bán kính bắt chuột), hoặc null. */
+  private handleAt(x: number, y: number): FaceId | null {
+    const camera = this.host.activeCamera();
+    if (!camera || !this.live()) return null;
+    for (const handle of this.handles) {
+      if (!handle.entity.enabled) continue;
+      const screen = camera.worldToScreen(handle.entity.getPosition());
+      if (Math.hypot(screen.x - x, screen.y - y) <= HANDLE_HIT_PX) return handle.face;
+    }
+    return null;
+  }
+
+  /** Tia con trỏ trong khung object-local (khung gốc overlay), hoặc null khi chưa có camera. */
+  private pointerRay(x: number, y: number): { origin: Vec3; direction: Vec3 } | null {
+    const camera = this.host.activeCamera();
+    if (!camera) return null;
+    const toLocal = this.root.getWorldTransform().clone().invert();
+    const near = toLocal.transformPoint(camera.entity.getPosition().clone(), new PcVec3());
+    const far = toLocal.transformPoint(camera.screenToWorld(x, y, camera.farClip), new PcVec3());
+    const direction = far.sub(near).normalize();
+    return { origin: [near.x, near.y, near.z], direction: [direction.x, direction.y, direction.z] };
+  }
+
+  /** Box gần nhất dưới con trỏ, hoặc null. Tia đưa về khung đơn vị của mặt box (mặt có scale 2·half). */
+  private pickBox(x: number, y: number): string | null {
+    const camera = this.host.activeCamera();
+    if (!camera) return null;
+    const eye = camera.entity.getPosition().clone();
+    const aim = camera.screenToWorld(x, y, camera.farClip).sub(eye).normalize();
+    let best: string | null = null;
+    let nearest = Infinity;
+    for (const [id, visual] of this.visuals) {
+      const inverse = visual.faces.getWorldTransform().clone().invert();
+      const origin = inverse.transformPoint(eye, new PcVec3());
+      const direction = inverse.transformVector(aim, new PcVec3());
+      const hit = rayUnitBox([origin.x, origin.y, origin.z], [direction.x, direction.y, direction.z]);
+      if (hit !== null && hit < nearest) {
+        nearest = hit;
+        best = id;
+      }
+    }
+    return best;
+  }
+
+  private snapshot(): EditableBox[] {
+    return this.boxes.map(copyBox);
+  }
+
+  /** Cử chỉ kéo tay nắm: bắt bằng pointer ở pha capture, nên camera không thấy lúc đang kéo. */
+  private faceGesture(): PointerGesture {
+    return {
+      hit: (e) => this.handleAt(e.offsetX, e.offsetY) !== null,
+      press: (e) => this.beginFaceDrag(e.offsetX, e.offsetY),
+      move: (e) => this.moveFaceDrag(e.offsetX, e.offsetY),
+      release: () => this.endFaceDrag(),
+      abort: () => this.revertFaceDrag(),
+    };
+  }
+
+  private beginFaceDrag(x: number, y: number): void {
+    const face = this.handleAt(x, y);
+    const original = this.boxes.find((box) => box.id === this.selectedId);
+    const ray = this.pointerRay(x, y);
+    if (!face || !original || !ray) return;
+    const startParam = rayLineParam(ray.origin, ray.direction, faceCenter(original, face), faceNormal(original, face));
+    if (startParam === null) return;
+    this.faceDrag = { face, original: copyBox(original), before: this.snapshot(), startParam };
+    window.addEventListener("keydown", this.onEscape);
+  }
+
+  /** Xem trước khi kéo: box đổi ngay theo tia, nhưng chưa báo ra ngoài. */
+  private moveFaceDrag(x: number, y: number): void {
+    const drag = this.faceDrag;
+    const ray = this.pointerRay(x, y);
+    if (!drag || !ray) return;
+    const param = rayLineParam(
+      ray.origin,
+      ray.direction,
+      faceCenter(drag.original, drag.face),
+      faceNormal(drag.original, drag.face),
+    );
+    if (param === null) return;
+    const moved = dragFace(drag.original, drag.face, param - drag.startParam);
+    this.boxes = this.boxes.map((box) => (box.id === moved.id ? moved : box));
+    this.sync();
+  }
+
+  /** Thả tay nắm: chỉ báo ra ngoài khi box thật sự đổi. */
+  private endFaceDrag(): void {
+    const drag = this.faceDrag;
+    if (!drag) return;
+    this.faceDrag = null;
+    window.removeEventListener("keydown", this.onEscape);
+    if (boxesKey(this.boxes) !== boxesKey(drag.before)) this.handlers.onChange(this.snapshot());
+  }
+
+  /** Huỷ kéo (Esc): trả box về trạng thái trước khi bấm, không báo ra ngoài. */
+  private revertFaceDrag(): void {
+    const drag = this.faceDrag;
+    if (!drag) return;
+    this.faceDrag = null;
+    window.removeEventListener("keydown", this.onEscape);
+    this.boxes = drag.before.map(copyBox);
+    this.sync();
+  }
+
+  /** Bấm trái lên một box không phải tay nắm: chọn box đó. Nghe ở pha bubble, nên tay nắm đã nuốt sự kiện thì không tới đây. */
+  private readonly onPointerDown = (e: PointerEvent): void => {
+    if (!this.live() || e.button !== 0 || e.target !== this.canvas) return;
+    const id = this.pickBox(e.offsetX, e.offsetY);
+    if (id === null || id === this.selectedId) return;
+    this.selectedId = id;
+    this.sync();
+    this.handlers.onSelect(id);
+  };
+
+  private readonly onUpdate = (): void => {
+    if (this.live()) this.scaleHandles();
+  };
+
+  private readonly onEscape = (e: KeyboardEvent): void => {
+    if (e.key === "Escape") this.isolation.cancel();
+  };
 }
