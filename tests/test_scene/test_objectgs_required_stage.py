@@ -20,8 +20,15 @@ def test_required_objectgs_failure_never_publishes_a_legacy_scene(tmp_path, monk
         raise ObjectifyError("required ObjectGS failed", retryable=False)
 
     monkeypatch.setattr(extraction, "objectify_with_retry", fail)
+    monkeypatch.setattr(extraction, "load_job_config", lambda *a: None)
     with pytest.raises(ObjectifyError):
-        extraction.extract_scene(SimpleNamespace(), SimpleNamespace(), SimpleNamespace(), Settings(), tmp_path)
+        extraction.extract_scene(
+            SimpleNamespace(runtime_resolver=None),
+            SimpleNamespace(job_id="job-test", config_checksum=None),
+            SimpleNamespace(),
+            Settings(),
+            tmp_path,
+        )
     assert not published
 
 
