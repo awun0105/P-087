@@ -50,4 +50,4 @@
 | T-022 | Giữ số Gaussian vá nền khi Tạo mesh (GR-01, P1) | Preflight/package PASS khi inpaint > 0 | T-019 | S |
 | T-023 | Box ban đầu khớp nhóm Gaussian hiện tại (GR-02, P1) | Route fit; mở lại Chỉnh vùng không loại hàng | T-019 | M |
 | T-024 | Chỉ dẫn lỗi: banner, donor, preview 409 (GR-03/04/06) | Người dùng thấy lỗi trước khi bấm | T-019 | M |
-| T-025 | Hiệu năng preview + khoá cache (GR-05) | Warm 2M hàng ≤ 1,5 s; không chặn khi đọc PLY | T-019 | M |
+| T-025 | Hiệu năng preview + khoá cache (GR-05) | Warm 2M hàng ≤ 1,5 s; không chặn khi đọc PLY | T-024 | M |

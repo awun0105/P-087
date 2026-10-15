@@ -19,9 +19,9 @@ Verdict: CHANGES REQUESTED — chưa đóng được; phần đã làm đạt.
    phân biệt sẽ thêm token riêng ở task sau. Không chặn.
 3. Lỗi mở được tách thành task: GR-01 → **T-022**, GR-02 → **T-023**, GR-03/04/06 → **T-024**, GR-05 → **T-025**. Thêm T-021
    (tiến trình/chuông hiểu Draft). Ghi vào handoff mục "Việc còn mở" với ID task.
-4. **Round 2 của T-019** sau khi T-021–T-024 accepted (T-025 có thể sau): chạy lại full backend **một lần trên source cuối**,
+4. **Round 2 của T-019** sau khi T-021–T-025 accepted (thứ tự: T-023 → T-024 → T-021 → T-025): chạy lại full backend **một lần trên source cuối**,
    full frontend, lint/typecheck/mirror; cập nhật số trong report và handoff. Test budget 300k: nếu T-025 chưa xong, ghi là
    failure đã biết, có task theo dõi (đúng tiêu chí 1 của plan).
 
 ## Thứ tự trước khi chạy scene demo
-T-022 → T-023 → T-024 → T-021 → T-019 round 2 → chạy thử 1 scene. T-025 không chặn demo.
+T-022 → T-023 → T-024 → T-021 → T-025 → T-019 round 2 → chạy thử 1 scene.
