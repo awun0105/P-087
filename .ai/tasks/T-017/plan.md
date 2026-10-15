@@ -47,8 +47,9 @@ export class ShellGlowLayer {
 2. `setPointSets` + test (số điểm, màu, depthTest). Commit.
 3. Nhịp phát sáng + reduced-motion + test. Commit.
 4. RegionEditor: preview mới → `setShell`/`setPointSets`; đóng editor → `clear`. Test. Commit.
-5. Draft rendering trong `ObjectReviewView`: không đưa Gaussian của vật vào overlay; vẽ vỏ `idle` cho mọi vật từ `geometry_ref`
-   (URL `jobArtifactContentUrl`), `selected` cho vật đang chọn. Ready: hành vi cũ. Test. Commit.
+5. Draft rendering trong `ObjectReviewView`: vẫn tạo `OverlayObject` cho mọi vật để có entity gốc (RegionOverlay của T-015 và
+   ShellGlowLayer gắn vào `objectEntity(id)`), nhưng với `url: null` (không nạp Gaussian của vật, tránh vẽ chồng); vẽ vỏ `idle`
+   cho mọi vật từ `geometry_ref` (URL `jobArtifactContentUrl`), `selected` cho vật đang chọn. Ready: hành vi cũ. Test. Commit.
 
 ## Acceptance criteria
 1. Vỏ gắn làm con của root vật → di theo transform vật; trong Draft vật không Move nên trùng vị trí Gaussian.

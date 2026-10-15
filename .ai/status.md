@@ -12,7 +12,7 @@ T-011 | Sửa vùng sau khi ready → rebuild vật bị ảnh hưởng | planne
 T-012 | Khoá Walk/USD/Move khi Draft | planned | engineer
 T-013 | API client + banner Draft + tiến độ build | planned | engineer
 T-014 | Box model TypeScript thuần | accepted | -
-T-015 | Box overlay + tay nắm + góc nhìn | implemented | engineer
+T-015 | Box overlay + tay nắm + góc nhìn | accepted | -
 T-016 | Region Editor panel | planned | engineer
 T-017 | Vỏ phát sáng + điểm thêm/bớt | planned | engineer
 T-020 | Lựa chọn Duyệt trước / Tạo mesh ngay khi tạo job | planned | engineer

@@ -44,10 +44,18 @@ Panel nổi bên phải viewport (cùng chỗ panel vật), tiêu đề "Chỉnh
 - 409 → "Scene đã đổi ở lượt khác. Tải lại để chỉnh tiếp." + nút Tải lại. 422 → hiện `message` server.
 - Bàn phím: Delete xoá box đang chọn (trừ box cộng cuối), Esc huỷ kéo (T-015) hoặc đóng panel nếu không kéo.
 
+## Bàn giao bắt buộc từ T-015
+1. Nối `gotoPose` của viewer vào `SceneOverlay` qua `bindViewerGotoPose` trong `MetricSceneView` (chỗ đang có `ViewerControls`).
+   Chưa nối thì `RegionOverlay.viewFrom` trả `false`; nút góc nhìn phải disabled khi `viewFrom` trả false lần đầu (hiện tooltip).
+2. Không gọi `RegionOverlay.setBoxes` trong lúc đang kéo: chỉ cập nhật box từ `onChange` (đã là lúc thả), và chặn mọi cập nhật
+   từ preview/props ghi đè box khi overlay đang có cử chỉ kéo.
+3. Khi entity của vật bị dựng lại (đổi URL visual, revision mới), `destroy()` RegionOverlay cũ và tạo lại với box hiện tại.
+4. `RegionOverlay` gắn vào `SceneOverlay.objectEntity(objectId)`; entity này chỉ tồn tại khi vật có `OverlayObject`. Xem T-017 bước 5.
+
 ## Steps
 1. API client + test fetch (URL, body, xử lý 201/202). Commit.
 2. `useRegionPreview`: debounce 250 ms sau `onChange`, `AbortController` huỷ request cũ, trả `{preview, key, loading, error}` + test (fake timers). Commit.
-3. `RegionEditor` danh sách box + thêm/xoá + góc nhìn + test. Commit.
+3. `RegionEditor` danh sách box + thêm/xoá + góc nhìn + bàn giao T-015 (1–3) + test. Commit.
 4. Bộ đếm, chồng lấn + Lấy luôn, shell_error + test. Commit.
 5. Apply/Huỷ + 409/422 + test. Commit.
 6. Nối vào `ObjectReviewView` (nút Chỉnh vùng, Brush/Lasso thành lựa chọn phụ) + test trong `object-review.test.tsx`. Commit.
