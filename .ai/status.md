@@ -9,7 +9,7 @@ T-008 | Nâng cấp ObjectGS theo từng vật | planned | engineer
 T-009 | Hàng đợi mode geometry + API build | planned | engineer
 T-010 | API region preview/apply trên Draft | planned | engineer
 T-011 | Sửa vùng sau khi ready → rebuild vật bị ảnh hưởng | planned | engineer
-T-012 | Khoá Walk/USD/Move khi Draft | planned | engineer
+T-012 | Khoá Walk/USD/Move khi Draft | implemented | summarizer
 T-013 | API client + banner Draft + tiến độ build | planned | engineer
 T-014 | Box model TypeScript thuần | accepted | -
 T-015 | Box overlay + tay nắm + góc nhìn | accepted | -
