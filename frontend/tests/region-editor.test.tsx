@@ -17,11 +17,13 @@ import {
   initialRegionSession,
   removeRegionBox,
   selectRegionBox,
+  setRegionClaim,
   type RegionSession,
   type RegionViewApi,
 } from "@/features/studio/region/region-session";
 import { PREVIEW_DEBOUNCE_MS, regionKey, useRegionPreview } from "@/features/studio/region/useRegionPreview";
 import type { RegionOverlayHandlers } from "@/features/viewer/region-overlay";
+import { ApiError } from "@/lib/api/client";
 import { applyObjectRegion, isSceneEditResponse, previewObjectRegion, type RegionPreview } from "@/lib/api/studio";
 import type { ObjectRegionCommand, SceneObject } from "@/lib/contracts/api";
 
@@ -251,6 +253,13 @@ describe("phiên chỉnh vùng", () => {
     expect(removeRegionBox(initial, "add-1")).toBe(initial);
   });
 
+  it("Lấy luôn bật và tắt id trong claimFrom, không trùng", () => {
+    const on = setRegionClaim(initial, "chair", true);
+    expect(on.claimFrom).toEqual(["chair"]);
+    expect(setRegionClaim(on, "chair", true).claimFrom).toEqual(["chair"]);
+    expect(setRegionClaim(on, "chair", false).claimFrom).toEqual([]);
+  });
+
   it("box cộng thứ hai xoá được; chọn id lạ thì bỏ chọn", () => {
     expect(canRemoveBox(addAddBox(initial), "add-1")).toBe(true);
     expect(selectRegionBox(initial, "nope").selectedId).toBeNull();
@@ -267,10 +276,31 @@ function Panel({
   onClose?: () => void;
 }) {
   const [session, setSession] = useState(start);
-  return <RegionEditor object={pallet} session={session} onSession={setSession} onClose={onClose} viewApi={viewApi} />;
+  return (
+    <RegionEditor
+      jobId="job-a"
+      object={pallet}
+      sceneRevision="rev-001"
+      membershipChecksum={command.membership_checksum}
+      nameOf={(id) => (id === "chair" ? "Ghế" : id)}
+      session={session}
+      onSession={setSession}
+      onClose={onClose}
+      viewApi={viewApi}
+    />
+  );
 }
 
 describe("panel chỉnh vùng", () => {
+  beforeEach(() => {
+    // Mặc định xem trước treo để panel không gọi mạng; các test về bộ đếm đặt kết quả riêng.
+    vi.mocked(previewObjectRegion).mockClear();
+    vi.mocked(previewObjectRegion).mockImplementation(() => new Promise<RegionPreview>(() => {}));
+  });
+  afterEach(() => {
+    vi.mocked(previewObjectRegion).mockImplementation(realPreview);
+  });
+
   it("mở với một box cộng bằng nửa kích thước vật, đang được chọn", () => {
     render(<Panel />);
     expect(within(screen.getByRole("list", { name: "Box vùng" })).getAllByRole("listitem")).toHaveLength(1);
@@ -363,6 +393,59 @@ describe("panel chỉnh vùng", () => {
     const thin: EditableBox = { ...addBox, half: [0.001, 0.4, 0.075] };
     render(<Panel start={{ ...initial, boxes: [thin] }} />);
     expect(screen.getByRole("alert")).toBeInTheDocument();
+  });
+
+  it("không gọi xem trước khi box không hợp lệ", () => {
+    const thin: EditableBox = { ...addBox, half: [0.001, 0.4, 0.075] };
+    vi.useFakeTimers();
+    try {
+      render(<Panel start={{ ...initial, boxes: [thin] }} />);
+      act(() => vi.advanceTimersByTime(PREVIEW_DEBOUNCE_MS * 2));
+      expect(previewObjectRegion).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("đang tính thì hiện spinner; xong thì hiện bộ đếm và bảo vệ sàn", async () => {
+    vi.mocked(previewObjectRegion).mockResolvedValue({ ...preview, protected_floor_count: 4 });
+    render(<Panel />);
+    expect(screen.getByText("Đang tính vùng…")).toBeInTheDocument();
+    expect(await screen.findByText("+3 / −0 · tổng 120")).toBeInTheDocument();
+    expect(screen.getByText("Bảo vệ sàn: 4")).toBeInTheDocument();
+    expect(screen.queryByText("Đang tính vùng…")).not.toBeInTheDocument();
+  });
+
+  it("đổi box thì bộ đếm cũ ẩn đi và đang tính lại", async () => {
+    vi.mocked(previewObjectRegion).mockResolvedValue(preview);
+    render(<Panel />);
+    expect(await screen.findByText("+3 / −0 · tổng 120")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "+ Box cộng" }));
+    expect(screen.queryByText("+3 / −0 · tổng 120")).not.toBeInTheDocument();
+    expect(screen.getByText("Đang tính vùng…")).toBeInTheDocument();
+  });
+
+  it("vật chồng lấn nêu tên và số Gaussian; Lấy luôn đưa id vào claim_from của lần xem trước sau", async () => {
+    vi.mocked(previewObjectRegion).mockResolvedValue({ ...preview, overlaps: { chair: 42 } });
+    render(<Panel />);
+    expect(await screen.findByText("Box chồng lên Ghế (42 Gaussian) — giữ chủ cũ")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Lấy luôn từ Ghế" }));
+    expect(await screen.findByText("Box chồng lên Ghế (42 Gaussian) — sẽ lấy về vật này")).toBeInTheDocument();
+    expect(vi.mocked(previewObjectRegion).mock.lastCall![2].claim_from).toEqual(["chair"]);
+  });
+
+  it("vỏ chưa dựng được thì nêu lý do trong cảnh báo", async () => {
+    vi.mocked(previewObjectRegion).mockResolvedValue({ ...preview, shell_error: "lưới vỏ rỗng" });
+    render(<Panel />);
+    expect(
+      await screen.findByText("Vỏ chưa dựng được: lưới vỏ rỗng. Apply vẫn được nhưng Tạo mesh sẽ báo lỗi cho vật này."),
+    ).toBeInTheDocument();
+  });
+
+  it("xem trước lỗi thì hiện câu của máy chủ", async () => {
+    vi.mocked(previewObjectRegion).mockRejectedValue(new ApiError(422, "Box lệch khỏi sàn"));
+    render(<Panel />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Box lệch khỏi sàn");
   });
 });
 

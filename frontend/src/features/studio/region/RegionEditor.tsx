@@ -2,7 +2,8 @@
 
 import { useEffect, useState, type RefObject } from "react";
 
-import { Button } from "@/components/studio/primitives";
+import { Loader2 } from "lucide-react";
+import { Button, Notice } from "@/components/studio/primitives";
 import { validateBoxes } from "@/features/studio/region/box-model";
 import {
   addAddBox,
@@ -12,9 +13,11 @@ import {
   initialRegionSession,
   removeRegionBox,
   selectRegionBox,
+  setRegionClaim,
   type RegionSession,
   type RegionViewApi,
 } from "@/features/studio/region/region-session";
+import { useRegionPreview } from "@/features/studio/region/useRegionPreview";
 import type { ViewPreset } from "@/features/viewer/region-overlay";
 import type { SceneObject } from "@/lib/contracts/api";
 
@@ -32,17 +35,29 @@ function isTextField(target: EventTarget | null): boolean {
 }
 
 /**
- * Panel chỉnh vùng một vật: danh sách box cộng/trừ, thêm và xoá box, góc nhìn. Phiên nằm ở cha và được đổi qua
- * `onSession`, nên viewport và panel luôn đọc cùng một danh sách box.
+ * Panel chỉnh vùng một vật: danh sách box cộng/trừ, thêm và xoá box, góc nhìn, và kết quả xem trước (bộ đếm, vật
+ * chồng lấn, cảnh báo vỏ). Phiên nằm ở cha và được đổi qua `onSession`, nên viewport và panel luôn đọc cùng một
+ * danh sách box.
  */
 export function RegionEditor({
+  jobId,
   object,
+  sceneRevision,
+  membershipChecksum,
+  nameOf,
   session,
   onSession,
   onClose,
   viewApi,
 }: {
+  jobId: string;
   object: SceneObject;
+  /** Revision của scene khi mở panel: máy chủ từ chối (409) nếu scene đã đổi. */
+  sceneRevision: string;
+  /** Checksum membership đang dùng: máy chủ từ chối (409) nếu membership đã đổi. */
+  membershipChecksum: string;
+  /** Tên hiển thị của một vật theo id, để nêu tên vật chồng lấn. */
+  nameOf(id: string): string;
   session: RegionSession;
   onSession(next: RegionSession): void;
   onClose(): void;
@@ -52,6 +67,18 @@ export function RegionEditor({
   // Góc nhìn chưa nối là trạng thái thật của viewer: sau lần đầu trả false thì khoá các nút góc nhìn.
   const [viewsReady, setViewsReady] = useState(true);
   const boxError = validateBoxes(session.boxes);
+  const region = useRegionPreview({
+    jobId,
+    objectId: object.id,
+    expectedRevision: sceneRevision,
+    membershipChecksum,
+    boxes: session.boxes,
+    claimFrom: session.claimFrom,
+    enabled: boxError === null,
+  });
+  // Kết quả chỉ có khi khớp box hiện tại; đổi box thì bộ đếm cũ ẩn đi trong lúc tính lại.
+  const preview = region.preview;
+  const overlaps = preview ? Object.entries(preview.overlaps).filter(([, count]) => count > 0) : [];
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -155,6 +182,56 @@ export function RegionEditor({
         ))}
       </div>
 
+      <div aria-live="polite" className="space-y-2">
+        {region.loading && (
+          <p className="flex items-center gap-2 text-on-dark/70">
+            <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" aria-hidden /> Đang tính vùng…
+          </p>
+        )}
+        {preview && (
+          <div className="space-y-1">
+            <p className="font-medium">
+              +{preview.added_count} / −{preview.removed_count} · tổng {preview.object_gaussian_count}
+            </p>
+            <p className="text-on-dark/70">Bảo vệ sàn: {preview.protected_floor_count}</p>
+          </div>
+        )}
+        {overlaps.length > 0 && (
+          <ul aria-label="Vật chồng lấn" className="space-y-2">
+            {overlaps.map(([id, count]) => {
+              const name = nameOf(id);
+              const claimed = session.claimFrom.includes(id);
+              return (
+                <li key={id} className="space-y-1 rounded border border-line-dark p-2">
+                  <p>
+                    Box chồng lên {name} ({count} Gaussian) — {claimed ? "sẽ lấy về vật này" : "giữ chủ cũ"}
+                  </p>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      aria-label={`Lấy luôn từ ${name}`}
+                      checked={claimed}
+                      onChange={(event) => onSession(setRegionClaim(session, id, event.target.checked))}
+                    />
+                    Lấy luôn
+                  </label>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        {preview?.shell_error && (
+          <Notice tone="ochre">
+            Vỏ chưa dựng được: {preview.shell_error}. Apply vẫn được nhưng Tạo mesh sẽ báo lỗi cho vật này.
+          </Notice>
+        )}
+      </div>
+
+      {region.error && (
+        <p role="alert" className="text-rust">
+          {region.error}
+        </p>
+      )}
       {boxError && (
         <p role="alert" className="text-rust">
           {boxError}

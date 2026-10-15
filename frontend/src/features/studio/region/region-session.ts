@@ -48,6 +48,12 @@ export function canRemoveBox(session: RegionSession, id: string): boolean {
   return !(box.op === "add" && addCount === 1);
 }
 
+/** Bật hoặc tắt "Lấy luôn" cho một vật chồng lấn; id chỉ xuất hiện một lần trong `claimFrom`. */
+export function setRegionClaim(session: RegionSession, id: string, claimed: boolean): RegionSession {
+  const others = session.claimFrom.filter((item) => item !== id);
+  return { ...session, claimFrom: claimed ? [...others, id] : others };
+}
+
 export function selectRegionBox(session: RegionSession, id: string | null): RegionSession {
   return { ...session, selectedId: session.boxes.some((box) => box.id === id) ? id : null };
 }
