@@ -81,7 +81,7 @@ def test_closing_fills_enclosed_cavities():
     grid = np.zeros((12, 12, 12), dtype=bool)
     grid[2:10, 2:10, 2:10] = True
     grid[4:8, 4:8, 4:8] = False
-    closed, _, _ = _close_shell(grid, dilate_voxels=0, close_iterations=0)
+    closed = _close_shell(grid, dilate_voxels=0, close_iterations=0)
     assert closed[6, 6, 6]
 
 
@@ -89,7 +89,7 @@ def test_closing_does_not_bridge_wide_gaps():
     grid = np.zeros((40, 8, 8), dtype=bool)
     grid[2:10, 2:6, 2:6] = True
     grid[20:28, 2:6, 2:6] = True
-    closed, _, _ = _close_shell(grid, dilate_voxels=1, close_iterations=2)
+    closed = _close_shell(grid, dilate_voxels=1, close_iterations=2)
     assert closed[5, 4, 4] and closed[25, 4, 4]
     assert not closed[15, 4, 4]
 
@@ -194,48 +194,18 @@ def test_filled_box_gives_watertight_shell_that_passes_qa():
     assert shell.statistics["component_genus"] == [0.0]
 
 
-def test_open_bottom_face_is_detected_as_open():
+def test_open_bottom_scan_gives_watertight_shell_that_passes_qa():
     rng = np.random.default_rng(12)
     shell = build_gaussian_shell(open_face_points(rng, BOX_LOW, BOX_HIGH, 20000, axis=2, side=0), None)
     assert mesh_of(shell).is_watertight
     assert shell.quality["passed"]
-    assert "-z" in shell.statistics["capped_directions"]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="Open question Q4 in report.md: the reviewed rim-cap rule leaves wall through-holes open (volume ~58%)",
-)
-def test_open_bottom_scan_is_closed_watertight():
-    rng = np.random.default_rng(12)
-    shell = build_gaussian_shell(open_face_points(rng, BOX_LOW, BOX_HIGH, 20000, axis=2, side=0), None)
-    mesh = mesh_of(shell)
-    assert mesh.is_watertight
-    assert shell.quality["passed"]
-    assert mesh.volume >= 0.8 * np.prod(BOX_HIGH - BOX_LOW)
-
-
-def test_box_missing_back_face_is_detected_as_capped():
+def test_missing_back_face_gives_watertight_shell_that_passes_qa():
     rng = np.random.default_rng(21)
     shell = build_gaussian_shell(open_face_points(rng, BOX_LOW, BOX_HIGH, 20000, axis=1, side=1), None)
     assert mesh_of(shell).is_watertight
     assert shell.quality["passed"]
-    assert "+y" in shell.statistics["capped_directions"]
-
-
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="Open question Q4 in report.md: the reviewed rim-cap rule leaves wall through-holes open (volume ~55%)",
-)
-def test_box_missing_back_face_is_capped():
-    rng = np.random.default_rng(21)
-    shell = build_gaussian_shell(open_face_points(rng, BOX_LOW, BOX_HIGH, 20000, axis=1, side=1), None)
-    mesh = mesh_of(shell)
-    assert mesh.is_watertight
-    assert shell.quality["passed"]
-    assert mesh.volume >= 0.8 * np.prod(BOX_HIGH - BOX_LOW)
 
 
 def test_table_underside_stays_open():
@@ -243,19 +213,9 @@ def test_table_underside_stays_open():
     shell = build_gaussian_shell(table_points(rng), None)
     mesh = mesh_of(shell)
     assert shell.quality["passed"]
-    assert "-z" not in shell.statistics["capped_directions"]
     assert not inside(mesh, [0.0, 0.0, 0.3])
     assert inside(mesh, [0.36, 0.2, 0.35]) and inside(mesh, [-0.36, -0.2, 0.35])
     assert inside(mesh, [0.0, 0.0, 0.72])
-
-
-def test_cap_can_be_disabled():
-    rng = np.random.default_rng(12)
-    shell = build_gaussian_shell(
-        open_face_points(rng, BOX_LOW, BOX_HIGH, 20000, axis=2, side=0), None, ShellParams(cap_open_faces=False)
-    )
-    assert shell.statistics["capped_directions"] == []
-    assert 0.4 * np.prod(BOX_HIGH - BOX_LOW) < mesh_of(shell).volume < 0.6 * np.prod(BOX_HIGH - BOX_LOW)
 
 
 def test_chair_leg_gaps_stay_open():

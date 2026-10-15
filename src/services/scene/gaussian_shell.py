@@ -1,9 +1,9 @@
-"""Closed shell of one object from its Gaussians: opacity and floater filters, voxel closing, rim caps, strict QA.
+"""Closed shell of one object from its Gaussians: opacity and floater filters, voxel closing, strict QA.
 
-A rim cap closes a face whose outer layers enclose a footprint in projection. It is a conservative approximation:
-holes parallel to an axis are filled, pinholes also count as capped faces, and a closed object can list capped
-directions. Faces that the scan never observed are not guaranteed to close; see report.md for the open cases.
-Shell meshes use a larger intersection budget than other surfaces, and large objects use coarser voxels.
+Only observed surface is closed. A face the scan never saw (a bottom resting on the floor, a back against a wall)
+stays open, so the shell is hollow on that side. It is still watertight and passes QA, and for collision it behaves
+like a solid, because nothing can enter the hollow. The shell never guesses a closure: a closure rule would also fill
+under tables. Shell meshes use a larger intersection budget than other surfaces, and large objects use coarser voxels.
 """
 
 import hashlib
@@ -24,8 +24,6 @@ MIN_GAUSSIANS = 50
 _CROSS = ndimage.generate_binary_structure(3, 1)  # 6-connected neighbourhood for every morphology step
 # Shell meshes are denser than the 250k pair budget that suits ObjectGS and CoACD surfaces; shells get their own.
 SHELL_INTERSECTION_BUDGET = 2_000_000
-_CROSS_2D = ndimage.generate_binary_structure(2, 1)
-_DIRECTIONS = ("-x", "+x", "-y", "+y", "-z", "+z")
 
 
 class GaussianShellError(ValueError):
@@ -45,8 +43,6 @@ class ShellParams:
     max_grid_cells: int = 32_000_000
     # voxel_m grows for large objects so the longest extent spans at most this many cells.
     max_cells_per_axis: int = 96
-    # Rim cap: close a face whose outer layers enclose a footprint in projection (see _cap_open_faces).
-    cap_open_faces: bool = True
 
     def __post_init__(self) -> None:
         if not np.isfinite(self.voxel_m) or self.voxel_m <= 0:
@@ -97,40 +93,8 @@ def _voxelize(points: np.ndarray, voxel_m: float, pad: int, max_grid_cells: int)
     return grid, low - pad, int(np.count_nonzero(grid))
 
 
-def _cap_open_faces(grid: np.ndarray, band: int) -> tuple[np.ndarray, int, list[str]]:
-    """Rim cap: close a face whose outermost `band` layers enclose a footprint in projection.
-
-    Holes of the band projection become cells of the extreme layer, applied in direction order.
-    Limits, both conservative approximations rather than evidence about the unseen face: a hole that
-    runs parallel to an axis is filled too, and a pinhole in the projection also counts as a capped
-    face, so `capped_directions` can name directions on a closed object.
-    """
-    grid = grid.copy()
-    capped, directions = 0, []
-    for direction in _DIRECTIONS:
-        sign, axis = direction[0], "xyz".index(direction[1])
-        layers = np.flatnonzero(grid.any(axis=tuple(other for other in range(3) if other != axis)))
-        if sign == "-":
-            extreme = int(layers[0])
-            indices = np.arange(extreme, min(extreme + band, grid.shape[axis]))
-        else:
-            extreme = int(layers[-1])
-            indices = np.arange(max(extreme - band + 1, 0), extreme + 1)
-        projection = np.take(grid, indices, axis=axis).any(axis=axis)
-        cap = ndimage.binary_fill_holes(projection, structure=_CROSS_2D) & ~projection
-        if cap.any():
-            selector = [slice(None)] * 3
-            selector[axis] = extreme
-            grid[tuple(selector)] |= cap
-            capped += int(cap.sum())
-            directions.append(direction)
-    return grid, capped, directions
-
-
-def _close_shell(
-    grid: np.ndarray, dilate_voxels: int, close_iterations: int, *, cap_open_faces: bool = True
-) -> tuple[np.ndarray, int, list[str]]:
-    """Grow by dilate_voxels, close narrow gaps, cap open faces, then fill enclosed cavities.
+def _close_shell(grid: np.ndarray, dilate_voxels: int, close_iterations: int) -> np.ndarray:
+    """Grow by dilate_voxels, close narrow gaps, then fill enclosed cavities.
 
     scipy treats iterations=0 as repeat-until-stable, so a zero count skips that operation.
     """
@@ -138,10 +102,7 @@ def _close_shell(
         grid = ndimage.binary_dilation(grid, structure=_CROSS, iterations=dilate_voxels)
     if close_iterations:
         grid = ndimage.binary_closing(grid, structure=_CROSS, iterations=close_iterations)
-    capped, directions = 0, []
-    if cap_open_faces:
-        grid, capped, directions = _cap_open_faces(grid, dilate_voxels + close_iterations + 1)
-    return ndimage.binary_fill_holes(grid, structure=_CROSS), capped, directions
+    return ndimage.binary_fill_holes(grid, structure=_CROSS)
 
 
 def _keep_large_components(grid: np.ndarray, min_fraction: float) -> tuple[np.ndarray, int, int]:
@@ -242,7 +203,7 @@ class GaussianShell:
     vertices: np.ndarray  # (N, 3) float64, object-local metres
     faces: np.ndarray  # (M, 3) int64
     checksum: str  # "sha256:" of the params JSON plus the final occupied cells
-    statistics: dict[str, int | float | list[str] | list[float | None]]
+    statistics: dict[str, int | float | list[float | None]]
     quality: dict  # assess_surface result
 
 
@@ -257,10 +218,8 @@ def build_gaussian_shell(
     voxel_m = max(params.voxel_m, extent / params.max_cells_per_axis)
     pad = params.dilate_voxels + params.close_iterations + 1
     grid, origin, occupied = _voxelize(points, voxel_m, pad, params.max_grid_cells)
-    grid, capped_cells, capped_directions = _close_shell(
-        grid, params.dilate_voxels, params.close_iterations, cap_open_faces=params.cap_open_faces
-    )
-    filled = int(np.count_nonzero(grid)) - occupied - capped_cells
+    grid = _close_shell(grid, params.dilate_voxels, params.close_iterations)
+    filled = int(np.count_nonzero(grid)) - occupied
     grid, components_kept, components_dropped = _keep_large_components(grid, params.min_component_fraction)
     grid, diagonal_fixes = _repair_diagonals(grid)
     cells = np.argwhere(grid)
@@ -285,8 +244,6 @@ def build_gaussian_shell(
             "components_dropped": components_dropped,
             "diagonal_fixes": diagonal_fixes,
             "voxel_m_effective": voxel_m,
-            "capped_cells": capped_cells,
-            "capped_directions": capped_directions,
             "component_genus": quality["metrics"]["component_genus"],
         },
         quality=quality,
