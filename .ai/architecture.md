@@ -125,6 +125,9 @@ Quy tắc tính (server, toạ độ source world):
 `inside = ∪(add) \ ∪(subtract)`.
 `eligible = nền không thuộc sàn ∪ hàng của chính vật ∪ hàng của vật trong claim_from`.
 `mới = inside ∩ eligible`. Hàng cũ của vật nằm ngoài `inside` → về nền (`-1`).
+Yaw là góc quay phải quanh +Z: trục x của box = (cos yaw, sin yaw, 0), trục y = (−sin yaw, cos yaw, 0).
+Điểm trên mặt box (dung sai 1e-6 m) tính là bên trong. Client và server dùng chung file ca kiểm
+`tests/fixtures/region_box_cases.json` (T-004 tạo) để chắc hai phía cho cùng kết quả.
 Toạ độ box là object-local; server đổi sang source world bằng `provenance.source_transform` của vật
 (**không** dùng `transform` hiện tại, vì vật có thể đã Move).
 
@@ -132,7 +135,7 @@ Preview trả: `added_count`, `removed_count`, `object_gaussian_count`, `protect
 `overlaps: {object_id: count}`, `added_sample_m`, `removed_sample_m` (tối đa 20.000 điểm mỗi loại,
 toạ độ object-local), `shell_glb_base64` (vỏ thô của kết quả).
 
-Ràng buộc: tối thiểu 1 box `add`, tối đa 16 box, `half_extents_m` > 0.005 và ≤ 20, kết quả ≥ 50
+Ràng buộc: tối thiểu 1 box `add`, tối đa 16 box, `half_extents_m` trong khoảng đóng [0.005, 20] m, kết quả ≥ 50
 Gaussian (dưới mức đó → 422, gợi ý dùng Delete).
 
 ### 7.4 Geometry build

@@ -1,5 +1,5 @@
 T-001 | Tách occupancy_surface() | accepted | -
-T-002 | Dựng vỏ Gaussian kín | planned | engineer
+T-002 | Dựng vỏ Gaussian kín | in-progress | engineer
 T-003 | Contract vỏ + trạng thái hình học | implemented | summarizer
 T-004 | Box → membership (region command + preview diff) | planned | engineer
 T-005 | Tách vật dừng ở Draft SceneIR | planned | engineer
@@ -11,7 +11,7 @@ T-010 | API region preview/apply trên Draft | planned | engineer
 T-011 | Sửa vùng sau khi ready → rebuild vật bị ảnh hưởng | planned | engineer
 T-012 | Khoá Walk/USD/Move khi Draft | planned | engineer
 T-013 | API client + banner Draft + tiến độ build | planned | engineer
-T-014 | Box model TypeScript thuần | implemented | engineer
+T-014 | Box model TypeScript thuần | accepted | -
 T-015 | Box overlay + tay nắm + góc nhìn | planned | engineer
 T-016 | Region Editor panel | planned | engineer
 T-017 | Vỏ phát sáng + điểm thêm/bớt | planned | engineer

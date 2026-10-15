@@ -36,6 +36,8 @@ Panel nổi bên phải viewport (cùng chỗ panel vật), tiêu đề "Chỉnh
 - Bộ đếm: "+{added} / −{removed} · tổng {object_gaussian_count}" và "Bảo vệ sàn: {protected_floor_count}". Đang tính: spinner nhỏ cạnh bộ đếm.
 - Chồng lấn: với mỗi `overlaps[id] > 0`: "Box chồng lên {tên} ({n} Gaussian) — giữ chủ cũ" + checkbox "Lấy luôn" → thêm id vào `claim_from` → preview lại.
 - `shell_error` → cảnh báo vàng "Vỏ chưa dựng được: {lý do}. Apply vẫn được nhưng Tạo mesh sẽ báo lỗi cho vật này."
+- Không gọi preview khi `validateBoxes(boxes)` khác null (hiện thông báo lỗi đó thay cho bộ đếm). `fitBoxToPoints` không kẹp
+  kích thước nên box tự khớp có thể không hợp lệ (vật > 40 m hoặc quá mỏng): phải báo, không âm thầm sửa.
 - **Apply** enabled chỉ khi: có preview thành công, `preview.key === boxesKey(boxes) + claim`, không đang tính, `validateBoxes` null.
   Draft → sau 201 đóng panel + tải revision mới. Ready → sau 202 đóng panel, `ObjectifyNotice` hiện tiến độ "region".
 - **Huỷ**: đóng panel, xoá box, không gọi API ghi.
