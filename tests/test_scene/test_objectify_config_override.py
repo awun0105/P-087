@@ -89,8 +89,10 @@ def test_provider_requests_receive_overrides(
             scene_config=override,
         )
     groups = override or {}
+    # The runner falls back to legacy, so the chosen refinement is always sent explicitly.
     assert requests["lift"]["config"] == {
-        key: value for key, value in groups.get("scene", {}).items() if key != "max_objects"
+        "refinement": "legacy",
+        **{key: value for key, value in groups.get("scene", {}).items() if key != "max_objects"},
     }
     assert requests["convex"]["config"] == groups.get("coacd", {})
     assert requests["inpaint"]["config"] == groups.get("inpaint", {})

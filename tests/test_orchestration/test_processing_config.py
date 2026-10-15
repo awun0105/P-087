@@ -543,3 +543,14 @@ def test_anonymize_is_recorded_only_when_chosen() -> None:
     assert config_bytes(plain) != config_bytes(chosen)
     assert type(chosen).model_validate_json(config_bytes(plain)).anonymize is False
     assert type(chosen).model_validate_json(config_bytes(chosen)).anonymize is True
+
+
+def test_every_preset_seals_objectgs_geometry_and_multiview_refinement() -> None:
+    from src.services.orchestration.scene.objectify import SceneObjectifyConfig
+
+    presets, checksum = load_presets(PRESETS)
+    for name in presets.presets:
+        scene = build_job_config(presets, checksum, preset_values(presets, name), None).scene
+        assert (scene["geometry_method"], scene["refinement"]) == ("objectgs", "multiview_v1"), name
+    # Jobs sealed before these presets carry neither key and keep the legacy behaviour.
+    assert (SceneObjectifyConfig().geometry_method, SceneObjectifyConfig().refinement) == ("legacy", "legacy")

@@ -409,6 +409,23 @@
       "unit": "m"
     },
     {
+      "key": "scene.refinement",
+      "group": "scene",
+      "label": "Tinh chỉnh tách vật đa góc nhìn",
+      "description": "multiview_v1 đối chiếu mask giữa nhiều góc nhìn để giữ đủ bộ phận và hạn chế gộp nhầm vật.",
+      "kind": "choice",
+      "choices": [
+        {
+          "value": "legacy",
+          "label": "Legacy"
+        },
+        {
+          "value": "multiview_v1",
+          "label": "Đa góc nhìn (multiview_v1)"
+        }
+      ]
+    },
+    {
       "key": "scene.geometry_method",
       "group": "scene",
       "label": "Hình học theo vật",
@@ -484,7 +501,8 @@
       "simulation.dynamic_friction": 0.4,
       "simulation.restitution": 0,
       "simulation.carve_margin_m": 0.05,
-      "scene.geometry_method": "legacy",
+      "scene.geometry_method": "objectgs",
+      "scene.refinement": "multiview_v1",
       "scene.objectgs_iterations": 30000,
       "scene.objectgs_background_voxel_m": 0.04
     },
@@ -524,7 +542,8 @@
       "simulation.dynamic_friction": 0.4,
       "simulation.restitution": 0,
       "simulation.carve_margin_m": 0.05,
-      "scene.geometry_method": "legacy",
+      "scene.geometry_method": "objectgs",
+      "scene.refinement": "multiview_v1",
       "scene.objectgs_iterations": 30000,
       "scene.objectgs_background_voxel_m": 0.04
     },
@@ -564,7 +583,8 @@
       "simulation.dynamic_friction": 0.4,
       "simulation.restitution": 0,
       "simulation.carve_margin_m": 0.05,
-      "scene.geometry_method": "legacy",
+      "scene.geometry_method": "objectgs",
+      "scene.refinement": "multiview_v1",
       "scene.objectgs_iterations": 30000,
       "scene.objectgs_background_voxel_m": 0.04
     },
@@ -604,7 +624,8 @@
       "simulation.dynamic_friction": 0.4,
       "simulation.restitution": 0,
       "simulation.carve_margin_m": 0.05,
-      "scene.geometry_method": "legacy",
+      "scene.geometry_method": "objectgs",
+      "scene.refinement": "multiview_v1",
       "scene.objectgs_iterations": 30000,
       "scene.objectgs_background_voxel_m": 0.04
     },
@@ -644,7 +665,8 @@
       "simulation.dynamic_friction": 0.4,
       "simulation.restitution": 0,
       "simulation.carve_margin_m": 0.05,
-      "scene.geometry_method": "legacy",
+      "scene.geometry_method": "objectgs",
+      "scene.refinement": "multiview_v1",
       "scene.objectgs_iterations": 30000,
       "scene.objectgs_background_voxel_m": 0.04
     },
@@ -684,7 +706,8 @@
       "simulation.dynamic_friction": 0.4,
       "simulation.restitution": 0,
       "simulation.carve_margin_m": 0.05,
-      "scene.geometry_method": "legacy",
+      "scene.geometry_method": "objectgs",
+      "scene.refinement": "multiview_v1",
       "scene.objectgs_iterations": 30000,
       "scene.objectgs_background_voxel_m": 0.04
     },
@@ -724,7 +747,8 @@
       "simulation.dynamic_friction": 0.4,
       "simulation.restitution": 0,
       "simulation.carve_margin_m": 0.05,
-      "scene.geometry_method": "legacy",
+      "scene.geometry_method": "objectgs",
+      "scene.refinement": "multiview_v1",
       "scene.objectgs_iterations": 30000,
       "scene.objectgs_background_voxel_m": 0.04
     },
@@ -764,7 +788,8 @@
       "simulation.dynamic_friction": 0.4,
       "simulation.restitution": 0,
       "simulation.carve_margin_m": 0.05,
-      "scene.geometry_method": "legacy",
+      "scene.geometry_method": "objectgs",
+      "scene.refinement": "multiview_v1",
       "scene.objectgs_iterations": 30000,
       "scene.objectgs_background_voxel_m": 0.04
     }

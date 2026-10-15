@@ -423,10 +423,19 @@ def objectify(
                 "sam2_checkpoint": str(checkpoint.resolve()),
                 "output_npz": str(workspace / "labels.npz"),
                 "views": view_requests,
-                "config": config.scene.model_dump(
-                    exclude={"max_objects", "geometry_method", "objectgs_iterations", "objectgs_background_voxel_m"},
-                    exclude_unset=True,
-                ),
+                # refinement is always explicit: the runner's own fallback is legacy.
+                "config": {
+                    **config.scene.model_dump(
+                        exclude={
+                            "max_objects",
+                            "geometry_method",
+                            "objectgs_iterations",
+                            "objectgs_background_voxel_m",
+                        },
+                        exclude_unset=True,
+                    ),
+                    "refinement": config.scene.refinement,
+                },
                 **(
                     {"objectgs_observations_dir": str((workspace / "objectgs-observations").resolve())}
                     if objectgs_runtime
