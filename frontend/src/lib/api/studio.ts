@@ -11,6 +11,7 @@ import type {
   ColliderEditCommand,
   ObjectMembershipMergeCommand,
   ObjectMembershipReassignCommand,
+  ObjectRegionCommand,
   ProductArtifactRef,
   SceneEditResponse,
   SceneResponse,
@@ -624,6 +625,54 @@ export function reassignObjectMembership(
     method: "POST",
     body: JSON.stringify(command),
   });
+}
+
+/** Bộ đếm và mẫu của một lần xem trước vùng. Preview không ghi gì và không đổi revision (architecture.md §7.3). */
+export interface RegionPreview {
+  scene_revision: string;
+  membership_checksum: string;
+  object_id: string;
+  added_count: number;
+  removed_count: number;
+  object_gaussian_count: number;
+  protected_floor_count: number;
+  overlaps: Record<string, number>;
+  claimed: Record<string, number>;
+  /** Object-local, tối đa 20 000 điểm mỗi loại. */
+  added_sample_m: [number, number, number][];
+  removed_sample_m: [number, number, number][];
+  shell_glb_base64: string | null;
+  shell_error: string | null;
+  shell_sample_rows?: number;
+}
+
+export function previewObjectRegion(
+  jobId: string,
+  objectId: string,
+  command: ObjectRegionCommand,
+  signal?: AbortSignal,
+): Promise<RegionPreview> {
+  return apiFetch<RegionPreview>(
+    `${API}/jobs/${encodeURIComponent(jobId)}/scene/objects/${encodeURIComponent(objectId)}/region/preview`,
+    { method: "POST", body: JSON.stringify(command), signal },
+  );
+}
+
+/** Draft: 201 với revision mới. Ready: 202 với tiến độ dựng lại (T-011). Dùng `isSceneEditResponse` để phân biệt. */
+export function applyObjectRegion(
+  jobId: string,
+  objectId: string,
+  command: ObjectRegionCommand,
+): Promise<SceneEditResponse | ObjectifyState> {
+  return apiFetch<SceneEditResponse | ObjectifyState>(
+    `${API}/jobs/${encodeURIComponent(jobId)}/scene/objects/${encodeURIComponent(objectId)}/region/apply`,
+    { method: "POST", body: JSON.stringify(command) },
+  );
+}
+
+/** Phản hồi apply là revision mới (Draft) hay tiến độ dựng lại (Ready): phân biệt theo dạng JSON, không theo mã HTTP. */
+export function isSceneEditResponse(value: SceneEditResponse | ObjectifyState): value is SceneEditResponse {
+  return "scene" in value && "scene_revision" in value;
 }
 
 /** Thêm vật cản hộp; `center` là tâm hộp theo mét trong khung world (sàn z = 0). */
