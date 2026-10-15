@@ -404,3 +404,10 @@ control; fixture/regression tests and executable handoff. Current changed-file i
 - `tests/test_scene/test_objectify_config_override.py`
 - `tests/test_simulation/test_object_aware_usd.py`
 - `tests/test_simulation/test_surface_convex_runner.py`
+
+## Follow-up: bounded object pipeline diagnostics (2026-10-15)
+
+Implementation and current verification are in
+[Object pipeline evidence handoff](../2026-10-15-object-pipeline-evidence/HANDOFF.md).
+Current branch is `mvp-pipeline-v2` after the user-requested branch rename. The follow-up adds traceability,
+not a quality fix or a new GPU/browser/Isaac acceptance result; the original quality gate above remains open.
