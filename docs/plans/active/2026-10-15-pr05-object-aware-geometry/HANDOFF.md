@@ -417,3 +417,10 @@ not a quality fix or a new GPU/browser/Isaac acceptance result; the original qua
 [Segmentation refinement handoff](../2026-10-15-segmentation-refinement/HANDOFF.md) records the opt-in
 `multiview_v1` algorithm, annotated synthetic before/after metrics and unresolved identity cases.
 Production defaults remain legacy; no new real-scene/GPU/browser/Isaac quality acceptance is implied.
+
+## Follow-up: ObjectGS surface quality and controlled repair (2026-10-15)
+
+[Surface quality handoff](../2026-10-15-objectgs-surface-quality/HANDOFF.md) records calibrated TSDF
+intrinsics, evidence-supported local repair, strict geometry/report gates and real CPU CoACD fixtures.
+The saved 8,000-iteration masked surface remains rejected (275 boundary edges; no support available).
+This follow-up does not close the real-scene/GPU/browser/Isaac quality gate above.
