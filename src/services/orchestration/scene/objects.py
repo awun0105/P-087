@@ -36,6 +36,7 @@ from src.services.scene.editing.commands import (
     set_object_active,
     set_object_semantics,
 )
+from src.services.scene.geometry_state import require_geometry_ready
 
 ObjectAction = Literal["confirm", "ignore", "hide", "delete", "rename", "restore", "duplicate", "label"]
 OBJECT_ACTIONS: frozenset[str] = frozenset(
@@ -117,6 +118,7 @@ def edit_collider_scene(scene: SceneIR, command: ColliderEditCommand) -> SceneIR
         raise SceneRevisionConflictError(
             f"scene đã đổi: client đang giữ {command.expected_scene_revision}, revision hiện tại là {scene.scene_revision}"
         )
+    require_geometry_ready(scene, "sửa collider")
     try:
         return edit_box_collider(
             scene,

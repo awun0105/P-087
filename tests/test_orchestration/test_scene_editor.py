@@ -8,14 +8,15 @@ Covers the properties the viewer depends on:
 """
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
 from src.models.contracts.artifacts import ProductArtifactRef
-from src.models.contracts.scene import SceneIR, SourceCollisionRegion
-from src.services.orchestration.artifacts import ArtifactResolver
+from src.models.contracts.scene import SceneIR, SceneObjectState, SourceCollisionRegion
+from src.services.orchestration.artifacts import ArtifactResolver, with_canonical_checksum
 from src.services.orchestration.scene import (
     SceneEditCommand,
     SceneEditor,
@@ -25,6 +26,8 @@ from src.services.orchestration.scene import (
     TransformEdit,
 )
 from src.services.orchestration.scene.editor import scene_artifact_uri
+from src.services.orchestration.scene.errors import ObjectGeometryNotReadyError
+from src.services.orchestration.scene.objects import apply_object_action
 
 _FIXTURE_ROOT = Path(__file__).resolve().parents[2] / "fixtures"
 _JOB_ID = "job-fixture-001"
@@ -42,6 +45,27 @@ def move_pallet() -> SceneEditCommand:
         expected_scene_revision="rev-001",
         edits=[TransformEdit(object_id="object-pallet-001", translation_xyz=(3.0, 2.0, 0.0))],
     )
+
+
+@pytest.fixture
+def draft_editor(tmp_path) -> SceneEditor:
+    """Editor whose only revision is a Draft scene; rack and floor are candidates awaiting review."""
+    scene = SceneIR.model_validate_json((_FIXTURE_ROOT / "scene_ir" / "scene.json").read_text(encoding="utf-8"))
+    candidates = {"object-rack-001", "object-floor-001"}
+    objects = [
+        item.model_copy(update={"state": SceneObjectState.CANDIDATE}) if item.id in candidates else item
+        for item in scene.objects
+    ]
+    draft = scene.model_copy(
+        update={"objects": objects, "provenance": {**scene.provenance, "object_geometry": "awaiting_review"}}
+    )
+    root = tmp_path / "fixtures"
+    (root / "scene_ir").mkdir(parents=True)
+    (root / "scene_ir" / "scene.json").write_text(
+        with_canonical_checksum(draft, "scene_ir_checksum").model_dump_json(), encoding="utf-8"
+    )
+    shutil.copytree(_FIXTURE_ROOT / "reconstruction_bundle", root / "reconstruction_bundle")
+    return SceneEditor(root, ArtifactResolver(tmp_path / "artifacts"))
 
 
 # ── baseline revision ────────────────────────────────────────────────────────
@@ -414,3 +438,29 @@ def test_publish_next_bumps_revision_and_rejects_stale_client(editor: SceneEdito
     assert editor.current(_JOB_ID).scene.objects == []
     with pytest.raises(SceneRevisionConflictError):
         editor.publish_next(_JOB_ID, "rev-001", scene, "confirm_object")
+
+
+def test_draft_scene_refuses_transform_and_keeps_the_revision(
+    draft_editor: SceneEditor, move_pallet: SceneEditCommand
+) -> None:
+    with pytest.raises(ObjectGeometryNotReadyError, match="Cần tạo mesh trước khi di chuyển/xoay vật"):
+        draft_editor.apply(_JOB_ID, move_pallet)
+    assert draft_editor.current(_JOB_ID).scene.scene_revision == "rev-001"
+
+
+def test_draft_scene_keeps_review_actions(draft_editor: SceneEditor) -> None:
+    """Confirm, ignore, hide, delete, restore và đổi tên vẫn chạy trên scene chờ tách vật, và giữ trạng thái Draft."""
+    steps = [
+        ("object-pallet-001", "rename", {"name": "Pallet A"}),
+        ("object-pallet-001", "hide", {"active": False}),
+        ("object-pallet-001", "delete", {}),
+        ("object-pallet-001", "restore", {}),
+        ("object-rack-001", "confirm", {}),
+        ("object-floor-001", "ignore", {}),
+    ]
+    revision = "rev-001"
+    for object_id, action, options in steps:
+        result = apply_object_action(draft_editor, _JOB_ID, object_id, action, revision, **options)
+        revision = result.revision.scene.scene_revision
+        assert result.revision.scene.provenance["object_geometry"] == "awaiting_review"
+    assert revision == "rev-007"

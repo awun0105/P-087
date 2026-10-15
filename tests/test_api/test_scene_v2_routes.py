@@ -556,3 +556,36 @@ async def test_visual_membership_apply_enqueues_exact_command_and_returns_202(cl
     assert seen[0][:3] == ("job-fixture-001", "rev-001", "membership")
     assert seen[0][3].source_gaussian_indices == [0, 2]
     assert seen[0][4] == "local"
+
+
+def _as_draft(registry, monkeypatch) -> None:
+    """Chỉ đổi revision mà route đọc: job mẫu coi như đang chờ tách vật, không ghi artifact nào."""
+    current = registry.scene.current("job-fixture-001")
+    draft = current.scene.model_copy(
+        update={"provenance": {**current.scene.provenance, "object_geometry": "awaiting_review"}}
+    )
+    monkeypatch.setattr(registry.scene, "current", lambda job_id: current.model_copy(update={"scene": draft}))
+
+
+@pytest.mark.asyncio
+async def test_draft_scene_rejects_move_and_collider_edits_without_publishing(
+    client, isolated_registry, monkeypatch
+) -> None:
+    _as_draft(isolated_registry, monkeypatch)
+    move = await client.post(
+        f"{_JOB}/scene/edits",
+        json={
+            "expected_scene_revision": "rev-001",
+            "edits": [{"object_id": _PALLET, "translation_xyz": [3.0, 2.0, 0.0]}],
+        },
+    )
+    collider = await client.post(
+        f"{_JOB}/scene/collider",
+        json={"expected_scene_revision": "rev-001", "object_id": _PALLET, "dimensions_xyz_m": [1.4, 0.8, 0.6]},
+    )
+
+    assert move.status_code == 422
+    assert move.json()["detail"] == "Cần tạo mesh trước khi di chuyển/xoay vật."
+    assert collider.status_code == 422
+    assert collider.json()["detail"] == "Cần tạo mesh trước khi sửa collider."
+    assert isolated_registry.scene.revision("job-fixture-001", "rev-002") is None

@@ -47,6 +47,7 @@ from src.services.orchestration.scene.models import (
     TransformEdit,
     VisualBinding,
 )
+from src.services.scene.geometry_state import require_geometry_ready
 
 _REVISION_PATTERN = re.compile(r"^(?P<prefix>.*?)(?P<number>\d+)$")
 _SCHEMA_VERSION = "1.0"
@@ -291,6 +292,7 @@ class SceneEditor:
                 f"scene đã đổi: client đang giữ {command.expected_scene_revision}, "
                 f"revision hiện tại là {scene.scene_revision}"
             )
+        require_geometry_ready(scene, "di chuyển/xoay vật")
         self.require_known_objects(scene, command)
         updated = self._build_revision(scene, command)
         if self.head_repository is not None:
