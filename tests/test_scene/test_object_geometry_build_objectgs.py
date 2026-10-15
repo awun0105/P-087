@@ -455,3 +455,36 @@ def test_failing_objectgs_surface_falls_back_to_its_shell_with_a_recorded_reason
     paths = [item["surface_mesh"] for request in objectgs.calls.convex for item in request["objects"]]
     assert any(path.endswith("label-1.glb") for path in paths)
     assert any(path.endswith("candidate-002-shell.glb") for path in paths)
+
+
+@pytest.mark.parametrize(
+    ("error", "retryable"),
+    [
+        (RuntimeError("CUDA out of memory while training"), True),
+        (OSError("disk full while writing the checkpoint"), True),
+        (ValueError("ObjectGS receipt does not bind the job"), False),
+    ],
+)
+def test_global_objectgs_errors_offer_shell_and_say_whether_to_retry(
+    objectgs: SimpleNamespace, error: Exception, retryable: bool
+) -> None:
+    from src.services.orchestration.scene.object_geometry_build import ObjectGeometryBuildError
+
+    objectgs.calls.fail = error
+    before = objectgs.registry.scene.current(objectgs.job_id).scene
+    with pytest.raises(ObjectGeometryBuildError) as raised:
+        build_objectgs(objectgs)
+    assert raised.value.retryable is retryable
+    assert "geometry_method" in str(raised.value) and "shell" in str(raised.value)
+    assert objectgs.registry.scene.current(objectgs.job_id).scene == before
+    assert objectgs.calls.convex == []
+
+
+def test_cancelled_objectgs_run_propagates_and_keeps_the_scene(objectgs: SimpleNamespace) -> None:
+    from src.services.process_control import ProcessCancelledError
+
+    objectgs.calls.fail = ProcessCancelledError("cancelled by the operator")
+    before = objectgs.registry.scene.current(objectgs.job_id).scene
+    with pytest.raises(ProcessCancelledError):
+        build_objectgs(objectgs)
+    assert objectgs.registry.scene.current(objectgs.job_id).scene == before
