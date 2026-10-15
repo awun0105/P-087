@@ -65,3 +65,26 @@ báo trước khi đọc config. Architect cũng bỏ sót vì file test này kh
    trả `None`), để test mô tả đúng job thật.
 3. Chạy: `tests/test_scene/test_objectify_draft.py`, `tests/test_orchestration/test_scene_extraction.py`,
    `tests/test_orchestration/test_scene_objectify_queue.py` + ruff. Thêm "Round 3" vào report, đặt `implemented`.
+
+---
+
+# Review T-009 — Round 3
+
+Verdict: CHANGES REQUESTED (còn một test cùng nguyên nhân)
+
+Diff `62e6288a` đúng yêu cầu: đọc job config và tính `auto_geometry` sau bước kiểm runtime nghiêm ngặt. `test_objectify_draft.py` PASS.
+
+Còn hỏng: `tests/test_scene/test_objectgs_required_stage.py::test_required_objectgs_failure_never_publishes_a_legacy_scene[True]`
+(`SimpleNamespace` không có `job_id`). Architect đã kiểm bằng worktree: file này 6/6 PASS tại `3b109112~1`, 2 failed tại `3b109112`;
+Round 3 sửa được một. Nhánh `[True]` (runtime có) giờ chạy tới `load_job_config`, mà job giả trong test thiếu field.
+
+## Required changes
+1. Sửa fixture job giả trong `test_objectgs_required_stage.py` để có `job_id` và `config_checksum` (hoặc monkeypatch
+   `extraction.load_job_config` trả `None`), giữ nguyên assertion của test.
+2. Chạy **đủ** nhóm này (mọi file test đụng `extract_scene`):
+   ```
+   .venv/bin/python -m pytest tests/test_scene/test_objectify_draft.py tests/test_scene/test_objectgs_required_stage.py \
+     tests/test_orchestration/test_scene_extraction.py tests/test_orchestration/test_scene_objectify_queue.py \
+     tests/test_scene/test_objectgs_objectify_flow.py tests/test_scene/test_objectify_config_override.py -q
+   ```
+   Kết quả phải 0 failed. Thêm "Round 4" vào report, đặt `implemented`.
