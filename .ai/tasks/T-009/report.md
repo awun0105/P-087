@@ -162,3 +162,33 @@ Sau sửa, chạy cùng lệnh: **7 passed in 0.96s**, không skip. Không chạ
 - Commits: `111324b6` status in-progress; `62e6288a` runtime ordering + fixture regression.
 - Pre-flight: CodeGraph/source/callers đã đọc; sửa thứ tự cục bộ, không đổi contract/artifact, không thêm abstraction; service-only nên DevTools n/a. Không có quyết định cần Architect chốt. T-010 đang dở được giữ riêng.
 - `graphify update .`: exit 0; 25.261 nodes, 78.551 edges, 809 communities; không chạy LLM label.
+
+## Round 4 — Fixture ObjectGS còn thiếu field
+
+Đã đọc mục Review T-009 — Round 3 mới bổ sung và CodeGraph toàn bộ `test_objectgs_required_stage.py`.
+Sửa duy nhất fixture `test_required_objectgs_failure_never_publishes_a_legacy_scene`: job giả có job_id/config_checksum,
+registry giả có runtime_resolver, `extraction.load_job_config` trả None. Giữ nguyên assertions ObjectifyError và không publication.
+Không sửa production source hoặc assertion để bỏ qua lỗi.
+
+Chạy đủ sáu file theo review, trước sửa: **1 failed, 96 passed in 16.74s**; đúng nhánh runtime_available=True thiếu job_id.
+Sau sửa:
+
+```bash
+.venv/bin/python -m pytest tests/test_scene/test_objectify_draft.py tests/test_scene/test_objectgs_required_stage.py \
+  tests/test_orchestration/test_scene_extraction.py tests/test_orchestration/test_scene_objectify_queue.py \
+  tests/test_scene/test_objectgs_objectify_flow.py tests/test_scene/test_objectify_config_override.py -q
+```
+
+**97 passed in 15.83s, 0 failed**, không skip; không full suite.
+
+```bash
+.venv/bin/ruff check tests/test_scene/test_objectgs_required_stage.py src/services/orchestration/scene/extraction.py tests/test_scene/test_objectify_draft.py
+.venv/bin/ruff format --check tests/test_scene/test_objectgs_required_stage.py src/services/orchestration/scene/extraction.py tests/test_scene/test_objectify_draft.py
+```
+
+`All checks passed!`; `3 files already formatted`.
+
+Commits riêng: `a48ffc1f` status in-progress; `e7d692bc` fixture fix. Không có quyết định Architect cần chốt.
+Pre-flight: fixture-only, đã đọc CodeGraph/source, sáu file test và ruff xanh; không đổi shared contract/runtime; DevTools n/a.
+
+`graphify update .`: exit 0; 25.280 nodes, 78.588 edges, 849 communities; không chạy LLM label. `git diff --check` sạch.
