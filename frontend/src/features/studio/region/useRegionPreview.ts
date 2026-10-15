@@ -29,6 +29,8 @@ interface PreviewState {
   key: string;
   preview: RegionPreview | null;
   error: string | null;
+  /** Mã HTTP của lỗi (409 khi scene hoặc membership đã đổi); null khi không phải lỗi máy chủ. */
+  errorStatus: number | null;
 }
 
 /**
@@ -57,12 +59,13 @@ export function useRegionPreview(input: RegionPreviewInput) {
         controller.signal,
       ).then(
         (result) => {
-          if (!controller.signal.aborted) setState({ key, preview: result, error: null });
+          if (!controller.signal.aborted) setState({ key, preview: result, error: null, errorStatus: null });
         },
         (cause: unknown) => {
           if (controller.signal.aborted) return;
           const message = cause instanceof ApiError ? cause.detail : "Không xem trước được vùng.";
-          setState({ key, preview: null, error: message });
+          const status = cause instanceof ApiError ? cause.status : null;
+          setState({ key, preview: null, error: message, errorStatus: status });
         },
       );
     }, PREVIEW_DEBOUNCE_MS);
@@ -77,6 +80,7 @@ export function useRegionPreview(input: RegionPreviewInput) {
     key,
     preview: current?.preview ?? null,
     error: current?.error ?? null,
+    errorStatus: current?.errorStatus ?? null,
     loading: enabled && current === null,
   };
 }

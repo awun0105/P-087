@@ -42,7 +42,7 @@ function isTextField(target: EventTarget | null): boolean {
 /** Một dòng "Vật chồng lấn": vật đã lấy về, vật còn chồng lên box, hoặc vật đang tick mà không còn trong box. */
 interface OverlapRow {
   id: string;
-  kind: "claimed" | "overlap" | "stale";
+  kind: "claimed" | "overlap" | "stale" | "unknown";
   count: number;
 }
 
@@ -51,7 +51,8 @@ interface OverlapRow {
  * bỏ mọi vật trong `claim_from` khỏi `overlaps`, nên chỉ lấy từ `overlaps` thì dòng biến mất ngay sau khi tick.
  */
 function overlapRows(preview: RegionPreview | null, claimFrom: readonly string[]): OverlapRow[] {
-  if (!preview) return [];
+  // Chưa có kết quả (đang tính hoặc lỗi): vật đã tick vẫn hiện để người dùng thấy lựa chọn không bị mất.
+  if (!preview) return claimFrom.map((id) => ({ id, kind: "unknown", count: 0 }));
   const rows: OverlapRow[] = [];
   const seen = new Set<string>();
   const add = (row: OverlapRow) => {
@@ -73,6 +74,7 @@ function overlapRows(preview: RegionPreview | null, claimFrom: readonly string[]
 function rowText({ kind, count }: OverlapRow, name: string, claimed: boolean): string {
   if (kind === "claimed") return `Box lấy ${count} Gaussian từ ${name} — sẽ lấy về vật này`;
   if (kind === "stale") return `${name} không còn trong box`;
+  if (kind === "unknown") return `${name} — chưa có kết quả xem trước`;
   return `Box chồng lên ${name} (${count} Gaussian) — ${claimed ? "sẽ lấy về vật này" : "giữ chủ cũ"}`;
 }
 
@@ -133,6 +135,8 @@ export function RegionEditor({
   const [applying, setApplying] = useState(false);
   const [applyError, setApplyError] = useState<string | null>(null);
   const [conflict, setConflict] = useState(false);
+  // 409 ở preview cũng là scene đã đổi: có nút Tải lại như ở Apply, và box/claim vẫn giữ nguyên.
+  const staleScene = region.errorStatus === 409 || conflict;
   // Apply chỉ bật khi có xem trước khớp box hiện tại và box hợp lệ; đổi box là tắt lại tới khi xem trước mới về.
   // Vật "Lấy luôn" mà áp box này sẽ còn dưới tối thiểu: máy chủ từ chối Apply, nên khoá nút và nêu tên trước.
   const donorBlockers = preview?.blockers ?? [];
@@ -320,7 +324,7 @@ export function RegionEditor({
         )}
       </div>
 
-      {region.error && (
+      {region.error && !staleScene && (
         <p role="alert" className="text-rust">
           {region.error}
         </p>
@@ -330,7 +334,7 @@ export function RegionEditor({
           {boxError}
         </p>
       )}
-      {conflict && (
+      {staleScene && (
         <div role="alert" className="space-y-2 text-rust">
           <p>Scene đã đổi ở lượt khác. Tải lại để chỉnh tiếp.</p>
           <Button

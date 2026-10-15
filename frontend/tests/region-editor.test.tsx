@@ -314,12 +314,14 @@ type ApplyResult = Awaited<ReturnType<typeof applyObjectRegion>>;
 
 function Panel({
   start = initial,
+  sceneRevision = "rev-001",
   viewApi = { current: null },
   onClose = () => {},
   onApplied = () => {},
   onReload = () => {},
 }: {
   start?: RegionSession;
+  sceneRevision?: string;
   viewApi?: RefObject<RegionViewApi | null>;
   onClose?: () => void;
   onApplied?: (result: ApplyResult) => void;
@@ -331,7 +333,7 @@ function Panel({
       jobId="job-a"
       object={pallet}
       fit={fit}
-      sceneRevision="rev-001"
+      sceneRevision={sceneRevision}
       membershipChecksum={command.membership_checksum}
       nameOf={(id) => (id === "chair" ? "Ghế" : id)}
       session={session}
@@ -976,6 +978,34 @@ describe("khoá Apply theo vật lấy luôn (T-024)", () => {
 
     expect(await screen.findByText("Box lấy 350 Gaussian từ Ghế — sẽ lấy về vật này")).toBeInTheDocument();
     expect(screen.queryByText(/sẽ chỉ còn/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Apply" })).toBeEnabled();
+  });
+});
+
+describe("409 ở xem trước (T-024)", () => {
+  afterEach(() => {
+    vi.mocked(previewObjectRegion).mockImplementation(realPreview);
+  });
+
+  it("409 khi xem trước: có Tải lại, giữ box và claim; tải lại rồi xem trước khớp thì Apply bật", async () => {
+    vi.mocked(previewObjectRegion).mockRejectedValueOnce(new ApiError(409, "scene đã đổi; tải lại trước khi chỉnh vùng"));
+    const onReload = vi.fn();
+    const start = { ...initial, claimFrom: ["chair"] };
+    const { rerender } = render(<Panel start={start} onReload={onReload} />);
+
+    expect(await screen.findByText(/Scene đã đổi ở lượt khác/)).toBeInTheDocument();
+    expect(screen.queryByText("scene đã đổi; tải lại trước khi chỉnh vùng")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Apply" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Cộng #1" })).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Lấy luôn từ Ghế" })).toBeChecked();
+
+    fireEvent.click(screen.getByRole("button", { name: "Tải lại" }));
+    expect(onReload).toHaveBeenCalledTimes(1);
+
+    vi.mocked(previewObjectRegion).mockResolvedValue({ ...preview, scene_revision: "rev-002" });
+    rerender(<Panel sceneRevision="rev-002" start={start} onReload={onReload} />);
+    expect(await screen.findByText("+3 / −0 · tổng 120")).toBeInTheDocument();
+    expect(screen.queryByText(/Scene đã đổi ở lượt khác/)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Apply" })).toBeEnabled();
   });
 });
