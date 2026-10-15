@@ -123,6 +123,58 @@ def preview_region(registry: ProjectRegistry, job_id: str, object_id: str, comma
     }
 
 
+class ObjectRegionNotFoundError(LookupError):
+    """The object has no rows in the current membership, so it has no region to fit."""
+
+
+def fit_region(registry: ProjectRegistry, job_id: str, object_id: str, expected_revision: str) -> dict:
+    """Box object-local bao đúng các Gaussian hiện có của vật (T-023). Chỉ đọc: không ghi artifact, không đổi revision.
+
+    Tính theo membership hiện tại mỗi lần mở panel, không lưu vào provenance nên không cần đồng bộ khi membership đổi.
+    Khung là khung nguồn (`source_transform`), giống `resolve_region`; Move không đổi kết quả.
+    """
+    scene = registry.scene.current(job_id).scene
+    if scene.scene_revision != expected_revision:
+        raise StaleObjectMembershipRevisionError("scene đã đổi; tải lại trước khi chỉnh vùng")
+    manifest = scene.environment.membership
+    if manifest is None:
+        raise ObjectMembershipValidationError("scene has no persisted Gaussian membership")
+    if object_id not in set(manifest.label_to_object_id.values()):
+        raise ObjectRegionNotFoundError(f"vật {object_id} không có trong membership")
+    item = next((obj for obj in scene.objects if obj.id == object_id), None)
+    if item is None:
+        raise ObjectRegionNotFoundError(f"vật {object_id} không có trong scene")
+    if item.state.value in {"DELETED", "IGNORED", "MERGED"} or item.provenance.get("review") in {
+        "DELETED",
+        "IGNORED",
+        "MERGED",
+    }:
+        raise ObjectMembershipValidationError(f"vật {object_id} đã xoá/bỏ qua/gộp")
+    _source_pose(item)
+    source = load_membership_source(registry, job_id, scene)
+    owned = [int(key) for key, owner in manifest.label_to_object_id.items() if owner == object_id]
+    own = np.isin(source.labels, owned)
+    rows = int(np.count_nonzero(own))
+    if rows < MIN_OBJECT_ROWS:
+        raise ObjectMembershipValidationError(
+            f"vật còn {rows} Gaussian (tối thiểu {MIN_OBJECT_ROWS}) nên không lấy được vùng hiện tại"
+        )
+    local = _local(source.positions[own], item)
+    low, high = local.min(axis=0), local.max(axis=0)
+    center = (low + high) / 2
+    # 0,1 mm margin so float rounding never leaves an owned row outside the fitted box.
+    half = np.clip((high - low) / 2 + 1e-4, 0.005, 20.0)
+    return {
+        "scene_revision": scene.scene_revision,
+        "membership_checksum": manifest.labels_ref.artifact_checksum,
+        "object_id": object_id,
+        "center_m": [float(value) for value in center],
+        "half_extents_m": [float(value) for value in half],
+        "yaw_rad": 0.0,
+        "rows": rows,
+    }
+
+
 def apply_region_draft(
     registry: ProjectRegistry, job_id: str, object_id: str, command: ObjectRegionCommand, *, actor_id: str
 ) -> SceneEditResult:

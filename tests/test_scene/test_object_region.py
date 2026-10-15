@@ -484,3 +484,71 @@ def test_draft_scene_is_refused_by_the_ready_rebuild(draft_scene, monkeypatch) -
     command = _command(draft_scene.scene, [_box([0, 0, 0.05], [0.2, 0.2, 0.16])])
     with pytest.raises(ObjectMembershipValidationError, match="Draft"):
         validate_region_rebuild(draft_scene.registry, draft_scene.job_id, "candidate-001", command)
+
+
+def test_fit_box_keeps_every_owned_row_after_reopen(draft):
+    """GR-02: the box a reopened panel starts from must not drop owned rows, even after a one-sided expansion."""
+    from src.services.orchestration.scene.object_region import apply_region_draft, fit_region, preview_region
+
+    registry, scene, command, *_ = draft
+    applied = apply_region_draft(registry, JOB, TARGET, command, actor_id="reviewer").revision.scene
+    fit = fit_region(registry, JOB, TARGET, applied.scene_revision)
+    reopened = ObjectRegionCommand(
+        expected_scene_revision=applied.scene_revision,
+        membership_checksum=applied.environment.membership.labels_ref.artifact_checksum,
+        boxes=[RegionBox(op="add", center_m=fit["center_m"], half_extents_m=fit["half_extents_m"], yaw_rad=0)],
+    )
+    preview = preview_region(registry, JOB, TARGET, reopened)
+    assert preview["removed_count"] == 0
+    assert preview["object_gaussian_count"] >= fit["rows"] > 0
+
+
+def test_fit_ignores_move_and_reflects_remaining_donor_rows(draft):
+    from src.services.orchestration.scene.object_region import apply_region_draft, fit_region
+    from src.services.scene.editing.membership import decode_gaussian_membership_labels
+
+    registry, scene, command, *_ = draft
+    before = fit_region(registry, JOB, TARGET, scene.scene_revision)
+    item = scene.objects[0]
+    moved = item.model_copy(update={"transform": item.transform.model_copy(update={"translation_xyz": (20, 30, 40)})})
+    changed = registry.scene.publish_next(
+        JOB, scene.scene_revision, scene.model_copy(update={"objects": [moved, *scene.objects[1:]]}), "moved-fixture"
+    ).revision.scene
+    after = fit_region(registry, JOB, TARGET, changed.scene_revision)
+    assert {k: v for k, v in before.items() if k != "scene_revision"} == {
+        k: v for k, v in after.items() if k != "scene_revision"
+    }
+
+    claim = command.model_copy(update={"claim_from": [OTHER], "expected_scene_revision": changed.scene_revision})
+    claimed = apply_region_draft(registry, JOB, TARGET, claim, actor_id="reviewer").revision.scene
+    manifest = claimed.environment.membership
+    labels = decode_gaussian_membership_labels(
+        registry.runtime_resolver.require(manifest.labels_ref).read_bytes(), manifest
+    )
+    donor = fit_region(registry, JOB, OTHER, claimed.scene_revision)
+    assert donor["rows"] == int(np.count_nonzero(labels == 2))
+
+
+def test_fit_rejects_stale_unknown_and_small_objects(draft, monkeypatch):
+    from src.services.orchestration.scene import object_region as module
+
+    registry, scene, *_ = draft
+    with pytest.raises(StaleObjectMembershipRevisionError):
+        module.fit_region(registry, JOB, TARGET, "rev-999")
+    with pytest.raises(module.ObjectRegionNotFoundError):
+        module.fit_region(registry, JOB, "candidate-999", scene.scene_revision)
+    monkeypatch.setattr(module, "MIN_OBJECT_ROWS", 10_000)
+    with pytest.raises(ObjectMembershipValidationError):
+        module.fit_region(registry, JOB, TARGET, scene.scene_revision)
+
+
+def test_fit_is_identical_on_draft_and_ready(draft_scene, cpu_providers, monkeypatch):  # noqa: F811
+    from src.services.orchestration.scene.object_region import fit_region
+
+    fixture = draft_scene
+    before = fit_region(fixture.registry, fixture.job_id, "candidate-001", fixture.scene.scene_revision)
+    ready = _ready(fixture, monkeypatch)
+    after = fit_region(fixture.registry, fixture.job_id, "candidate-001", ready.scene_revision)
+    assert {k: v for k, v in before.items() if k != "scene_revision"} == {
+        k: v for k, v in after.items() if k != "scene_revision"
+    }
