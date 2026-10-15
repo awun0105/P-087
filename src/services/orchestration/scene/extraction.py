@@ -31,7 +31,7 @@ from src.services.orchestration.scene.objectify import (
     AWAITING_CHOICE,
     ObjectifyError,
     Publish,
-    job_requires_objectgs,
+    job_requires_strict_geometry,
     objectify_with_retry,
 )
 from src.services.orchestration.scene.objectify import METHOD as OBJECTIFY_METHOD
@@ -185,7 +185,7 @@ def extract_scene(
     runtime = _sam2_runtime(settings)
     objects: list[SceneObject] = []
     environment, extra = None, {}
-    objectgs_required = job_requires_objectgs(registry, job)
+    objectgs_required = job_requires_strict_geometry(registry, job)
     if objectgs_required and not (settings.product_objectify and runtime is not None and runtime.available()):
         raise ObjectifyError(
             "ObjectGS job requires the configured SAM2/objectify runtime; legacy fallback is forbidden", retryable=False

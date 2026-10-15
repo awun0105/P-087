@@ -12,7 +12,7 @@ from src.services.orchestration.scene.objectify import ObjectifyError
 @pytest.mark.parametrize("runtime_available", [True, False])
 def test_required_objectgs_failure_never_publishes_a_legacy_scene(tmp_path, monkeypatch, runtime_available):
     published = []
-    monkeypatch.setattr(extraction, "job_requires_objectgs", lambda *a: True)
+    monkeypatch.setattr(extraction, "job_requires_strict_geometry", lambda *a: True)
     monkeypatch.setattr(extraction, "_idempotent_publish", lambda *a: lambda *args: published.append(args))
     monkeypatch.setattr(extraction, "_sam2_runtime", lambda *a: SimpleNamespace(available=lambda: runtime_available))
 

@@ -1013,10 +1013,13 @@ def objectify(
     return ObjectifyResult(environment=environment, objects=objects, provenance=provenance)
 
 
-def job_requires_objectgs(registry: ProjectRegistry, job: JobManifest) -> bool:
-    """Read the sealed job choice so required ObjectGS failures cannot become a legacy success."""
+def job_requires_strict_geometry(registry: ProjectRegistry, job: JobManifest) -> bool:
+    """Read the sealed job choice so required shell/ObjectGS failures cannot become a legacy success."""
     processing = load_job_config(job.job_id, job.config_checksum, registry.runtime_resolver)
-    return processing is not None and processing.scene.get("geometry_method") == "objectgs"
+    return processing is not None and processing.scene.get("geometry_method") in {"shell", "objectgs"}
+
+
+job_requires_objectgs = job_requires_strict_geometry
 
 
 def objectify_with_retry(

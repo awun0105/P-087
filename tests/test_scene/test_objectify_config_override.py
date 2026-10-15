@@ -151,6 +151,23 @@ def test_geometry_method_accepts_shell_and_rejects_unknown_values() -> None:
         module.SceneObjectifyConfig(geometry_method="unknown")
 
 
+@pytest.mark.parametrize(
+    ("scene", "strict"),
+    [
+        ({"geometry_method": "shell"}, True),
+        ({"geometry_method": "objectgs"}, True),
+        ({"geometry_method": "legacy"}, False),
+        ({}, False),
+    ],
+)
+def test_strict_geometry_follows_the_sealed_job_choice(
+    monkeypatch: pytest.MonkeyPatch, scene: dict, strict: bool
+) -> None:
+    monkeypatch.setattr(module, "load_job_config", lambda *args: SimpleNamespace(scene=scene))
+    job = SimpleNamespace(job_id="job-test", config_checksum="unused")
+    assert module.job_requires_strict_geometry(SimpleNamespace(runtime_resolver=None), job) is strict
+
+
 def test_seed_count_override_limits_instances(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     points = np.arange(36).reshape(12, 3)
     instances = [np.arange(start, start + 3) for start in range(0, 12, 3)]
