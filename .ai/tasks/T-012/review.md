@@ -37,3 +37,21 @@ Verdict: CHANGES REQUESTED (nhỏ; chốt các thao tác ngoài bảng)
 ## Ghi chú
 - Studio vẫn gửi Walk/USD khi Draft cho tới T-013 (khoá nút). Chấp nhận trong khoảng giữa hai task.
 - Về câu "answer with text only, no tool calls": không có yêu cầu đó. Agent làm đúng khi tiếp tục làm task.
+
+---
+
+# Review T-012 — Round 2
+
+Verdict: ACCEPTED
+
+Đã đọc diff `558c164b` (src) và `f3e79825` (test). Chạy lại nhóm Round 1 + `test_object_restore.py` + `test_collision_surfaces.py`:
+185 passed.
+
+## Required changes Round 1
+1. Chặn thêm box, thêm vật từ thư viện, nhân bản, sửa bề mặt va chạm khi Draft: **pass**. Nhân bản chỉ chặn trong nhánh
+   `action == "duplicate"` của `apply_object_action`; thêm box/catalog chặn trước khi ghi GLB nên lỗi không để lại artifact.
+2. Test route: ready → 201, Draft → 422, không có revision mới: **pass**.
+3. Restore hai chiều Ready ↔ Draft giữ đúng trạng thái và collider/membership/object-aware ref của revision đích: **pass**.
+
+## Ghi chú
+- Chặn cả remove/fill của collision surfaces, không chỉ mark: đúng ý review.
