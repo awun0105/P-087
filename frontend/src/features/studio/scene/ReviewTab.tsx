@@ -14,10 +14,12 @@ import { floorFitDiagnostic } from "@/features/studio/scene/floorFitDiagnostic";
 import { EvaluationCard } from "@/features/studio/evaluation/EvaluationCard";
 import { ValidationReportCard } from "@/features/studio/ValidationReportCard";
 import { getJobScene, type ReviewStateView } from "@/lib/api/studio";
+import { GEOMETRY_NOT_READY_REASON, objectGeometryState } from "@/lib/scene/geometry-state";
 import { RegistrationPanel } from "@/features/studio/scene/RegistrationPanel";
 
 export function ReviewTab({ jobId, canMutateJob, onSaveState }: { jobId: string; canMutateJob: boolean; onSaveState: (state: SaveState) => void }) {
   const [revision, setRevision] = useState<string | null>(null);
+  const [geometryLocked, setGeometryLocked] = useState(false);
   const [reload, setReload] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [floorFit, setFloorFit] = useState<ReturnType<typeof floorFitDiagnostic>>(null);
@@ -31,6 +33,7 @@ export function ReviewTab({ jobId, canMutateJob, onSaveState }: { jobId: string;
       if (result.ok) {
         setError(null);
         setRevision(result.data.scene.scene_revision);
+        setGeometryLocked(objectGeometryState(result.data.scene) === "awaiting_review");
         setFloorFit(floorFitDiagnostic(result.data.scene.provenance));
         // Tạo gói ghi một revision mới (collider vật đã xác nhận) → header phải theo revision đó.
         onSaveState({ status: "saved", revision: result.data.scene.scene_revision });
@@ -65,7 +68,13 @@ export function ReviewTab({ jobId, canMutateJob, onSaveState }: { jobId: string;
         <RegistrationPanel jobId={jobId} sceneRevision={revision} canMutateJob={canMutateJob} />
       </Card>
       <Card className="overflow-hidden">
-        <SimulationPackagePanel jobId={jobId} sceneRevision={revision} canCreate={canMutateJob} onSceneChanged={() => setReload((value) => value + 1)} />
+        <SimulationPackagePanel
+          jobId={jobId}
+          sceneRevision={revision}
+          canCreate={canMutateJob}
+          lockedReason={geometryLocked ? GEOMETRY_NOT_READY_REASON : null}
+          onSceneChanged={() => setReload((value) => value + 1)}
+        />
       </Card>
       <Card className="overflow-hidden">
         <ReviewPanel jobId={jobId} sceneRevision={revision} refreshToken={reviewRefresh} onState={setReview} />

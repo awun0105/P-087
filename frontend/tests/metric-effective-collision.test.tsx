@@ -130,3 +130,43 @@ it("reports the active collision source, revision, triangle count and selected c
   expect(diagnostics).toHaveTextContent("Khối lồi của vật đang chọn: 3");
   expect(diagnostics).toHaveTextContent("sha256:active-background");
 });
+
+describe("MetricSceneView khoá Draft (T-013)", () => {
+  it("khoá Đi bộ: không nạp lưới va chạm và có nút Đi bộ bị khoá kèm lý do", () => {
+    render(<MetricSceneView jobId="j" visual={visual} collision={collision} cameras={cameras} sceneRevision="rev-1" lockedReason="Cần tạo mesh trước" />);
+    const props = renderViewer.mock.lastCall![0];
+    expect(props.collisionUrl).toBeNull();
+    const controls = render(props.extraControls);
+    const walk = controls.getByRole("button", { name: "Đi bộ" });
+    expect(walk).toBeDisabled();
+    expect(walk).toHaveAttribute("title", "Cần tạo mesh trước");
+  });
+
+  it("ngoài Draft thì không có nút Đi bộ khoá và lưới va chạm vẫn được nạp", () => {
+    render(<MetricSceneView jobId="j" visual={visual} collision={collision} cameras={cameras} sceneRevision="rev-1" />);
+    const props = renderViewer.mock.lastCall![0];
+    expect(props.collisionUrl).toContain("scene_revision=rev-1");
+    const controls = render(props.extraControls);
+    expect(controls.queryByRole("button", { name: "Đi bộ" })).toBeNull();
+  });
+
+  it("khoá Dịch và Xoay của vật đang chọn, không mở gizmo", () => {
+    render(
+      <MetricSceneView
+        jobId="j"
+        visual={visual}
+        cameras={cameras}
+        sceneRevision="rev-1"
+        selectedObject={{ id: "A", name: "Pallet", viewportHidden: false, canTransform: true }}
+        tool="none"
+        onTool={vi.fn()}
+        lockedReason="Cần tạo mesh trước"
+      />,
+    );
+    for (const name of ["Dịch", "Xoay"]) {
+      const button = screen.getByRole("button", { name });
+      expect(button).toBeDisabled();
+      expect(button).toHaveAttribute("title", "Cần tạo mesh trước");
+    }
+  });
+});

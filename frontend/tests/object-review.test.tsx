@@ -21,6 +21,7 @@ vi.mock("@/features/studio/MetricSceneView", () => ({
     onTool,
     onDelete,
     onTransform,
+    lockedReason,
   }: {
     boxes: {
       id: string;
@@ -40,11 +41,13 @@ vi.mock("@/features/studio/MetricSceneView", () => ({
     onTool?: (tool: "translate" | "rotate" | "none") => void;
     onDelete?: () => void;
     onTransform?: (id: string, position: [number, number, number], rotation: [number, number, number, number]) => void;
+    lockedReason?: string | null;
   }) => (
     <div data-testid="metric-scene" data-objects={JSON.stringify(objects)} data-boxes={JSON.stringify(boxes)} data-physics-objects={JSON.stringify(physicsObjects)}>
       {boxes.map((box) => `${box.id}:${box.color}`).join(",")}
       <span data-testid="splats">{objects.map((item) => `${item.id}:${item.url ? "ply" : "none"}:${item.visible}`).join(",")}</span>
       <span data-testid="gizmo">{gizmo ? `${gizmo.id}:${gizmo.mode}` : "none"}</span>
+      <span data-testid="locked">{lockedReason ?? "none"}</span>
       {onTool && <button type="button" onClick={() => onTool("translate")}>Dịch</button>}
       {onDelete && <button type="button" onClick={onDelete}>Xoá</button>}
       {onTransform && gizmo && <button type="button" onClick={() => onTransform(gizmo.id, [7, 8, 9], [0, 0, Math.SQRT1_2, Math.SQRT1_2])}>Áp pose kiểm tra</button>}
@@ -1220,4 +1223,27 @@ describe("ObjectReviewView", () => {
     expect(JSON.parse(canvas.dataset.boxes!)).toHaveLength(1);
   });
 
+  it("scene Draft: hiện banner Tạo mesh, khoá Dịch/Xoay bằng lý do, và gizmo không mở", async () => {
+    const policy = { object_id: "candidate-001", visual_policy: "source", source_visual_required: false, source_transform: null, readiness_blockers: [] };
+    const base = scene("rev-001", "CONFIRMED");
+    routeFetch({ "/scene": [reply({ scene: { ...base, provenance: { ...base.provenance, object_geometry: "awaiting_review" } }, representations: [policy] })] });
+    render(<ObjectReviewView jobId="job-a" />);
+
+    const banner = await screen.findByRole("region", { name: "Duyệt tách vật" });
+    expect(banner).toHaveTextContent("Đang duyệt tách vật · 1 vật · chưa có collider");
+    expect(screen.getByTestId("locked")).toHaveTextContent("Cần tạo mesh trước");
+    fireEvent.click(screen.getByRole("button", { name: "Chọn Vật thể 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Dịch" }));
+    expect(screen.getByTestId("gizmo")).toHaveTextContent("none");
+  });
+
+  it("khoá Tạo gói mô phỏng khi scene chưa có mesh: nút vô hiệu, tooltip nêu lý do, không gửi POST", async () => {
+    routeFetch({});
+    render(<SimulationPackagePanel jobId="job-a" sceneRevision="rev-001" lockedReason="Cần tạo mesh trước" onSceneChanged={() => {}} />);
+
+    const create = await screen.findByRole("button", { name: "Tạo gói mô phỏng" });
+    expect(create).toBeDisabled();
+    expect(create).toHaveAttribute("title", "Cần tạo mesh trước");
+    expect(calls("/simulation-package").some(([, init]) => (init as RequestInit | undefined)?.method === "POST")).toBe(false);
+  });
 });

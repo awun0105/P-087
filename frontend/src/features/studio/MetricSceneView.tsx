@@ -3,7 +3,7 @@
 import type { AppBase } from "playcanvas";
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 
-import { Copy, Eye, EyeOff, Hand, Maximize, Move3d, PersonStanding, RotateCcw, RotateCw, Trash2, X } from "lucide-react";
+import { Copy, Eye, EyeOff, Footprints, Hand, Maximize, Move3d, PersonStanding, RotateCcw, RotateCw, Trash2, X } from "lucide-react";
 import { Notice } from "@/components/studio/primitives";
 import {
   INITIAL_RUNTIME,
@@ -75,6 +75,7 @@ export function MetricSceneView({
   onRemoveSurface,
   onFillSurface,
   collisionDiagnostics,
+  lockedReason = null,
 }: {
   jobId: string;
   visual: Ref;
@@ -129,6 +130,8 @@ export function MetricSceneView({
   onRemoveSurface?: (id: string) => void;
   onFillSurface?: (id: string) => void;
   collisionDiagnostics?: { source: "Legacy" | "Object-aware"; backgroundChecksum: string; selectedParts: number | null };
+  /** Lý do khoá thao tác cần hình học (scene Draft): khoá Đi bộ, Dịch/Xoay và không nạp lưới va chạm. null = không khoá. */
+  lockedReason?: string | null;
 }) {
   const [capability, setCapability] = usePlayCanvasCapability();
   const fail = useCallback(() => setCapability("failed"), [setCapability]);
@@ -141,8 +144,9 @@ export function MetricSceneView({
   const [collisionState, setCollisionState] = useState<{ triangles?: number; error?: string } | null>(null);
   const initialCamera = useMemo(() => recordingCameraPose("z_up", cameras), [cameras]);
   const contentUrl = jobArtifactContentUrl(jobId, visual);
-  const collisionUrl = collision ? (sceneRevision ? jobWalkCollisionUrl(jobId, collision, [], sceneRevision, "canonical", collisionPreview) : jobArtifactContentUrl(jobId, collision)) : null;
-  const walkCollisionUrl = collision ? jobWalkCollisionUrl(jobId, collision, [], sceneRevision, "display", collisionPreview) : null;
+  // Draft: lưới va chạm theo vật chưa có, máy chủ sẽ từ chối; không gọi để khỏi báo lỗi thừa.
+  const collisionUrl = collision && !lockedReason ? (sceneRevision ? jobWalkCollisionUrl(jobId, collision, [], sceneRevision, "canonical", collisionPreview) : jobArtifactContentUrl(jobId, collision)) : null;
+  const walkCollisionUrl = collision && !lockedReason ? jobWalkCollisionUrl(jobId, collision, [], sceneRevision, "display", collisionPreview) : null;
   const colliderBoxes = useMemo<OverlayBox[]>(() => physicsObjects.flatMap((item) => {
     if (!item.dimensions && !item.colliderUrl) return [];
     const local = item.colliderLocalTransform;
@@ -473,6 +477,18 @@ export function MetricSceneView({
             >
               <RotateCcw className="size-4" aria-hidden />
             </button>
+            {lockedReason && (
+              // Viewer chỉ hiện nút Đi bộ khi lưới va chạm có sẵn; trong Draft thì hiện nút khoá kèm lý do.
+              <button
+                type="button"
+                className="sse-controlButton flex items-center justify-center text-on-dark/80 opacity-40 cursor-not-allowed"
+                disabled
+                title={lockedReason}
+                aria-label="Đi bộ"
+              >
+                <Footprints className="size-4" aria-hidden />
+              </button>
+            )}
             <button
               type="button"
               className={cn(
@@ -559,12 +575,13 @@ export function MetricSceneView({
                 type="button"
                 onClick={() => onTool?.(tool === "translate" ? "none" : "translate")}
                 className={cn(
-                  "flex items-center gap-1 rounded px-2 py-1 transition-colors",
+                  "flex items-center gap-1 rounded px-2 py-1 transition-colors disabled:cursor-not-allowed disabled:opacity-40",
                   tool === "translate"
                     ? "bg-ember-soft text-ember-strong font-medium"
                     : "text-on-dark/80 hover:bg-on-dark/10 hover:text-on-dark",
                 )}
-                title="Dịch chuyển vật (G)"
+                disabled={Boolean(lockedReason)}
+                title={lockedReason ?? "Dịch chuyển vật (G)"}
                 aria-pressed={tool === "translate"}
               >
                 <Move3d className="size-3.5" aria-hidden />
@@ -574,12 +591,13 @@ export function MetricSceneView({
                 type="button"
                 onClick={() => onTool?.(tool === "rotate" ? "none" : "rotate")}
                 className={cn(
-                  "flex items-center gap-1 rounded px-2 py-1 transition-colors",
+                  "flex items-center gap-1 rounded px-2 py-1 transition-colors disabled:cursor-not-allowed disabled:opacity-40",
                   tool === "rotate"
                     ? "bg-ember-soft text-ember-strong font-medium"
                     : "text-on-dark/80 hover:bg-on-dark/10 hover:text-on-dark",
                 )}
-                title="Xoay vật (R)"
+                disabled={Boolean(lockedReason)}
+                title={lockedReason ?? "Xoay vật (R)"}
                 aria-pressed={tool === "rotate"}
               >
                 <RotateCw className="size-3.5" aria-hidden />

@@ -28,6 +28,7 @@ import { subscribeTheme, themeColor, themeKey } from "@/lib/theme";
 import { Badge, Button, Notice } from "@/components/studio/primitives";
 import { MetricSceneView } from "@/features/studio/MetricSceneView";
 import { ObjectifyNotice } from "@/features/studio/ObjectifyNotice";
+import { GeometryReviewBanner } from "@/features/studio/GeometryReviewBanner";
 import { composeColliderTransform } from "@/features/viewer/layers";
 import type { GizmoMode, OverlayBox, OverlayObject } from "@/features/viewer/scene-overlay";
 import type { PhysicsObjectInput } from "@/features/viewer/usePhysicsPlay";
@@ -55,6 +56,7 @@ import {
 import { cn } from "@/lib/cn";
 import type { ColliderEditCommand, ObjectRepresentation, ProductArtifactRef, SceneIR, SceneObject } from "@/lib/contracts/api";
 import type { StageView } from "@/lib/contracts/studio";
+import { GEOMETRY_NOT_READY_REASON, objectGeometryState } from "@/lib/scene/geometry-state";
 
 // Chỉ dùng khi scene không có 3DGS: tải three.js theo nhu cầu, không kéo vào mọi lần mở Studio.
 const CollisionMeshCanvas = dynamic(() => import("@/features/studio/StageViewer").then((m) => m.CollisionMeshCanvas), { ssr: false });
@@ -317,6 +319,11 @@ export function ObjectReviewView({
   const [focus, setFocus] = useState<{ id: string; nonce: number } | undefined>();
   const [reload, setReload] = useState(0);
   const [tool, setTool] = useState<GizmoMode | "none">("none");
+  // Scene Draft chưa có hình học theo vật: Dịch/Xoay bị khoá, gizmo đang mở thì đóng lại.
+  const geometryLockReason = scene && objectGeometryState(scene) === "awaiting_review" ? GEOMETRY_NOT_READY_REASON : null;
+  useEffect(() => {
+    if (geometryLockReason) setTool("none");
+  }, [geometryLockReason]);
   const [selectMode, setSelectMode] = useState(true);
   const [catalog, setCatalog] = useState<SceneCatalog | null>(null);
   const [leftCollapsed, setLeftCollapsed] = useState(false);
@@ -668,13 +675,21 @@ export function ObjectReviewView({
         </AlertDialogContent>
       </AlertDialog>
       {/* Viewport 3D chiếm toàn bộ không gian khung nhìn */}
-      <div className="size-full">
+      <div className="relative size-full">
+        {geometryLockReason && (
+          <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex justify-center">
+            <div className="pointer-events-auto w-full max-w-xl">
+              <GeometryReviewBanner jobId={jobId} scene={scene} onRevision={() => setReload((value) => value + 1)} />
+            </div>
+          </div>
+        )}
         {scene.environment.visual_ref ? (
           <MetricSceneView
             jobId={jobId}
             visual={scene.environment.visual_ref}
             collision={scene.environment.collision_source_ref ?? scene.environment.geometry_ref}
             sceneRevision={scene.scene_revision}
+            lockedReason={geometryLockReason}
             collisionPreview
             collisionDiagnostics={{
               source: scene.environment.object_aware_collision_ref ? "Object-aware" : "Legacy",
@@ -697,7 +712,7 @@ export function ObjectReviewView({
             cameras={cameras}
             boxes={boxes}
             objects={splats}
-            gizmo={tool !== "none" && current && isPlaced(current) && !hiddenIds.has(current.id) ? { id: current.id, mode: tool } : null}
+            gizmo={!geometryLockReason && tool !== "none" && current && isPlaced(current) && !hiddenIds.has(current.id) ? { id: current.id, mode: tool } : null}
             onTransform={(id, position, rotation) => run((revision) => setObjectTransform(jobId, revision, id, position, rotation))}
             focus={focus}
             onPickBox={selectFromScene}
@@ -728,7 +743,7 @@ export function ObjectReviewView({
                 : null
             }
             tool={tool}
-            onTool={setTool}
+            onTool={(next) => setTool(geometryLockReason && next !== "none" ? "none" : next)}
             onDuplicate={current && !isIgnored(current) ? () => void act(current, "duplicate") : undefined}
             onToggleVisibility={current ? () => toggleViewportVisibility(current.id) : undefined}
             onDelete={
