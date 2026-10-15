@@ -10,7 +10,7 @@ from src.services.orchestration.scene import objectify as module
 
 
 @pytest.fixture
-def draft_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def draft_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     grid = np.array(np.meshgrid(*[np.linspace(-0.15, 0.15, 7)] * 3)).reshape(3, -1).T
     points = np.vstack([grid + [2, 3, 1], grid + [-2, 1, 2], [[0, 0, 0]]])
     rows = np.zeros(
@@ -61,11 +61,13 @@ def draft_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     )
     published = {}
 
-    def publish(ref, payload):
+    def publish(ref: module.ProductArtifactRef, payload: bytes) -> module.ProductArtifactRef:
         published[ref.artifact_uri] = payload
         return ref
 
-    def run(python, script, request, workspace, name, *args, **kwargs):
+    def run(
+        python: Path, script: Path, request: dict, workspace: Path, name: str, *args: object, **kwargs: object
+    ) -> dict:
         assert name == "lift", f"Draft called {name}"
         assert "geometry_review" not in request["config"]
         np.savez(workspace / "labels.npz", labels=labels)
@@ -73,14 +75,14 @@ def draft_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     monkeypatch.setattr(module, "_run", run)
 
-    def forbidden(*args, **kwargs):
+    def forbidden(*args: object, **kwargs: object) -> None:
         pytest.fail("Draft called an expensive geometry provider")
 
     monkeypatch.setattr(module, "run_prepared_objectgs", forbidden)
     monkeypatch.setattr(module, "package_splat", forbidden)
     monkeypatch.setattr(module, "build_background_collision", forbidden)
 
-    def extract(method="shell"):
+    def extract(method: str = "shell") -> module.ObjectifyResult:
         return module.objectify(
             registry,
             SimpleNamespace(job_id="job-draft"),
@@ -94,14 +96,14 @@ def draft_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     return SimpleNamespace(extract=extract, bundle=bundle, published=published, labels=labels, source=source)
 
 
-def test_objectgs_draft_does_not_require_objectgs_runtime(draft_inputs):
+def test_objectgs_draft_does_not_require_objectgs_runtime(draft_inputs: SimpleNamespace) -> None:
     result = draft_inputs.extract("objectgs")
     assert result.provenance["object_geometry"] == "awaiting_review"
     assert result.provenance["geometry_method"] == "objectgs"
     assert len(result.objects) == 2
 
 
-def test_draft_objects_have_preview_shells_and_source_poses(draft_inputs):
+def test_draft_objects_have_preview_shells_and_source_poses(draft_inputs: SimpleNamespace) -> None:
     result = draft_inputs.extract()
     assert len(result.objects) == 2
     for number, item in enumerate(result.objects, 1):
@@ -115,7 +117,7 @@ def test_draft_objects_have_preview_shells_and_source_poses(draft_inputs):
         assert item.provenance["gaussians"] == 343
 
 
-def test_draft_shells_are_local_watertight_glbs(draft_inputs):
+def test_draft_shells_are_local_watertight_glbs(draft_inputs: SimpleNamespace) -> None:
     import io
 
     import trimesh
@@ -133,8 +135,10 @@ def test_draft_shells_are_local_watertight_glbs(draft_inputs):
         np.testing.assert_allclose(module.gaussian_split.positions(visual).mean(axis=0), 0, atol=1e-6)
 
 
-def test_shell_failure_keeps_object_as_display_placeholder(draft_inputs, monkeypatch):
-    def broken(*args, **kwargs):
+def test_shell_failure_keeps_object_as_display_placeholder(
+    draft_inputs: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def broken(*args: object, **kwargs: object) -> None:
         raise module.GaussianShellError("fixture QA failure")
 
     monkeypatch.setattr(module, "build_gaussian_shell", broken, raising=False)
@@ -147,7 +151,7 @@ def test_shell_failure_keeps_object_as_display_placeholder(draft_inputs, monkeyp
         assert item.geometry_ref.artifact_type == "ObjectShellMesh"
 
 
-def test_draft_never_calls_geometry_or_background_providers(draft_inputs):
+def test_draft_never_calls_geometry_or_background_providers(draft_inputs: SimpleNamespace) -> None:
     # Fixture providers raise immediately if anything beyond lift is invoked.
     result = draft_inputs.extract()
     assert result.provenance["geometry_review"] == "required"
@@ -158,7 +162,7 @@ def test_draft_never_calls_geometry_or_background_providers(draft_inputs):
     assert "inpaint_method" not in result.provenance
 
 
-def test_draft_environment_keeps_full_bundle_and_published_membership(draft_inputs):
+def test_draft_environment_keeps_full_bundle_and_published_membership(draft_inputs: SimpleNamespace) -> None:
     result = draft_inputs.extract()
     environment = result.environment
     assert environment.visual_ref == draft_inputs.bundle.visual_artifact_ref
@@ -173,3 +177,83 @@ def test_draft_environment_keeps_full_bundle_and_published_membership(draft_inpu
     np.testing.assert_array_equal(
         np.frombuffer(draft_inputs.published[membership.labels_ref.artifact_uri], dtype="<i4"), draft_inputs.labels
     )
+
+
+def test_retry_preserves_sealed_geometry_review(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = {}
+    monkeypatch.setattr(
+        module,
+        "load_job_config",
+        lambda *args: SimpleNamespace(
+            scene={"geometry_method": "shell", "geometry_review": "required", "coacd_threshold": 0.03}
+        ),
+    )
+
+    def attempt(*args: object, **kwargs: object) -> SimpleNamespace:
+        captured.update(kwargs["scene_config"])
+        return SimpleNamespace(provenance={})
+
+    monkeypatch.setattr(module, "objectify", attempt)
+    module.objectify_with_retry(
+        SimpleNamespace(runtime_resolver=None),
+        SimpleNamespace(job_id="job-draft", config_checksum="unused"),
+        None,
+        SimpleNamespace(product_objectify_attempts=1),
+        tmp_path,
+        None,
+    )
+    assert captured["scene"] == {"geometry_method": "shell", "geometry_review": "required"}
+    assert captured["coacd"] == {"threshold": 0.03}
+
+
+def test_strict_extraction_error_names_shell_and_objectgs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from src.services.orchestration.scene import extraction
+
+    monkeypatch.setattr(extraction, "job_requires_strict_geometry", lambda *args: True)
+    monkeypatch.setattr(extraction, "_sam2_runtime", lambda *args: None)
+    with pytest.raises(module.ObjectifyError, match="Job hình học nghiêm ngặt") as error:
+        extraction.extract_scene(
+            SimpleNamespace(runtime_resolver=None), None, None, SimpleNamespace(product_objectify=False), tmp_path
+        )
+    assert not error.value.retryable
+
+
+def test_geometry_entrypoints_accept_shell_without_obsolete_alias() -> None:
+    from typing import get_type_hints
+
+    assert not hasattr(module, "job_requires_objectgs")
+    for function in (module.objectify_with_retry, module.reobjectify):
+        assert "shell" in str(get_type_hints(function)["geometry_method"])
+
+
+def test_extraction_publishes_draft_with_source_ownership(
+    draft_inputs: SimpleNamespace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from src.models.contracts.reconstruction import ReconstructionBundle
+    from src.services.orchestration.scene import extraction
+
+    result = draft_inputs.extract()
+    fixture = Path(__file__).resolve().parents[2] / "fixtures/reconstruction_bundle/manifest.json"
+    bundle = ReconstructionBundle.model_validate_json(fixture.read_text().replace("job-fixture-001", "job-draft"))
+    scenes = []
+
+    def publish_initial(job_id: str, scene: object) -> SimpleNamespace:
+        scenes.append(scene)
+        reference = module._reference(job_id, "{digest}.json", "SceneIR", module.StageId.SCENE_DECOMPOSE, b"scene")
+        return SimpleNamespace(scene_reference=reference)
+
+    registry = SimpleNamespace(scene=SimpleNamespace(publish_initial=publish_initial))
+    monkeypatch.setattr(extraction, "_idempotent_publish", lambda *args: None)
+    monkeypatch.setattr(extraction, "_sam2_runtime", lambda *args: SimpleNamespace(available=lambda: True))
+    monkeypatch.setattr(extraction, "job_requires_strict_geometry", lambda *args: True)
+    monkeypatch.setattr(extraction, "objectify_with_retry", lambda *args: result)
+    extraction.extract_scene(
+        registry, SimpleNamespace(job_id="job-draft"), bundle, SimpleNamespace(product_objectify=True), tmp_path
+    )
+    (scene,) = scenes
+    assert scene.provenance["object_geometry"] == "awaiting_review"
+    assert scene.environment == result.environment
+    for item in scene.objects:
+        assert item.collider is None
+        assert item.source_collision.source_transform == item.transform
+        assert item.source_collision.source_geometry_ref == result.environment.geometry_ref

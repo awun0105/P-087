@@ -24,6 +24,9 @@ class StopAfterProvidersError(RuntimeError):
             "inpaint": {"max_new_gaussians": 100, "behind_object_m": 0.07},
         },
         {"scene": {"geometry_review": "required"}},
+        {"scene": {"geometry_review": "legacy"}},
+        {"scene": {"geometry_review": "auto"}},
+        {"scene": {"geometry_method": "shell", "geometry_review": "auto"}},
     ],
 )
 def test_provider_requests_receive_overrides(
@@ -97,7 +100,7 @@ def test_provider_requests_receive_overrides(
         **{
             key: value
             for key, value in groups.get("scene", {}).items()
-            if key not in {"max_objects", "geometry_review"}
+            if key not in {"max_objects", "geometry_review", "geometry_method"}
         },
     }
     assert requests["convex"]["config"] == groups.get("coacd", {})

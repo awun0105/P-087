@@ -1141,9 +1141,6 @@ def job_requires_strict_geometry(registry: ProjectRegistry, job: JobManifest) ->
     return processing is not None and processing.scene.get("geometry_method") in {"shell", "objectgs"}
 
 
-job_requires_objectgs = job_requires_strict_geometry
-
-
 def objectify_with_retry(
     registry: ProjectRegistry,
     job: JobManifest,
@@ -1155,7 +1152,7 @@ def objectify_with_retry(
     extraction_revision: str = "rev-001",
     cancel_event: Event | None = None,
     scene_config: dict[str, object] | None = None,
-    geometry_method: Literal["legacy", "objectgs"] | None = None,
+    geometry_method: Literal["legacy", "shell", "objectgs"] | None = None,
     refinement: Literal["legacy", "multiview_v1"] | None = None,
     correction: CorrectedMembership | None = None,
     progress: Callable[[str], None] | None = None,
@@ -1232,7 +1229,7 @@ def reobjectify(
     expected_revision: str | None = None,
     commit_guard: Callable[[RuntimeTransaction], bool] | None = None,
     cancel_event: Event | None = None,
-    geometry_method: Literal["legacy", "objectgs"] | None = None,
+    geometry_method: Literal["legacy", "shell", "objectgs"] | None = None,
     refinement: Literal["legacy", "multiview_v1"] | None = None,
 ) -> str:
     """Chạy lại tách theo vật cho job đã có SceneIR; ghi **revision kế tiếp** (không sửa revision cũ).

@@ -185,10 +185,11 @@ def extract_scene(
     runtime = _sam2_runtime(settings)
     objects: list[SceneObject] = []
     environment, extra = None, {}
-    objectgs_required = job_requires_strict_geometry(registry, job)
-    if objectgs_required and not (settings.product_objectify and runtime is not None and runtime.available()):
+    strict_geometry_required = job_requires_strict_geometry(registry, job)
+    if strict_geometry_required and not (settings.product_objectify and runtime is not None and runtime.available()):
         raise ObjectifyError(
-            "ObjectGS job requires the configured SAM2/objectify runtime; legacy fallback is forbidden", retryable=False
+            "Job hình học nghiêm ngặt (shell/ObjectGS) cần runtime SAM2/objectify; không được lùi về legacy",
+            retryable=False,
         )
     if settings.product_objectify and runtime is not None and runtime.available():
         try:
@@ -196,7 +197,7 @@ def extract_scene(
             objects, environment, extra = result.objects, result.environment, result.provenance
             method, note = OBJECTIFY_METHOD, ""
         except ObjectifyError as error:
-            if objectgs_required:
+            if strict_geometry_required:
                 raise
             # Không tự lùi về hộp (owner quyết 2026-10-01): scene chỉ có môi trường, chờ người dùng chọn.
             method, note = AWAITING_CHOICE, f"{error}; chọn chạy lại hoặc dùng hộp ứng viên"
