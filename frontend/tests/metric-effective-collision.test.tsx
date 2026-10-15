@@ -14,7 +14,7 @@ const pickCollisionTriangle = vi.hoisted(() => vi.fn());
 vi.mock("@/features/viewer/scene-overlay", () => ({ SceneOverlay: class {
   attachGizmo = gizmo;
   destroy = vi.fn(); detachGizmo = vi.fn(); setObjects = vi.fn(); setBoxes = setBoxes; setColliders = setColliders; setSurfaceMarkers = vi.fn();
-  setSplatVisible = vi.fn(); setCollision = setCollision; collisionPositions = () => null;
+  setSplatVisible = vi.fn(); setCollision = setCollision; collisionPositions = () => null; bindViewerGotoPose = vi.fn();
   loadCollision = loadCollision; pickCollisionTriangle = pickCollisionTriangle;
 } }));
 vi.mock("@/features/viewer/third-person", () => ({

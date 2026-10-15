@@ -1,10 +1,21 @@
 "use client";
 
-import type { AppBase } from "playcanvas";
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import type { AppBase, Entity } from "playcanvas";
+import {
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+  type RefObject,
+} from "react";
 
 import { Copy, Eye, EyeOff, Footprints, Hand, Maximize, Move3d, PersonStanding, RotateCcw, RotateCw, Trash2, X } from "lucide-react";
 import { Notice } from "@/components/studio/primitives";
+import type { EditableBox } from "@/features/studio/region/box-model";
+import type { RegionViewApi } from "@/features/studio/region/region-session";
 import {
   INITIAL_RUNTIME,
   PlayCanvasScene,
@@ -14,6 +25,7 @@ import {
   type ViewerAppLike,
   type ViewerControls,
 } from "@/features/viewer/PlayCanvasScene";
+import { RegionOverlay, type RegionOverlayHandlers } from "@/features/viewer/region-overlay";
 import { SceneOverlay, type GizmoMode, type OverlayBox, type OverlayObject } from "@/features/viewer/scene-overlay";
 import { ThirdPersonRig } from "@/features/viewer/third-person";
 import { browserPhysicsBlocker, usePhysicsPlay, type PhysicsObjectInput } from "@/features/viewer/usePhysicsPlay";
@@ -76,6 +88,8 @@ export function MetricSceneView({
   onFillSurface,
   collisionDiagnostics,
   lockedReason = null,
+  regionEdit = null,
+  regionApi,
 }: {
   jobId: string;
   visual: Ref;
@@ -132,6 +146,16 @@ export function MetricSceneView({
   collisionDiagnostics?: { source: "Legacy" | "Object-aware"; backgroundChecksum: string; selectedParts: number | null };
   /** Lý do khoá thao tác cần hình học (scene Draft): khoá Đi bộ, Dịch/Xoay và không nạp lưới va chạm. null = không khoá. */
   lockedReason?: string | null;
+  /** Vật đang chỉnh vùng: overlay vùng gắn vào entity của vật; box và chọn lấy từ cha, null = không chỉnh. */
+  regionEdit?: {
+    objectId: string;
+    boxes: EditableBox[];
+    selectedId: string | null;
+    onChange(boxes: EditableBox[]): void;
+    onSelect(id: string | null): void;
+  } | null;
+  /** Cầu nối tới góc nhìn và trạng thái cử chỉ của overlay vùng, để panel chỉnh vùng dùng. */
+  regionApi?: RefObject<RegionViewApi | null>;
 }) {
   const [capability, setCapability] = usePlayCanvasCapability();
   const fail = useCallback(() => setCapability("failed"), [setCapability]);
@@ -188,6 +212,8 @@ export function MetricSceneView({
     setRig(rigRef.current);
     overlayRef.current?.destroy();
     overlayRef.current = app ? new SceneOverlay(app) : null;
+    // Góc nhìn của overlay vùng đi qua lệnh chuyển camera của viewer.
+    overlayRef.current?.bindViewerGotoPose(next ? (pose) => next.gotoPose(pose) : null);
     controls.current = next ?? null;
     setViewerControls(next ?? null);
     setOverlay(overlayRef.current);
@@ -355,6 +381,58 @@ export function MetricSceneView({
     overlay.setObjects(objects.map((item) => ({ ...item, visible: item.visible && layers.splat })));
   }, [overlay, objects, layers.splat]);
 
+  // Overlay vùng của vật đang chỉnh: box lấy từ cha; cha đổi box chỉ khi thả (onChange), nên khi đang kéo không ghi đè.
+  const regionRef = useRef<RegionOverlay | null>(null);
+  const regionEntityRef = useRef<Entity | null>(null);
+  const regionEditRef = useRef(regionEdit);
+  useEffect(() => {
+    regionEditRef.current = regionEdit;
+  }, [regionEdit]);
+  const regionObjectId = regionEdit?.objectId ?? null;
+  const regionBoxes = regionEdit?.boxes;
+  const regionSelected = regionEdit?.selectedId ?? null;
+  // Entity của vật được dựng lại khi objects đổi: overlay cũ được gỡ và tạo lại với box hiện tại.
+  useEffect(() => {
+    const entity = overlay && regionObjectId ? overlay.objectEntity(regionObjectId) : null;
+    if (!overlay || !regionObjectId || !entity) {
+      regionRef.current?.destroy();
+      regionRef.current = null;
+      regionEntityRef.current = null;
+      return;
+    }
+    if (regionRef.current && regionEntityRef.current === entity) return;
+    regionRef.current?.destroy();
+    const handlers: RegionOverlayHandlers = {
+      onChange: (boxes) => regionEditRef.current?.onChange(boxes),
+      onSelect: (id) => regionEditRef.current?.onSelect(id),
+    };
+    const region = new RegionOverlay(overlay, regionObjectId, handlers);
+    regionRef.current = region;
+    regionEntityRef.current = entity;
+    if (regionEditRef.current) region.setBoxes(regionEditRef.current.boxes, regionEditRef.current.selectedId);
+  }, [overlay, regionObjectId, objects]);
+  // Không ghi box vào overlay khi đang kéo; box thả đã đến qua onChange.
+  useEffect(() => {
+    const region = regionRef.current;
+    if (!region || regionBoxes === undefined || region.isGesturing()) return;
+    region.setBoxes(regionBoxes, regionSelected);
+  }, [regionBoxes, regionSelected]);
+  useImperativeHandle(
+    regionApi,
+    (): RegionViewApi => ({
+      viewFrom: (preset) => regionRef.current?.viewFrom(preset) ?? false,
+      isGesturing: () => regionRef.current?.isGesturing() ?? false,
+    }),
+    [],
+  );
+  useEffect(
+    () => () => {
+      regionRef.current?.destroy();
+      regionRef.current = null;
+    },
+    [],
+  );
+
   const transformed = useRef(onTransform);
   useEffect(() => {
     transformed.current = onTransform;
@@ -422,6 +500,9 @@ export function MetricSceneView({
       onPointerLeave={onPointerLeave}
     >
       {(walkBlocker || walkCollisionError) && <Notice tone="rust">Không thể dùng Walk: {walkBlocker ?? walkCollisionError}</Notice>}
+      {overlay && regionObjectId && !objects.some((item) => item.id === regionObjectId) && (
+        <Notice tone="ochre">Vật đang chỉnh vùng chưa có trên viewport, nên chưa thể kéo box.</Notice>
+      )}
       {placement && (
         <div
           role="status"

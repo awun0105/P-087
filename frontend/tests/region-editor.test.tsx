@@ -1,14 +1,29 @@
 /**
- * Region Editor (T-016): API vùng Gaussian, hook xem trước, panel chỉnh vùng, và các điểm bàn giao từ T-015.
+ * Region Editor (T-016): API vùng Gaussian, hook xem trước, phiên và panel chỉnh vùng, và nối overlay vùng vào
+ * MetricSceneView.
  */
 
-import { act, renderHook } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, renderHook, screen, within } from "@testing-library/react";
+import { useState, type RefObject } from "react";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
+import { MetricSceneView } from "@/features/studio/MetricSceneView";
+import { RegionEditor } from "@/features/studio/region/RegionEditor";
 import type { EditableBox } from "@/features/studio/region/box-model";
+import {
+  addAddBox,
+  addSubtractBox,
+  canRemoveBox,
+  initialRegionSession,
+  removeRegionBox,
+  selectRegionBox,
+  type RegionSession,
+  type RegionViewApi,
+} from "@/features/studio/region/region-session";
 import { PREVIEW_DEBOUNCE_MS, regionKey, useRegionPreview } from "@/features/studio/region/useRegionPreview";
+import type { RegionOverlayHandlers } from "@/features/viewer/region-overlay";
 import { applyObjectRegion, isSceneEditResponse, previewObjectRegion, type RegionPreview } from "@/lib/api/studio";
-import type { ObjectRegionCommand } from "@/lib/contracts/api";
+import type { ObjectRegionCommand, SceneObject } from "@/lib/contracts/api";
 
 // Các test API dùng bản thật; test hook thay bằng bản giả và trả về bản thật sau mỗi test.
 vi.mock("@/lib/api/studio", async (original) => {
@@ -179,5 +194,384 @@ describe("hook xem trước vùng", () => {
     const boxes = [box(0.5)];
     expect(regionKey(boxes, ["b", "a"])).toBe(regionKey(boxes, ["a", "b"]));
     expect(regionKey(boxes, ["a"])).not.toBe(regionKey(boxes, []));
+  });
+});
+
+// ---- Phiên và panel chỉnh vùng (T-016 bước 3) ----
+
+const pallet = { id: "pallet", name: "Pallet gỗ", primitive_dimensions_xyz_m: [1.2, 0.8, 0.15] } as SceneObject;
+const addBox: EditableBox = { id: "add-1", op: "add", center: [0, 0, 0], half: [0.6, 0.4, 0.075], yaw: 0 };
+const initial = initialRegionSession(pallet)!;
+
+describe("phiên chỉnh vùng", () => {
+  it("vật có kích thước: một box cộng, tâm gốc, nửa kích thước bằng nửa vật", () => {
+    expect(initial).toEqual({ objectId: "pallet", boxes: [addBox], selectedId: "add-1", claimFrom: [] });
+  });
+
+  it("vật không có kích thước thì chưa có phiên", () => {
+    expect(initialRegionSession({ ...pallet, primitive_dimensions_xyz_m: null })).toBeNull();
+  });
+
+  it("+ Box cộng: box mới thu còn 80% box đang chọn, cùng tâm và yaw, rồi được chọn", () => {
+    const next = addAddBox(initial);
+    const created = next.boxes[1];
+    expect(created).toMatchObject({ id: "add-2", op: "add", center: [0, 0, 0], yaw: 0 });
+    expect(created.half[0]).toBeCloseTo(0.48);
+    expect(created.half[1]).toBeCloseTo(0.32);
+    expect(created.half[2]).toBeCloseTo(0.06);
+    expect(next.selectedId).toBe("add-2");
+  });
+
+  it("− Box trừ: box trừ nhỏ 30% đặt ở tâm box đang chọn", () => {
+    const shifted: RegionSession = { ...initial, boxes: [{ ...addBox, center: [0.2, 0, 0] }] };
+    const next = addSubtractBox(shifted);
+    const created = next.boxes[1];
+    expect(created).toMatchObject({ id: "sub-2", op: "subtract", center: [0.2, 0, 0] });
+    expect(created.half[0]).toBeCloseTo(0.18);
+    expect(created.half[1]).toBeCloseTo(0.12);
+    expect(created.half[2]).toBeCloseTo(0.0225);
+  });
+
+  it("không chọn box thì thêm box dựa trên box cộng đầu", () => {
+    const loose: RegionSession = {
+      ...initial,
+      boxes: [addBox, { id: "add-2", op: "add", center: [1, 0, 0], half: [0.2, 0.2, 0.2], yaw: 0 }],
+      selectedId: null,
+    };
+    expect(addSubtractBox(loose).boxes[2].center).toEqual([0, 0, 0]);
+  });
+
+  it("box cộng cuối cùng không xoá được; box trừ xoá được và chọn lại box đầu", () => {
+    expect(canRemoveBox(initial, "add-1")).toBe(false);
+    const withSub = addSubtractBox(initial);
+    expect(canRemoveBox(withSub, "sub-2")).toBe(true);
+    const removed = removeRegionBox(withSub, "sub-2");
+    expect(removed.boxes.map((item) => item.id)).toEqual(["add-1"]);
+    expect(removed.selectedId).toBe("add-1");
+    expect(removeRegionBox(initial, "add-1")).toBe(initial);
+  });
+
+  it("box cộng thứ hai xoá được; chọn id lạ thì bỏ chọn", () => {
+    expect(canRemoveBox(addAddBox(initial), "add-1")).toBe(true);
+    expect(selectRegionBox(initial, "nope").selectedId).toBeNull();
+  });
+});
+
+function Panel({
+  start = initial,
+  viewApi = { current: null },
+  onClose = () => {},
+}: {
+  start?: RegionSession;
+  viewApi?: RefObject<RegionViewApi | null>;
+  onClose?: () => void;
+}) {
+  const [session, setSession] = useState(start);
+  return <RegionEditor object={pallet} session={session} onSession={setSession} onClose={onClose} viewApi={viewApi} />;
+}
+
+describe("panel chỉnh vùng", () => {
+  it("mở với một box cộng bằng nửa kích thước vật, đang được chọn", () => {
+    render(<Panel />);
+    expect(within(screen.getByRole("list", { name: "Box vùng" })).getAllByRole("listitem")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Cộng #1" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("+ Box cộng và − Box trừ thêm box mới rồi chọn nó", () => {
+    render(<Panel />);
+    fireEvent.click(screen.getByRole("button", { name: "+ Box cộng" }));
+    expect(screen.getByRole("button", { name: "Cộng #2" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: "− Box trừ" }));
+    expect(screen.getByRole("button", { name: "Trừ #3" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("không xoá box cộng cuối cùng; xoá được box trừ và box cộng khi còn box cộng khác", () => {
+    render(<Panel />);
+    expect(screen.getByRole("button", { name: "Xoá Cộng #1" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "− Box trừ" }));
+    fireEvent.click(screen.getByRole("button", { name: "Xoá Trừ #2" }));
+    expect(screen.queryByRole("button", { name: "Trừ #2" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "+ Box cộng" }));
+    fireEvent.click(screen.getByRole("button", { name: "Xoá Cộng #1" }));
+    expect(screen.getByRole("button", { name: "Xoá Cộng #1" })).toBeDisabled();
+  });
+
+  it("Delete xoá box đang chọn, không xoá box cộng cuối cùng", () => {
+    render(<Panel />);
+    fireEvent.click(screen.getByRole("button", { name: "− Box trừ" }));
+    fireEvent.keyDown(window, { key: "Delete" });
+    expect(screen.queryByRole("button", { name: "Trừ #2" })).not.toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "Delete" });
+    expect(screen.getByRole("button", { name: "Cộng #1" })).toBeInTheDocument();
+  });
+
+  it("Delete đang gõ trong ô nhập thì không xoá box", () => {
+    render(<Panel />);
+    fireEvent.click(screen.getByRole("button", { name: "− Box trừ" }));
+    const field = document.createElement("input");
+    document.body.appendChild(field);
+    fireEvent.keyDown(field, { key: "Delete" });
+    expect(screen.getByRole("button", { name: "Trừ #2" })).toBeInTheDocument();
+    field.remove();
+  });
+
+  it("Đặt lại đưa về một box cộng ban đầu", () => {
+    render(<Panel />);
+    fireEvent.click(screen.getByRole("button", { name: "+ Box cộng" }));
+    fireEvent.click(screen.getByRole("button", { name: "− Box trừ" }));
+    fireEvent.click(screen.getByRole("button", { name: "Đặt lại" }));
+    expect(within(screen.getByRole("list", { name: "Box vùng" })).getAllByRole("listitem")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Cộng #1" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("góc nhìn gọi overlay; khi overlay chưa nối thì khoá các nút và báo lý do", () => {
+    const viewFrom = vi.fn(() => false);
+    const viewApi: RefObject<RegionViewApi | null> = { current: { viewFrom, isGesturing: () => false } };
+    render(<Panel viewApi={viewApi} />);
+    fireEvent.click(screen.getByRole("button", { name: "Trước" }));
+    expect(viewFrom).toHaveBeenCalledWith("front");
+    expect(screen.getByRole("button", { name: "Trước" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Cạnh" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Trên" })).toHaveAttribute("title", expect.stringContaining("chưa sẵn sàng"));
+  });
+
+  it("góc nhìn cần box đang chọn", () => {
+    render(<Panel start={{ ...initial, selectedId: null }} />);
+    expect(screen.getByRole("button", { name: "Trên" })).toBeDisabled();
+  });
+
+  it("Esc đóng panel khi không kéo; khi đang kéo thì Esc thuộc về overlay", () => {
+    const onClose = vi.fn();
+    const isGesturing = vi.fn(() => true);
+    const viewApi: RefObject<RegionViewApi | null> = { current: { viewFrom: () => true, isGesturing } };
+    render(<Panel viewApi={viewApi} onClose={onClose} />);
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(onClose).not.toHaveBeenCalled();
+    isGesturing.mockReturnValue(false);
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("nút đóng gọi onClose", () => {
+    const onClose = vi.fn();
+    render(<Panel onClose={onClose} />);
+    fireEvent.click(screen.getByRole("button", { name: "Đóng chỉnh vùng" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("báo lỗi khi box không hợp lệ", () => {
+    const thin: EditableBox = { ...addBox, half: [0.001, 0.4, 0.075] };
+    render(<Panel start={{ ...initial, boxes: [thin] }} />);
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+  });
+});
+
+// ---- MetricSceneView nối overlay vùng (bàn giao T-015) ----
+
+// Viewer giả: PlayCanvasScene chỉ đưa props ra ngoài; SceneOverlay và overlay vùng được ghi lại để đọc lời gọi.
+type FakeRegion = {
+  objectId: string;
+  handlers: RegionOverlayHandlers;
+  setBoxes: Mock;
+  viewFrom: Mock;
+  isGesturing: Mock;
+  destroy: Mock;
+};
+const viewer = vi.hoisted(() => ({
+  viewerProps: vi.fn(),
+  entities: new Map<string, object>(),
+  sceneOverlays: [] as Array<{ bindViewerGotoPose: Mock }>,
+  regionOverlays: [] as FakeRegion[],
+}));
+vi.mock("@/features/viewer/scene-overlay", () => ({
+  SceneOverlay: class {
+    attachGizmo = vi.fn();
+    bindViewerGotoPose = vi.fn();
+    destroy = vi.fn();
+    detachGizmo = vi.fn();
+    setObjects = vi.fn();
+    setBoxes = vi.fn();
+    setColliders = vi.fn();
+    setSurfaceMarkers = vi.fn();
+    setSplatVisible = vi.fn();
+    setCollision = vi.fn();
+    collisionPositions = () => null;
+    loadCollision = vi.fn(async () => 0);
+    pickCollisionTriangle = vi.fn();
+    constructor() {
+      viewer.sceneOverlays.push(this);
+    }
+    isAlive = () => true;
+    objectEntity = (id: string) => viewer.entities.get(id) ?? null;
+  },
+}));
+vi.mock("@/features/viewer/region-overlay", () => ({
+  RegionOverlay: class {
+    objectId: string;
+    handlers: RegionOverlayHandlers;
+    setBoxes = vi.fn();
+    viewFrom = vi.fn(() => true);
+    isGesturing = vi.fn(() => false);
+    destroy = vi.fn();
+    constructor(_host: unknown, objectId: string, handlers: RegionOverlayHandlers) {
+      this.objectId = objectId;
+      this.handlers = handlers;
+      viewer.regionOverlays.push(this);
+    }
+  },
+}));
+vi.mock("@/features/viewer/third-person", () => ({
+  WALK_EYE_HEIGHT_M: 1.3,
+  ThirdPersonRig: class {
+    destroy = vi.fn();
+    setActive = vi.fn();
+    setCollision = vi.fn();
+  },
+}));
+vi.mock("@/features/viewer/PlayCanvasScene", async (original) => ({
+  ...(await original<typeof import("@/features/viewer/PlayCanvasScene")>()),
+  usePlayCanvasCapability: () => ["ready", vi.fn()],
+  PlayCanvasScene: (props: object) => {
+    viewer.viewerProps(props);
+    return <div data-testid="viewer-surface" />;
+  },
+}));
+
+const visualRef = { artifact_uri: "artifact://jobs/j/background.sog", artifact_checksum: "sha256:visual" };
+const palletObject = {
+  id: "pallet",
+  url: null,
+  position: [0, 0, 0] as [number, number, number],
+  rotation_xyzw: [0, 0, 0, 1] as [number, number, number, number],
+  visible: true,
+};
+type RegionEditProp = NonNullable<Parameters<typeof MetricSceneView>[0]["regionEdit"]>;
+type ViewerProps = {
+  regionEdit: RegionEditProp | null;
+  objects?: (typeof palletObject)[];
+  regionApi?: RefObject<RegionViewApi | null>;
+};
+
+function viewerElement({ regionEdit, objects = [palletObject], regionApi }: ViewerProps) {
+  return (
+    <MetricSceneView
+      jobId="j"
+      visual={visualRef}
+      cameras={[]}
+      objects={objects}
+      regionEdit={regionEdit}
+      regionApi={regionApi}
+    />
+  );
+}
+
+/** Dựng viewer và trao `onApp` (viewer đã sẵn sàng) để overlay được tạo, như khi PlayCanvas mở xong. */
+function mountViewer(props: ViewerProps) {
+  const view = render(viewerElement(props));
+  const controls = {
+    gotoPose: vi.fn(() => true),
+    setObjectCollision: vi.fn(),
+    setCameraMode: vi.fn(),
+    setInputEnabled: vi.fn(),
+  };
+  act(() => viewer.viewerProps.mock.lastCall![0].onApp({}, controls));
+  return { ...view, controls, update: (next: ViewerProps) => view.rerender(viewerElement(next)) };
+}
+
+function regionEdit(boxes: EditableBox[], objectId = "pallet") {
+  return { objectId, boxes, selectedId: boxes[0]?.id ?? null, onChange: vi.fn(), onSelect: vi.fn() };
+}
+
+describe("MetricSceneView nối overlay vùng", () => {
+  beforeEach(() => {
+    viewer.entities.clear();
+    viewer.entities.set("pallet", {});
+    viewer.sceneOverlays.length = 0;
+    viewer.regionOverlays.length = 0;
+  });
+
+  it("đưa lệnh chuyển camera của viewer vào overlay để góc nhìn dùng được", () => {
+    const { controls } = mountViewer({ regionEdit: regionEdit([addBox]) });
+    const goto = viewer.sceneOverlays[0].bindViewerGotoPose.mock.lastCall![0] as (pose: unknown) => boolean;
+    const pose = { position: [1, 2, 3], target: [0, 0, 0], fov: 50 };
+    expect(goto(pose)).toBe(true);
+    expect(controls.gotoPose).toHaveBeenCalledWith(pose);
+  });
+
+  it("vẽ overlay vùng cho vật đang chỉnh với box và box chọn hiện tại", () => {
+    mountViewer({ regionEdit: regionEdit([addBox]) });
+    expect(viewer.regionOverlays).toHaveLength(1);
+    expect(viewer.regionOverlays[0].objectId).toBe("pallet");
+    expect(viewer.regionOverlays[0].setBoxes).toHaveBeenLastCalledWith([addBox], "add-1");
+  });
+
+  it("box và chọn từ overlay (onChange, onSelect) được trả về cho cha", () => {
+    const region = regionEdit([addBox]);
+    mountViewer({ regionEdit: region });
+    const moved: EditableBox[] = [{ ...addBox, center: [0.1, 0, 0] }];
+    viewer.regionOverlays[0].handlers.onChange(moved);
+    viewer.regionOverlays[0].handlers.onSelect(null);
+    expect(region.onChange).toHaveBeenCalledWith(moved);
+    expect(region.onSelect).toHaveBeenCalledWith(null);
+  });
+
+  it("không ghi box vào overlay khi đang kéo; box thả đến từ cha thì ghi", () => {
+    const region = regionEdit([addBox]);
+    const { update } = mountViewer({ regionEdit: region });
+    const overlay = viewer.regionOverlays[0];
+    overlay.setBoxes.mockClear();
+    overlay.isGesturing.mockReturnValue(true);
+    const previewed: EditableBox[] = [{ ...addBox, half: [0.7, 0.4, 0.075] }];
+    update({ regionEdit: { ...region, boxes: previewed } });
+    expect(overlay.setBoxes).not.toHaveBeenCalled();
+    overlay.isGesturing.mockReturnValue(false);
+    const released: EditableBox[] = [{ ...addBox, half: [0.8, 0.4, 0.075] }];
+    update({ regionEdit: { ...region, boxes: released } });
+    expect(overlay.setBoxes).toHaveBeenLastCalledWith(released, "add-1");
+  });
+
+  it("dựng lại entity của vật thì gỡ overlay cũ và tạo overlay mới với box hiện tại", () => {
+    const region = regionEdit([addBox]);
+    const { update } = mountViewer({ regionEdit: region });
+    const first = viewer.regionOverlays[0];
+    viewer.entities.set("pallet", {});
+    update({ regionEdit: region, objects: [{ ...palletObject }] });
+    expect(first.destroy).toHaveBeenCalledTimes(1);
+    expect(viewer.regionOverlays).toHaveLength(2);
+    expect(viewer.regionOverlays[1].setBoxes).toHaveBeenLastCalledWith([addBox], "add-1");
+  });
+
+  it("đóng panel gỡ overlay; mở lại tạo overlay mới; unmount cũng gỡ", () => {
+    const region = regionEdit([addBox]);
+    const { update, unmount } = mountViewer({ regionEdit: region });
+    const first = viewer.regionOverlays[0];
+    update({ regionEdit: null });
+    expect(first.destroy).toHaveBeenCalledTimes(1);
+    update({ regionEdit: region });
+    const second = viewer.regionOverlays[1];
+    unmount();
+    expect(second.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it("không có vật đang chỉnh thì không tạo overlay vùng", () => {
+    mountViewer({ regionEdit: null });
+    expect(viewer.regionOverlays).toHaveLength(0);
+  });
+
+  it("vật đang chỉnh chưa có trên viewport thì báo và chưa tạo overlay", () => {
+    mountViewer({ regionEdit: regionEdit([addBox], "other") });
+    expect(viewer.regionOverlays).toHaveLength(0);
+    expect(screen.getByText(/chưa có trên viewport/)).toBeInTheDocument();
+  });
+
+  it("regionApi: góc nhìn và trạng thái kéo đi qua overlay vùng", () => {
+    const api: RefObject<RegionViewApi | null> = { current: null };
+    mountViewer({ regionEdit: regionEdit([addBox]), regionApi: api });
+    const overlay = viewer.regionOverlays[0];
+    overlay.viewFrom.mockReturnValueOnce(false);
+    expect(api.current?.viewFrom("side")).toBe(false);
+    expect(overlay.viewFrom).toHaveBeenCalledWith("side");
+    overlay.isGesturing.mockReturnValue(true);
+    expect(api.current?.isGesturing()).toBe(true);
   });
 });
