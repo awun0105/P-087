@@ -35,6 +35,7 @@ import {
   type Vec3,
 } from "@/features/studio/region/box-model";
 import type { DisplayCameraPose } from "@/features/viewer/source-frame";
+import { themeColor } from "@/lib/theme";
 import {
   isolateGizmoPointer,
   isolatePointerGesture,
@@ -58,9 +59,6 @@ export type RegionHost = Pick<
   "isAlive" | "application" | "activeCamera" | "objectEntity" | "sharedGizmoLayer" | "requestFrame" | "gotoPose"
 >;
 
-const ADD_COLOR = "#22c55e";
-const SUBTRACT_COLOR = "#ef4444";
-const HANDLE_COLOR = "#ffffff";
 const FACE_OPACITY = 0.08;
 const EDGE_THICKNESS_M = 0.006;
 const SELECTED_EDGE_THICKNESS_M = 0.014;
@@ -109,7 +107,7 @@ function yawOf(root: Entity): number {
 
 /** Màu theo thao tác: cộng xanh lục, trừ đỏ. */
 function colorOf(op: BoxOp): string {
-  return op === "add" ? ADD_COLOR : SUBTRACT_COLOR;
+  return op === "add" ? themeColor("--studio-sage", "#22c55e") : themeColor("--studio-rust", "#ef4444");
 }
 
 /**
@@ -314,7 +312,7 @@ export class RegionOverlay {
     object.addChild(this.root);
     this.handles = FACE_IDS.map((face) => {
       const entity = new Entity(`region-handle-${face}`, this.app);
-      entity.addComponent("render", { type: "sphere", material: this.material("handle", HANDLE_COLOR, 1), castShadows: false });
+      entity.addComponent("render", { type: "sphere", material: this.material("handle", themeColor("--studio-on-dark", "#ffffff"), 1), castShadows: false });
       entity.enabled = false;
       return { face, entity };
     });

@@ -19,6 +19,7 @@ import {
 } from "playcanvas";
 
 import type { SceneOverlay } from "@/features/viewer/scene-overlay";
+import { themeColor } from "@/lib/theme";
 
 export type ShellStyle = "selected" | "idle";
 
@@ -32,15 +33,11 @@ export interface ShellSpec {
   style: ShellStyle;
 }
 
-const SHELL_COLOR = "#2dd4bf";
 const SHELL_OPACITY: Record<ShellStyle, number> = { selected: 0.25, idle: 0.1 };
 const WIRE_OPACITY = 0.5;
 const PENDING_OPACITY = 0.12;
-const WARNING_COLOR = "#f59e0b";
 const PULSE_PERIOD_MS = 2000;
 const PULSE_AMPLITUDE = 0.03;
-const ADDED_COLOR = "#22c55e";
-const REMOVED_COLOR = "#ef4444";
 
 interface PointRecord {
   root: Entity;
@@ -164,8 +161,8 @@ export class ShellGlowLayer {
         tone: "normal",
         pulsing: false,
         root: new Entity(`r2s-shell-${objectId}`, app),
-        fill: shellMaterial(SHELL_COLOR, SHELL_OPACITY[style]),
-        wire: style === "selected" ? shellMaterial(SHELL_COLOR, WIRE_OPACITY) : null,
+        fill: shellMaterial(themeColor("--studio-sage", "#2dd4bf"), SHELL_OPACITY[style]),
+        wire: style === "selected" ? shellMaterial(themeColor("--studio-sage", "#2dd4bf"), WIRE_OPACITY) : null,
         asset,
         blobUrl,
         settle: resolve,
@@ -209,8 +206,8 @@ export class ShellGlowLayer {
     const root = new Entity(`r2s-points-${objectId}`, app);
     const record: PointRecord = { root, meshes: [], materials: [] };
     const sets: [string, Float32Array, string][] = [
-      ["added", added, ADDED_COLOR],
-      ["removed", removed, REMOVED_COLOR],
+      ["added", added, themeColor("--studio-sage", "#22c55e")],
+      ["removed", removed, themeColor("--studio-rust", "#ef4444")],
     ];
     for (const [label, positions, hex] of sets) {
       if (positions.length < 3) continue;
@@ -270,7 +267,7 @@ export class ShellGlowLayer {
 
   /** Màu và độ mờ theo trạng thái: thường (độ mờ theo kiểu), đang tính (mờ 0,12), hoặc xem trước lỗi (màu cam). */
   private applyTone(record: ShellRecord): void {
-    const color = record.tone === "warning" ? WARNING_COLOR : SHELL_COLOR;
+    const color = record.tone === "warning" ? themeColor("--studio-ochre", "#f59e0b") : themeColor("--studio-sage", "#2dd4bf");
     record.fill.emissive = new Color().fromString(color);
     record.fill.opacity = record.tone === "pending" ? PENDING_OPACITY : SHELL_OPACITY[record.style];
     record.fill.emissiveIntensity = 1;
