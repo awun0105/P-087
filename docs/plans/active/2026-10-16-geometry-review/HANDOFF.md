@@ -2,9 +2,10 @@
 
 Ngày 2026-10-16. Branch `mvp-pipeline-v2`; baseline HEAD `69611ea9`. Thay đổi T-019 ở worktree, chưa commit/push/merge/PR.
 
-**Trạng thái: có implementation và kiểm chứng local; chưa nghiệm thu scene thật.** Deep review T-019 tái hiện hai lỗi P1:
-count inpaint không đi vào revision Ready, và box mở lại không khớp membership lệch tâm. Cần xử lý GR-01/GR-02 trước khi
-chốt luồng scene mới. Chi tiết, source và test cần bổ sung: [review T-019](../../../../.ai/tasks/T-019/review.md).
+**Trạng thái: round 2 — đã sửa sáu finding của deep review (GR-01…GR-06) và có kiểm chứng tự động; chưa nghiệm thu scene thật.**
+Round 1 của T-019 tìm hai P1 (count inpaint không vào revision Ready; box mở lại lệch khỏi membership) và bốn P2. Round 2
+sửa chúng ở T-022 (GR-01), T-023 (GR-02), T-024 (GR-03/04/06), T-025 (GR-05, preview 2M) và T-021 (luồng Draft trong
+Tiến trình, chuông, đầu trang). Chi tiết và source của từng finding: [review T-019](../../../../.ai/tasks/T-019/review.md).
 
 ## Phần đã triển khai
 
@@ -20,51 +21,61 @@ chốt luồng scene mới. Chi tiết, source và test cần bổ sung: [review
 | T-020 | Radio Duyệt trước/Tạo mesh ngay ở màn tạo job, cùng state `scene.geometry_review`, có chế độ chỉ đọc. |
 | T-018 | Test tương thích legacy/ObjectGS, Move/Rotate, Walk và USD với shell/CoACD local. |
 | T-019 | Full regression, sửa palette regression, fixture Gaussian đầy đủ và test public simulation package cho scene shell; deep review và handoff. |
+| T-021 | Hàng ảo "Duyệt vật & Tạo mesh" sau "Tách vật thể" trong Tiến trình (trạng thái lấy từ `ObjectifyState.object_geometry`, không đổi job pipeline hay `StageId`); chuông nhánh Draft; đầu trang "Chờ duyệt vật" / "Đang tạo mesh". |
+| T-022 | GR-01: builder ghi số Gaussian vá nền của lần inpaint **mới** vào provenance cùng revision (cả dựng toàn bộ và một phần); validator không đổi. |
+| T-023 | GR-02: `GET …/region/fit` tính box bao đúng Gaussian hiện có của vật trong khung nguồn; Chỉnh vùng mở sau khi có box, không tạo box từ kích thước. |
+| T-024 | GR-03: banner nêu vật đã loại có lỗi vỏ (builder vẫn dựng vỏ cho chúng). GR-04: preview báo donor còn dưới 50 hàng; Apply bị khoá kèm lý do. GR-06: 409 ở preview có nút Tải lại, giữ box và claim. |
+| T-025 | GR-05: `_box_contains` chỉ kiểm hàng ứng viên khi chúng ít; một phép đổi world→local mỗi preview; cache nguồn theo PLY với ngân sách byte và không giữ khoá khi đọc PLY. Benchmark `scripts/scene/bench_region_preview.py`. |
 
 Tái dùng SceneIR publication/CAS, immutable artifact store/checksum, source ownership, effective collision compositor dùng
 chung cho Walk/USD, surface QA, convex runner, inpaint/SOG runtime và SuperSplat Brush/Lasso. Không viết lại provider và
-không chạy train scene mới.
+không chạy train scene mới. Không thay đổi `contracts/StageId`; `check_contract_mirror.py` vẫn PASS.
 
 ## Kết quả kiểm thử
 
-| Kiểm tra | Kết quả ngày 16/10 |
-| --- | --- |
-| Backend full baseline | **3502 passed, 28 skipped, 1 failed**, 23 phút 53 giây. Failure partial Draft build đã sửa và 2 regression guard trên source cuối PASS. Chưa rerun full backend sau guard. |
-| Builder/ObjectGS/region sau guard | **81 passed, 1 failed, 2 deselected**. Failure là budget preview 300k 1,620 s > 1,5 s; GR-05 còn mở. |
-| Queue/regeneration/API/role matrix sau guard | **116 passed** |
-| Public simulation package shell trên source cuối | **1 passed**, CoACD/OpenUSD local thật, một vật Confirm và một ứng viên |
-| Frontend full sau sửa palette | **839 passed**, 80 test files |
-| Ruff check/format + contract mirror | PASS; 746 file đúng format, 5 enum/8 model khớp |
-| TypeScript + eslint | PASS; 0 errors, 7 warnings ở file không sửa |
-| Graphify AST update | PASS; 25.574 nodes, 79.508 edges, 832 communities |
+Round 1 (trước T-021..T-025) giữ nguyên làm lịch sử: backend full baseline 3502 passed, 28 skipped, 1 failed; budget preview
+300k 1,62 s. Round 2 (sau T-021..T-025, các lượt riêng, không cộng thành một số pass):
 
-Lần focused 90 test trước guard có 2 failed/88 passed: partial Draft và preview budget. Test budget chạy riêng vẫn fail
-1,873 s; không tăng threshold hoặc giấu failure. Kết quả full baseline, focused và rerun là các lượt riêng, không cộng
-thành một số pass. Chi tiết lệnh/log ở [report T-019](../../../../.ai/tasks/T-019/report.md).
+| Kiểm tra | Kết quả round 2 |
+| --- | --- |
+| Backend full suite (`pytest tests -q`) | **3538 passed, 28 skipped, 0 failed**, 15 warning httpx ở test error-view, 569,67 s (`pytest tests -q`, một lượt trên source cuối). Failure partial Draft của round 1 đã được sửa và pass. |
+| Focused: region, membership, geometry build, queue, routes, role matrix | T-023: 90 passed; T-024: 85 passed; T-021: 105 passed; T-025: 40 passed; T-022 đã có trong full run |
+| Budget preview 300k, chạy riêng 5 lần | 0,504 · 0,539 · 0,539 · 0,564 · 0,755 s, PASS |
+| Benchmark 2M Gaussian đủ SH (degree 3), sàn fit thật | warm 16 box p50 1,19 s; warm 1 box p50 0,57 s; cold ~4 s; RSS ~1,14 GB |
+| Tương đương kết quả preview trước/sau tối ưu | SHA-256 toàn bộ kết quả giống nhau cho 1 box, 16 box và hộp nhỏ lệch tâm |
+| Frontend full (`vitest run`) | **83 files, 880 passed**, `vitest run`, exit 0. |
+| Typecheck, eslint | `npm run typecheck` PASS; `npm run lint` 0 errors, 7 warnings ở file không đổi trong round 2 (`ImportedScenesHome.tsx`, `LidarCalibrationQAStage.tsx` và hai test liên quan). |
+| Ruff check/format, contract mirror | `ruff check src tests scripts` PASS; `ruff format --check` PASS (747 file); `check_contract_mirror.py` PASS (5 enum, 8 model). |
+
+Lệnh và log: [report T-019](../../../../.ai/tasks/T-019/report.md), [evidence](../../../../.ai/tasks/T-019/evidence/README.md),
+[benchmark T-025](../../../../.ai/tasks/T-025/evidence/).
 
 ## Hướng dẫn chạy scene mới
 
-Các bước sau là quy trình nghiệm thu cần thực hiện, chưa có evidence live của T-019.
+Các bước sau là quy trình nghiệm thu cần thực hiện; chưa có evidence live (GPU, trình duyệt, Isaac) cho round 2.
 
 1. Khởi động API/worker/Studio theo `RUNTIME.md`. SuperSplat editor đã có build local từ 15/10 sau thay đổi source-selection;
    nếu checkout/deploy mới chưa có `frontend/public/editor`, chạy `cd frontend && npm run build:editor` trước Brush/Lasso.
 2. Tạo job từ capture mới. Kiểm params niêm phong: `scene.geometry_method=shell`, `scene.geometry_review=required`,
    `scene.refinement=multiview_v1`. Chọn “Dừng để duyệt và chỉnh vùng vật”. `auto` bỏ điểm dừng giữa extraction và build;
    dùng khi đã chấp nhận quy trình batch và các giới hạn trong review.
-3. Xử lý reconstruction và xác nhận mét. Chờ tách vật publish Draft. Kiểm banner “Đang duyệt tách vật”, collider null và
+3. Xử lý reconstruction và xác nhận mét. Chờ tách vật publish Draft. Trên tab Tiến trình, hàng "Duyệt vật & Tạo mesh" hiện
+   "Chỉnh vùng nếu cần, rồi Tạo mesh"; đầu trang hiện "Chờ duyệt vật"; chuông nêu số vật chờ xác nhận. Collider là null và
    Walk/USD/Move/Rotate bị khoá. Job/scene Ready chưa đồng nghĩa được APPROVED/RELEASED.
-4. Chọn vật → Chỉnh vùng → box cộng/trừ, Trên/Trước/Cạnh, kéo mặt/xoay/dịch. Chờ preview đúng box; kiểm bộ đếm, bảo vệ sàn
-   và các vật chồng lấn. “Lấy luôn” phải chủ động tick. GR-04: preview hiện chưa báo đủ trường hợp donor còn dưới 50 hàng.
-5. Apply Draft tạo revision mới không train. **GR-02:** trước khi bản sửa có mặt, không coi box mặc định sau khi đóng/mở lại
-   là vùng đã duyệt; kiểm lại bộ đếm removed và hình trước khi Apply.
+4. Chọn vật → Chỉnh vùng. Panel hiện "Đang lấy vùng hiện tại…" rồi mở với box bao đúng Gaussian của vật (không phải box từ
+   kích thước). Chỉnh bằng box cộng/trừ, Trên/Trước/Cạnh, kéo mặt/xoay/dịch; kiểm bộ đếm, bảo vệ sàn và các vật chồng lấn.
+   “Lấy luôn” phải chủ động tick. Nếu một vật được lấy luôn sẽ còn dưới 50 Gaussian, dòng của vật đó hiện cảnh báo và Apply bị
+   khoá kèm lý do.
+5. Apply Draft tạo revision mới không train. Nếu scene đã đổi ở lượt khác (409), panel giữ box và claim; bấm Tải lại rồi chờ
+   preview khớp revision mới trước khi Apply.
 6. Bấm Tạo mesh. Theo dõi shell/quality/collider/environment/publish; ObjectGS có thêm phase riêng nếu được chọn. Nếu lỗi,
-   kiểm scene revision cũ vẫn là head và thông báo nguyên nhân. Vật Ignore có lỗi vỏ vẫn có thể chặn build: Restore vật đó,
-   sửa vùng rồi thử lại theo GR-03; không dùng OBB để vượt QA.
+   kiểm scene revision cũ vẫn là head và thông báo nguyên nhân. Vật Ignore/Delete/Merge có lỗi vỏ vẫn chặn build và được nêu
+   trên banner kèm hướng dẫn "Khôi phục, sửa vùng, rồi Tạo mesh"; không dùng OBB để vượt QA.
 7. Ready → Confirm vật → Move/Rotate → kiểm Gaussian/collider đi cùng pose → Walk. Kiểm không còn ghost tại vị trí cũ,
    sàn vẫn có support, bỏ Ignore/Restore không làm mất ownership. Brush/Lasso chỉ dùng sau Ready.
-8. Xuất USD sau preflight. **GR-01:** nếu nền có hàng inpaint và còn vật cần SOURCE representation, preflight có thể báo
-   `SOURCE_BACKGROUND_INVALID`; đây là lỗi metadata chưa xử lý, không bỏ qua kiểm tra. Khi có bản sửa, kiểm đúng candidate,
-   scene revision, checksum, inventory, rồi mở Isaac Sim và ghi evidence physics từ runtime đó.
+8. Xuất USD sau preflight. Nền có hàng inpaint được tính đúng số Gaussian vá trong provenance của revision Ready, nên
+   `SOURCE_BACKGROUND_INVALID` không còn xuất hiện vì lỗi đếm (GR-01). Khi có scene thật, kiểm đúng candidate, scene revision,
+   checksum, inventory, rồi mở Isaac Sim và ghi evidence physics từ runtime đó.
 
 Capture gợi ý: đi quanh vật chính ở hai độ cao; có sàn và bối cảnh đủ cho pose/floor fitting. Không coi mẹo quay này là bảo
 đảm mask, geometry hoặc physics đạt chất lượng.
@@ -75,8 +86,8 @@ Capture gợi ý: đi quanh vật chính ở hai độ cao; có sàn và bối c
   kiểm operation_id và head cũ còn nguyên. Không chỉ đóng panel rồi gọi đó là huỷ tác vụ.
 - QA vỏ lỗi: xem lỗi và vật bị ảnh hưởng; Draft/head cũ giữ nguyên; sửa box rồi yêu cầu lại. Placeholder trong Draft chỉ để
   hiển thị, không có collider và không chứng minh hình học hợp lệ.
-- Hai lượt sửa cùng revision: lượt stale phải 409; tải lại rồi preview lại theo checksum mới. GR-06: preview409 hiện thiếu
-  CTA Tải lại trực tiếp trong panel khi cha chưa nhận revision mới.
+- Hai lượt sửa cùng revision: lượt stale phải 409; tải lại rồi preview lại theo checksum mới. Preview 409 và Apply 409 đều có
+  nút Tải lại trong panel; box và claim được giữ.
 - Ready partial rebuild lỗi/huỷ: membership, object geometry và environment mới không được publish riêng lẻ thành head.
 
 ## Giới hạn và khác biệt với handoff cũ
@@ -92,7 +103,9 @@ Capture gợi ý: đi quanh vật chính ở hai độ cao; có sàn và bối c
   biết, không phải evidence mesh được đặt hai lần trong USD. Chưa sửa inventory trong task này.
 - Opacity 0,1, voxel preview 0,05 m/fine 0,02 m và adaptive grid là giá trị khởi đầu cần chỉnh trên scene thật. Shell kín
   không chứng minh thể tích khối đặc đúng; không suy mass/inertia từ thể tích vỏ rỗng.
-- Benchmark 2M local: cold 3,5–7,0 s, warm 1,57–2,16 s, floor fit stub, 7-field PLY, máy có tải đồng thời. Chưa đạt mục tiêu
-  preview <1,5 s trong phép đo này; chưa có latency HTTP/browser hoặc memory test với SH đầy đủ.
-- Chưa nghiệm thu GPU ObjectGS, kéo box thực, hiển thị/màu/độ tương phản, GPU buffer lifetime, Walk feel và Isaac Sim.
-  DevTools chỉ thấy tab `about:blank`, không có phiên Studio để kiểm những việc này.
+- Benchmark 2M (SH đầy đủ, sàn fit thật, 60% hàng thuộc một vật — trường hợp nặng): warm p50 16 box 1,19 s và 1 box 0,57 s,
+  đạt mục tiêu ≤1,5 s trên máy phát triển; cold ~4 s vì phải đọc PLY 472 MB và fit sàn một lần. Chưa đo HTTP, trình duyệt, hay
+  máy khác. Cache nguồn giữ tối đa 1 GiB (`product_region_source_cache_mib`).
+- Chưa nghiệm thu GPU ObjectGS, kéo box thực, hiển thị/màu/độ tương phản của hàng và panel mới, GPU buffer lifetime, Walk
+  feel và Isaac Sim. DevTools chỉ thấy tab `about:blank`, không có phiên Studio để kiểm những việc này.
+- Round 2 chưa thêm test riêng cho nhánh Ready của quy tắc donor (GR-04) và ETA của hàng ảo đang chạy (T-021).

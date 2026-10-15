@@ -143,3 +143,59 @@ Pre-flight (GUIDE.md Rule 13)
 - GPU mask/training quality, browser region/cancel/reload, memory/latency SH đầy đủ, Isaac physics/Walk feel.
 - Dọn `objectify(correction=…)` và inventory trùng ref ở task riêng; không xoá trong T-019.
 - T-019 chờ Architect/owner review; không tự đặt `accepted`.
+
+## Round 2
+
+Sau T-021 đến T-025, mỗi task có report và commit riêng. Sáu finding của deep review đã được sửa; không đổi kết luận nghiệm
+thu của round 1: vẫn chờ Architect review, không tự đặt `accepted`, và chưa có evidence GPU/browser/Isaac.
+
+### Finding đã sửa
+
+| Finding | Task | Commit | Kiểm chứng chính |
+| --- | --- | --- | --- |
+| GR-01 (P1) số đếm inpaint không vào revision Ready | T-022 | `22181667`, `9e903dbe` | Test dựng toàn bộ, dựng một phần, reassign, count bị sửa, count sai kiểu; e2e CoACD thật qua preflight và package |
+| GR-02 (P1) box mở lại lệch khỏi membership | T-023 | `f2cd4c12`, `de3d00e7`, `016cc2ae` | Service `fit_region`, route `…/region/fit` (409/404/422), frontend mở qua cổng fit, không tạo box từ kích thước |
+| GR-03 (P2) banner bỏ vật đã loại có lỗi vỏ | T-024 | `e4e86134` | Banner nêu vật đã loại; test service chặn build |
+| GR-04 (P2) donor còn dưới 50 hàng | T-024 | `4fb1115d` | Preview báo `donor_remaining` và `blockers`; Apply khoá kèm lý do |
+| GR-06 (P2) 409 preview không có Tải lại | T-024 | `784bbadf` | Nút Tải lại; box và claim giữ nguyên; Apply bật lại sau preview khớp revision |
+| GR-05 (P2) preview 2M vượt 1,5 s | T-025 | `de6bba6f`, `d2f2ffd2`, `a50ec684`, `3f964a2a` | Warm 16 box p50 1,19 s (trước 1,48 s); 300k PASS 5/5; kết quả preview giống hệt trước tối ưu |
+
+Luồng Draft trong Tiến trình, chuông và đầu trang (T-021) là phần triển khai theo plan, không phải finding của deep review:
+`cd534f60`, `5177a52f`, `3d672ab8`, `8dac5580`, `e41350f5`, `c899aeb7`. Báo cáo T-021 nằm trong `4222212d`.
+
+### Kiểm thử round 2
+
+Đây là các lượt riêng, không cộng thành một số pass.
+
+| Lệnh | Kết quả |
+| --- | --- |
+| `.venv/bin/python -m pytest tests -q` (một lượt, source cuối) | **3538 passed, 28 skipped, 0 failed**, 569,67 s |
+| `cd frontend && ./node_modules/.bin/vitest run` | **83 files, 880 passed**, exit 0 |
+| `npm run typecheck` | PASS |
+| `npm run lint` | 0 errors, 7 warnings ở file không đổi trong round 2 |
+| `ruff check src tests scripts`, `ruff format --check src tests scripts` | PASS; 747 file đúng format |
+| `scripts/check_contract_mirror.py` | PASS |
+| Benchmark preview 2M, SH đầy đủ, sàn fit thật | warm 16 box p50 1,19 s; warm 1 box p50 0,57 s; cold ~4 s |
+| Budget test 300k chạy riêng 5 lần | 0,504 · 0,539 · 0,539 · 0,564 · 0,755 s, PASS |
+| So sánh kết quả preview trước/sau tối ưu | SHA-256 giống nhau cho 1 box, 16 box và hộp nhỏ lệch tâm |
+
+Test flaky đã biết `object-review.test.tsx` "hủy selection … conflict 409" PASS trong lượt full, không cần chạy riêng.
+
+### Lệch plan và ghi chú
+
+- Plan của T-019 yêu cầu test `build_simulation_package` cho scene vỏ (bước 0). Test này đã có từ round 1 trong
+  `tests/test_scene/test_shell_geometry_walk_usd.py` và vẫn PASS trong full run.
+- Lịch sử commit có hai commit của Architect (`90ede4db` Accept T-022, `3d35abc1` Order T-025 before T-019 round 2). Round 2
+  không sửa chúng.
+- T-025 không làm bước 4 (lọc kNN của vỏ) vì sau các bước trước warm 16 box đã dưới giới hạn; chi tiết trong report T-025.
+- Cold preview 2M vẫn ~4 s (đọc PLY 472 MB và fit sàn). Mục tiêu 1,5 s chỉ áp dụng cho warm trong acceptance của T-025.
+- Round 2 chưa có test riêng cho nhánh Ready của quy tắc donor và cho ETA của hàng ảo đang chạy.
+
+### Còn lại (không đổi so với round 1, trừ các mục đã sửa)
+
+- Chưa nghiệm thu GPU ObjectGS, thao tác kéo box trên trình duyệt, hiển thị hàng/panel/chuông mới, GPU buffer lifetime, Walk
+  feel và Isaac Sim.
+- Dọn `objectify(correction=…)` và inventory trùng ref của collider vỏ: để task riêng.
+- Tham số vỏ (opacity, voxel) cần chỉnh trên scene thật.
+
+Trạng thái: `implemented`, chờ Architect review. Handoff cập nhật: [HANDOFF](../../../docs/plans/active/2026-10-16-geometry-review/HANDOFF.md).
