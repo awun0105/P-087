@@ -51,11 +51,13 @@ def _local(positions: np.ndarray, item: SceneObject) -> np.ndarray:
 
 
 def _resolve(
-    registry: ProjectRegistry, job_id: str, object_id: str, command: ObjectRegionCommand
+    registry: ProjectRegistry, job_id: str, object_id: str, command: ObjectRegionCommand, *, draft_only: bool = False
 ) -> tuple[SceneIR, SceneObject, MembershipSource, RegionResolution, np.ndarray]:
     scene = registry.scene.current(job_id).scene
     if scene.scene_revision != command.expected_scene_revision:
         raise StaleObjectMembershipRevisionError("scene đã đổi; tải lại trước khi chỉnh vùng")
+    if draft_only and object_geometry_state(scene) != "awaiting_review":
+        raise ObjectMembershipValidationError("Scene đã có hình học; tính năng dựng lại vật sẽ có ở bước sau.")
     manifest = scene.environment.membership
     if manifest is None:
         raise ObjectMembershipValidationError("scene has no persisted Gaussian membership")
@@ -118,9 +120,7 @@ def preview_region(registry: ProjectRegistry, job_id: str, object_id: str, comma
 def apply_region_draft(
     registry: ProjectRegistry, job_id: str, object_id: str, command: ObjectRegionCommand, *, actor_id: str
 ) -> SceneEditResult:
-    scene, _, source, resolution, local = _resolve(registry, job_id, object_id, command)
-    if object_geometry_state(scene) != "awaiting_review":
-        raise ObjectMembershipValidationError("Scene đã có hình học; tính năng dựng lại vật sẽ có ở bước sau.")
+    scene, _, source, resolution, local = _resolve(registry, job_id, object_id, command, draft_only=True)
     labels = apply_resolution(source.labels, source.manifest, object_id, resolution)
     affected = {object_id, *resolution.claimed}
     masks = {

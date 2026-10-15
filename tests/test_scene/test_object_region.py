@@ -61,10 +61,6 @@ def draft(tmp_path, monkeypatch):
     return registry, scene, command, rows, labels
 
 
-def files(registry):
-    return sorted(registry.runtime_resolver.root.rglob("*"))
-
-
 def test_preview_is_read_only_and_uses_source_pose(draft, tmp_path):
     from src.services.orchestration.scene.object_region import preview_region
 

@@ -777,3 +777,17 @@ async def test_region_routes(client, tmp_path, monkeypatch, operation, case):
         assert set(response.json()) == {"detail"}
         if case == "ready":
             assert response.json()["detail"] == "Scene đã có hình học; tính năng dựng lại vật sẽ có ở bước sau."
+
+
+@pytest.mark.asyncio
+async def test_region_apply_ready_legacy_returns_explicit_deferred_message(client):
+    response = await client.post(
+        f"{_JOB}/scene/objects/{_PALLET}/region/apply",
+        json={
+            "expected_scene_revision": "rev-001",
+            "membership_checksum": "sha256:" + "a" * 64,
+            "boxes": [{"op": "add", "center_m": [0, 0, 0], "half_extents_m": [0.3, 0.3, 0.3], "yaw_rad": 0}],
+        },
+    )
+    assert response.status_code == 422
+    assert response.json() == {"detail": "Scene đã có hình học; tính năng dựng lại vật sẽ có ở bước sau."}
