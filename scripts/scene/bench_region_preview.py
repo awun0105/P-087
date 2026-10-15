@@ -87,10 +87,10 @@ def main() -> None:
     parser.add_argument("--profile", action="store_true", help="thêm một lần warm có cProfile cho mỗi cấu hình box")
     args = parser.parse_args()
 
-    from tests.test_scene import test_object_correction as correction
+    from src.models.contracts.object_membership import ObjectRegionCommand
     from src.services.orchestration.scene import membership_regeneration
     from src.services.orchestration.scene.object_region import preview_region
-    from src.models.contracts.object_membership import ObjectRegionCommand
+    from tests.test_scene import test_object_correction as correction
 
     records: list[dict] = []
 
@@ -103,11 +103,20 @@ def main() -> None:
         rows, labels = _rows(args.rows, args.sh_degree)
         started = perf_counter()
         fixture = correction._fixture(tmp, source_rows=rows, source_labels=labels)
-        emit({"stage": "fixture", "rows": args.rows, "sh_degree": args.sh_degree, "seconds": round(perf_counter() - started, 3)})
+        emit(
+            {
+                "stage": "fixture",
+                "rows": args.rows,
+                "sh_degree": args.sh_degree,
+                "seconds": round(perf_counter() - started, 3),
+            }
+        )
         registry = SimpleNamespace(scene=fixture.editor, runtime_resolver=fixture.editor.resolver)
         # Vật cần pose nguồn để đổi world → object-local; fixture chưa ghi, nên ghi như test vùng làm.
         objects = [
-            item.model_copy(update={"provenance": {**item.provenance, "source_transform": item.transform.model_dump(mode="json")}})
+            item.model_copy(
+                update={"provenance": {**item.provenance, "source_transform": item.transform.model_dump(mode="json")}}
+            )
             for item in fixture.scene.objects
         ]
         scene = fixture.editor.publish_next(
@@ -127,14 +136,30 @@ def main() -> None:
             started = perf_counter()
             result = preview_region(registry, correction._JOB_ID, TARGET, command)
             cold = perf_counter() - started
-            emit({"stage": "cold", "boxes": boxes, "seconds": round(cold, 4), "rss_mib": round(_rss_mib(), 1),
-                  "object_gaussian_count": result["object_gaussian_count"], "shell_ok": result["shell_error"] is None})
+            emit(
+                {
+                    "stage": "cold",
+                    "boxes": boxes,
+                    "seconds": round(cold, 4),
+                    "rss_mib": round(_rss_mib(), 1),
+                    "object_gaussian_count": result["object_gaussian_count"],
+                    "shell_ok": result["shell_error"] is None,
+                }
+            )
             warm: list[float] = []
             for run in range(args.runs):
                 started = perf_counter()
                 preview_region(registry, correction._JOB_ID, TARGET, command)
                 warm.append(perf_counter() - started)
-                emit({"stage": "warm", "boxes": boxes, "run": run, "seconds": round(warm[-1], 4), "rss_mib": round(_rss_mib(), 1)})
+                emit(
+                    {
+                        "stage": "warm",
+                        "boxes": boxes,
+                        "run": run,
+                        "seconds": round(warm[-1], 4),
+                        "rss_mib": round(_rss_mib(), 1),
+                    }
+                )
             if args.profile:
                 import cProfile
                 import io
@@ -149,11 +174,21 @@ def main() -> None:
                 print(f"--- cProfile warm boxes={boxes} ---\n{text.getvalue()}", flush=True)
             ordered = sorted(warm)
             p95 = ordered[min(len(ordered) - 1, int(round(0.95 * (len(ordered) - 1))))]
-            emit({"stage": "summary", "boxes": boxes, "cold_s": round(cold, 4), "warm_p50_s": round(statistics.median(warm), 4),
-                  "warm_p95_s": round(p95, 4), "rss_mib": round(_rss_mib(), 1)})
+            emit(
+                {
+                    "stage": "summary",
+                    "boxes": boxes,
+                    "cold_s": round(cold, 4),
+                    "warm_p50_s": round(statistics.median(warm), 4),
+                    "warm_p95_s": round(p95, 4),
+                    "rss_mib": round(_rss_mib(), 1),
+                }
+            )
 
     if args.json:
-        args.json.write_text("\n".join(json.dumps(record, ensure_ascii=False) for record in records) + "\n", encoding="utf-8")
+        args.json.write_text(
+            "\n".join(json.dumps(record, ensure_ascii=False) for record in records) + "\n", encoding="utf-8"
+        )
 
 
 if __name__ == "__main__":

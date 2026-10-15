@@ -245,7 +245,9 @@ def test_concurrent_requests_for_one_source_read_the_ply_once(tmp_path, monkeypa
     registry = SimpleNamespace(scene=fixture.editor, runtime_resolver=fixture.editor.resolver)
     results = []
     threads = [
-        threading.Thread(target=lambda: results.append(module.load_membership_source(registry, "job-fixture-001", fixture.scene)))
+        threading.Thread(
+            target=lambda: results.append(module.load_membership_source(registry, "job-fixture-001", fixture.scene))
+        )
         for _ in range(3)
     ]
     threads[0].start()
