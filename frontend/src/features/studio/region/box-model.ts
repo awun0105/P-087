@@ -5,6 +5,8 @@
  * trục y cục bộ = (−sin yaw, cos yaw, 0). Mọi hàm trả object mới, không sửa đầu vào.
  */
 
+import type { RegionBox } from "@/lib/contracts/api";
+
 export type Vec3 = [number, number, number];
 export type BoxOp = "add" | "subtract";
 
@@ -18,14 +20,6 @@ export interface EditableBox {
 }
 
 export type FaceId = "+x" | "-x" | "+y" | "-y" | "+z" | "-z";
-
-/** Dạng gửi lên API (architecture §7.3). Khai báo cục bộ cho tới khi T-004 đưa mirror vào `api.ts`. */
-export interface RegionBox {
-  op: BoxOp;
-  center_m: Vec3;
-  half_extents_m: Vec3;
-  yaw_rad: number;
-}
 
 export const MIN_HALF_M = 0.005;
 export const MAX_HALF_M = 20;

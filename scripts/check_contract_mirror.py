@@ -30,6 +30,7 @@ from src.models.contracts.manifests import (  # noqa: E402
     StageId,
     StageStatus,
 )
+from src.models.contracts.object_membership import ObjectRegionCommand, RegionBox  # noqa: E402
 from src.models.contracts.scene import ColliderSpec, SceneEnvironment, SceneObject, SourceCollisionRegion  # noqa: E402
 from src.services.orchestration.jobs.transitions import ALLOWED_TRANSITIONS  # noqa: E402
 
@@ -50,6 +51,8 @@ MODEL_MIRRORS: list[tuple[str, type[BaseModel]]] = [
     ("SceneEnvironment", SceneEnvironment),
     ("ColliderSpec", ColliderSpec),
     ("Transform", Transform),
+    ("RegionBox", RegionBox),
+    ("ObjectRegionCommand", ObjectRegionCommand),
 ]
 
 PLACEHOLDERS = {

@@ -154,6 +154,22 @@ export interface ObjectMembershipReassignCommand {
   target_object_id: string | null;
 }
 
+/** `src/models/contracts/object_membership.py` RegionBox. Yaw quay phải quanh +Z: trục x box = (cos yaw, sin yaw, 0). */
+export interface RegionBox {
+  op: "add" | "subtract";
+  center_m: [number, number, number];
+  half_extents_m: [number, number, number];
+  yaw_rad: number;
+}
+
+/** `src/models/contracts/object_membership.py` ObjectRegionCommand. */
+export interface ObjectRegionCommand {
+  expected_scene_revision: string;
+  membership_checksum: string;
+  boxes: RegionBox[];
+  claim_from: string[];
+}
+
 /** `src/models/contracts/coordinates.py` Transform. */
 export interface Transform {
   semantics: "parent_from_local";
