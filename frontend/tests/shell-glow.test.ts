@@ -192,3 +192,57 @@ describe("ShellGlowLayer: vỏ của vật", () => {
     expect(new Uint8Array(decodeShellGlb(base64))).toEqual(bytes);
   });
 });
+
+describe("ShellGlowLayer: điểm xanh và đỏ", () => {
+  let app: AppBase;
+  let object: Entity;
+  let layer: ShellGlowLayer;
+
+  beforeEach(() => {
+    app = fakeApp();
+    object = new Entity("object-A", app);
+    layer = new ShellGlowLayer(hostWith(app, new Map([["A", object]])));
+  });
+
+  const pointsOf = (id: string) => object.children.find((child) => child.name === `r2s-points-${id}`) as Entity | undefined;
+  const instanceOf = (child: Entity) => renderOf(child).meshInstances[0];
+  const countOf = (instance: MeshInstance) => (instance.mesh as unknown as { positions: number[] }).positions.length / 3;
+
+  it("mỗi loại một mesh điểm: xanh là Gaussian thêm, đỏ là bị loại; số điểm đúng mẫu và vẽ trên cùng", () => {
+    layer.setPointSets("A", new Float32Array([0, 0, 0, 1, 1, 1, 2, 2, 2]), new Float32Array([5, 5, 5, 6, 6, 6]));
+    const [added, removed] = pointsOf("A")!.children as Entity[];
+    const green = instanceOf(added);
+    const red = instanceOf(removed);
+    expect(countOf(green)).toBe(3);
+    expect(countOf(red)).toBe(2);
+    expect((green.material as StandardMaterial).emissive.equals(new Color().fromString("#22c55e"))).toBe(true);
+    expect((red.material as StandardMaterial).emissive.equals(new Color().fromString("#ef4444"))).toBe(true);
+    expect((green.material as StandardMaterial).depthTest).toBe(false);
+    expect((red.material as StandardMaterial).depthTest).toBe(false);
+  });
+
+  it("điểm là con của entity vật; loại không có mẫu thì không có mesh", () => {
+    layer.setPointSets("A", new Float32Array(0), new Float32Array([1, 2, 3]));
+    const points = pointsOf("A")!;
+    expect(points.parent).toBe(object);
+    expect(points.children).toHaveLength(1);
+    expect(countOf(instanceOf(points.children[0] as Entity))).toBe(1);
+  });
+
+  it("gọi lại thì thay bộ điểm cũ; hai mảng rỗng thì không còn điểm", () => {
+    layer.setPointSets("A", new Float32Array(9), new Float32Array(0));
+    layer.setPointSets("A", new Float32Array(3), new Float32Array(3));
+    expect(object.children.filter((child) => child.name === "r2s-points-A")).toHaveLength(1);
+    layer.setPointSets("A", new Float32Array(0), new Float32Array(0));
+    expect(pointsOf("A")).toBeUndefined();
+  });
+
+  it("clear(id) và destroy gỡ điểm của vật, không để lại entity nào", () => {
+    layer.setPointSets("A", new Float32Array([0, 0, 0]), new Float32Array([1, 1, 1]));
+    layer.clear("A");
+    expect(pointsOf("A")).toBeUndefined();
+    layer.setPointSets("A", new Float32Array([0, 0, 0]), new Float32Array(0));
+    layer.destroy();
+    expect(pointsOf("A")).toBeUndefined();
+  });
+});

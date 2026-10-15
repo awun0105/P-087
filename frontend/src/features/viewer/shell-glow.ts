@@ -9,11 +9,13 @@ import {
   Color,
   CULLFACE_NONE,
   Entity,
+  Mesh,
+  MeshInstance,
+  PRIMITIVE_POINTS,
   RENDERSTYLE_SOLID,
   RENDERSTYLE_WIREFRAME,
   StandardMaterial,
   type ContainerResource,
-  type MeshInstance,
 } from "playcanvas";
 
 import type { SceneOverlay } from "@/features/viewer/scene-overlay";
@@ -30,6 +32,14 @@ export interface ShellSpec {
 const SHELL_COLOR = "#2dd4bf";
 const SHELL_OPACITY: Record<ShellStyle, number> = { selected: 0.25, idle: 0.1 };
 const WIRE_OPACITY = 0.5;
+const ADDED_COLOR = "#22c55e";
+const REMOVED_COLOR = "#ef4444";
+
+interface PointRecord {
+  root: Entity;
+  meshes: Mesh[];
+  materials: StandardMaterial[];
+}
 
 interface ShellRecord {
   root: Entity;
@@ -42,6 +52,19 @@ interface ShellRecord {
 }
 
 type RenderLike = { meshInstances: MeshInstance[] };
+
+/** Vật liệu điểm: màu phát sáng đặc, không ghi depth và luôn vẽ trên cùng để thấy được qua vỏ và Gaussian. */
+function pointMaterial(hex: string): StandardMaterial {
+  const result = new StandardMaterial();
+  result.diffuse = new Color(0, 0, 0);
+  result.emissive = new Color().fromString(hex);
+  result.useLighting = false;
+  result.depthTest = false;
+  result.depthWrite = false;
+  result.cull = CULLFACE_NONE;
+  result.update();
+  return result;
+}
 
 /** Vật liệu vỏ: màu phát sáng, không đổ bóng, cộng dồn, không ghi depth, hai mặt. Cùng kiểu với `material` của scene-overlay. */
 function shellMaterial(hex: string, opacity: number): StandardMaterial {
@@ -79,6 +102,7 @@ export function decodeShellGlb(base64: string): ArrayBuffer {
 /** Lớp vỏ phát sáng của một viewer. Gắn vào `SceneOverlay`: vỏ được vẽ dưới entity của từng vật. */
 export class ShellGlowLayer {
   private readonly shells = new Map<string, ShellRecord>();
+  private readonly points = new Map<string, PointRecord>();
   private destroyed = false;
 
   constructor(private readonly host: SceneOverlay) {}
@@ -130,9 +154,48 @@ export class ShellGlowLayer {
     });
   }
 
-  /** Gỡ vỏ của một vật, hoặc của mọi vật khi không truyền `objectId`. */
+  /**
+   * Điểm của lần xem trước: `added` là Gaussian sẽ thêm (xanh), `removed` là Gaussian sẽ bị loại (đỏ). Mỗi mảng là các
+   * xyz liên tiếp trong khung object-local, con của entity vật. Gọi lại thì thay bộ cũ; cả hai mảng rỗng thì gỡ hết.
+   */
+  setPointSets(objectId: string, added: Float32Array, removed: Float32Array): void {
+    this.releasePoints(objectId);
+    const parent = this.parentOf(objectId);
+    if (!parent) return;
+    const app = this.host.application();
+    const root = new Entity(`r2s-points-${objectId}`, app);
+    const record: PointRecord = { root, meshes: [], materials: [] };
+    const sets: [string, Float32Array, string][] = [
+      ["added", added, ADDED_COLOR],
+      ["removed", removed, REMOVED_COLOR],
+    ];
+    for (const [label, positions, hex] of sets) {
+      if (positions.length < 3) continue;
+      const mesh = new Mesh(app.graphicsDevice);
+      mesh.setPositions(positions);
+      mesh.update(PRIMITIVE_POINTS);
+      const material = pointMaterial(hex);
+      const child = new Entity(`r2s-points-${objectId}-${label}`, app);
+      child.addComponent("render", { meshInstances: [new MeshInstance(mesh, material)], castShadows: false });
+      root.addChild(child);
+      record.meshes.push(mesh);
+      record.materials.push(material);
+    }
+    if (record.meshes.length === 0) {
+      root.destroy();
+      return;
+    }
+    parent.addChild(root);
+    this.points.set(objectId, record);
+  }
+
+  /** Gỡ vỏ và điểm của một vật, hoặc của mọi vật khi không truyền `objectId`. */
   clear(objectId?: string): void {
-    for (const id of objectId === undefined ? [...this.shells.keys()] : [objectId]) this.releaseShell(id);
+    const ids = objectId === undefined ? new Set([...this.shells.keys(), ...this.points.keys()]) : [objectId];
+    for (const id of ids) {
+      this.releaseShell(id);
+      this.releasePoints(id);
+    }
   }
 
   /** Gỡ toàn bộ vỏ. Sau khi gọi, các lời gọi khác không làm gì; gọi lại cũng an toàn. */
@@ -159,6 +222,16 @@ export class ShellGlowLayer {
     record.wire?.destroy();
     this.host.application().assets?.remove(record.asset);
     record.asset.unload();
+  }
+
+  /** Gỡ điểm của một vật: entity, mesh và vật liệu của chúng. */
+  private releasePoints(objectId: string): void {
+    const record = this.points.get(objectId);
+    if (!record) return;
+    this.points.delete(objectId);
+    record.root.destroy();
+    for (const mesh of record.meshes) mesh.destroy();
+    for (const material of record.materials) material.destroy();
   }
 
   private revoke(record: ShellRecord): void {
