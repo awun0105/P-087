@@ -4,10 +4,12 @@ import {
   MAX_BOXES,
   MAX_HALF_M,
   MIN_HALF_M,
+  clampToFloor,
   contains,
   dragFace,
   faceCenter,
   faceNormal,
+  fitBoxToPoints,
   rotateYaw,
   toCommandBoxes,
   translateBox,
@@ -202,5 +204,87 @@ describe("faceCenter and faceNormal", () => {
     expectVec3Close(faceNormal(b, "+x"), [0, 1, 0]);
     expectVec3Close(faceNormal(b, "+y"), [-1, 0, 0]);
     expectVec3Close(faceCenter(b, "+z"), [0, 0, 3]);
+  });
+});
+
+const deg = (d: number) => (d * Math.PI) / 180;
+
+/** Points on a 5×5×5 lattice spanning the box (extremes included), flat object-local xyz. */
+function latticePoints(b: EditableBox): Float32Array {
+  const ticks = [-1, -0.5, 0, 0.5, 1];
+  const c = Math.cos(b.yaw);
+  const s = Math.sin(b.yaw);
+  const out = new Float32Array(ticks.length ** 3 * 3);
+  let k = 0;
+  for (const tx of ticks) {
+    for (const ty of ticks) {
+      for (const tz of ticks) {
+        const x = tx * b.half[0];
+        const y = ty * b.half[1];
+        out[k++] = b.center[0] + c * x - s * y;
+        out[k++] = b.center[1] + s * x + c * y;
+        out[k++] = b.center[2] + tz * b.half[2];
+      }
+    }
+  }
+  return out;
+}
+
+describe("fitBoxToPoints", () => {
+  const truth = box({ center: [2, -1, 0.5], half: [1, 0.4, 0.5], yaw: deg(30) });
+
+  it("recovers yaw within 2 degrees and half-extents plus margin for a rotated box", () => {
+    const fit = fitBoxToPoints(latticePoints(truth), 0.02);
+    expect(Math.abs(fit.yaw - deg(30))).toBeLessThan(deg(2));
+    expect(fit.half[0]).toBeCloseTo(1.02, 3);
+    expect(fit.half[1]).toBeCloseTo(0.42, 3);
+    expect(fit.half[2]).toBeCloseTo(0.52, 3);
+  });
+
+  it("puts the bottom on the lowest point and encloses every point", () => {
+    const points = latticePoints(truth);
+    const fit = { id: "fit", op: "add" as const, ...fitBoxToPoints(points, 0.02) };
+    expect(fit.center[2] - fit.half[2]).toBeCloseTo(0, 6);
+    for (let i = 0; i < points.length; i += 3) {
+      expect(contains(fit, [points[i], points[i + 1], points[i + 2]])).toBe(true);
+    }
+  });
+
+  it("uses a 0.02 m margin by default", () => {
+    const fit = fitBoxToPoints(new Float32Array([0, 0, 0, 1, 0, 0]));
+    expect(fit.half[0]).toBeCloseTo(0.52, 9);
+    expect(fit.half[1]).toBeCloseTo(0.02, 9);
+  });
+
+  it("keeps a single point within the valid half-extent range", () => {
+    const fit = fitBoxToPoints(new Float32Array([3, 4, 5]), 0);
+    expect(fit.half).toEqual([MIN_HALF_M, MIN_HALF_M, MIN_HALF_M]);
+    expect(fit.center).toEqual([3, 4, 5 + MIN_HALF_M]);
+  });
+
+  it("rejects an empty or malformed point array", () => {
+    expect(() => fitBoxToPoints(new Float32Array())).toThrow("cần mảng xyz");
+    expect(() => fitBoxToPoints(new Float32Array([1, 2]))).toThrow("cần mảng xyz");
+  });
+});
+
+describe("clampToFloor", () => {
+  it("lifts the bottom to the floor and keeps the top fixed", () => {
+    const out = clampToFloor(box({ center: [0, 0, 0.1], half: [0.5, 0.5, 0.3] }), 0);
+    expect(out.center[2] - out.half[2]).toBeCloseTo(0, 9);
+    expect(out.center[2] + out.half[2]).toBeCloseTo(0.4, 9);
+    expect(out.half[0]).toBe(0.5);
+    expect(out.half[1]).toBe(0.5);
+  });
+
+  it("leaves a box already above the floor unchanged", () => {
+    const base = box({ center: [0, 0, 0.5], half: [0.5, 0.5, 0.5] });
+    expect(clampToFloor(base, 0)).toEqual(base);
+  });
+
+  it("keeps MIN_HALF_M height and raises the top when it is nearly at the floor", () => {
+    const out = clampToFloor(box({ center: [0, 0, -0.499], half: [0.5, 0.5, 0.5] }), 0);
+    expect(out.half[2]).toBe(MIN_HALF_M);
+    expect(out.center[2] - out.half[2]).toBeCloseTo(0, 9);
   });
 });

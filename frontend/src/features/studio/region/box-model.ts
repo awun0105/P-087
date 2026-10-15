@@ -116,6 +116,85 @@ export function faceNormal(box: EditableBox, face: FaceId): Vec3 {
   return [sign * e[0], sign * e[1], sign * e[2]];
 }
 
+const DEFAULT_FIT_MARGIN_M = 0.02;
+
+/**
+ * Box mặc định bao quanh các điểm object-local (xyz phẳng). Yaw theo hướng chính trên mặt XY (PCA); cạnh dài hơn
+ * là trục x. Đáy bám đúng z nhỏ nhất của điểm; mọi nửa kích thước cộng `marginM`, nên đỉnh cao hơn điểm cao nhất
+ * 2·marginM. Nửa kích thước kẹp trong [MIN_HALF_M, MAX_HALF_M]. Ném lỗi khi không có điểm.
+ */
+export function fitBoxToPoints(points: Float32Array, marginM = DEFAULT_FIT_MARGIN_M): Omit<EditableBox, "id" | "op"> {
+  if (points.length === 0 || points.length % 3 !== 0) throw new Error("fitBoxToPoints cần mảng xyz với ít nhất một điểm");
+  const count = points.length / 3;
+  let sumX = 0;
+  let sumY = 0;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  for (let i = 0; i < points.length; i += 3) {
+    sumX += points[i];
+    sumY += points[i + 1];
+    minZ = Math.min(minZ, points[i + 2]);
+    maxZ = Math.max(maxZ, points[i + 2]);
+  }
+  const meanX = sumX / count;
+  const meanY = sumY / count;
+  let sxx = 0;
+  let syy = 0;
+  let sxy = 0;
+  for (let i = 0; i < points.length; i += 3) {
+    const dx = points[i] - meanX;
+    const dy = points[i + 1] - meanY;
+    sxx += dx * dx;
+    syy += dy * dy;
+    sxy += dx * dy;
+  }
+  // Trục chính trên mặt XY: tan 2φ = 2·sxy / (sxx − syy).
+  const phi = 0.5 * Math.atan2(2 * sxy, sxx - syy);
+  const u = [Math.cos(phi), Math.sin(phi)];
+  const v = [-Math.sin(phi), Math.cos(phi)];
+  let minU = Infinity;
+  let maxU = -Infinity;
+  let minV = Infinity;
+  let maxV = -Infinity;
+  for (let i = 0; i < points.length; i += 3) {
+    const pu = points[i] * u[0] + points[i + 1] * u[1];
+    const pv = points[i] * v[0] + points[i + 1] * v[1];
+    minU = Math.min(minU, pu);
+    maxU = Math.max(maxU, pu);
+    minV = Math.min(minV, pv);
+    maxV = Math.max(maxV, pv);
+  }
+  const extU = maxU - minU;
+  const extV = maxV - minV;
+  // Trục x là trục có extent lớn hơn; yaw của nó được đưa về (-π/2, π/2].
+  let yaw = extU >= extV ? phi : phi + Math.PI / 2;
+  if (yaw > Math.PI / 2) yaw -= Math.PI;
+  const midU = (minU + maxU) / 2;
+  const midV = (minV + maxV) / 2;
+  const half: Vec3 = [
+    clampHalf(Math.max(extU, extV) / 2 + marginM),
+    clampHalf(Math.min(extU, extV) / 2 + marginM),
+    clampHalf((maxZ - minZ) / 2 + marginM),
+  ];
+  return {
+    center: [midU * u[0] + midV * v[0], midU * u[1] + midV * v[1], minZ + half[2]],
+    half,
+    yaw,
+  };
+}
+
+/**
+ * Không cho đáy box xuống dưới `floorZ` (object-local). Giữ đỉnh cố định và giảm nửa chiều cao; nếu đỉnh quá sát
+ * sàn thì giữ MIN_HALF_M và nâng đỉnh lên, vì sàn là ràng buộc cứng.
+ */
+export function clampToFloor(box: EditableBox, floorZ: number): EditableBox {
+  const bottom = box.center[2] - box.half[2];
+  if (bottom >= floorZ) return { ...box };
+  const top = box.center[2] + box.half[2];
+  const half = clampHalf((top - floorZ) / 2);
+  return { ...box, center: [box.center[0], box.center[1], floorZ + half], half: withComponent(box.half, 2, half) };
+}
+
 /** Điểm object-local nằm trong box (bỏ qua op: cộng/trừ do server xử lý). */
 export function contains(box: EditableBox, p: Vec3): boolean {
   const d: Vec3 = [p[0] - box.center[0], p[1] - box.center[1], p[2] - box.center[2]];
