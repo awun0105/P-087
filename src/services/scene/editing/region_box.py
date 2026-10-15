@@ -18,21 +18,42 @@ BACKGROUND_LABEL = -1
 MIN_OBJECT_ROWS = 50
 
 
+#: Biên an toàn cho lọc sơ bộ theo hình vuông bao quanh box; lớn hơn sai số làm tròn, nhỏ hơn mọi kích thước thật.
+_NEAR_SLACK_M = 1e-9
+#: Dưới tỉ lệ này thì chỉ tính trên ứng viên; trên thì tính trên cả đám mây (sao chép ứng viên tốn hơn khi chúng nhiều).
+_CANDIDATE_SHARE_LIMIT = 4
+
+
 def _box_contains(points_local: np.ndarray, box: RegionBox) -> np.ndarray:
     center = np.asarray(box.center_m, dtype=float)
     half = np.asarray(box.half_extents_m, dtype=float)
     cos_yaw, sin_yaw = math.cos(box.yaw_rad), math.sin(box.yaw_rad)
-    relative = points_local - center
+    # Điểm trong box có khoảng cách ngang tới tâm không quá bán kính ngang, bất kể yaw; các điểm còn lại chắc chắn ngoài box.
+    # Khi chỉ một phần nhỏ đám mây là ứng viên thì công thức đầy đủ chỉ chạy trên ứng viên (T-025); khi phần lớn là ứng viên
+    # thì chạy trên cả đám mây như trước, vì sao chép ứng viên tốn hơn.
+    reach = math.hypot(half[0] + CONTAINS_TOLERANCE_M, half[1] + CONTAINS_TOLERANCE_M) + _NEAR_SLACK_M
     # Điểm không hữu hạn cho inf × 0 = NaN; so sánh với NaN luôn sai nên điểm rơi vào "ngoài box" như mong muốn.
     with np.errstate(invalid="ignore"):
+        near = (np.abs(points_local[:, 0] - center[0]) <= reach) & (np.abs(points_local[:, 1] - center[1]) <= reach)
+        candidates = np.flatnonzero(near)
+        if candidates.size == 0:
+            return np.zeros(len(points_local), dtype=bool)
+        selective = candidates.size * _CANDIDATE_SHARE_LIMIT < len(points_local)
+        subset = points_local[candidates] if selective else points_local
+        relative = subset - center
         along_x = relative[:, 0] * cos_yaw + relative[:, 1] * sin_yaw
         along_y = -relative[:, 0] * sin_yaw + relative[:, 1] * cos_yaw
         along_z = relative[:, 2]
-        return (
+        contained = (
             (np.abs(along_x) <= half[0] + CONTAINS_TOLERANCE_M)
             & (np.abs(along_y) <= half[1] + CONTAINS_TOLERANCE_M)
             & (np.abs(along_z) <= half[2] + CONTAINS_TOLERANCE_M)
         )
+    if not selective:
+        return contained
+    inside = np.zeros(len(points_local), dtype=bool)
+    inside[candidates] = contained
+    return inside
 
 
 def boxes_contain(points_local: np.ndarray, boxes: list[RegionBox]) -> np.ndarray:
@@ -75,10 +96,12 @@ def resolve_region(
     source_world_from_object: Transform,
     command: ObjectRegionCommand,
     floor_protected: np.ndarray | None,
+    points_local: np.ndarray | None = None,
 ) -> RegionResolution:
     """Hàng mới = inside ∩ eligible; eligible = nền không thuộc sàn ∪ hàng của vật ∪ hàng của vật trong claim_from.
 
     Box là object-local. Đổi sang world bằng pose nguồn lúc tách (`source_world_from_object`), không dùng pose hiện tại.
+    `points_local` truyền vào khi người gọi đã đổi sang object-local (cùng pose), để không đổi hai lần.
     """
     count = manifest.gaussian_count
     if positions_world.shape != (count, 3) or not np.isfinite(positions_world).all():
@@ -95,9 +118,10 @@ def resolve_region(
     claimed_ids = list(command.claim_from)
     claim_labels = [label for other in claimed_ids for label in _labels_of(manifest, other)]
 
-    rotation = rotation_matrix(source_world_from_object.rotation_quaternion_xyzw)
-    translation = np.asarray(source_world_from_object.translation_xyz, dtype=float)
-    points_local = (positions_world - translation) @ rotation
+    if points_local is None:
+        rotation = rotation_matrix(source_world_from_object.rotation_quaternion_xyzw)
+        translation = np.asarray(source_world_from_object.translation_xyz, dtype=float)
+        points_local = (positions_world - translation) @ rotation
     inside = boxes_contain(points_local, command.boxes)
 
     own = np.isin(labels, own_labels)

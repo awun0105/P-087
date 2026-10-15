@@ -349,3 +349,52 @@ def test_shared_case_matches_the_frontend_contains_contract(case: dict) -> None:
     region = RegionBox.model_validate(case["box"])
     inside = boxes_contain(np.array([case["point_m"]], dtype=float), [region])
     assert bool(inside[0]) is case["inside"]
+
+
+def _full_formula_contains(points_local: np.ndarray, box) -> np.ndarray:  # noqa: ANN001
+    """Công thức gốc của `_box_contains` trên mọi điểm, dùng làm chuẩn cho lọc sơ bộ (T-025)."""
+    import math as _math
+
+    from src.services.scene.editing.region_box import CONTAINS_TOLERANCE_M
+
+    center = np.asarray(box.center_m, dtype=float)
+    half = np.asarray(box.half_extents_m, dtype=float)
+    cos_yaw, sin_yaw = _math.cos(box.yaw_rad), _math.sin(box.yaw_rad)
+    relative = points_local - center
+    with np.errstate(invalid="ignore"):
+        along_x = relative[:, 0] * cos_yaw + relative[:, 1] * sin_yaw
+        along_y = -relative[:, 0] * sin_yaw + relative[:, 1] * cos_yaw
+        along_z = relative[:, 2]
+        return (
+            (np.abs(along_x) <= half[0] + CONTAINS_TOLERANCE_M)
+            & (np.abs(along_y) <= half[1] + CONTAINS_TOLERANCE_M)
+            & (np.abs(along_z) <= half[2] + CONTAINS_TOLERANCE_M)
+        )
+
+
+@pytest.mark.parametrize("yaw", [0.0, 0.4, np.pi / 4, -1.2, np.pi])
+@pytest.mark.parametrize("half", [(0.9, 0.4, 0.6), (3.0, 3.0, 3.0)])  # lọc chọn lọc và không chọn lọc (T-025)
+def test_box_prefilter_matches_the_full_formula_on_faces_and_non_finite_points(yaw: float, half: tuple) -> None:
+    from src.models.contracts.object_membership import RegionBox
+    from src.services.scene.editing.region_box import _box_contains
+
+    box = RegionBox(op="add", center_m=(0.3, -0.2, 0.1), half_extents_m=half, yaw_rad=yaw)
+    rng = np.random.default_rng(7)
+    random_points = rng.uniform(-2, 2, (200_000, 3))
+    # Điểm sát mặt box (cả trong và ngoài dung sai) đi qua phép quay ngược về object-local.
+    hx, hy, hz = half
+    along = np.column_stack(
+        [
+            rng.choice([-hx, hx], 20_000) + rng.choice([-1e-7, 0.0, 1e-7], 20_000),
+            rng.uniform(-hy * 1.2, hy * 0.9, 20_000),
+            rng.uniform(-hz * 1.1, hz * 1.2, 20_000),
+        ]
+    )
+    cos_yaw, sin_yaw = np.cos(yaw), np.sin(yaw)
+    rotated = np.column_stack(
+        [along[:, 0] * cos_yaw - along[:, 1] * sin_yaw, along[:, 0] * sin_yaw + along[:, 1] * cos_yaw, along[:, 2]]
+    )
+    face_points = rotated + np.asarray(box.center_m)
+    points = np.vstack([random_points, face_points, [[np.nan, 0, 0], [np.inf, 0, 0], [0.3, -0.2, np.inf]]])
+
+    np.testing.assert_array_equal(_box_contains(points, box), _full_formula_contains(points, box))

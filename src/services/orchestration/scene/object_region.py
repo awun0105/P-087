@@ -84,6 +84,7 @@ def _resolve(
         _source_pose(item)
     item = objects[object_id]
     source = load_membership_source(registry, job_id, scene)
+    local = _local(source.positions, item)
     resolution = resolve_region(
         positions_world=source.positions,
         labels=source.labels,
@@ -92,8 +93,9 @@ def _resolve(
         source_world_from_object=_source_pose(item),
         command=command,
         floor_protected=source.floor_protected,
+        points_local=local,
     )
-    return scene, item, source, resolution, _local(source.positions, item)
+    return scene, item, source, resolution, local
 
 
 def _shell(points: np.ndarray, opacity: np.ndarray) -> tuple[bytes | None, dict, str | None]:
