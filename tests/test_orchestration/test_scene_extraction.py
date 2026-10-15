@@ -7,6 +7,7 @@ bằng chứng chất lượng SAMPro3D trên dữ liệu thật.
 import io
 from pathlib import Path
 
+import pytest
 import trimesh
 
 from src.config import Settings
@@ -77,3 +78,72 @@ def test_without_sam2_runtime_falls_back_to_geometric_candidates(tmp_path: Path)
     # Chạy lại (retry) không ghi đè revision đã có.
     again = extract_scene(registry, job, bundle, settings, tmp_path / "work")
     assert again.artifact_checksum == stage.artifact_checksum
+
+
+@pytest.mark.parametrize("review", ["auto", "required"])
+@pytest.mark.parametrize("method", ["shell", "objectgs"])
+def test_extraction_auto_publishes_draft_then_enqueues_geometry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, review: str, method: str
+) -> None:
+    from types import SimpleNamespace
+
+    from src.services.orchestration.scene import extraction as module
+    from src.services.orchestration.scene import objectify_queue
+    from src.services.orchestration.scene.objectify import ObjectifyResult
+
+    registry, job, _ = _confirmed(tmp_path)
+    bundle = ReconstructionBundle.model_validate_json(_FIXTURE.read_text().replace("job-fixture-001", job.job_id))
+    bundle = bundle.model_copy(update={"canonical_geometry_ref": _collision(registry, job.job_id)})
+    sealed_scene = {
+        "geometry_method": method,
+        "geometry_review": review,
+        "refinement": "multiview_v1",
+        "sam_batch": 4,
+        "coacd_threshold": 0.03,
+        "inpaint_max_new_gaussians": 123,
+    }
+    observed = []
+    monkeypatch.setattr(
+        module, "load_job_config", lambda *args: SimpleNamespace(scene=dict(sealed_scene)), raising=False
+    )
+    monkeypatch.setattr(module, "job_requires_strict_geometry", lambda *args: True)
+    monkeypatch.setattr(module, "_sam2_runtime", lambda *args: SimpleNamespace(available=lambda: True))
+    monkeypatch.setattr(objectify_queue, "job_bundle", lambda *args: bundle)
+
+    def extract(*args: object, **kwargs: object) -> ObjectifyResult:
+        from src.models.contracts.scene import SceneEnvironment
+
+        observed.append(kwargs)
+        if review == "auto":
+            assert kwargs["scene_config"] == {
+                "scene": {
+                    "geometry_method": method,
+                    "geometry_review": "required",
+                    "refinement": "multiview_v1",
+                    "sam_batch": 4,
+                },
+                "coacd": {"threshold": 0.03},
+                "inpaint": {"max_new_gaussians": 123},
+            }
+        return ObjectifyResult(
+            SceneEnvironment(visual_ref=bundle.visual_artifact_ref, geometry_ref=bundle.canonical_geometry_ref),
+            [],
+            {"object_geometry": "awaiting_review", "geometry_method": method, "geometry_review": "required"},
+        )
+
+    monkeypatch.setattr(module, "objectify_with_retry", extract)
+    settings = Settings(database_url=f"sqlite:///{tmp_path / 'queue.db'}", product_objectify=True)
+    stage = module.extract_scene(registry, job, bundle, settings, tmp_path / "work")
+    scene = registry.scene.current(job.job_id).scene
+    queued = objectify_queue.state(registry, settings, job.job_id)
+    assert scene.provenance["object_geometry"] == "awaiting_review"
+    assert stage.artifact_uri.endswith("scene_ir.rev-001.json")
+    if review == "auto":
+        assert scene.provenance["geometry_review"] == "auto"
+        assert queued.status == "queued" and queued.mode == "geometry" and queued.base_revision == scene.scene_revision
+        # Retrying extraction after initial publication keeps the same queued operation.
+        module.extract_scene(registry, job, bundle, settings, tmp_path / "retry")
+        assert objectify_queue.state(registry, settings, job.job_id).operation_id == queued.operation_id
+    else:
+        assert queued.status == "idle"
+    assert sealed_scene["geometry_review"] == review

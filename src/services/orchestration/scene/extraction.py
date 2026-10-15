@@ -24,11 +24,13 @@ from src.models.contracts.scene import SceneObject
 from src.services.orchestration.artifacts import FilesystemArtifactStore
 from src.services.orchestration.jobs.database import RuntimeTransaction
 from src.services.orchestration.jobs.progress import metric_confirmation_stage
+from src.services.orchestration.processing.config import load_job_config
 from src.services.orchestration.projects.registry import ProjectRegistry
 from src.services.orchestration.scene.errors import SceneRevisionConflictError
 from src.services.orchestration.scene.floor_evidence import publish_floor_fit_evidence, scene_floor_fit_summary
 from src.services.orchestration.scene.objectify import (
     AWAITING_CHOICE,
+    ObjectifyConfig,
     ObjectifyError,
     Publish,
     job_requires_strict_geometry,
@@ -41,6 +43,7 @@ from src.services.scene.builder import scene_from_bundle
 from src.services.scene.collision_ownership import bind_source_collision_ownership
 from src.services.scene.floor_model import fit_canonical_floor_model, point_cloud_checksum
 from src.services.scene.geometric import GeometricConfig, candidate_objects, collision_vertices, objects_from_candidates
+from src.services.scene.geometry_state import object_geometry_state
 from src.services.scene.publisher import with_scene_checksum
 from src.services.scene.sampro3d.pipeline import METHOD as SAMPRO3D_METHOD
 from src.services.scene.sampro3d.pipeline import CameraFrame, Sam2Runtime, extract
@@ -186,6 +189,21 @@ def extract_scene(
     objects: list[SceneObject] = []
     environment, extra = None, {}
     strict_geometry_required = job_requires_strict_geometry(registry, job)
+    processing = load_job_config(job.job_id, job.config_checksum, registry.runtime_resolver)
+    auto_geometry = bool(
+        processing is not None
+        and processing.scene.get("geometry_review") == "auto"
+        and processing.scene.get("geometry_method") in {"shell", "objectgs"}
+    )
+    arguments = {}
+    if auto_geometry:
+        # Auto still extracts a Draft first; the sealed choice and all other controls remain intact.
+        groups: dict[str, dict] = {"scene": {}, "coacd": {}, "inpaint": {}}
+        for key, value in processing.scene.items():
+            group, name = key.split("_", 1) if key.startswith(("coacd_", "inpaint_")) else ("scene", key)
+            groups[group][name] = value
+        groups["scene"]["geometry_review"] = "required"
+        arguments["scene_config"] = ObjectifyConfig.model_validate(groups).model_dump(exclude_unset=True)
     if strict_geometry_required and not (settings.product_objectify and runtime is not None and runtime.available()):
         raise ObjectifyError(
             "Job hình học nghiêm ngặt (shell/ObjectGS) cần runtime SAM2/objectify; không được lùi về legacy",
@@ -193,8 +211,12 @@ def extract_scene(
         )
     if settings.product_objectify and runtime is not None and runtime.available():
         try:
-            result = objectify_with_retry(registry, job, bundle, settings, workspace / "objectify", publish)
+            result = objectify_with_retry(
+                registry, job, bundle, settings, workspace / "objectify", publish, **arguments
+            )
             objects, environment, extra = result.objects, result.environment, result.provenance
+            if auto_geometry:
+                extra = {**extra, "geometry_review": "auto"}
             method, note = OBJECTIFY_METHOD, ""
         except ObjectifyError as error:
             if strict_geometry_required:
@@ -212,6 +234,18 @@ def extract_scene(
     objects = bind_source_collision_ownership(objects, source_geometry_ref, "rev-001")
     scene = scene_from_bundle(bundle, objects, {"object_extraction": method, "note": note, **extra}, environment)
     revision = registry.scene.publish_initial(job.job_id, scene)
+    if auto_geometry and object_geometry_state(revision.scene) == "awaiting_review":
+        from src.services.orchestration.scene import objectify_queue
+
+        queued = objectify_queue.state(registry, settings, job.job_id)
+        if not (
+            queued.mode == "geometry"
+            and queued.base_revision == revision.scene.scene_revision
+            and queued.status in {"queued", "running"}
+        ):
+            objectify_queue.request(
+                registry, settings, job.job_id, revision.scene.scene_revision, "geometry", actor_id="system"
+            )
     reference = revision.scene_reference
     return StageArtifact(
         stage_id=StageId.OBJECT_EXTRACT,
