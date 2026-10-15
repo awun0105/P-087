@@ -1,6 +1,7 @@
 import type { JobManifest, JobStatus, StageId } from "@/lib/contracts/api";
 import type { JobProgress, SceneSummary } from "@/lib/contracts/studio";
 import { stageMeta } from "@/features/studio/stages";
+import type { GeometryStep } from "@/features/studio/scene/useObjectify";
 
 export type SceneStatusTone = "neutral" | "ember" | "sage" | "ochre" | "rust";
 
@@ -41,12 +42,19 @@ export function sceneSummaryStatus(scene: SceneSummary): SceneStatusView {
   return sceneStatus(scene.latest_job, scene.preview_ready, scene.awaiting_anonymization_review, scene.awaiting_object_choice);
 }
 
-/** Header scene đọc progress thật; cùng bảng nhãn với Scenes/Jobs, không suy DONE từ preview. */
-export function progressSceneStatus(progress: JobProgress, awaitingObjectChoice = false): SceneStatusView {
+/**
+ * Header scene đọc progress thật; cùng bảng nhãn với Scenes/Jobs, không suy DONE từ preview. `geometry` là hàng
+ * "Duyệt vật & Tạo mesh" (T-021): job đã xong nhưng scene Draft thì header phải nói còn việc phải làm.
+ */
+export function progressSceneStatus(progress: JobProgress, awaitingObjectChoice = false, geometry: GeometryStep | null = null): SceneStatusView {
   if (progress.waiting_for === "resources") return { label: "Đang chờ tài nguyên", tone: "ochre", active: true, group: "running" };
   // Frame đã che xong, pipeline dừng chờ người upload xem — không phải worker đang chạy hay đang xếp hàng.
   if (progress.waiting_for === "anonymization_review") return { label: "Cần xem bản đã che", tone: "ochre", active: false, group: "action" };
   if (awaitingObjectChoice && progress.status === "SUCCEEDED") return OBJECT_CHOICE_STATUS;
+  if (geometry && progress.status === "SUCCEEDED") {
+    if (geometry.state === "running") return { label: "Đang tạo mesh", tone: "ember", active: true, group: "running" };
+    if (geometry.state === "waiting" || geometry.state === "failed") return { label: "Chờ duyệt vật", tone: "ochre", active: false, group: "action" };
+  }
   return deriveStatus(progress.status, progress.current_stage, progress.waiting_for === "metric_confirmation");
 }
 

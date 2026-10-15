@@ -10,6 +10,8 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { PipelineTimeline } from "@/features/studio/PipelineTimeline";
 import { GEOMETRY_REVIEW_STAGE, GEOMETRY_STAGE, OBJECT_STAGE } from "@/features/studio/stages";
 import { geometryReviewStep, objectifyStageOverride } from "@/features/studio/scene/useObjectify";
+import { progressSceneStatus } from "@/features/studio/sceneStatus";
+import type { JobProgress } from "@/lib/contracts/studio";
 import type { ObjectifyState } from "@/lib/api/studio";
 
 function objectify(overrides: Partial<ObjectifyState>): ObjectifyState {
@@ -148,3 +150,52 @@ describe("chữ mô tả bước và hàng ảo trên timeline", () => {
     expect(screen.getAllByRole("link", { name: /Xem giai đoạn/ })).toHaveLength(1);
   });
 });
+
+describe("đầu trang scene theo hàng Duyệt vật & Tạo mesh", () => {
+  const succeeded: JobProgress = {
+    job_id: "job-1", status: "SUCCEEDED", current_stage: "ST-OBJECT-EXTRACT", attempt: 1,
+    started_at: "2026-10-10T00:00:00Z", updated_at: "2026-10-10T01:00:00Z", completed_at: "2026-10-10T01:00:00Z",
+    stages: [], preview_ready: true, error: null, waiting_for: null,
+  } as unknown as JobProgress;
+
+  it("không có hàng (scene cũ) hoặc Ready: vẫn Đã dựng scene", () => {
+    expect(progressSceneStatus(succeeded, false, null)).toMatchObject({ label: "Đã dựng scene", group: "done" });
+    expect(progressSceneStatus(succeeded, false, geometryReviewStep(objectify({ object_geometry: "ready" })))).toMatchObject({
+      label: "Đã dựng scene",
+      group: "done",
+    });
+  });
+
+  it("Draft chờ duyệt hoặc tạo mesh lỗi: Chờ duyệt vật, không chạy", () => {
+    expect(progressSceneStatus(succeeded, false, geometryReviewStep(objectify({ status: "idle" })))).toMatchObject({
+      label: "Chờ duyệt vật",
+      group: "action",
+      active: false,
+    });
+    expect(
+      progressSceneStatus(succeeded, false, geometryReviewStep(objectify({ status: "failed", mode: "geometry", base_revision: "rev-002" }))),
+    ).toMatchObject({ label: "Chờ duyệt vật", group: "action" });
+  });
+
+  it("đang tạo mesh: Đang tạo mesh, đang chạy", () => {
+    expect(progressSceneStatus(succeeded, false, geometryReviewStep(objectify({ status: "queued", mode: "geometry" })))).toMatchObject({
+      label: "Đang tạo mesh",
+      group: "running",
+      active: true,
+    });
+  });
+
+  it("tách theo vật lỗi vẫn ưu tiên hơn việc chờ duyệt", () => {
+    expect(progressSceneStatus(succeeded, true, geometryReviewStep(objectify({ status: "idle" })))).toMatchObject({
+      label: "Cần chọn cách tách vật thể",
+    });
+  });
+
+  it("job chưa xong thì hàng hình học không đổi nhãn đầu trang", () => {
+    const running = { ...succeeded, status: "RUNNING" as const, current_stage: "ST-RGB-GEOMETRY" as const };
+    expect(progressSceneStatus(running, false, geometryReviewStep(objectify({ status: "idle" })))).toMatchObject({
+      label: "Đang dựng collision",
+    });
+  });
+});
+

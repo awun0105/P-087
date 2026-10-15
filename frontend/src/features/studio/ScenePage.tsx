@@ -16,7 +16,7 @@ import { DemoControls } from "@/features/studio/scene/DemoControls";
 import { SceneTabs, type SceneTabItem } from "@/features/studio/scene/SceneTabs";
 import { GAUSSIAN_EDIT_ENABLED, metricState, stageState, type Preview, type SceneInfo, type StudioMode, type Tab } from "@/features/studio/scene/state";
 import { ObjectifyContext } from "@/features/studio/scene/objectifyContext";
-import { useObjectifyState } from "@/features/studio/scene/useObjectify";
+import { geometryReviewStep, useObjectifyState } from "@/features/studio/scene/useObjectify";
 import { progressSceneStatus } from "@/features/studio/sceneStatus";
 import { usePolling } from "@/features/studio/usePolling";
 import { getJob, getPreview, getProject, jobArtifactContentUrl } from "@/lib/api/endpoints";
@@ -264,7 +264,9 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
     enabled: sceneReady,
     onRevision: (revision) => { setSave({ status: "saved", revision }); setPollingKey((k) => k + 1); },
   });
-  const status = progress ? progressSceneStatus(progress, objectify.state?.awaiting_choice === true && !objectify.pending) : null;
+  const status = progress
+    ? progressSceneStatus(progress, objectify.state?.awaiting_choice === true && !objectify.pending, geometryReviewStep(objectify.state))
+    : null;
   const studioMode: StudioMode = mode === "metric" && !waitingMetric ? "scene" : mode;
 
   const tabs: SceneTabItem[] = [
