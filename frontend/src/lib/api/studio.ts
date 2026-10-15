@@ -849,6 +849,8 @@ export interface ObjectifyState {
   resource_wait: ObjectifyResourceWait | null;
   /** Running operation has received a cancel request and is stopping/reaping its child. */
   cancellation_requested: boolean;
+  /** Trạng thái hình học theo vật của scene; null = scene cũ không có khoá (luồng cũ, T-021). */
+  object_geometry?: "awaiting_review" | "ready" | null;
 }
 
 export function getObjectifyState(jobId: string, signal?: AbortSignal): Promise<ObjectifyState> {
