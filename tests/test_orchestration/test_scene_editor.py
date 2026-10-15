@@ -15,6 +15,7 @@ import pytest
 from pydantic import ValidationError
 
 from src.models.contracts.artifacts import ProductArtifactRef
+from src.models.contracts.object_membership import ObjectMembershipArtifact
 from src.models.contracts.scene import SceneIR, SceneObjectState, SourceCollisionRegion
 from src.services.orchestration.artifacts import ArtifactResolver, with_canonical_checksum
 from src.services.orchestration.scene import (
@@ -27,7 +28,8 @@ from src.services.orchestration.scene import (
 )
 from src.services.orchestration.scene.editor import scene_artifact_uri
 from src.services.orchestration.scene.errors import ObjectGeometryNotReadyError
-from src.services.orchestration.scene.objects import apply_object_action
+from src.services.orchestration.scene.objects import apply_object_action, restore_revision
+from src.services.scene.geometry_state import object_geometry_state
 
 _FIXTURE_ROOT = Path(__file__).resolve().parents[2] / "fixtures"
 _JOB_ID = "job-fixture-001"
@@ -464,3 +466,75 @@ def test_draft_scene_keeps_review_actions(draft_editor: SceneEditor) -> None:
         revision = result.revision.scene.scene_revision
         assert result.revision.scene.provenance["object_geometry"] == "awaiting_review"
     assert revision == "rev-007"
+
+
+def _with_geometry(scene: SceneIR, state: str) -> SceneIR:
+    return scene.model_copy(update={"provenance": {**scene.provenance, "object_geometry": state}})
+
+
+def test_restoring_a_draft_revision_from_a_ready_scene_reopens_review(editor: SceneEditor) -> None:
+    ready = editor.current(_JOB_ID).scene
+    draft = editor.publish_next(
+        _JOB_ID, ready.scene_revision, _with_geometry(ready, "awaiting_review"), "test_draft"
+    ).revision.scene
+    ready_again = editor.publish_next(
+        _JOB_ID, draft.scene_revision, _with_geometry(draft, "ready"), "test_ready"
+    ).revision.scene
+
+    restored = restore_revision(editor, _JOB_ID, ready_again.scene_revision, draft.scene_revision).revision.scene
+
+    assert object_geometry_state(ready_again) == "ready"
+    assert object_geometry_state(restored) == "awaiting_review"
+
+
+def _object_aware_ready(scene: SceneIR) -> SceneIR:
+    """Scene sẵn sàng có membership và manifest object-aware, dựng như helper của test contract."""
+    geometry = scene.environment.geometry_ref
+    job_id = geometry.artifact_uri.removeprefix("artifact://jobs/").partition("/")[0]
+    geometry = geometry.model_copy(update={"job_id": job_id})
+    membership = ObjectMembershipArtifact(
+        source_visual_ref=geometry.model_copy(update={"artifact_type": "GaussianPLY"}),
+        source_geometry_ref=geometry,
+        extraction_revision=scene.scene_revision,
+        coordinate_system=scene.coordinate_system,
+        gaussian_count=10,
+        labels_ref=geometry.model_copy(update={"artifact_type": "ObjectMembershipLabels"}),
+        label_to_object_id={"0": "object-pallet-001"},
+    )
+    manifest = geometry.model_copy(update={"artifact_type": "ObjectAwareEnvironmentManifest"})
+    environment = scene.environment.model_copy(
+        update={"membership": membership, "object_aware_collision_ref": manifest}
+    )
+    return _with_geometry(scene, "ready").model_copy(update={"environment": environment})
+
+
+def test_restoring_a_ready_revision_from_a_draft_brings_back_its_colliders(editor: SceneEditor) -> None:
+    ready = editor.current(_JOB_ID).scene
+    target = editor.publish_next(
+        _JOB_ID, ready.scene_revision, _object_aware_ready(ready), "test_ready_with_manifest"
+    ).revision.scene
+    target_pallet = next(item for item in target.objects if item.id == "object-pallet-001")
+    assert target_pallet.collider is not None
+    assert target.environment.object_aware_collision_ref is not None
+
+    draft_objects = [
+        item.model_copy(update={"collider": None}) if item.id == "object-pallet-001" else item
+        for item in target.objects
+    ]
+    draft_environment = target.environment.model_copy(update={"membership": None, "object_aware_collision_ref": None})
+    draft = editor.publish_next(
+        _JOB_ID,
+        target.scene_revision,
+        _with_geometry(target, "awaiting_review").model_copy(
+            update={"objects": draft_objects, "environment": draft_environment}
+        ),
+        "test_draft",
+    ).revision.scene
+    assert next(item for item in draft.objects if item.id == "object-pallet-001").collider is None
+
+    restored = restore_revision(editor, _JOB_ID, draft.scene_revision, target.scene_revision).revision.scene
+
+    assert object_geometry_state(restored) == "ready"
+    assert next(item for item in restored.objects if item.id == "object-pallet-001").collider == target_pallet.collider
+    assert restored.environment.object_aware_collision_ref == target.environment.object_aware_collision_ref
+    assert restored.environment.membership == target.environment.membership
