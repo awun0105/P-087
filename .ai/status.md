@@ -1,4 +1,4 @@
-T-001 | Tách occupancy_surface() | planned | engineer
+T-001 | Tách occupancy_surface() | implemented | summarizer
 T-002 | Dựng vỏ Gaussian kín | planned | engineer
 T-003 | Contract vỏ + trạng thái hình học + presets | planned | engineer
 T-004 | Box → membership (region command + preview diff) | planned | engineer
