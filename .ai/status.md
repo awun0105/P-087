@@ -15,5 +15,6 @@ T-014 | Box model TypeScript thuần | planned | engineer
 T-015 | Box overlay + tay nắm + góc nhìn | planned | engineer
 T-016 | Region Editor panel | planned | engineer
 T-017 | Vỏ phát sáng + điểm thêm/bớt | planned | engineer
+T-020 | Lựa chọn Duyệt trước / Tạo mesh ngay khi tạo job | planned | engineer
 T-018 | Tương thích scene cũ + Walk/USD với collider vỏ | planned | engineer
 T-019 | Full regression + handoff | planned | engineer

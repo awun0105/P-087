@@ -60,7 +60,7 @@ Sửa vùng sau khi đã ready → rebuild chỉ các vật bị ảnh hưởng 
 ```
 
 `scene.geometry_review` (preset param): `required` (mặc định) dừng ở Draft; `auto` chạy build
-ngay sau tách vật (cho batch). Job cũ không có khóa này → hành vi cũ (`legacy`).
+ngay sau tách vật (cho batch). Người dùng chọn ở màn tạo job (T-020). Job cũ không có khóa này → hành vi cũ (`legacy`).
 
 ## 6. Mô-đun và trách nhiệm
 
@@ -211,4 +211,4 @@ Gaussian (dưới mức đó → 422, gợi ý dùng Delete).
 ## 14. Câu hỏi mở cho chủ dự án
 
 1. Ngưỡng opacity 0.1 và voxel 0.02 m cho vỏ mịn: giá trị khởi đầu, cần chỉnh trên scene thật.
-2. Có cần chế độ `auto` (bỏ qua duyệt) trong UI tạo job, hay chỉ để trong preset?
+2. ~~Chế độ `auto` trong UI tạo job?~~ Đã chốt: **có**, radio riêng ngoài mục nâng cao (T-020).
