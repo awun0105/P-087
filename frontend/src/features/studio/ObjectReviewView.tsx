@@ -20,7 +20,7 @@ import {
   Undo2,
   X,
 } from "lucide-react";
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode, useSyncExternalStore } from "react";
+import { Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode, useSyncExternalStore } from "react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/shadcn/alert-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/shadcn/tabs";
 import { subscribeTheme, themeColor, themeKey } from "@/lib/theme";
@@ -29,6 +29,9 @@ import { Badge, Button, Notice } from "@/components/studio/primitives";
 import { MetricSceneView } from "@/features/studio/MetricSceneView";
 import { ObjectifyNotice } from "@/features/studio/ObjectifyNotice";
 import { GeometryReviewBanner } from "@/features/studio/GeometryReviewBanner";
+import { RegionEditor } from "@/features/studio/region/RegionEditor";
+import { initialRegionSession, selectRegionBox, type RegionSession, type RegionViewApi } from "@/features/studio/region/region-session";
+import { ObjectifyContext } from "@/features/studio/scene/objectifyContext";
 import { composeColliderTransform } from "@/features/viewer/layers";
 import type { GizmoMode, OverlayBox, OverlayObject } from "@/features/viewer/scene-overlay";
 import type { PhysicsObjectInput } from "@/features/viewer/usePhysicsPlay";
@@ -45,6 +48,7 @@ import {
   getJobScene,
   getSceneCatalog,
   getStageViews,
+  isSceneEditResponse,
   mergeObjectCandidates,
   reassignObjectMembership,
   restoreSceneRevision,
@@ -307,6 +311,11 @@ export function ObjectReviewView({
   };
   const [mergeRestoreTarget, setMergeRestoreTarget] = useState<string | null>(null);
   const [membershipEditorOpen, setMembershipEditorOpen] = useState(false);
+  // Chỉnh vùng (T-016): phiên của vật đang chọn. Chọn vật khác thì phiên bị bỏ; chọn lại đúng vật đó thì giữ phiên.
+  const [regionSession, setRegionSession] = useState<RegionSession | null>(null);
+  const regionApi = useRef<RegionViewApi | null>(null);
+  // Trang scene chia sẻ trạng thái tách vật qua ObjectifyContext; sau khi áp vùng nhận 202 thì đọc lại để hiện tiến độ.
+  const sharedObjectify = useContext(ObjectifyContext);
   const [correctionPanelOpen, setCorrectionPanelOpen] = useState(false);
   const [collisionSourcePanelOpen, setCollisionSourcePanelOpen] = useState(false);
   const [collisionCandidates, setCollisionCandidates] = useState<ProductArtifactRef[]>([]);
@@ -353,6 +362,7 @@ export function ObjectReviewView({
   const selectObject = (id: string | null) => {
     if (id !== selected) setColliderDraft(null);
     setSelected(id);
+    setRegionSession((session) => (session?.objectId === id ? session : null));
   };
 
   useEffect(() => {
@@ -640,6 +650,11 @@ export function ObjectReviewView({
   const current = scene.objects.find((object) => object.id === selected) ?? null;
   const previous = typeof scene.provenance.edited_from === "string" ? scene.provenance.edited_from : null;
   const membership = scene.environment.membership ?? null;
+  const regionOpen = regionSession && regionSession.objectId === selected ? regionSession : null;
+  const openRegionEditor = () => {
+    if (!current || !membership) return;
+    setRegionSession((session) => (session?.objectId === current.id ? session : initialRegionSession(current)));
+  };
   const candidateCorrections = scene.objects
     .filter((object) => object.state === "CANDIDATE")
     .map((object) => ({ object, reason: correctionUnavailableReason(scene, object) }));
@@ -699,6 +714,28 @@ export function ObjectReviewView({
             </div>
           </div>
         )}
+        {regionOpen && current && membership && (
+          <div className="pointer-events-none absolute top-3 right-3 z-20">
+            <RegionEditor
+              jobId={jobId}
+              object={current}
+              sceneRevision={scene.scene_revision}
+              membershipChecksum={membership.labels_ref.artifact_checksum}
+              nameOf={(id) => scene.objects.find((item) => item.id === id)?.name ?? id}
+              session={regionOpen}
+              onSession={setRegionSession}
+              onApplied={(result) => {
+                setRegionSession(null);
+                // Draft (201): scene mới, tải lại theo revision mới. Ready (202): đang dựng lại, đọc tiến độ.
+                if (isSceneEditResponse(result)) setReload((value) => value + 1);
+                else sharedObjectify?.refresh();
+              }}
+              onReload={() => setReload((value) => value + 1)}
+              onClose={() => setRegionSession(null)}
+              viewApi={regionApi}
+            />
+          </div>
+        )}
         {scene.environment.visual_ref ? (
           <MetricSceneView
             jobId={jobId}
@@ -728,6 +765,14 @@ export function ObjectReviewView({
             cameras={cameras}
             boxes={boxes}
             objects={splats}
+            regionEdit={regionOpen ? {
+              objectId: regionOpen.objectId,
+              boxes: regionOpen.boxes,
+              selectedId: regionOpen.selectedId,
+              onChange: (boxes) => setRegionSession((session) => (session ? { ...session, boxes } : session)),
+              onSelect: (id) => setRegionSession((session) => (session ? selectRegionBox(session, id) : session)),
+            } : null}
+            regionApi={regionApi}
             gizmo={!geometryLockReason && tool !== "none" && current && isPlaced(current) && !hiddenIds.has(current.id) ? { id: current.id, mode: tool } : null}
             onTransform={(id, position, rotation) => run((revision) => setObjectTransform(jobId, revision, id, position, rotation))}
             focus={focus}
@@ -960,7 +1005,24 @@ export function ObjectReviewView({
                 <span className="font-normal text-on-dark/60">{membership ? `${eligibleCorrections.length} ứng viên khả dụng` : "chưa có membership"}</span>
               </button>
               {scene.environment.object_aware_collision_ref && selected && membership && Object.values(membership.label_to_object_id).includes(selected) && (
-                <Button size="sm" disabled={busy} onClick={() => setMembershipEditorOpen(true)}>Chỉnh vùng Gaussian · Box / Brush / Lasso</Button>
+                "object_geometry" in scene.provenance ? (
+                  <div className="flex flex-wrap gap-2">
+                    <Button size="sm" disabled={busy || !current?.primitive_dimensions_xyz_m} onClick={openRegionEditor}>Chỉnh vùng</Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={busy}
+                      onClick={() => {
+                        setRegionSession(null);
+                        setMembershipEditorOpen(true);
+                      }}
+                    >
+                      Chỉnh chi tiết (Brush/Lasso)
+                    </Button>
+                  </div>
+                ) : (
+                  <Button size="sm" disabled={busy} onClick={() => setMembershipEditorOpen(true)}>Chỉnh vùng Gaussian · Box / Brush / Lasso</Button>
+                )
               )}
               {correctionPanelOpen && (
                 <div id="membership-correction-panel" className="mt-2 max-h-80 space-y-3 overflow-y-auto rounded-md border border-line-dark bg-viewport-deep/60 p-2 text-xs">

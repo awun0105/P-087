@@ -111,7 +111,10 @@ export function useObjectifyState({
     }
   }, [jobId, operationId]);
 
-  return { state, error, sending, pending, send, cancel };
+  // Đọc lại trạng thái ngay, cho thao tác không đi qua `send` (ví dụ áp vùng nhận 202).
+  const refresh = useCallback(() => setTick((value) => value + 1), []);
+
+  return { state, error, sending, pending, send, cancel, refresh };
 }
 
 /**
