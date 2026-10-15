@@ -104,3 +104,49 @@ def test_objectgs_draft_does_not_require_objectgs_runtime(draft_inputs, monkeypa
     monkeypatch.setattr(module, "_seeds", stop)
     with pytest.raises(ReachedSegmentationError):
         draft_inputs.extract("objectgs")
+
+
+def test_draft_objects_have_preview_shells_and_source_poses(draft_inputs):
+    result = draft_inputs.extract()
+    assert len(result.objects) == 2
+    for number, item in enumerate(result.objects, 1):
+        assert item.id == f"candidate-{number:03d}"
+        assert item.collider is None
+        assert item.surface_mesh_ref is None
+        assert item.geometry_ref.artifact_type == "ObjectShellMesh"
+        assert item.state == module.SceneObjectState.CANDIDATE
+        assert not item.active
+        assert item.provenance["source_transform"] == item.transform.model_dump(mode="json")
+        assert item.provenance["gaussians"] == 343
+
+
+def test_draft_shells_are_local_watertight_glbs(draft_inputs):
+    import io
+
+    import trimesh
+
+    result = draft_inputs.extract()
+    for item in result.objects:
+        mesh = trimesh.load(
+            io.BytesIO(draft_inputs.published[item.geometry_ref.artifact_uri]), file_type="glb", force="mesh"
+        )
+        assert mesh.is_watertight
+        # split() already centres rows. Subtracting the world centre twice would break this.
+        np.testing.assert_allclose(mesh.bounds.mean(axis=0), 0, atol=0.06)
+        assert "solidity" in item.provenance["shell_preview"]["statistics"]
+        visual = module.gaussian_split.read_gaussian_ply(draft_inputs.published[item.visual_ref.artifact_uri])
+        np.testing.assert_allclose(module.gaussian_split.positions(visual).mean(axis=0), 0, atol=1e-6)
+
+
+def test_shell_failure_keeps_object_as_display_placeholder(draft_inputs, monkeypatch):
+    def broken(*args, **kwargs):
+        raise module.GaussianShellError("fixture QA failure")
+
+    monkeypatch.setattr(module, "build_gaussian_shell", broken, raising=False)
+    result = draft_inputs.extract()
+    assert len(result.objects) == 2
+    for item in result.objects:
+        assert item.collider is None
+        assert item.provenance["shell_error"] == "fixture QA failure"
+        assert item.provenance["shell_display"] == "bounding_box_placeholder"
+        assert item.geometry_ref.artifact_type == "ObjectShellMesh"

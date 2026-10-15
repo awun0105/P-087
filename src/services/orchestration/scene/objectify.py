@@ -59,6 +59,7 @@ from src.services.scene.editing.membership import (
     membership_labels_for_parts,
 )
 from src.services.scene.floor_model import fit_canonical_floor_model, point_cloud_checksum
+from src.services.scene.gaussian_shell import GaussianShellError, ShellParams, build_gaussian_shell
 from src.services.scene.geometric import GeometricConfig, box_from_points
 from src.services.scene.object_aware_geometry import build_background_collision
 from src.services.scene.objectgs import OBJECTGS_COMMIT, ObjectGSRuntime, PreparedObjectGSRequest, run_prepared_objectgs
@@ -313,6 +314,93 @@ class CorrectedMembership:
     labels: np.ndarray
     source_poses: dict[str, Transform]
     evidence_ref: ProductArtifactRef | None = None
+
+
+def _publish_draft(
+    job_id: str,
+    bundle: ReconstructionBundle,
+    parts: list[gaussian_split.ObjectPart],
+    seeds: list[np.ndarray],
+    lift: dict,
+    publish: Publish,
+    publish_membership: Callable[[], ObjectMembershipArtifact],
+    config: ObjectifyConfig,
+    floor_model: FloorModel,
+    floor_fit: JsonObject,
+    cancel_event: Event | None,
+) -> ObjectifyResult:
+    """Publish review previews without creating collision geometry or filling the background."""
+    membership = publish_membership()
+    objects: list[SceneObject] = []
+    for number, part in enumerate(parts, start=1):
+        _ensure_not_cancelled(cancel_event)
+        object_id = membership.label_to_object_id[str(part.index)]
+        gaussians = gaussian_split.write_gaussian_ply(part.rows)
+        visual = publish(
+            _reference(job_id, "objects/{digest}.ply", "ObjectGaussians", StageId.SCENE_DECOMPOSE, gaussians), gaussians
+        )
+        transform = Transform(
+            parent_frame="world",
+            local_frame=object_id,
+            translation_xyz=part.center,
+            rotation_quaternion_xyzw=_IDENTITY,
+        )
+        provenance = {
+            "method": METHOD,
+            "gaussians": len(part.rows),
+            "seed_gaussians": len(seeds[part.index]),
+            "masks": int(
+                lift["masks_per_object"][str(part.index)]
+                if isinstance(lift["masks_per_object"], dict)
+                else lift["masks_per_object"][part.index]
+            ),
+            "note": "ứng viên, cần người xác nhận",
+            "source_transform": transform.model_dump(mode="json"),
+        }
+        try:
+            # split() already returns object-local rows; the source centre must not be subtracted again.
+            shell = build_gaussian_shell(
+                gaussian_split.positions(part.rows),
+                part.rows["opacity"],
+                ShellParams(voxel_m=0.05, smooth_iterations=0),
+            )
+            mesh = trimesh.Trimesh(shell.vertices, shell.faces, process=False)
+            provenance["shell_preview"] = {"voxel_m": 0.05, "checksum": shell.checksum, "statistics": shell.statistics}
+        except GaussianShellError as error:
+            mesh = trimesh.creation.box(extents=part.dimensions)
+            provenance.update(shell_error=str(error), shell_display="bounding_box_placeholder")
+        payload = mesh.export(file_type="glb")
+        geometry = publish(
+            _reference(job_id, "objects/shells/{digest}.glb", "ObjectShellMesh", StageId.SCENE_DECOMPOSE, payload),
+            payload,
+        )
+        objects.append(
+            SceneObject(
+                id=object_id,
+                name=f"Vật thể {number}",
+                state=SceneObjectState.CANDIDATE,
+                origin=SceneObjectOrigin.RECONSTRUCTED,
+                active=False,
+                local_frame=object_id,
+                transform=transform,
+                visual_ref=visual,
+                geometry_ref=geometry,
+                surface_mesh_ref=None,
+                collider=None,
+                primitive_dimensions_xyz_m=part.dimensions,
+                tags=["objectify_v1"],
+                provenance=provenance,
+            )
+        )
+    return ObjectifyResult(
+        environment=SceneEnvironment(
+            visual_ref=bundle.visual_artifact_ref,
+            geometry_ref=bundle.canonical_geometry_ref,
+            membership=membership,
+        ),
+        objects=objects,
+        provenance={"object_geometry": "awaiting_review"},
+    )
 
 
 def objectify(
@@ -576,6 +664,21 @@ def objectify(
             gaussian_count=len(rows),
             labels_ref=membership_labels_ref,
             label_to_object_id=label_to_object_id,
+        )
+
+    if draft:
+        return _publish_draft(
+            job_id,
+            bundle,
+            parts,
+            seeds,
+            lift,
+            publish,
+            publish_membership,
+            config,
+            floor_model,
+            floor_fit,
+            cancel_event,
         )
 
     membership = publish_membership() if objectgs_runtime else None
