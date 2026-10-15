@@ -186,6 +186,7 @@ def _objectgs_surfaces(
     job_id: str,
     membership: ObjectMembershipArtifact,
     selected: list[SceneObject],
+    shells: dict[str, tuple[ProductArtifactRef, ProductArtifactRef, SurfaceInput]],
     observations_ref: ProductArtifactRef,
     workspace: Path,
     publish: Publish,
@@ -237,6 +238,7 @@ def _objectgs_surfaces(
             surface_artifact_callback=lambda object_id, item: publish_surface_artifacts(
                 job_id, object_id, item, publish
             ),
+            raise_on_quality_failure=False,
         )
     except ProcessCancelledError:
         raise
@@ -263,8 +265,26 @@ def _objectgs_surfaces(
     surfaces: dict[str, _Surface] = {}
     for item in selected:
         info = receipt["objects"][item.id]
+        evidence = {
+            "checkpoint": checkpoint_ref.model_dump(mode="json"),
+            "dataset": dataset_ref.model_dump(mode="json"),
+            "surface_evidence": info["evidence_refs"],
+        }
         if info.get("quality_passed") is not True:
-            raise ObjectGeometryBuildError(f"{item.id}: surface ObjectGS chưa đạt QA", object_id=item.id)
+            # Per-object rule (architecture §8.4): this object keeps its Gaussian shell, and the reason is recorded.
+            shell_ref, _, shell_input = shells[item.id]
+            surfaces[item.id] = _Surface(
+                origin="gaussian_shell",
+                surface_ref=shell_ref,
+                collider_input=shell_input,
+                selection={
+                    "chosen": "gaussian_shell",
+                    "reason": "objectgs_quality_failed",
+                    "quality_reasons": list(info.get("quality_reasons", [])),
+                },
+                provenance={"objectgs_evidence": evidence},
+            )
+            continue
         surface_payload = Path(info["path"]).read_bytes()
         if sha256_bytes(surface_payload) != info["checksum"]:
             raise ObjectGeometryBuildError("Surface ObjectGS không khớp checksum", object_id=item.id)
@@ -327,11 +347,7 @@ def _objectgs_surfaces(
             selection={"chosen": "objectgs"},
             provenance={
                 "objectgs_surface_manifest_ref": manifest_ref.model_dump(mode="json"),
-                "objectgs_evidence": {
-                    "checkpoint": checkpoint_ref.model_dump(mode="json"),
-                    "dataset": dataset_ref.model_dump(mode="json"),
-                    "surface_evidence": info["evidence_refs"],
-                },
+                "objectgs_evidence": evidence,
             },
         )
     return surfaces
@@ -659,6 +675,7 @@ def build_object_geometry(
             job_id=job_id,
             membership=membership,
             selected=selected,
+            shells=shells,
             observations_ref=observations_ref,
             workspace=workspace,
             publish=publish,

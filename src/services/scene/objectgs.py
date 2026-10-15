@@ -401,6 +401,8 @@ def run_prepared_objectgs(
     progress: Callable[[str], None] | None = None,
     evidence_dir: Path | None = None,
     surface_artifact_callback: Callable[[str, dict], dict] | None = None,
+    # False keeps objects that fail QA in the receipt so the caller picks their fallback surface per object.
+    raise_on_quality_failure: bool = True,
 ) -> dict[str, object]:
     if Path(request.job_id).name != request.job_id or request.membership.source_visual_ref.job_id != request.job_id:
         raise ValueError("ObjectGS job ID and immutable membership source must agree")
@@ -518,6 +520,7 @@ def run_prepared_objectgs(
             triangle_count=len(mesh.faces),
             watertight=bool(mesh.is_watertight),
             quality_passed=quality["passed"],
+            quality_reasons=quality["reasons"],
             **reports,
         )
         item["producer_provenance"] = {
@@ -541,7 +544,7 @@ def run_prepared_objectgs(
         )
         if not quality["passed"]:
             failures.append(f"{object_id}: {', '.join(quality['reasons'])}")
-    if failures:
+    if failures and raise_on_quality_failure:
         raise RuntimeError("ObjectGS surface quality gate failed: " + "; ".join(failures))
     receipt.update(
         coordinate_frame="object_local",

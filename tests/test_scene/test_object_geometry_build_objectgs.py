@@ -85,7 +85,7 @@ def objectgs(draft_scene, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:  
 
     registry, job_id = draft_scene.registry, draft_scene.job_id
     store = FilesystemArtifactStore(registry.runtime_resolver)
-    calls = SimpleNamespace(convex=[], correction=[], objectgs=[])
+    calls = SimpleNamespace(convex=[], correction=[], objectgs=[], failing=set())
     tmp_path = draft_scene.workspace.parent
     views_dir = tmp_path / "lift-views"
     views_dir.mkdir()
@@ -192,11 +192,22 @@ def objectgs(draft_scene, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:  
     monkeypatch.setattr(objectify, "_run", run)
     monkeypatch.setattr(objectify, "package_splat", package)
 
-    def fake_objectgs(request, *, cancel_event=None, progress=None, evidence_dir=None, surface_artifact_callback=None):
+    def fake_objectgs(
+        request,
+        *,
+        cancel_event=None,
+        progress=None,
+        evidence_dir=None,
+        surface_artifact_callback=None,
+        raise_on_quality_failure=True,
+    ):
         calls.objectgs.append(request)
         if calls.fail is not None:
             raise calls.fail
-        return fake_receipt(request, surface_artifact_callback, tmp_path / "objectgs-output")
+        receipt = fake_receipt(request, surface_artifact_callback, tmp_path / "objectgs-output", calls.failing)
+        if raise_on_quality_failure and any(not item["quality_passed"] for item in receipt["objects"].values()):
+            raise RuntimeError("ObjectGS surface quality gate failed")
+        return receipt
 
     calls.fail = None
     monkeypatch.setattr(module, "run_prepared_objectgs", fake_objectgs)
@@ -213,7 +224,7 @@ def objectgs(draft_scene, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:  
     )
 
 
-def fake_receipt(request, surface_artifact_callback, workspace: Path) -> dict:
+def fake_receipt(request, surface_artifact_callback, workspace: Path, failing: set[str]) -> dict:
     """Shaped like `run_prepared_objectgs`: per-object QA reports and surfaces, all accepted."""
     workspace.mkdir(parents=True, exist_ok=True)
     checkpoint = workspace / "objectgs-checkpoint.tar.gz"
@@ -232,8 +243,8 @@ def fake_receipt(request, surface_artifact_callback, workspace: Path) -> dict:
         surface_path.write_bytes(surface)
         quality = {
             "object_id": object_id,
-            "passed": True,
-            "reasons": [],
+            "passed": object_id not in failing,
+            "reasons": [] if object_id not in failing else ["open_boundary"],
             "source_checksum": _sha(raw),
             "result_checksum": _sha(surface),
             "inferred_faces": 0,
@@ -255,7 +266,8 @@ def fake_receipt(request, surface_artifact_callback, workspace: Path) -> dict:
             "vertex_count": 8,
             "triangle_count": 12,
             "watertight": True,
-            "quality_passed": True,
+            "quality_passed": object_id not in failing,
+            "quality_reasons": [] if object_id not in failing else ["open_boundary"],
             "producer_provenance": {"fixture": True},
             **reports,
         }
@@ -418,3 +430,28 @@ def test_objectgs_build_rejects_partial_object_ids(objectgs: SimpleNamespace) ->
     with pytest.raises(ObjectGeometryBuildError, match="toàn bộ"):
         build_objectgs(objectgs, object_ids={"candidate-001"})
     assert objectgs.calls.objectgs == []
+
+
+def test_failing_objectgs_surface_falls_back_to_its_shell_with_a_recorded_reason(objectgs: SimpleNamespace) -> None:
+    objectgs.calls.failing = {"candidate-002"}
+    build_objectgs(objectgs)
+    scene = objectgs.registry.scene.current(objectgs.job_id).scene
+    accepted = next(item for item in scene.objects if item.id == "candidate-001")
+    fallback = next(item for item in scene.objects if item.id == "candidate-002")
+    assert accepted.provenance["surface_selection"] == {"chosen": "objectgs"}
+    assert accepted.surface_mesh_ref.artifact_type == "ObjectSurfaceMesh"
+    assert accepted.collider.provenance["surface_origin"] == "objectgs_v1"
+    assert "objectgs_surface_manifest_ref" in accepted.provenance
+    assert fallback.provenance["surface_selection"] == {
+        "chosen": "gaussian_shell",
+        "reason": "objectgs_quality_failed",
+        "quality_reasons": ["open_boundary"],
+    }
+    assert fallback.surface_mesh_ref.artifact_type == "ObjectShellMesh"
+    assert fallback.collider.provenance["surface_origin"] == "gaussian_shell_v1"
+    assert "objectgs_surface_manifest_ref" not in fallback.provenance
+    evidence = fallback.provenance["objectgs_evidence"]["surface_evidence"]
+    assert {"raw", "quality_report", "repair_report", "surface"} <= set(evidence)
+    paths = [item["surface_mesh"] for request in objectgs.calls.convex for item in request["objects"]]
+    assert any(path.endswith("label-1.glb") for path in paths)
+    assert any(path.endswith("candidate-002-shell.glb") for path in paths)
