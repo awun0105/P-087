@@ -125,6 +125,16 @@ def test_objectgs_surface_reaches_real_coacd_and_publishes_separate_background(t
             checkpoint.write_bytes(b"explicit fixture, not a real ObjectGS checkpoint")
             object_id = next(iter(request["source_poses"]))
             return dict(
+                upstream_commit=module.OBJECTGS_COMMIT,
+                gsplat_commit="b" * 40,
+                config_checksum="sha256:" + "c" * 64,
+                export_config={
+                    "voxel_size_m": 0.01,
+                    "depth_trunc_m": 10.0,
+                    "num_cluster": 1,
+                    "mesh_variant": "raw_fuse",
+                },
+                runtime={"fixture": True},
                 coordinate_frame="object_local",
                 distance_unit="m",
                 source_membership=request["membership"],
@@ -194,3 +204,7 @@ def test_objectgs_surface_reaches_real_coacd_and_publishes_separate_background(t
     assert result.objects[0].collider.geometry_ref.artifact_type == "ObjectCollider"
     assert result.objects[0].collider.parameters["parts"] >= 1
     assert result.provenance["geometry_method"] == "objectgs"
+    provenance = result.objects[0].surface_mesh_ref.source_provenance
+    assert provenance["runtime"] == {"fixture": True}
+    assert provenance["training_config_checksum"] == "sha256:" + "c" * 64
+    assert provenance["source_world_from_object"]["local_frame"] == result.objects[0].id

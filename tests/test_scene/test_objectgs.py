@@ -147,6 +147,12 @@ def test_runner_contract_calls_train_then_each_numeric_label_never_minus_one(tmp
         assert all(call[1]["environment"]["TORCH_EXTENSIONS_DIR"] == str(tmp_path / "compiler-cache") for call in calls)
     assert set(receipt["objects"]) == {"chair", "table"}
     assert receipt["coordinate_frame"] == "world"
+    assert receipt["export_config"] == {
+        "voxel_size_m": 0.01,
+        "depth_trunc_m": 10.0,
+        "num_cluster": 1,
+        "mesh_variant": "raw_fuse",
+    }
     config = yaml.safe_load((tmp_path / "work/config.yaml").read_text())
     assert config["model_params"]["source_path"] == str(dataset.parent)
     assert config["optim_params"]["iterations"] == 2

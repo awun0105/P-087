@@ -324,10 +324,18 @@ with open(sys.argv[1], 'w') as f:
         "objects": surfaces,
         "upstream_commit": OBJECTGS_COMMIT,
         "gsplat_commit": GSPLAT_COMMIT,
+        "glm_commit": GLM_COMMIT if runtime.glm_repository else None,
         "coordinate_frame": "world",
         "distance_unit": "m",
         "source_dataset": str(dataset),
         "runtime": json.loads(metadata_path.read_text()),
+        "gpu_device": runtime.gpu_device,
+        "export_config": {
+            "voxel_size_m": runtime.voxel_size_m,
+            "depth_trunc_m": runtime.depth_trunc_m,
+            "num_cluster": 1,
+            "mesh_variant": "raw_fuse",
+        },
         "config_checksum": "sha256:" + hashlib.sha256(config_path.read_bytes()).hexdigest(),
     }
     (workspace / "result.json").write_text(json.dumps(receipt, sort_keys=True))

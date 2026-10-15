@@ -251,3 +251,14 @@ process_control now also kills groups within the private Linux session, with a s
 created during the first sweep. No unrelated sessions are targeted. Both cases PASS after the fix; focused
 process/adapter/producer tests: 22 PASS / 3.17s. This shared helper is also used by SAM3D, Objectify and Isaac
 process control; callers were inspected with CodeGraph and their related regressions are rerun below.
+
+## Checkpoint: persisted training/export provenance
+
+ObjectGS receipts now record explicit export voxel/depth/cluster/raw-mesh settings and the optional GLM pin,
+in addition to upstream/custom-gsplat commits, training YAML checksum and runtime versions. The producer stores
+those values plus immutable source world-from-object pose in ObjectSurfaceManifest.provenance and the
+surface ref's source_provenance, so the sealed SceneIR/candidate inventory retain them after scratch cleanup.
+This metadata does not replace byte checksums. Focused adapter/contracts/producer tests: 18 PASS; fake-GPU
+producer metadata stays explicitly marked fixture. Contract mirror: 5 enums / 6 models PASS. Actual
+`npm run typecheck` (next typegen + tsc --noEmit) PASS. Latest broad suite after cache/process-session fixes:
+724 PASS / 67.11s; provenance-only changes have the focused evidence above.

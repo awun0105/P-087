@@ -554,6 +554,15 @@ def objectify(
             dataset_payload,
         )
         for object_id, info in objectgs_receipt["objects"].items():
+            surface_provenance = {
+                "upstream_commit": objectgs_receipt["upstream_commit"],
+                "gsplat_commit": objectgs_receipt["gsplat_commit"],
+                "glm_commit": objectgs_receipt.get("glm_commit"),
+                "training_config_checksum": objectgs_receipt["config_checksum"],
+                "export_config": objectgs_receipt["export_config"],
+                "runtime": objectgs_receipt["runtime"],
+                "source_world_from_object": source_poses[object_id],
+            }
             surface_payload = Path(info["path"]).read_bytes()
             if f"sha256:{hashlib.sha256(surface_payload).hexdigest()}" != info["checksum"]:
                 raise ObjectifyError("ObjectGS surface checksum mismatch", retryable=False)
@@ -564,7 +573,7 @@ def objectify(
                     "ObjectSurfaceMesh",
                     StageId.SCENE_DECOMPOSE,
                     surface_payload,
-                ),
+                ).model_copy(update={"source_provenance": surface_provenance}),
                 surface_payload,
             )
             manifest = ObjectSurfaceManifest(
@@ -584,6 +593,7 @@ def objectify(
                 vertex_count=info["vertex_count"],
                 triangle_count=info["triangle_count"],
                 quality={"watertight": info["watertight"]},
+                provenance=surface_provenance,
             )
             manifest_payload = manifest.model_dump_json().encode()
             surface_manifests[object_id] = publish(

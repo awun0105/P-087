@@ -27,6 +27,7 @@ class ObjectSurfaceManifest(ContractModel):
     vertex_count: int = Field(ge=3, strict=True)
     triangle_count: int = Field(gt=0, strict=True)
     quality: JsonObject
+    provenance: JsonObject = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_binding(self) -> Self:
