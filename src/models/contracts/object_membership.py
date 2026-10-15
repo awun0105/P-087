@@ -3,7 +3,7 @@
 from math import isfinite
 from typing import Literal, Self
 
-from pydantic import Field, FiniteFloat, model_validator
+from pydantic import Field, FiniteFloat, StrictInt, model_validator
 
 from src.models.contracts.artifacts import Checksum, ContractModel, Identifier, ProductArtifactRef
 from src.models.contracts.coordinates import CoordinateSystem
@@ -93,12 +93,23 @@ class SourceGaussianROI(ContractModel):
 class ObjectMembershipReassignCommand(MembershipCommandBase):
     """Move selected source Gaussian rows between an object and the background."""
 
-    region: SourceGaussianROI
+    region: SourceGaussianROI | None = None
+    source_gaussian_indices: list[StrictInt] | None = Field(default=None, min_length=1, max_length=250_000)
+    source_visual_checksum: Checksum | None = None
     source_object_id: Identifier | None
     target_object_id: Identifier | None
 
     @model_validator(mode="after")
     def _require_distinct_owners(self) -> Self:
+        if (self.region is None) == (self.source_gaussian_indices is None):
+            raise ValueError("provide exactly one source ROI or source Gaussian index selection")
+        if self.source_gaussian_indices is not None:
+            if self.source_visual_checksum is None:
+                raise ValueError("source Gaussian selection requires source_visual_checksum")
+            if self.source_gaussian_indices != sorted(set(self.source_gaussian_indices)) or any(
+                index < 0 for index in self.source_gaussian_indices
+            ):
+                raise ValueError("source Gaussian indices must be sorted, unique and non-negative")
         if self.source_object_id is None and self.target_object_id is None:
             raise ValueError("a Gaussian region cannot move from background back to background")
         if self.source_object_id == self.target_object_id:

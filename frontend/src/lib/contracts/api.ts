@@ -145,7 +145,9 @@ export interface SourceGaussianROI {
 export interface ObjectMembershipReassignCommand {
   expected_scene_revision: string;
   membership_checksum: string;
-  region: SourceGaussianROI;
+  region?: SourceGaussianROI | null;
+  source_gaussian_indices?: number[] | null;
+  source_visual_checksum?: string | null;
   /** `null` means background. */
   source_object_id: string | null;
   /** `null` means background. */
