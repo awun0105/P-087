@@ -3,7 +3,7 @@ T-002 | Dựng vỏ Gaussian kín | accepted | -
 T-003 | Contract vỏ + trạng thái hình học | accepted | -
 T-004 | Box → membership (region command + preview diff) | accepted | -
 T-005 | Tách vật dừng ở Draft SceneIR | accepted | -
-T-006 | Tách helper dùng chung khỏi objectify() | planned | engineer
+T-006 | Tách helper dùng chung khỏi objectify() | in-progress | engineer
 T-007 | Build hình học từ vỏ (Draft → ready) | planned | engineer
 T-008 | Nâng cấp ObjectGS theo từng vật | planned | engineer
 T-009 | Hàng đợi mode geometry + API build | planned | engineer
