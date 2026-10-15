@@ -90,3 +90,50 @@ Benchmark T-001 cùng hàm vòng lặp: 64 000 ô 0,31 s; 512 000 ô 1,83 s.
 - Chưa kiểm trên scene thật. Toàn bộ số liệu là hình tổng hợp.
 - Chưa chạy `tests/test_simulation/test_surface_convex_runner.py` và `test_objectgs_objectify_flow.py`, vì không thuộc lệnh của plan. Không đổi code dùng chung nên ảnh hưởng chỉ có thể đến từ `occupancy_surface`, đã được digest chốt bảo vệ.
 - `graphify update .` đã chạy (24 578 node).
+
+## Round 2
+
+Đọc `review.md` (CHANGES REQUESTED). Trạng thái: **changes-requested, cần Architect**. Ba trên bốn nhóm yêu cầu đạt. Yêu cầu 1 (luật nắp vành) chưa đạt. Luật đã duyệt được triển khai đúng, nhưng không khép được mặt hở. Chi tiết và câu hỏi Q4 ở cuối mục này.
+
+### Required changes
+1. **Luật nắp vành (Q1): chưa đạt.**
+   - Triển khai đúng luật đã duyệt: `_cap_open_faces` (lỗ của hình chiếu band, bật tại lớp cực trị, tuần tự theo hướng), `ShellParams.cap_open_faces`, `statistics.capped_cells` và `capped_directions`.
+   - Đạt: `test_open_bottom_face_is_detected_as_open` (`-z` có trong `capped_directions`), `test_box_missing_back_face_is_detected_as_capped` (`+y`), `test_table_underside_stays_open` (gầm bàn vẫn mở, không vá `-z`), `test_chair_leg_gaps_stay_open`, `test_cap_can_be_disabled`.
+   - Không đạt, xfail strict: `test_open_bottom_scan_is_closed_watertight` và `test_box_missing_back_face_is_capped` yêu cầu thể tích ≥ 80% hộp. Đo được 58% và 55%.
+2. **Ngân sách và voxel thích ứng (Q2): đạt.** `assess_surface(..., intersection_budget=250_000)` giữ mặc định cũ (`test_intersection_budget_is_an_explicit_keyword_with_unchanged_default`). `build_gaussian_shell` dùng `SHELL_INTERSECTION_BUDGET = 2_000_000` và `ShellParams.max_cells_per_axis = 96`. `statistics.voxel_m_effective` có mặt, checksum gồm `voxel_m_effective`. `test_large_object_uses_adaptive_voxel_and_passes_qa` PASS.
+3. **`statistics.component_genus`: đạt.** Lấy từ metrics QA. Test hộp đầy kiểm `[0.0]`.
+4. **Docstring module: đạt.** Nêu luật nắp, giới hạn (lỗ xuyên trục bị lấp, lỗ kim tính là mặt bị vá), ngân sách và voxel thích ứng.
+5. **Lệnh kiểm tra:** 4 file theo review → **57 passed, 2 xfailed** (26,9 s). `ruff check` và `ruff format --check` sạch trên `gaussian_shell.py`, `surface_mesh.py`, `test_gaussian_shell.py`, `test_surface_mesh.py`.
+6. **Commit theo nhóm:** (a) `ce627ea9` ngân sách `assess_surface`; (b) `356271f9` voxel thích ứng và test 2 m; (c) `e0c0c54d` luật nắp và test; (d) `0cc9f827` genus và docstring.
+
+### Thời gian dựng vỏ 2,0 × 0,9 × 0,8 m (ngưỡng ≤ 15 s)
+
+| Trường hợp | Điểm | Toàn bộ | Số mặt | Kết quả |
+|---|---|---|---|---|
+| đặc | 200 000 | 3,52 s | 68 752 | QA pass, watertight |
+| đặc | 300 000 | 3,95 s | 65 212 | QA pass, watertight |
+| hở đáy, quét mặt | 300 000 | 4,93 s | 77 060 | QA pass, watertight, `capped = ['-z']`, thể tích 0,31 hộp |
+
+Voxel thích ứng 0,0208 m. Đạt ngưỡng nên không giảm `max_cells_per_axis`.
+
+### Sửa dữ liệu thử (không đổi thuật toán)
+Bộ sinh điểm "hở đáy" trước đó lấy mẫu thể tích rồi chiếu lên mặt gần nhất. Mật độ điểm trên mặt khi đó tỉ lệ với khoảng cách tới các mặt khác, nên về gần 0 ở mép. Tường đáy vì vậy bị thủng do cách lấy mẫu, không do vỏ. Đã đổi sang lấy mẫu đều theo diện tích trên 5 mặt, giống quét bề mặt thật. Các test khác không đổi dữ liệu.
+
+### Q4: luật nắp không khép mặt hở (cần Architect)
+Chứng cứ:
+- Hở đáy, seed 100–105: thể tích/hộp = 0,581–0,583. Hộp thiếu mặt +y, seed 100–105: 0,547–0,550. Mặt được phát hiện đúng hướng nhưng không được khép.
+- Nguyên nhân (đo trên seed 12): tường có lỗ thủng ở các lớp đáy, và lòng hộp thông ra ngoài qua đó. Luật lỗ-của-hình-chiếu không thấy các lỗ này, vì hình chiếu của band là hợp của các lớp và lớp trên đã phủ chúng. Đường đi BFS từ lòng hộp ra ngoài đi qua mép tường đáy ở lớp cực trị (x = 5, z = 3..5).
+- Đã thử trong script tạm (không commit): dùng bao thay vì lỗ → 1,36 (tràn). Đóng kín hình chiếu theo `close_iterations` → không đổi. Closing sau khi vá → 1,33 (tràn). Mọc lỗ một bước vào bao → 0,605 (chưa đủ).
+- Lỗi phụ: luật coi lỗ kim (pinhole) là mặt bị vá. Hình cầu kín 60 000 điểm báo 5 hướng với 12 ô. Thể tích không đổi, 1,129 với và không vá.
+
+Các lựa chọn:
+- **(a)** Chấp nhận giới hạn. Mặt chưa quan sát không được khép tự động. `capped_directions` là tín hiệu để người dùng vẽ box đóng (T-004). Hai test đóng kín chuyển thành test phát hiện.
+- **(b)** Đổi luật: đóng kín từng lớp của band bằng cùng bán kính closing, rồi vá lớp đáy thấp nhất có footprint kín. Cần spec và test mới.
+- **(c)** Ngưỡng tối thiểu số ô để một hướng được tính là mặt vá, nhằm lọc lỗ kim. Đổi ngữ nghĩa `capped_directions`.
+
+Đề xuất của Engineer: (a) và (c) cho đường production. (b) chỉ khi cần khép mặt tự động. Chưa đổi gì theo các lựa chọn này.
+
+### Ghi chú
+- Trạng thái T-002: `changes-requested | architect`. Nếu chọn (a), yêu cầu 1 đổi thành test phát hiện. Nếu chọn (b) hoặc (c), tôi làm trong vòng tiếp theo.
+- Test file chạy 14 s, dưới giới hạn 20 s.
+- Lệnh `graphify update .` đã chạy sau thay đổi code.
