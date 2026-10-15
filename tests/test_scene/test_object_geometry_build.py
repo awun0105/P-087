@@ -266,3 +266,242 @@ def test_environment_build_removes_object_cells(draft_scene: SimpleNamespace, cp
         point = positions(fixture.rows[fixture.labels == (0 if item.id.endswith("001") else 2)]).mean(axis=0)
         assert ray(mesh, point, [0, 0, -1]) > 0.1
     assert fixture.registry.scene.current(fixture.job_id).scene == fixture.scene
+
+
+def build(fixture: SimpleNamespace, **kwargs: object) -> str:
+    from src.services.orchestration.scene.object_geometry_build import build_object_geometry
+
+    return build_object_geometry(
+        fixture.registry,
+        fixture.settings,
+        fixture.job_id,
+        expected_revision=fixture.scene.scene_revision,
+        workspace=fixture.workspace,
+        **kwargs,
+    )
+
+
+def test_draft_build_publishes_ready_and_preserves_user_state(
+    draft_scene: SimpleNamespace, cpu_providers: None
+) -> None:
+    from src.models.contracts.object_geometry import ObjectShellManifest
+    from src.models.contracts.scene import ColliderType
+
+    phases = []
+    revision = build(draft_scene, progress=phases.append)
+    scene = draft_scene.registry.scene.current(draft_scene.job_id).scene
+    assert scene.scene_revision == revision != draft_scene.scene.scene_revision
+    assert scene.provenance["object_geometry"] == "ready"
+    assert scene.provenance["geometry_build"]["built_object_ids"] == ["candidate-001", "candidate-002"]
+    assert phases == ["shell", "quality", "collider", "environment", "publish"]
+    assert scene.environment.object_aware_collision_ref is not None
+    for before, item in zip(draft_scene.scene.objects, scene.objects, strict=True):
+        assert item.collider.collider_type == ColliderType.CONVEX_DECOMPOSITION
+        assert item.surface_mesh_ref.artifact_type == "ObjectShellMesh"
+        assert item.transform == before.transform
+        assert item.state == before.state and item.active == before.active
+        assert item.name == before.name and item.physics == before.physics
+        assert item.source_collision == before.source_collision
+        assert item.provenance["surface_selection"] == {"chosen": "gaussian_shell"}
+        ref = item.provenance["shell_manifest_ref"]
+        from src.models.contracts.artifacts import ProductArtifactRef
+
+        manifest = ObjectShellManifest.model_validate_json(
+            draft_scene.registry.runtime_resolver.require(ProductArtifactRef.model_validate(ref)).read_bytes()
+        )
+        assert manifest.quality["passed"] is True
+        assert manifest.provenance["surface_origin"] == "gaussian_shell_v1"
+
+
+@pytest.mark.parametrize("phase", ["quality", "collider", "environment", "publish"])
+def test_cancelled_build_never_publishes(draft_scene: SimpleNamespace, cpu_providers: None, phase: str) -> None:
+    from threading import Event
+
+    from src.services.process_control import ProcessCancelledError
+
+    cancel = Event()
+
+    def progress(current: str) -> None:
+        if current == phase:
+            cancel.set()
+
+    with pytest.raises(ProcessCancelledError):
+        build(draft_scene, cancel_event=cancel, progress=progress)
+    assert draft_scene.registry.scene.current(draft_scene.job_id).scene == draft_scene.scene
+
+
+@pytest.mark.parametrize("reason", ["placeholder", "qa", "missing_frame"])
+def test_shell_failure_keeps_draft_without_obb(
+    draft_scene: SimpleNamespace, cpu_providers: None, monkeypatch: pytest.MonkeyPatch, reason: str
+) -> None:
+    from src.services.orchestration.scene import object_geometry_build as module
+
+    if reason == "qa":
+
+        def broken(*args: object, **kwargs: object) -> None:
+            raise module.GaussianShellError("fixture QA failed")
+
+        monkeypatch.setattr(module, "build_gaussian_shell", broken)
+    else:
+        item = draft_scene.scene.objects[0]
+        provenance = dict(item.provenance)
+        if reason == "placeholder":
+            provenance["shell_error"] = "fixture placeholder"
+        else:
+            provenance.pop("source_transform")
+        updated = item.model_copy(update={"provenance": provenance})
+        draft_scene.scene = draft_scene.registry.scene.publish_next(
+            draft_scene.job_id,
+            draft_scene.scene.scene_revision,
+            draft_scene.scene.model_copy(update={"objects": [updated, draft_scene.scene.objects[1]]}),
+            "fixture-error",
+        ).revision.scene
+    with pytest.raises(module.ObjectGeometryBuildError) as error:
+        build(draft_scene)
+    assert error.value.object_id == "candidate-001"
+    assert draft_scene.registry.scene.current(draft_scene.job_id).scene == draft_scene.scene
+    assert all(item.collider is None for item in draft_scene.scene.objects)
+
+
+@pytest.mark.parametrize("review", ["IGNORED", "DELETED", "MERGED"])
+def test_review_tombstones_are_not_built(draft_scene: SimpleNamespace, cpu_providers: None, review: str) -> None:
+    item = draft_scene.scene.objects[0]
+    ignored = item.model_copy(update={"provenance": {**item.provenance, "review": review}})
+    draft_scene.scene = draft_scene.registry.scene.publish_next(
+        draft_scene.job_id,
+        draft_scene.scene.scene_revision,
+        draft_scene.scene.model_copy(update={"objects": [ignored, draft_scene.scene.objects[1]]}),
+        "fixture-review",
+    ).revision.scene
+    build(draft_scene)
+    scene = draft_scene.registry.scene.current(draft_scene.job_id).scene
+    assert scene.objects[0] == ignored
+    assert scene.objects[1].collider is not None
+    assert scene.provenance["geometry_build"]["built_object_ids"] == ["candidate-002"]
+
+
+def test_source_frame_wins_over_moved_pose(draft_scene: SimpleNamespace, cpu_providers: None) -> None:
+    import numpy as np
+    import trimesh
+
+    original = draft_scene.scene
+    build(draft_scene)
+    ready = draft_scene.registry.scene.current(draft_scene.job_id).scene
+    bounds = trimesh.load(
+        draft_scene.registry.runtime_resolver.require(ready.objects[0].geometry_ref), force="mesh"
+    ).bounds
+    moved = original.objects[0].model_copy(
+        update={
+            "transform": original.objects[0].transform.model_copy(
+                update={"translation_xyz": (20, 30, 40), "rotation_quaternion_xyzw": (0, 0, 0.6, 0.8)}
+            )
+        }
+    )
+    draft_scene.scene = draft_scene.registry.scene.publish_next(
+        draft_scene.job_id,
+        ready.scene_revision,
+        original.model_copy(update={"objects": [moved, original.objects[1]]}),
+        "fixture-moved-draft",
+    ).revision.scene
+    build(draft_scene)
+    rebuilt = draft_scene.registry.scene.current(draft_scene.job_id).scene
+    np.testing.assert_allclose(
+        trimesh.load(
+            draft_scene.registry.runtime_resolver.require(rebuilt.objects[0].geometry_ref), force="mesh"
+        ).bounds,
+        bounds,
+    )
+    assert rebuilt.objects[0].transform == moved.transform
+
+
+@pytest.mark.parametrize("outcome", ["concurrent_edit", "fenced", "environment_failure"])
+def test_failed_publication_or_environment_keeps_committed_head(
+    draft_scene: SimpleNamespace, cpu_providers: None, monkeypatch: pytest.MonkeyPatch, outcome: str
+) -> None:
+    from src.services.orchestration.scene import object_geometry_build as module
+    from src.services.orchestration.scene.errors import SceneRevisionConflictError
+
+    expected = draft_scene.scene
+
+    def progress(phase: str) -> None:
+        nonlocal expected
+        if phase == "environment" and outcome == "concurrent_edit":
+            changed = expected.model_copy(update={"provenance": {**expected.provenance, "concurrent_edit": True}})
+            expected = draft_scene.registry.scene.publish_next(
+                draft_scene.job_id, expected.scene_revision, changed, "concurrent-edit"
+            ).revision.scene
+
+    def broken(*args: object, **kwargs: object) -> None:
+        raise module.ObjectifyError("fixture environment failure")
+
+    if outcome == "environment_failure":
+        monkeypatch.setattr(module, "_build_environment", broken)
+    error_type = module.ObjectGeometryBuildError if outcome == "environment_failure" else SceneRevisionConflictError
+    with pytest.raises(error_type):
+        build(draft_scene, progress=progress, commit_guard=(lambda tx: False) if outcome == "fenced" else None)
+    assert draft_scene.registry.scene.current(draft_scene.job_id).scene == expected
+
+
+@pytest.mark.parametrize("target", ["source", "labels"])
+def test_corrupt_source_artifact_fails_before_shell(
+    draft_scene: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, target: str
+) -> None:
+    from src.services.orchestration.scene import object_geometry_build as module
+
+    resolver = draft_scene.registry.runtime_resolver
+    membership = draft_scene.scene.environment.membership
+    reference = membership.source_visual_ref if target == "source" else membership.labels_ref
+    broken = draft_scene.workspace.parent / "corrupt"
+    broken.write_bytes(b"corrupt")
+    original = resolver.require
+    monkeypatch.setattr(resolver, "require", lambda ref: broken if ref == reference else original(ref))
+    with pytest.raises(module.ObjectGeometryBuildError, match="checksum"):
+        build(draft_scene)
+    assert draft_scene.registry.scene.current(draft_scene.job_id).scene == draft_scene.scene
+
+
+def test_rotated_source_frame_is_used_for_shell(draft_scene: SimpleNamespace) -> None:
+    import io
+
+    import numpy as np
+    import trimesh
+
+    from src.services.orchestration.scene import object_geometry_build as module
+
+    item = draft_scene.scene.objects[0]
+    pose = item.transform.model_copy(update={"rotation_quaternion_xyzw": (0, 0, 2**-0.5, 2**-0.5)})
+    item = item.model_copy(update={"provenance": {"source_transform": pose.model_dump(mode="json")}})
+    payloads = {}
+
+    def publish(ref: module.ProductArtifactRef, payload: bytes) -> module.ProductArtifactRef:
+        payloads[ref.artifact_uri] = payload
+        return ref
+
+    mesh_ref, _, _ = module._build_shell(
+        item,
+        draft_scene.rows[draft_scene.labels == 0],
+        draft_scene.scene.environment.membership,
+        draft_scene.workspace,
+        publish,
+    )
+    mesh = trimesh.load(io.BytesIO(payloads[mesh_ref.artifact_uri]), file_type="glb", force="mesh")
+    np.testing.assert_allclose(mesh.bounds.mean(axis=0), 0, atol=0.03)
+    # Closing/dilation expands the two sides by up to about 0.08 m on this grid.
+    np.testing.assert_allclose(mesh.extents, [0.32, 0.24, 0.4], atol=0.1)
+    assert mesh.extents[0] > mesh.extents[1]
+
+
+def test_full_build_rejects_zero_part_collider_before_environment(
+    draft_scene: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from src.services.orchestration.scene import object_geometry_build as module
+    from src.services.orchestration.scene import objectify
+
+    def run(python: Path, script: Path, request: dict, *args: object, **kwargs: object) -> dict:
+        assert script == objectify.CONVEX_RUNNER
+        return {"objects": [{"id": item["id"], "parts": 0} for item in request["objects"]]}
+
+    monkeypatch.setattr(objectify, "_run", run)
+    with pytest.raises(module.ObjectGeometryBuildError, match="Gaussian shell collider generation failed"):
+        build(draft_scene)
+    assert draft_scene.registry.scene.current(draft_scene.job_id).scene == draft_scene.scene

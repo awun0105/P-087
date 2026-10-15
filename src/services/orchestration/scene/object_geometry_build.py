@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from dataclasses import asdict
+from datetime import UTC, datetime
 from pathlib import Path
 from threading import Event
 
@@ -16,8 +17,10 @@ from src.models.contracts.manifests import StageId
 from src.models.contracts.object_geometry import ObjectShellManifest
 from src.models.contracts.object_membership import ObjectMembershipArtifact
 from src.models.contracts.scene import ColliderSpec, ColliderType, SceneEnvironment, SceneIR, SceneObject
+from src.services.orchestration.artifacts import FilesystemArtifactStore
 from src.services.orchestration.jobs.database import RuntimeTransaction
 from src.services.orchestration.jobs.stage_views import job_bundle
+from src.services.orchestration.processing.config import load_job_config
 from src.services.orchestration.projects.registry import ProjectRegistry
 from src.services.orchestration.scene.floor_evidence import publish_floor_fit_evidence, scene_floor_fit_summary
 from src.services.orchestration.scene.object_geometry_steps import (
@@ -34,8 +37,9 @@ from src.services.orchestration.scene.objectify import (
     _reference,
 )
 from src.services.reconstruction import camera_views
-from src.services.scene.decomposition.gaussian_split import positions, write_gaussian_ply
-from src.services.scene.editing.membership import StaleObjectMembershipRevisionError
+from src.services.scene.collision_ownership import bind_source_collision_ownership
+from src.services.scene.decomposition.gaussian_split import positions, read_gaussian_ply, write_gaussian_ply
+from src.services.scene.editing.membership import StaleObjectMembershipRevisionError, decode_gaussian_membership_labels
 from src.services.scene.floor_model import fit_canonical_floor_model, point_cloud_checksum
 from src.services.scene.gaussian_shell import GaussianShellError, ShellParams, build_gaussian_shell
 from src.services.scene.geometry_state import object_geometry_state
@@ -275,4 +279,132 @@ def build_object_geometry(
         raise ObjectGeometryBuildError("Scene không có source membership để dựng hình học.")
     if object_ids is None and object_geometry_state(scene) != "awaiting_review":
         raise ObjectGeometryBuildError("Scene phải đang duyệt tách vật trước khi tạo mesh.")
-    raise ObjectGeometryBuildError("Geometry build stages are not implemented yet")
+    membership = scene.environment.membership
+    if membership.labels_ref.job_id != job_id or membership.source_geometry_ref != scene.environment.geometry_ref:
+        raise ObjectGeometryBuildError("Geometry build source membership does not match the scene")
+    if scene.environment.collision_selection_ref is not None:
+        raise ObjectGeometryBuildError("Dựng hình học trên scene nguồn trước khi chọn collision source khác.")
+    resolve = registry.runtime_resolver.require
+    payload = resolve(membership.source_visual_ref).read_bytes()
+    from src.services.orchestration.artifacts import sha256_bytes
+
+    if sha256_bytes(payload) != membership.source_visual_ref.artifact_checksum:
+        raise ObjectGeometryBuildError("source PLY checksum mismatch")
+    try:
+        rows = read_gaussian_ply(payload)
+        labels = decode_gaussian_membership_labels(resolve(membership.labels_ref).read_bytes(), membership)
+        if len(rows) != membership.gaussian_count:
+            raise ValueError("source PLY row count does not match membership")
+    except ValueError as error:
+        raise ObjectGeometryBuildError(str(error)) from error
+    job = registry.get_job(job_id)
+    processing = load_job_config(job_id, job.config_checksum, registry.runtime_resolver)
+    groups: dict[str, dict] = {"scene": {}, "coacd": {}, "inpaint": {}}
+    for key, value in (processing.scene if processing is not None else {}).items():
+        group, name = key.split("_", 1) if key.startswith(("coacd_", "inpaint_")) else ("scene", key)
+        groups[group][name] = value
+    config = ObjectifyConfig.model_validate(groups)
+    if object_ids is not None and not object_ids <= {item.id for item in scene.objects}:
+        raise ObjectGeometryBuildError("Geometry build requested unknown objects")
+    selected = [
+        item
+        for item in scene.objects
+        if item.id in membership.label_to_object_id.values()
+        and item.provenance.get("review") not in {"DELETED", "IGNORED", "MERGED"}
+        and (object_ids is None or item.id in object_ids)
+    ]
+    store = FilesystemArtifactStore(registry.runtime_resolver)
+
+    def publish(reference: ProductArtifactRef, data: bytes) -> ProductArtifactRef:
+        _ensure_not_cancelled(cancel_event)
+        if registry.runtime_resolver.locate(reference.artifact_uri) is not None:
+            if resolve(reference).read_bytes() != data:
+                raise ObjectGeometryBuildError("immutable geometry artifact bytes differ")
+            registry.runtime_resolver.published(reference.artifact_uri)
+            return reference
+        return store.publish(reference, data)
+
+    def phase(name: str) -> None:
+        _ensure_not_cancelled(cancel_event)
+        if progress is not None:
+            progress(name)
+        _ensure_not_cancelled(cancel_event)
+
+    phase("shell")
+    shells = {}
+    for item in selected:
+        _ensure_not_cancelled(cancel_event)
+        keys = [int(key) for key, owner in membership.label_to_object_id.items() if owner == item.id]
+        shells[item.id] = _build_shell(item, rows[np.isin(labels, keys)], membership, workspace, publish)
+    phase("quality")
+    phase("collider")
+    colliders = (
+        _build_colliders(
+            [shells[item.id][2] for item in selected],
+            settings,
+            config.coacd.model_dump(exclude_unset=True),
+            workspace,
+            publish,
+            job_id,
+            cancel_event,
+        )
+        if selected
+        else {}
+    )
+    phase("environment")
+    try:
+        environment = _build_environment(
+            registry, settings, job_id, scene, rows, labels, config, workspace, publish, cancel_event
+        )
+    except ObjectifyError as error:
+        raise ObjectGeometryBuildError(str(error), retryable=error.retryable) from error
+    objects = []
+    for item in scene.objects:
+        if item.id not in colliders:
+            objects.append(item)
+            continue
+        geometry, collider = colliders[item.id]
+        shell_ref, manifest_ref, _ = shells[item.id]
+        updated = item.model_copy(
+            update={
+                "geometry_ref": geometry,
+                "surface_mesh_ref": shell_ref,
+                "collider": collider,
+                "provenance": {
+                    **item.provenance,
+                    "shell_manifest_ref": manifest_ref.model_dump(mode="json"),
+                    "surface_selection": {"chosen": "gaussian_shell"},
+                },
+            },
+            deep=True,
+        )
+        if updated.source_collision is None:
+            source_pose = Transform.model_validate(item.provenance["source_transform"])
+            source_item = updated.model_copy(update={"transform": source_pose})
+            (bound,) = bind_source_collision_ownership(
+                [source_item], membership.source_geometry_ref, membership.extraction_revision
+            )
+            updated = updated.model_copy(update={"source_collision": bound.source_collision})
+        objects.append(updated)
+    updated_scene = scene.model_copy(
+        update={
+            "objects": objects,
+            "environment": environment,
+            "provenance": {
+                **scene.provenance,
+                "object_geometry": "ready",
+                "geometry_build": {
+                    "input_scene_revision": expected_revision,
+                    "built_object_ids": sorted(colliders),
+                    "at": datetime.now(UTC).isoformat(),
+                },
+            },
+        },
+        deep=True,
+    )
+    updated_scene = SceneIR.model_validate(updated_scene.model_dump())
+    phase("publish")
+    published = registry.scene.publish_next(
+        job_id, expected_revision, updated_scene, "object_geometry_build", commit_guard=commit_guard
+    )
+    return published.revision.scene.scene_revision
