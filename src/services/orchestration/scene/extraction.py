@@ -189,27 +189,28 @@ def extract_scene(
     objects: list[SceneObject] = []
     environment, extra = None, {}
     strict_geometry_required = job_requires_strict_geometry(registry, job)
-    processing = load_job_config(job.job_id, job.config_checksum, registry.runtime_resolver)
-    auto_geometry = bool(
-        processing is not None
-        and processing.scene.get("geometry_review") == "auto"
-        and processing.scene.get("geometry_method") in {"shell", "objectgs"}
-    )
-    arguments = {}
-    if auto_geometry:
-        # Auto still extracts a Draft first; the sealed choice and all other controls remain intact.
-        groups: dict[str, dict] = {"scene": {}, "coacd": {}, "inpaint": {}}
-        for key, value in processing.scene.items():
-            group, name = key.split("_", 1) if key.startswith(("coacd_", "inpaint_")) else ("scene", key)
-            groups[group][name] = value
-        groups["scene"]["geometry_review"] = "required"
-        arguments["scene_config"] = ObjectifyConfig.model_validate(groups).model_dump(exclude_unset=True)
+    auto_geometry = False
     if strict_geometry_required and not (settings.product_objectify and runtime is not None and runtime.available()):
         raise ObjectifyError(
             "Job hình học nghiêm ngặt (shell/ObjectGS) cần runtime SAM2/objectify; không được lùi về legacy",
             retryable=False,
         )
     if settings.product_objectify and runtime is not None and runtime.available():
+        processing = load_job_config(job.job_id, job.config_checksum, registry.runtime_resolver)
+        auto_geometry = bool(
+            processing is not None
+            and processing.scene.get("geometry_review") == "auto"
+            and processing.scene.get("geometry_method") in {"shell", "objectgs"}
+        )
+        arguments = {}
+        if auto_geometry:
+            # Auto still extracts a Draft first; the sealed choice and all other controls remain intact.
+            groups: dict[str, dict] = {"scene": {}, "coacd": {}, "inpaint": {}}
+            for key, value in processing.scene.items():
+                group, name = key.split("_", 1) if key.startswith(("coacd_", "inpaint_")) else ("scene", key)
+                groups[group][name] = value
+            groups["scene"]["geometry_review"] = "required"
+            arguments["scene_config"] = ObjectifyConfig.model_validate(groups).model_dump(exclude_unset=True)
         try:
             result = objectify_with_retry(
                 registry, job, bundle, settings, workspace / "objectify", publish, **arguments

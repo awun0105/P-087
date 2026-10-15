@@ -211,6 +211,7 @@ def test_strict_extraction_error_names_shell_and_objectgs(tmp_path: Path, monkey
 
     monkeypatch.setattr(extraction, "job_requires_strict_geometry", lambda *args: True)
     monkeypatch.setattr(extraction, "_sam2_runtime", lambda *args: None)
+    monkeypatch.setattr(extraction, "load_job_config", lambda *args: pytest.fail("config read before runtime gate"))
     with pytest.raises(module.ObjectifyError, match="Job hình học nghiêm ngặt") as error:
         extraction.extract_scene(
             SimpleNamespace(runtime_resolver=None), None, None, SimpleNamespace(product_objectify=False), tmp_path
@@ -242,13 +243,18 @@ def test_extraction_publishes_draft_with_source_ownership(
         reference = module._reference(job_id, "{digest}.json", "SceneIR", module.StageId.SCENE_DECOMPOSE, b"scene")
         return SimpleNamespace(scene_reference=reference)
 
-    registry = SimpleNamespace(scene=SimpleNamespace(publish_initial=publish_initial))
+    registry = SimpleNamespace(scene=SimpleNamespace(publish_initial=publish_initial), runtime_resolver=None)
     monkeypatch.setattr(extraction, "_idempotent_publish", lambda *args: None)
     monkeypatch.setattr(extraction, "_sam2_runtime", lambda *args: SimpleNamespace(available=lambda: True))
     monkeypatch.setattr(extraction, "job_requires_strict_geometry", lambda *args: True)
+    monkeypatch.setattr(extraction, "load_job_config", lambda *args: None)
     monkeypatch.setattr(extraction, "objectify_with_retry", lambda *args: result)
     extraction.extract_scene(
-        registry, SimpleNamespace(job_id="job-draft"), bundle, SimpleNamespace(product_objectify=True), tmp_path
+        registry,
+        SimpleNamespace(job_id="job-draft", config_checksum=None),
+        bundle,
+        SimpleNamespace(product_objectify=True),
+        tmp_path,
     )
     (scene,) = scenes
     assert scene.provenance["object_geometry"] == "awaiting_review"
