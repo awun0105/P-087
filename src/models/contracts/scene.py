@@ -172,8 +172,8 @@ class SceneObject(ContractModel):
         if self.collider is not None and self.collider.local_transform.parent_frame != self.local_frame:
             raise ValueError("collider local offset must be parented to SceneObject.local_frame")
         if self.surface_mesh_ref is not None:
-            if self.surface_mesh_ref.artifact_type != "ObjectSurfaceMesh":
-                raise ValueError("surface_mesh_ref must reference ObjectSurfaceMesh, not a collider")
+            if self.surface_mesh_ref.artifact_type not in {"ObjectSurfaceMesh", "ObjectShellMesh"}:
+                raise ValueError("surface_mesh_ref must reference ObjectSurfaceMesh or ObjectShellMesh, not a collider")
             if _artifact_job_id(self.surface_mesh_ref) != _artifact_job_id(self.geometry_ref):
                 raise ValueError("surface mesh and object geometry must belong to the same job")
         if self.source_collision is not None:

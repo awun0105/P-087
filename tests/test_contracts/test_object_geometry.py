@@ -148,3 +148,18 @@ def test_shell_manifest_is_object_local_and_requires_passing_quality() -> None:
     ]:
         with pytest.raises(ValidationError):
             ObjectShellManifest(**(data | change))
+
+
+def test_scene_object_accepts_shell_surface_but_not_other_mesh_kinds() -> None:
+    value = scene()
+    data = value.objects[0].model_dump(mode="json")
+    shell = data["geometry_ref"] | {"artifact_type": "ObjectShellMesh"}
+    data["surface_mesh_ref"] = shell
+    obj = type(value.objects[0]).model_validate(data)
+    assert obj.surface_mesh_ref.artifact_type == "ObjectShellMesh"
+    for invalid in [
+        shell | {"artifact_type": "ObjectCollider"},
+        shell | {"artifact_uri": "artifact://jobs/other/a.glb", "job_id": "other"},
+    ]:
+        with pytest.raises(ValidationError):
+            type(obj).model_validate(data | {"surface_mesh_ref": invalid})
