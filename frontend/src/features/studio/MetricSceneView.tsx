@@ -137,10 +137,12 @@ export function MetricSceneView({
   const fail = useCallback(() => setCapability("failed"), [setCapability]);
   const [overlay, setOverlay] = useState<SceneOverlay | null>(null);
   const [surfaceTool, setSurfaceTool] = useState<"floor" | "wall" | null>(null);
-  // Draft: không đánh dấu mặt va chạm; bỏ công cụ đang chọn khi scene bị khoá.
-  useEffect(() => {
+  // Draft: bỏ công cụ đánh dấu đang chọn ngay khi scene bị khoá (chỉnh state theo prop trong lúc render, không dùng effect).
+  const [lockedBefore, setLockedBefore] = useState(lockedReason);
+  if (lockedBefore !== lockedReason) {
+    setLockedBefore(lockedReason);
     if (lockedReason) setSurfaceTool(null);
-  }, [lockedReason]);
+  }
   const [surfacePickError, setSurfacePickError] = useState<string | null>(null);
   const [layers, setLayers] = useState({ ...defaultLayers, lidar: false, triangles: false });
   const [, setLidarState] = useState<{ points?: number; error?: string } | null>(null);
