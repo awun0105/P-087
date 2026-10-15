@@ -4,13 +4,13 @@
 
 `build_object_geometry()` dựng vỏ mịn từ PLY nguồn world + membership theo immutable `source_transform`, publish manifest QA, chạy CoACD strict, dựng nền inpaint/SOG và collision object-aware, rồi publish SceneIR Ready bằng `publish_next(..., commit_guard=...)`.
 
-Giữ transform hiện tại, tên, state, active, review, visual, physics và source ownership đã có. Vật Ignored/Deleted/Merged không được dựng. Vỏ/placeholder lỗi trả `ObjectGeometryBuildError` có object_id; không tạo collider OBB. Huỷ hoặc lỗi trước commit không đổi committed head. Source ownership thiếu được bind bằng pose nguồn và extraction revision của membership.
+Giữ transform hiện tại, tên, state, active, review, visual, physics và source ownership đã có. Theo review Round 2, mọi vật có trong membership đều được dựng collider, kể cả IGNORED/DELETED/MERGED; review/state của vật giữ nguyên. Vỏ/placeholder lỗi trả `ObjectGeometryBuildError` có object_id; không tạo collider OBB. Huỷ hoặc lỗi trước commit không đổi committed head. Source ownership thiếu được bind bằng pose nguồn và extraction revision của membership.
 
 ## Changed files
 
 - `src/services/orchestration/scene/object_geometry_build.py`: service và helper vỏ/collider/môi trường.
 - `src/services/orchestration/scene/object_geometry_steps.py`: thêm keyword `surface_label="ObjectGS surface"`; build từ vỏ truyền `"Gaussian shell"`.
-- `tests/test_scene/test_object_geometry_build.py`: 28 ca kiểm thử, gồm hai test CoACD thật.
+- `tests/test_scene/test_object_geometry_build.py`: 28 ca kiểm thử ban đầu, gồm hai test CoACD thật; Round 2 thêm 3 ca.
 - `.ai/tasks/T-007/report.md`.
 - `.ai/status.md`: chỉ dòng T-007.
 
@@ -91,3 +91,70 @@ Không có match. Không tính mass/inertia từ vỏ/collider; test giữ nguy�
 ## Architect review
 
 Không có quyết định contract còn chờ. Vỏ rỗng đạt ngân sách mảnh và bounds theo plan; không cần thay luật khép mặt.
+
+
+## Round 2 — Required changes
+
+### Outcome
+
+Bỏ điều kiện loại review IGNORED/DELETED/MERGED khỏi tập build. Khi `object_ids is None`, build tất cả vật có trong membership. Khi có `object_ids`, giữ đúng phép giao với tập được yêu cầu. Quy tắc `shell_error` chặn build không đổi.
+
+Compositor object-aware có thể khôi phục source collider theo review/state sau khi Ready. Review không quyết định có tạo collider hay không.
+
+### Changed files
+
+- `src/services/orchestration/scene/object_geometry_build.py`: chỉ bỏ điều kiện lọc review khỏi selected.
+- `tests/test_scene/test_object_geometry_build.py`: sửa ba ca tombstone; thêm hai ca build/compose/Restore và một ca kiểm object_ids trên Ready.
+- `.ai/tasks/T-007/report.md`: cập nhật outcome và thêm Round 2.
+- `.ai/status.md`: chỉ dòng T-007.
+
+### Red → green
+
+Trước sửa source:
+
+```bash
+.venv/bin/python -m pytest tests/test_scene/test_object_geometry_build.py -k 'review_tombstones or reviewed_build' -q --tb=short
+```
+
+**5 failed, 25 deselected**: cả ba review thiếu collider; hai test tích hợp không có source collider để đọc/compose.
+Sau bỏ điều kiện review: **5 passed, 25 deselected**.
+
+### Coverage
+
+- IGNORED/DELETED/MERGED đều có shell/collider sau full build; giữ review, state, active, tên, physics, transform và source ownership.
+- Ready có IGNORED: compose thành công, các triangle collider được thêm tại immutable source pose. Test đặt current pose tại (20, 30, 40) để bắt nhầm pose.
+- Ready có DELETED: compose chỉ còn baseline, không chứa collider của vật này. Gọi `apply_object_action(..., "restore")`, giữ collider, rồi compose lại thành công và kiểm bounds source.
+- Ready + `object_ids={candidate-001}` với vật IGNORED: chỉ gọi dựng vỏ cho đúng vật đó, vật thứ hai giữ nguyên.
+- Không sửa compositor, review/restore commands, QA, CoACD hoặc hành vi shell_error.
+
+### Verification Round 2
+
+```bash
+.venv/bin/python -m pytest tests/test_scene/test_object_geometry_build.py tests/test_scene/test_object_geometry_steps.py tests/test_scene/test_effective_collision.py tests/test_scene/test_object_aware_composition.py -q
+```
+
+**58 passed in 68.07s**, không skip; gồm hai test CoACD thật. Không chạy full suite.
+
+```bash
+.venv/bin/ruff check src/services/orchestration/scene/object_geometry_build.py tests/test_scene/test_object_geometry_build.py
+.venv/bin/ruff format --check src/services/orchestration/scene/object_geometry_build.py tests/test_scene/test_object_geometry_build.py
+```
+
+`All checks passed!`; `2 files already formatted`. `git diff --check`: sạch.
+
+`graphify update .`: exit 0, 25.071 nodes, 77.736 edges, 825 communities. Output graph.json/graph.html/GRAPH_REPORT.md được cập nhật và bị gitignore; không chạy LLM label.
+
+### Commits Round 2
+
+- `fb0470f6` Mark T-007 review fixes in progress
+- `dc7d547c` Build source colliders for all reviewed membership objects
+
+### Gate report Round 2
+
+- codegraph: explore build_object_geometry, _object_aware_environment, compose_effective_collision, apply_object_action, restore_object trước sửa; callers service hiện chỉ là test.
+- impact: bổ sung collider nguồn cho mọi vật trong membership để object-aware composition dùng được sau review/Restore; caller public và chữ ký service không đổi.
+- understand: membership → build mọi source collider → compositor quyết định giữ/loại theo review; đã dùng graphify query. Không có tool understand-anything explain/domain trong session.
+- minimal-code: bỏ một điều kiện lọc; tái dùng builder và compositor hiện có.
+- DevTools: n/a — sửa backend service/test, không UI.
+
+Không có lệch Required changes hoặc quyết định contract cần chốt thêm.
