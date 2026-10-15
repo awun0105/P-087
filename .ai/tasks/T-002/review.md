@@ -111,3 +111,22 @@ Vì vậy:
 4. Lệnh kiểm tra như Round 1. Commit theo nhóm (xoá nắp; solidity + test). Thêm "Round 3" vào report, `status.md` → `implemented`.
 
 Architect đã cập nhật `architecture.md` §8.1 theo quyết định này.
+
+---
+
+# Review T-002 — Round 3
+
+Verdict: ACCEPTED
+
+Chạy lại 4 file test: 57 passed, 0 xfailed. Đã kiểm không còn `cap_open_faces`/`capped_*`/`_cap_open_faces` trong `src` và `tests`.
+`solidity` chỉ ghi vào `statistics`, không chặn. Ruff sạch.
+
+## Đánh giá
+- Required changes Round 2 (xoá nắp, thêm solidity, đổi test, giữ test gầm bàn/khe chân): **pass**.
+- Engineer đã sửa đúng một nhận định sai của Architect: tỉ lệ thể tích vỏ/thể tích thật **không** cố định 55–60%; vật 2 m chỉ còn
+  ~29% vì tường vỏ mỏng tương đối. `architecture.md` §8 đã sửa: **không** được suy khối lượng/quán tính từ thể tích vỏ.
+- Hai việc mở đã chuyển vào T-007: kiểm số mảnh CoACD trên vỏ rỗng; không dùng thể tích vỏ cho vật lý.
+
+## Suggestions (không chặn)
+- `test_solidity_is_close_to_one_for_filled_box` qua sát ngưỡng (0,906 so với 0,9). Nếu sau này đổi tham số Taubin mà test đỏ,
+  hạ ngưỡng xuống 0,85 kèm lý do, không tắt smoothing chỉ để qua test.

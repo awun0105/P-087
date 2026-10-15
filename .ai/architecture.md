@@ -152,6 +152,8 @@ Gaussian (dưới mức đó → 422, gợi ý dùng Delete).
    Mặt camera không thấy (đáy sát sàn, mặt sát tường) **không** được lấp tự động: vỏ khi đó rỗng phía mặt đó nhưng vẫn kín,
    và tương đương khối đặc về va chạm vì không vật nào đi vào được. Luật lấp tự động đã thử ở T-002 và bị loại (lấp nhầm hoặc
    rò). Ghi `solidity = V(vỏ)/V(bao lồi)` để truy vết, không chặn.
+   Vỏ rỗng làm thể tích vỏ nhỏ hơn thật và tỉ lệ phụ thuộc kích thước (đo ở T-002: hộp 0,4×0,6×0,8 m còn ~58%,
+   vật 2 m chỉ ~29%). **Không** suy khối lượng/quán tính từ thể tích vỏ; khối lượng lấy theo nhãn vật như hiện tại.
 2. Vỏ phải qua `assess_surface`. Không qua → lỗi rõ ràng, **không** thay bằng OBB.
 3. Vỏ nhiều thành phần rời: giữ tất cả thành phần ≥ 5% tổng voxel, ghi số thành phần vào report.
    CoACD chạy riêng từng thành phần (hành vi hiện có của convex runner).
