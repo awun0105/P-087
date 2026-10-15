@@ -341,6 +341,12 @@ export function ObjectReviewView({
   const [rightCollapsed, setRightCollapsed] = useState(false);
   /** Vật đang chờ đặt bằng chuột: kích thước hộp xem trước + lệnh ghi khi bấm sàn. */
   const [placing, setPlacing] = useState<{ label: string; dimensions: [number, number, number]; commit: (point: [number, number, number]) => void } | null>(null);
+  // Draft: huỷ chế độ đặt vật đang chờ ngay khi scene bị khoá (chỉnh state theo prop trong lúc render, không dùng effect).
+  const [lockedBeforePlacing, setLockedBeforePlacing] = useState(geometryLockReason);
+  if (lockedBeforePlacing !== geometryLockReason) {
+    setLockedBeforePlacing(geometryLockReason);
+    if (geometryLockReason) setPlacing(null);
+  }
   const cancelPlacing = useCallback(() => setPlacing(null), []);
   const stale = Boolean(revision && scene && !busy && revision !== scene.scene_revision);
 
