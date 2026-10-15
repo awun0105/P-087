@@ -260,3 +260,14 @@ def test_body_diagonal_contact_is_repaired_until_no_pattern_remains():
     assert fixes >= 1
     assert not _planar_diagonal_targets(repaired).any()
     assert not _body_diagonal_targets(repaired).any()
+
+
+def test_same_input_and_params_give_same_checksum():
+    rng = np.random.default_rng(18)
+    points = rng.uniform(BOX_LOW, BOX_HIGH, size=(20000, 3))
+    first = build_gaussian_shell(points, None)
+    second = build_gaussian_shell(points, None)
+    assert first.checksum == second.checksum
+    np.testing.assert_array_equal(first.vertices, second.vertices)
+    np.testing.assert_array_equal(first.faces, second.faces)
+    assert build_gaussian_shell(points, None, ShellParams(voxel_m=0.03)).checksum != first.checksum
