@@ -32,3 +32,13 @@ Task **duy nhất** được chạy full suite. Xác nhận toàn bộ, build l�
 
 ## Out of scope
 Không chạy train scene mới, không push/merge/PR.
+
+## Bổ sung theo yêu cầu review 2026-10-16
+
+- Review sâu phần T-001..T-018 và T-020: chất lượng code, hiệu năng, logic, tính nhất quán artifact/revision và UX.
+- Ghi phát hiện vào `review.md`: ưu tiên, vị trí source, điều kiện tái hiện, tác động, hướng sửa và test nghiệm thu.
+- Đo preview với 2 triệu Gaussian; phân biệt cache cold/warm, fixture với scene thật, thời gian service với HTTP/browser.
+- Chỉ sửa regression mà các bước kiểm thử của T-019 phát hiện; các thay đổi logic ngoài phạm vi này được ghi thành mục xử lý
+  riêng trong review. Không coi suite xanh là đã xử lý mọi finding.
+- Báo cáo và handoff phân biệt kiểm thử tự động với nghiệm thu GPU/browser/Isaac. Giữ trạng thái `implemented` để chờ review,
+  không tự đặt `accepted`.

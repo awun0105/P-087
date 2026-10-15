@@ -1,0 +1,35 @@
+import json
+import resource
+import tempfile
+from pathlib import Path
+from types import SimpleNamespace
+from time import perf_counter
+import numpy as np
+from src.models.contracts.object_membership import ObjectRegionCommand, RegionBox
+from src.services.orchestration.scene import membership_regeneration as loader
+from src.services.orchestration.scene.object_region import preview_region
+from tests.test_scene.test_object_correction import _fixture, _source_rows
+
+rng = np.random.default_rng(90)
+rows = np.repeat(_source_rows()[:1], 2_000_000)
+xyz = rng.uniform(-0.2, 0.2, (len(rows), 3)) + (1.5,0.1,1.1)
+for axis,name in enumerate(('x','y','z')):
+    rows[name] = xyz[:,axis]
+with tempfile.TemporaryDirectory(prefix='t019-preview-') as directory:
+    fixture = _fixture(Path(directory), source_rows=rows, source_labels=np.zeros(len(rows),dtype=np.int32))
+    item = fixture.scene.objects[0]
+    item = item.model_copy(update={'provenance':{'source_transform':item.transform.model_dump(mode='json')}})
+    scene = fixture.editor.publish_next('job-fixture-001',fixture.scene.scene_revision,fixture.scene.model_copy(update={'objects':[item,*fixture.scene.objects[1:]]}),'audit-benchmark').revision.scene
+    registry = SimpleNamespace(scene=fixture.editor,runtime_resolver=fixture.editor.resolver)
+    loader.fit_canonical_floor_model = lambda *args: None
+    loader.above_floor_mask = lambda xyz,_: np.ones(len(xyz), dtype=bool)
+    loader._SOURCE_CACHE.clear()
+    command = ObjectRegionCommand(expected_scene_revision=scene.scene_revision,membership_checksum=fixture.membership.labels_ref.artifact_checksum,boxes=[RegionBox(op='add',center_m=(0,0,0),half_extents_m=(.3,.3,.3),yaw_rad=0)])
+    for run in range(3):
+        start=perf_counter()
+        result=preview_region(registry,'job-fixture-001','candidate-001',command)
+        print(json.dumps({'run':run,'cache':'cold' if run==0 else 'warm','elapsed_s':round(perf_counter()-start,4),'count':result['object_gaussian_count'],'shell_sample_rows':result['shell_sample_rows'],'shell_ok':result['shell_glb_base64'] is not None,'peak_rss_mib':round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024,1)}),flush=True)
+    import cProfile, pstats, sys
+    profile=cProfile.Profile()
+    profile.runcall(preview_region, registry, 'job-fixture-001', 'candidate-001', command)
+    pstats.Stats(profile, stream=sys.stdout).strip_dirs().sort_stats('cumulative').print_stats(15)

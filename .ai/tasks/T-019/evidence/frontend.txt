@@ -1,0 +1,325 @@
+
+ RUN  v3.2.7 /home/lqaq/PROJECT/AI20K/P-087/frontend
+
+ ✓ tests/processing-settings.test.tsx (9 tests) 3583ms
+   ✓ scenario wizard > applies environment and capture choices through the API and shows all advanced groups  2562ms
+ ✓ tests/demo-controls.test.tsx (14 tests) 4101ms
+   ✓ DemoControls: mốc gốc > keeps only publication controls on the header  832ms
+   ✓ DemoControls: mốc gốc > Reviewer đặt và bỏ mốc gốc; Editor không có hai nút này  527ms
+   ✓ DemoControls: Đặt làm bản demo = xuất vào thư viện mẫu > Reviewer phải xác nhận công khai mới xuất được, và gửi tên + mô tả  538ms
+   ✓ DemoControls: Đặt làm bản demo = xuất vào thư viện mẫu > lỗi từ máy chủ hiện ngay trong hộp thoại và không đánh dấu đã xuất  617ms
+   ✓ DemoControls: Đặt làm bản demo = xuất vào thư viện mẫu > Editor không có nút xuất; mẫu đã xuất thì ai cũng thấy đường dẫn  319ms
+stdout | tests/region-editor.test.tsx
+SuperSplat Viewer v1.35.2 | Engine v2.22.4 (b5b9839)
+
+ ✓ tests/imported-scenes-home.test.tsx (6 tests) 3507ms
+   ✓ ImportedScenesHome > hiển thị tiêu đề và trạng thái rỗng khi chưa có scene import  995ms
+   ✓ ImportedScenesHome > scene import hiển thị creator và role dưới dạng text thuần (chống XSS)  905ms
+   ✓ ImportedScenesHome > scene import hiển thị đúng nguồn và trạng thái persisted  464ms
+   ✓ ImportedScenesHome > 'guest' chỉ hiện thao tác xoá theo capability của server ở cả lưới và danh sách  330ms
+   ✓ ImportedScenesHome > 'editor' chỉ hiện thao tác xoá theo capability của server ở cả lưới và danh sách  307ms
+   ✓ ImportedScenesHome > 'reviewer' chỉ hiện thao tác xoá theo capability của server ở cả lưới và danh sách  496ms
+ ✓ tests/ux-account-auth.test.tsx (12 tests) 5088ms
+   ✓ tài khoản và đích sau xác thực > standard registration leaves invitation optional and creates a Guest when it is blank  1081ms
+   ✓ tài khoản và đích sau xác thực > local không bịa profile; khách có link quay lại account  1116ms
+   ✓ tài khoản và đích sau xác thực > hiện /me thật, logout lỗi giữ thông báo và cho thử lại  346ms
+   ✓ tài khoản và đích sau xác thực > AppShell phân biệt role Guest và hiển thị quota/reset từ backend  789ms
+   ✓ tài khoản và đích sau xác thực > sai mật khẩu / mã mời hỏng: hiện đúng lý do backend trả, không báo 'phiên hết hạn'  401ms
+   ✓ tài khoản và đích sau xác thực > Guest đăng ký theo endpoint riêng, không gửi invite hoặc role và chỉ hiện khi deployment bật  380ms
+   ✓ tài khoản và đích sau xác thực > AppShell: khách vào /new/try-demo được xem và thanh bên chỉ hiện video mẫu, không hiện workspace  428ms
+ ✓ tests/studio-inspection.test.tsx (21 tests) 5569ms
+   ✓ Inspect theo giai đoạn > timeline chỉ chọn được bước xong; selection mở link đúng stage, mẫu không tạo link job  1930ms
+   ✓ Inspect theo giai đoạn > bước cần người dùng thao tác có nút hiện sẵn tại hàng của nó; bước đã xong thì Xem giai đoạn nằm trong phần mở  854ms
+   ✓ Inspect theo giai đoạn > nội dung khác nhau cho 'ST-INPUT-VALIDATE', viewport chính và output panel thu gọn  334ms
+ ✓ tests/trash-page.test.tsx (14 tests) 6794ms
+   ✓ TrashPage > thùng rác trống hiện trạng thái rỗng, không có nút hàng loạt  583ms
+   ✓ TrashPage > khôi phục một mục gửi đúng ID và mục đó rời danh sách  1170ms
+   ✓ TrashPage > chọn nhiều mục rồi xoá hẳn: phải xác nhận, huỷ thì không gửi gì  2430ms
+   ✓ TrashPage > chọn tất cả và khôi phục tất cả; mục lỗi được nêu tên kèm lý do  643ms
+   ✓ TrashPage > Guest chỉ chọn và khôi phục entry có capability sở hữu; request bulk không gửi entry foreign  805ms
+ ✓ tests/ux-scene-flow.test.tsx (20 tests) 7126ms
+   ✓ workflow scene > Studio mở toàn màn hình; nút thoát quay về Tiến trình của job  2515ms
+   ✓ workflow scene > chuông là nơi duy nhất hiện thông báo trên mọi tab; không còn khung dưới thanh tab, trống thì nói rõ  741ms
+   ✓ workflow scene > không có ?tab= thì luôn mở Tiến trình, kể cả khi preview đã sẵn sàng hoặc job lỗi  410ms
+   ✓ workflow scene > Progress không mount canvas; đóng metric thực sự về timeline, mở lại giữ draft  555ms
+   ✓ workflow scene > đồng bộ retry nếu POST lỗi sau khi backend đã tạo attempt mới  324ms
+   ✓ workflow scene > refresh quota sau 429 từ tab khác và khoá retry theo /auth/me mới  366ms
+   ✓ workflow scene > refresh quota sau khi máy chủ chấp nhận manual Retry của Guest  382ms
+ ✓ tests/studio-overview.test.tsx (16 tests) 7886ms
+   ✓ Tổng quan và thư viện riêng > số liệu từ API; nút chính là Tạo scene mới; việc chờ bạn nằm trên cùng  1973ms
+   ✓ Tổng quan và thư viện riêng > job chờ xem bản đã che được tính là cần xử lý, không phải đang chạy  586ms
+   ✓ Tổng quan và thư viện riêng > lỗi nguồn không biến thành số 0 và có đường thử lại  359ms
+   ✓ Tổng quan và thư viện riêng > thẻ scene ghi rõ ai tạo và ai chạy lại gần nhất; không biết thì không ghi  1366ms
+   ✓ Tổng quan và thư viện riêng > 'guest' chỉ hiện thao tác xoá theo capability của server ở cả lưới và danh sách  617ms
+   ✓ Tổng quan và thư viện riêng > 'editor' chỉ hiện thao tác xoá theo capability của server ở cả lưới và danh sách  615ms
+   ✓ Tổng quan và thư viện riêng > 'reviewer' chỉ hiện thao tác xoá theo capability của server ở cả lưới và danh sách  765ms
+   ✓ Tổng quan và thư viện riêng > legacy Scenes response fails closed for Guest and preserves editor access  386ms
+   ✓ Tổng quan và thư viện riêng > legacy Scenes response fails closed for Guest and preserves reviewer access  330ms
+ ✓ tests/validation-report-card.test.tsx (10 tests) 2433ms
+   ✓ ValidationReportCard > báo cáo không có bằng chứng Isaac: hiện cảnh báo kèm môi trường, check, Start–Goal và bằng chứng  951ms
+   ✓ ValidationReportCard > Nguồn kết quả cho đối chiếu revision, checksum gói và checksum báo cáo; nút chép báo kết quả  514ms
+   ✓ ValidationReportCard > không chép được thì báo lỗi thay vì im lặng  405ms
+ ✓ tests/studio-sample-pipeline.test.tsx (4 tests) 3760ms
+   ✓ mẫu cũ tại bước upload > hiện pipeline 8 bước, bỏ qua chỉ hoàn tất 5 bước đã ghi  2449ms
+   ✓ khung phát lại giống tiến trình thật > dùng cùng tiêu đề 'Tiến trình xử lý' và nói rõ đây là bản phát lại  326ms
+   ✓ khung phát lại giống tiến trình thật > bundle có bước LiDAR thì dòng thời gian có bước LiDAR như scene thật  649ms
+   ✓ khung phát lại giống tiến trình thật > hết phát lại thì nút Mở scene 3D gọi onDone để sang scene  334ms
+ ✓ tests/progress-objectify.test.tsx (17 tests) 5733ms
+   ✓ tab Tiến trình: bước Tách vật thể lỗi > không còn hiện 'đã xong': báo lỗi, lý do và nút chọn tiếp ngay tại hàng bước  1345ms
+   ✓ tab Tiến trình: bước Tách vật thể lỗi > bấm nút gửi đúng revision hiện tại và hiện trạng thái đang chạy lại  761ms
+   ✓ tab Tiến trình: bước Tách vật thể lỗi > hủy yêu cầu đang chạy gọi API hủy  512ms
+   ✓ tab Tiến trình: bước Tách vật thể lỗi > scene tách theo vật bình thường, hoặc lần dựng lại lỗi mà scene vẫn tốt: bước vẫn là đã xong  304ms
+   ✓ các trường hợp còn lại của hàng bước > lỗi dữ liệu không báo có thể thử lại và vẫn cho chọn đường hộp  896ms
+   ✓ các trường hợp còn lại của hàng bước > gặp 409 (scene đã đổi hoặc đã có yêu cầu khác) thì đọc lại trạng thái từ máy chủ  436ms
+   ✓ một trạng thái dùng chung trong trang scene > thao tác ở hàng bước làm thông báo trong Studio đổi theo ngay, không gọi API đọc thêm  498ms
+ ✓ tests/region-editor.test.tsx (55 tests) 11764ms
+   ✓ panel chỉnh vùng > mở với một box cộng bằng nửa kích thước vật, đang được chọn  1038ms
+   ✓ panel chỉnh vùng > + Box cộng và − Box trừ thêm box mới rồi chọn nó  663ms
+   ✓ panel chỉnh vùng > không xoá box cộng cuối cùng; xoá được box trừ và box cộng khi còn box cộng khác  722ms
+   ✓ panel chỉnh vùng > Delete đang gõ trong ô nhập thì không xoá box  307ms
+   ✓ panel chỉnh vùng > Đặt lại đưa về một box cộng ban đầu  366ms
+   ✓ panel chỉnh vùng > đổi box thì bộ đếm cũ ẩn đi và đang tính lại  404ms
+   ✓ panel chỉnh vùng > vật chồng lấn nêu tên và số Gaussian; Lấy luôn đưa id vào claim_from của lần xem trước sau  619ms
+   ✓ panel chỉnh vùng > Lấy luôn: vật đã lấy về vẫn hiện và đang tick sau xem trước kế tiếp; bỏ tick thì yêu cầu sau không còn claim  916ms
+   ✓ panel chỉnh vùng > vật đang tick mà box không còn chồng lên thì hiện 'không còn trong box' và vẫn bỏ tick được  951ms
+   ✓ panel chỉnh vùng > xem trước lỗi thì hiện câu của máy chủ  300ms
+   ✓ Apply và Huỷ > Apply tắt cho tới khi có xem trước khớp box; đổi box thì tắt lại  746ms
+   ✓ Apply và Huỷ > Apply gửi revision, membership, box và claim hiện tại; kết quả 201 đưa cho cha  756ms
+   ✓ Apply và Huỷ > Apply trên scene Ready (202) đưa kết quả tiến độ cho cha  351ms
+   ✓ Apply và Huỷ > 409: báo scene đã đổi, giữ nguyên box, nút Tải lại gọi onReload  623ms
+   ✓ Apply và Huỷ > 422: hiện câu của máy chủ  480ms
+stdout | tests/metric-effective-collision.test.tsx
+SuperSplat Viewer v1.35.2 | Engine v2.22.4 (b5b9839)
+
+ ✓ tests/ux-navigation-guard.test.tsx (5 tests) 2032ms
+   ✓ guard phiên editor > iframe dirty giữ phiên khi cancel, chỉ navigate sau xác nhận  1475ms
+   ✓ guard phiên editor > browser Back khôi phục entry nguồn trước khi hỏi; cancel giữ iframe route  340ms
+ ✓ tests/registration-panel.test.tsx (10 tests) 3511ms
+   ✓ registration panel > starts only a READY request and reports the server proposal without applying it  1964ms
+   ✓ registration panel > confirms only the selected QA-qualified candidate and stores the server decision  615ms
+ ✓ tests/pipeline-timeline.test.tsx (9 tests) 1407ms
+   ✓ PipelineTimeline error guidance rendering > hiển thị ETA chưa xác định cho job chạy khi không có số đo hỗ trợ  725ms
+ ✓ tests/review-panel.test.tsx (12 tests) 3818ms
+   ✓ ReviewPanel > hiển thị trạng thái tải trong khi API chưa trả review state  1405ms
+   ✓ ReviewPanel > phê duyệt chỉ sau khi chấp nhận cảnh báo và xác nhận, gửi đúng checksum  849ms
+   ✓ ReviewPanel > hiện lỗi seal an toàn và cho Reviewer thử lại dù release đang ở APPROVED  371ms
+ ✓ tests/metric-effective-collision.test.tsx (11 tests) 3379ms
+   ✓ MetricSceneView effective collision > does not silently omit a confirmed static collider after removing its source region  1011ms
+   ✓ uses preview URLs and sends a picked canonical triangle to surface annotation and infill controls  491ms
+   ✓ MetricSceneView khoá Draft (T-013) > khoá Nhân bản và các nút mặt va chạm trong Draft; scene sẵn sàng vẫn bấm được  679ms
+ ✓ tests/studio-results.test.tsx (5 tests) 1774ms
+   ✓ kết quả đúng revision > có candidate và release hiện hành thì mở đúng download  1036ms
+   ✓ kết quả đúng revision > release chưa có archive thì không mở tải; lỗi mạng có thể retry  390ms
+ ✓ tests/anonymization-review.test.tsx (5 tests) 2324ms
+   ✓ AnonymizationReviewPanel > shows the redacted frames and accepts exactly the frame set that was viewed  1169ms
+   ✓ anonymization review waiting state > replaces the queue message with the review panel and keeps cancel available  887ms
+stdout | tests/camera-toolbar.test.tsx
+SuperSplat Viewer v1.35.2 | Engine v2.22.4 (b5b9839)
+
+ ✓ tests/camera-toolbar.test.tsx (7 tests) 2777ms
+   ✓ CameraToolbar > khoá mọi nút khi viewer chưa nạp xong  1365ms
+   ✓ CameraToolbar > chuyển chế độ, về toàn cảnh và về vị trí đầu qua controls của viewer  317ms
+   ✓ CameraToolbar > không cho đi bộ khi viewer báo chưa có va chạm, và hiện hướng dẫn theo chế độ đang chạy  428ms
+   ✓ scaledWheelInit > góc nhìn thứ ba chỉ bật được khi đang đi bộ  361ms
+ ✓ tests/gaussian-membership-editor.test.tsx (4 tests) 2303ms
+   ✓ Gaussian membership preview/apply > previews source rows without mutation, then queues the exact reviewed command  935ms
+   ✓ Gaussian membership preview/apply > keeps Apply unavailable when preview fails; foreign iframe messages are ignored  959ms
+ ✓ tests/studio-resource-wait.test.tsx (4 tests) 2445ms
+   ✓ đợi tài nguyên với config đã chọn > animation chờ không bịa phần trăm, vẫn cho huỷ  1578ms
+   ✓ đợi tài nguyên với config đã chọn > nói rõ thiếu gì, bao nhiêu và việc chờ có tự hết không  606ms
+ ✓ tests/studio-input-flows.test.tsx (8 tests) 2919ms
+   ✓ hai cửa vào dữ liệu đã dựng sẵn > mỗi trang chỉ có form của nhánh đó và quay về khung tải input chung  1336ms
+   ✓ hai cửa vào dữ liệu đã dựng sẵn > import chỉ chọn 3DGS; lỗi giữ tên và gọi đúng API  740ms
+ ✓ tests/import-scene-page.test.tsx (9 tests) 2176ms
+   ✓ ImportScenePage durable lifecycle > shows the waiting reason and cancels an active import into a terminal state  1346ms
+ ✓ tests/palette.test.tsx (14 tests) 2901ms
+   ✓ chọn bảng màu > menu chỉ chọn bảng màu; sáng/tối do nút riêng và không đụng bảng màu  2458ms
+stdout | tests/preview-scene-camera.test.tsx
+SuperSplat Viewer v1.35.2 | Engine v2.22.4 (b5b9839)
+
+ ✓ tests/evaluation-card.test.tsx (8 tests) 2240ms
+   ✓ EvaluationCard > hiện từng nhóm với giá trị, kết luận có ngưỡng, và ghi rõ bước chưa có kết quả  1888ms
+ ✓ tests/studio-navigation.test.tsx (10 tests) 2456ms
+   ✓ ngữ cảnh điều hướng > breadcrumb lấy tên API và bỏ tên khi màn chi tiết rời đi  462ms
+   ✓ scene tabs > tab khóa hiện lý do khi click và không chuyển vùng  1581ms
+   ✓ scene tabs > Arrow/Home/End di chuyển focus và đọc lý do tab khóa  344ms
+ ✓ tests/preview-scene-camera.test.tsx (7 tests) 2631ms
+   ✓ PreviewScene mở đầu bên trong scene > chờ quỹ đạo camera của job rồi mới dựng viewer, đặt camera tại frame quay đầu tiên  1321ms
+   ✓ PreviewScene mở đầu bên trong scene > hiển thị nút lưu góc nhìn mặc định khi có onSaveDefaultCamera  517ms
+stderr | tests/stage-view-selection.test.tsx
+WARNING: Multiple instances of Three.js being imported.
+
+ ✓ tests/ux-processing-form.test.tsx (8 tests) 1497ms
+   ✓ thông số nháp và evaluation hiện hành > đợi draft rồi công bố đúng giá trị; không lộ preset mặc định để ghi đè draft  399ms
+   ✓ thông số nháp và evaluation hiện hành > evaluation cũ bị ẩn khi sửa; lỗi có thể thử lại mà không mất values  714ms
+ ✓ tests/stage-view-selection.test.tsx (4 tests) 1534ms
+   ✓ stage viewer selection > lọc đúng stage và tab đang hiển thị có aria-selected  1395ms
+ ✓ tests/validation-runs-panel.test.tsx (6 tests) 2311ms
+   ✓ ValidationRunsPanel > submits an idempotent run for the current candidate and refreshes its status  1496ms
+ ✓ tests/geometry-review-banner.test.tsx (8 tests) 1207ms
+   ✓ banner Duyệt tách vật > scene Draft: đếm vật còn giữ và cảnh báo vật có lỗi vỏ  843ms
+ ✓ tests/ux-feedback-drafts.test.tsx (10 tests) 1395ms
+   ✓ feedback và boundary lỗi > toast dùng acknowledgement, cùng key không nhân bản và đóng được  1064ms
+ ✓ tests/lidar-metric-confirm.test.tsx (3 tests) 1491ms
+   ✓ xác nhận tỉ lệ từ LiDAR > hiện số frame khớp và độ lệch pose, rồi xác nhận bằng một nút  1354ms
+ ✓ tests/unified-input-flow.test.tsx (30 tests) 39001ms
+   ✓ unified input flow > shows processing settings for an automatically selected video and sends the chosen preset  4514ms
+   ✓ unified input flow > sends scene.geometry_review = auto in the create payload when the user chooses Tạo mesh ngay  2782ms
+   ✓ unified input flow > tóm tắt thông số hiện nhãn lựa chọn thay vì giá trị thô  1501ms
+   ✓ unified input flow > automatically resolves a legacy upload and hides redundant notices  998ms
+   ✓ unified input flow > only shows Retry after an automatic resolution request fails  1230ms
+   ✓ unified input flow > keeps edited processing values and recovers through Retry after evaluation returns 500  1839ms
+   ✓ unified input flow > discards the upload when removed and sends a keepalive cleanup on leaving  1069ms
+   ✓ unified input flow > keeps uploads, processing and confirmation fields when moving back, without repeating requests  2065ms
+   ✓ unified input flow > cannot leave input selection while uploads or resolution are incomplete  1181ms
+   ✓ unified input flow > revalidates changed input before advancing again and still allows abandoned files to be removed  2132ms
+   ✓ unified input flow > waits for processing options before allowing a video job to start  1846ms
+   ✓ unified input flow > shows an options error and retries without silently starting with default settings  2111ms
+   ✓ unified input flow > shows report-level diagnostics (e.g. a broken calibration) with the file they refer to  835ms
+   ✓ unified input flow > analyzes by itself once every file is verified, without pressing Analyze  1037ms
+   ✓ unified input flow > lists why the create button is disabled and never shows internal route codes  1375ms
+   ✓ unified input flow > tells the user which timestamp units were estimated and how to correct them  863ms
+   ✓ unified input flow > flags only the unclassified members of a mixed archive  514ms
+   ✓ unified input flow > prepares each dropped video before upload and requires an explicit choice for ambiguous videos  3113ms
+   ✓ unified input flow > explains an undecodable codec in Vietnamese and uploads the original only on an explicit choice  747ms
+   ✓ unified input flow > shows unqualified R6 diagnostics while keeping the supplied R4 recipe as a usable fallback  1258ms
+   ✓ unified input flow > requires explicit timestamp sensor roles and preserves separate RGB and LiDAR units  1717ms
+   ✓ unified input flow > drops a stale analysis when inputs change mid-flight and analyzes again with the new values  1793ms
+   ✓ unified input flow > routes a staged SOG through the durable view import without exposing continuation  1288ms
+ ✓ tests/floor-fit-diagnostics.test.tsx (4 tests) 1292ms
+   ✓ floor fit diagnostics > shows the persisted fallback diagnostic in Review without breaking old scene responses  1248ms
+ ✓ tests/stage-workspace.test.tsx (5 tests) 2212ms
+   ✓ workspace scene 5–8 > 5 dùng editor hiện có với ref đã publish và quay về đúng tiến trình  1411ms
+   ✓ workspace scene 5–8 > 5 lỗi preview không mount editor, có thể thử lại  353ms
+   ✓ workspace scene 5–8 > 6 xem scene hoặc so sánh đã publish, không mở lại công cụ xác nhận  347ms
+ ✓ tests/theme-toggle.test.tsx (3 tests) 1697ms
+   ✓ ThemeToggle > mặc định là theme sáng và bấm thì chuyển sang tối, lưu lựa chọn  1390ms
+   ✓ ThemeToggle > hai nút trên cùng trang luôn khớp trạng thái  304ms
+ ✓ tests/auth-provider.test.tsx (1 test) 1280ms
+   ✓ AuthProvider > backend treo: hết hạn chờ thì báo lỗi có nút thử lại và coi như khách  1270ms
+ ✓ tests/object-review.test.tsx (58 tests) 41864ms
+   ✓ ObjectReviewView > orders scene-state before objects and preserves the viewer and selection across panel tabs  3298ms
+   ✓ ObjectReviewView > xác nhận ứng viên với revision hiện tại và hiển thị revision mới  429ms
+   ✓ ObjectReviewView > chỉ liệt kê candidate đã publish và gửi exact ref cùng revision khi được chọn  915ms
+   ✓ ObjectReviewView > nêu rõ khi job chưa publish candidate LiDAR  662ms
+   ✓ ObjectReviewView > gộp nhiều ứng viên bằng membership checksum và semantic source đã chọn  1300ms
+   ✓ ObjectReviewView > reassign ROI gửi bounds canonical theo mét và reload scene mới  1353ms
+   ✓ ObjectReviewView > hủy selection và giữ canonical scene sau conflict 409  2381ms
+   ✓ ObjectReviewView > nói rõ khi scene cũ chưa có membership và khóa correction commands  452ms
+   ✓ ObjectReviewView > ẩn ứng viên đã loại trừ khi bật hiển thị  549ms
+   ✓ ObjectReviewView > inspector đổi tên gửi revision hiện tại; báo trạng thái lưu lên header  1007ms
+   ✓ ObjectReviewView > 409 (scene đổi ở lượt khác): tự tải bản mới và giữ thông báo xung đột  634ms
+   ✓ ObjectReviewView > scene theo vật: Gaussian riêng của vật tới viewer; vật đã xoá không vẽ; gizmo theo công cụ đang chọn  871ms
+   ✓ ObjectReviewView > gán nhãn gửi nhãn + khối lượng người dùng nhập; hoàn tác quay về revision trước  790ms
+   ✓ ObjectReviewView > giữ object đã gộp trong nhóm audit và không cho sửa tombstone  591ms
+   ✓ ObjectReviewView > previews box dimensions and local pose, then saves them against the canonical revision  861ms
+   ✓ ObjectReviewView > cancel restores the canonical collider preview without sending a request  315ms
+   ✓ ObjectReviewView > rejects non-positive dimensions in the form and leaves the canonical preview intact  320ms
+   ✓ ObjectReviewView > stale collider save reloads the newer canonical scene and drops the local preview  870ms
+   ✓ ObjectReviewView > failed collider save rolls the form and preview back to canonical state  1211ms
+   ✓ ObjectReviewView > does not expose box edits for a convex-decomposition collider  689ms
+   ✓ ObjectReviewView > hỗ trợ thu gọn và xổ xuống 2 panel bên trong viewport  313ms
+   ✓ ObjectReviewView > Ẩn/Hiện Candidate chỉ đổi viewport, giữ revision và không gọi backend  865ms
+   ✓ ObjectReviewView > Tắt mô phỏng là lệnh backend riêng, không dùng nút Ẩn viewport  1079ms
+   ✓ ObjectReviewView > đổi job reset viewport hide dù object ID trùng nhau  975ms
+   ✓ ObjectReviewView > Pending preview binds Gaussian and static Studio collision to the editable object at B without confirming it  518ms
+   ✓ ObjectReviewView > archive separates Ignore, Delete, Merge, viewport Hide and simulation disable  761ms
+   ✓ ObjectReviewView > restore simulation-disabled object sends active=true while viewport restore stays local  443ms
+   ✓ ObjectReviewView > merged restore explains group restoration and requires explicit confirmation  2399ms
+   ✓ ObjectReviewView > legacy INVALID_OBJECT_ACTIVATION offers a Candidate repair instead of automatic confirmation  725ms
+   ✓ ObjectReviewView > Candidate inspector exposes Merge and explains that it joins parts of one object  827ms
+   ✓ ObjectReviewView > Candidate Move/Rotate, Hide/Show, Delete/Restore keep Gaussian, collider and gizmo bound to one object  1366ms
+   ✓ ObjectReviewView > Ignore retains only the source observation at A; Restore rebinds the editable visual at B  825ms
+   ✓ ObjectReviewView > scene Draft: hiện banner Tạo mesh, khoá Dịch/Xoay bằng lý do, và gizmo không mở  395ms
+   ✓ ObjectReviewView > scene Draft: khoá Thêm vật cản hộp và Thêm từ thư viện; scene sẵn sàng vẫn bấm được  366ms
+   ✓ ObjectReviewView chỉnh vùng (T-016) > scene có object_geometry: Chỉnh vùng mở panel của vật đang chọn; Brush/Lasso vẫn là trình sửa chi tiết  1153ms
+   ✓ ObjectReviewView chỉnh vùng (T-016) > Draft (object_geometry đang duyệt, không có collision theo vật): Chỉnh vùng vẫn mở panel; Brush/Lasso bị khoá kèm lý do  997ms
+   ✓ ObjectReviewView chỉnh vùng (T-016) > scene cũ chưa có object_geometry giữ nút Chỉnh vùng Gaussian cũ  428ms
+   ✓ ObjectReviewView chỉnh vùng (T-016) > Apply trên Draft (201) gửi revision và membership, đóng panel rồi tải lại scene  1128ms
+   ✓ ObjectReviewView chỉnh vùng (T-016) > Apply trên Ready (202) đóng panel và yêu cầu đọc lại tiến độ qua trạng thái tách vật chung  2078ms
+   ✓ ObjectReviewView chỉnh vùng (T-016) > chọn vật khác thì panel chỉnh vùng của vật cũ đóng  1688ms
+   ✓ ObjectReviewView vỏ và Gaussian theo Draft/Ready (T-017) > Ready: vật đã xác nhận nạp Gaussian như trước và không có vỏ vẽ riêng  527ms
+ ✓ tests/studio-ownership.test.tsx (2 tests) 662ms
+   ✓ StudioTab ownership capabilities > keeps a foreign scene viewable but never mounts mutation editors  637ms
+ ✓ tests/playcanvas-camera.test.tsx (4 tests) 1048ms
+   ✓ PlayCanvas camera bridge > captures the real app camera and restores poses through the public annotation command  681ms
+ ✓ tests/studio-demo-showcase.test.tsx (7 tests) 676ms
+   ✓ khung xem trước phát lại > bước chưa có bằng chứng nói thẳng và không vẽ số liệu  480ms
+ ✓ tests/region-overlay.test.ts (36 tests) 1296ms
+   ✓ RegionOverlay.setBoxes > draws one entity per box under the region root  729ms
+ ✓ tests/mode-comparison-view.test.tsx (3 tests) 655ms
+   ✓ metric comparison provenance > shows a MoGe estimate separately from the accepted estimate, without claiming manual measurement  509ms
+ ✓ tests/api-client.test.ts (20 tests) 162ms
+ ✓ tests/direct-upload.test.ts (10 tests) 72ms
+ ✓ tests/scene-overlay-gizmo.test.ts (5 tests) 789ms
+   ✓ SceneOverlay - Gaussian and collider attachment > translate targets the loaded Gaussian entity and keeps its outline synchronized  687ms
+stdout | tests/collider-loading.test.ts
+SuperSplat Viewer v1.35.2 | Engine v2.22.4 (b5b9839)
+
+ ✓ tests/shell-glow.test.ts (18 tests) 868ms
+   ✓ ShellGlowLayer: vỏ của vật > vỏ là con của entity vật, nên đi theo transform của vật  644ms
+ ✓ tests/collider-loading.test.ts (13 tests) 1016ms
+ ✓ tests/video-normalization-service.test.ts (3 tests) 161ms
+ ✓ tests/video-normalization-core.test.ts (10 tests) 72ms
+ ✓ tests/glb-collider-parts.test.ts (7 tests) 76ms
+ ✓ tests/metric-confirm.test.ts (10 tests) 32ms
+ ✓ tests/registration-api.test.ts (10 tests) 33ms
+ ✓ tests/layers.test.ts (25 tests) 93ms
+ ✓ tests/input-kinds.test.ts (6 tests) 119ms
+ ✓ tests/upload-route.test.ts (2 tests) 38ms
+ ✓ tests/region-box-model.test.ts (55 tests) 116ms
+ ✓ tests/prepared-video-upload.test.ts (4 tests) 140ms
+ ✓ tests/video-preparation-contract.test.ts (10 tests) 114ms
+stdout | tests/source-frame.test.ts
+SuperSplat Viewer v1.35.2 | Engine v2.22.4 (b5b9839)
+
+ ✓ tests/source-frame.test.ts (12 tests) 116ms
+ ✓ tests/landing-redirects.test.ts (2 tests) 20ms
+ ✓ tests/studio-demo-replay.test.ts (5 tests) 40ms
+ ✓ tests/inspection-history.test.ts (5 tests) 31ms
+stderr | tests/stage-viewer.test.ts
+WARNING: Multiple instances of Three.js being imported.
+
+ ✓ tests/studio-contracts.test.ts (10 tests) 34ms
+ ✓ tests/preview-contract.test.ts (2 tests) 15ms
+ ✓ tests/glb-mesh.test.ts (21 tests) 81ms
+ ✓ tests/auth-ui.test.ts (4 tests) 10ms
+ ✓ tests/input-assembly-contract.test.ts (2 tests) 21ms
+ ✓ tests/source-selection.test.ts (3 tests) 19ms
+ ✓ tests/third-person.test.ts (6 tests) 29ms
+stdout | tests/stage-viewer.test.ts
+SuperSplat Viewer v1.35.2 | Engine v2.22.4 (b5b9839)
+
+ ✓ tests/viewer-collision-patch.test.ts (1 test) 75ms
+ ✓ tests/studio-pipeline-eta.test.ts (5 tests) 14ms
+ ✓ tests/stage-viewer.test.ts (4 tests) 49ms
+ ✓ tests/scene-overlay-pick.test.ts (7 tests) 35ms
+stdout | tests/compound-physics.test.ts > matches canonical object × collider × GLB-node transforms in Ammo and camera queries
+SuperSplat Viewer v1.35.2 | Engine v2.22.4 (b5b9839)
+
+stdout | tests/scene-physics.test.ts
+SuperSplat Viewer v1.35.2 | Engine v2.22.4 (b5b9839)
+
+stdout | tests/compound-physics.test.ts > repeated native world teardown balances tracked allocations and stabilizes WASM heap capacity
+PR04 native allocation metrics {"cycles":55,"allocations":3740,"releases":3740,"live":0,"heapBefore":16777216,"heapAfter":16777216,"measuredCycles":50,"durationMs":798.0345299999999}
+
+ ✓ tests/compound-physics.test.ts (7 tests) 1618ms
+   ✓ repeated native world teardown balances tracked allocations and stabilizes WASM heap capacity  909ms
+ ✓ tests/scene-physics.test.ts (12 tests) 435ms
+stdout | tests/object-camera-collision.test.ts
+SuperSplat Viewer v1.35.2 | Engine v2.22.4 (b5b9839)
+
+stdout | tests/walk-support.test.ts
+SuperSplat Viewer v1.35.2 | Engine v2.22.4 (b5b9839)
+
+stdout | tests/object-camera-collision.test.ts > pose updates rebuild only the changed object query mesh, never the PR-03 environment BVH
+PR04 camera query metrics {"changedPoses":299,"queryBuilds":300,"durationMs":77.2202870000001,"environmentRebuilds":0,"trianglesPerObject":24}
+
+ ✓ tests/object-camera-collision.test.ts (3 tests) 104ms
+ ✓ tests/walk-support.test.ts (2 tests) 80ms
+
+ Test Files  80 passed (80)
+      Tests  839 passed (839)
+   Start at  02:10:29
+   Duration  78.87s (transform 26.03s, setup 70.70s, collect 171.85s, tests 216.29s, environment 288.84s, prepare 31.65s)
+

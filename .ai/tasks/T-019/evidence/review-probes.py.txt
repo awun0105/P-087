@@ -1,0 +1,120 @@
+import numpy as np
+import pytest
+from src.models.contracts.object_membership import RegionBox
+from src.services.orchestration.scene import object_region, membership_regeneration
+from src.services.orchestration.scene.object_geometry_build import ObjectGeometryBuildError
+from src.services.scene.decomposition.gaussian_split import positions, read_gaussian_ply
+from src.services.scene.editing.membership import ObjectMembershipValidationError
+from tests.test_scene.test_object_region import draft, JOB, TARGET, OTHER
+from tests.test_scene.test_object_geometry_build import draft_scene, cpu_providers, build
+
+
+def test_reopen_resets_asymmetric_membership_bounds(draft):
+    registry, scene, command, *_ = draft
+    updated = object_region.apply_region_draft(registry, JOB, TARGET, command, actor_id='audit').revision.scene
+    item = updated.objects[0]
+    xyz = positions(read_gaussian_ply(registry.runtime_resolver.require(item.visual_ref).read_bytes()))
+    reopened = command.model_copy(update={
+        'expected_scene_revision': updated.scene_revision,
+        'membership_checksum': updated.environment.membership.labels_ref.artifact_checksum,
+        'boxes': [RegionBox(op='add', center_m=(0, 0, 0), half_extents_m=tuple(v/2 for v in item.primitive_dimensions_xyz_m), yaw_rad=0)],
+        'claim_from': [],
+    })
+    result = object_region.preview_region(registry, JOB, TARGET, reopened)
+    print('REOPEN', {'local_min':xyz.min(0).tolist(), 'local_max':xyz.max(0).tolist(), 'initial_half':reopened.boxes[0].half_extents_m, 'removed_without_user_change':result['removed_count'], 'remaining':result['object_gaussian_count']})
+    assert result['removed_count'] > 0
+
+
+def test_claim_preview_accepts_emptying_donor(draft):
+    registry, scene, command, *_ = draft
+    command = command.model_copy(update={'claim_from':[OTHER], 'boxes':[RegionBox(op='add', center_m=(0,-1,0), half_extents_m=(1,2,1), yaw_rad=0)]})
+    result = object_region.preview_region(registry, JOB, TARGET, command)
+    assert result['claimed'][OTHER] == 400
+    with pytest.raises(ObjectMembershipValidationError) as error:
+        object_region.apply_region_draft(registry, JOB, TARGET, command, actor_id='audit')
+    assert registry.scene.current(JOB).scene == scene
+    print('CLAIM', {'preview_claimed':result['claimed'], 'apply_error':str(error.value)})
+
+
+def test_ignored_shell_error_still_blocks_full_build(draft_scene, cpu_providers):
+    scene = draft_scene.scene
+    obj = scene.objects[0]
+    obj = obj.model_copy(update={'provenance':{**obj.provenance,'review':'IGNORED','shell_error':'audit sparse shell'}})
+    draft_scene.scene = draft_scene.registry.scene.publish_next(draft_scene.job_id, scene.scene_revision, scene.model_copy(update={'objects':[obj, scene.objects[1]]}), 'audit-ignore').revision.scene
+    with pytest.raises(ObjectGeometryBuildError, match='audit sparse shell') as error:
+        build(draft_scene)
+    assert draft_scene.registry.scene.current(draft_scene.job_id).scene == draft_scene.scene
+    print('IGNORED_SHELL', str(error.value))
+
+
+def test_build_drops_nonzero_inpaint_count(draft_scene, cpu_providers, monkeypatch):
+    from pathlib import Path
+    from src.services.orchestration.scene import objectify
+    from src.services.scene.representation_integrity import representation_issues
+    from src.services.orchestration.scene.objects import apply_object_action
+    old_run = objectify._run
+    def run(python, script, request, workspace, name, *args, **kwargs):
+        if name != 'inpaint':
+            return old_run(python, script, request, workspace, name, *args, **kwargs)
+        rows = read_gaussian_ply(Path(request['background_ply']).read_bytes())
+        output = np.concatenate([rows, rows[:1]])
+        from src.services.scene.decomposition.gaussian_split import write_gaussian_ply
+        Path(request['output_ply']).write_bytes(write_gaussian_ply(output))
+        return {'method':'audit-add-one', 'original_gaussians':len(rows), 'inpainted_gaussians':1}
+    monkeypatch.setattr(objectify, '_run', run)
+    build(draft_scene)
+    scene = draft_scene.registry.scene.current(draft_scene.job_id).scene
+    issues = representation_issues(scene, draft_scene.registry.runtime_resolver.require)
+    assert (scene.objects[0].id, 'SOURCE_BACKGROUND_INVALID') in issues
+    patched = scene.model_copy(update={'provenance':{**scene.provenance,'inpainted_gaussians':1}})
+    repaired_issues = representation_issues(patched, draft_scene.registry.runtime_resolver.require)
+    assert not any(code == 'SOURCE_BACKGROUND_INVALID' for _,code in repaired_issues)
+    print('INPAINT_COUNT', {'published_count':scene.provenance.get('inpainted_gaussians'), 'actual_added':1, 'issues':issues, 'after_correct_count':repaired_issues})
+
+
+def test_build_inpaint_failure_with_valid_visual_rows(draft_scene, cpu_providers, monkeypatch):
+    from pathlib import Path
+    from src.models.contracts.manifests import StageId
+    from src.services.orchestration.artifacts import FilesystemArtifactStore
+    from src.services.orchestration.scene import objectify
+    from src.services.scene.decomposition.gaussian_split import write_gaussian_ply
+    from src.services.scene.representation_integrity import representation_issues
+    from src.services.simulation.preflight import run_preflight
+    scene = draft_scene.scene
+    resolver = draft_scene.registry.runtime_resolver
+    store = FilesystemArtifactStore(resolver)
+    names = ['x','y','z','opacity', *(f'scale_{i}' for i in range(3)), *(f'rot_{i}' for i in range(4)), *(f'f_dc_{i}' for i in range(3))]
+    rows = np.zeros(len(draft_scene.rows), dtype=[(name,'<f4') for name in names])
+    for name in draft_scene.rows.dtype.names:
+        rows[name] = draft_scene.rows[name]
+    def publish(payload, tail, kind):
+        return store.publish(objectify._reference(draft_scene.job_id, tail, kind, StageId.SCENE_DECOMPOSE, payload), payload)
+    source = publish(write_gaussian_ply(rows), 'audit-source/{digest}.ply', 'GaussianPLY')
+    membership = scene.environment.membership.model_copy(update={'source_visual_ref':source})
+    objects=[]
+    for item in scene.objects:
+        keys=[int(k) for k,v in membership.label_to_object_id.items() if v==item.id]
+        local=rows[np.isin(draft_scene.labels,keys)].copy()
+        for index,name in enumerate(('x','y','z')):
+            local[name]-=item.transform.translation_xyz[index]
+        visual=publish(write_gaussian_ply(local), 'audit-objects/{digest}.ply', 'ObjectGaussians')
+        objects.append(item.model_copy(update={'visual_ref':visual}))
+    draft_scene.scene = draft_scene.registry.scene.publish_next(draft_scene.job_id, scene.scene_revision, scene.model_copy(update={'objects':objects,'environment':scene.environment.model_copy(update={'membership':membership})}), 'audit-valid-source').revision.scene
+    old_run=objectify._run
+    def run(python,script,request,workspace,name,*args,**kwargs):
+        if name!='inpaint':
+            return old_run(python,script,request,workspace,name,*args,**kwargs)
+        background=read_gaussian_ply(Path(request['background_ply']).read_bytes())
+        Path(request['output_ply']).write_bytes(write_gaussian_ply(np.concatenate([background,background[:1]])))
+        return {'inpainted_gaussians':1,'original_gaussians':len(background),'method':'audit-add-one'}
+    monkeypatch.setattr(objectify,'_run',run)
+    build(draft_scene)
+    ready=draft_scene.registry.scene.current(draft_scene.job_id).scene
+    issues=representation_issues(ready,resolver.require)
+    assert issues and all(code=='SOURCE_BACKGROUND_INVALID' for _,code in issues)
+    fixed=ready.model_copy(update={'provenance':{**ready.provenance,'inpainted_gaussians':1}})
+    assert representation_issues(fixed,resolver.require)==[]
+    report=run_preflight(ready,artifact_store_root=resolver.artifact_root)
+    fixed_report=run_preflight(fixed,artifact_store_root=resolver.artifact_root)
+    print('VALID_INPAINT', {'issues':issues,'preflight':report.blocking_result.value,'with_count':fixed_report.blocking_result.value})
+    assert report.blocking_result.value=='FAIL' and fixed_report.blocking_result.value=='PASS'

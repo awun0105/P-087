@@ -1,0 +1,15 @@
+
+ RUN  v3.2.7 /home/lqaq/PROJECT/AI20K/P-087/frontend
+
+ ✓ tests/shell-glow.test.ts (18 tests) 896ms
+   ✓ ShellGlowLayer: vỏ của vật > vỏ là con của entity vật, nên đi theo transform của vật  692ms
+ ✓ tests/region-overlay.test.ts (36 tests) 1115ms
+   ✓ RegionOverlay.setBoxes > draws one entity per box under the region root  596ms
+ ✓ tests/palette.test.tsx (14 tests) 2071ms
+   ✓ chọn bảng màu > menu chỉ chọn bảng màu; sáng/tối do nút riêng và không đụng bảng màu  1837ms
+
+ Test Files  3 passed (3)
+      Tests  68 passed (68)
+   Start at  02:09:40
+   Duration  9.89s (transform 1.73s, setup 2.02s, collect 6.97s, tests 4.08s, environment 11.31s, prepare 1.18s)
+
