@@ -1,8 +1,10 @@
 """Region box resolution: acceptance tests for T-004 (one test per criterion in the plan)."""
 
 import hashlib
+import json
 import math
 import time
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -330,3 +332,20 @@ def test_preview_samples_are_complete_below_the_limit() -> None:
     payload = preview_payload(res, POSITIONS)
     assert len(payload["added_sample_m"]) == len(res.added)
     assert payload["added_sample_m"][0] == POSITIONS[res.added[0]].tolist()
+
+
+#: Ca kiểm chung với client: cùng file được vitest đọc (frontend/tests/region-box-model.test.ts).
+SHARED_CASES = json.loads((Path(__file__).parents[2] / "tests/fixtures/region_box_cases.json").read_text("utf-8"))[
+    "cases"
+]
+
+
+def test_shared_case_file_has_at_least_eight_cases() -> None:
+    assert len(SHARED_CASES) >= 8
+
+
+@pytest.mark.parametrize("case", SHARED_CASES, ids=[case["id"] for case in SHARED_CASES])
+def test_shared_case_matches_the_frontend_contains_contract(case: dict) -> None:
+    region = RegionBox.model_validate(case["box"])
+    inside = boxes_contain(np.array([case["point_m"]], dtype=float), [region])
+    assert bool(inside[0]) is case["inside"]

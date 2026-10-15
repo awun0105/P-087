@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -334,5 +337,36 @@ describe("boxesKey", () => {
     for (const b of moved) {
       expect(boxesKey([b])).not.toBe(boxesKey([original]));
     }
+  });
+});
+
+interface SharedRegionCase {
+  id: string;
+  box: { op: "add" | "subtract"; center_m: Vec3; half_extents_m: Vec3; yaw_rad: number };
+  point_m: Vec3;
+  inside: boolean;
+}
+
+// Cùng file ca kiểm với pytest (tests/fixtures/region_box_cases.json): server và client phải cho cùng kết quả.
+const SHARED_REGION_CASES = (
+  JSON.parse(readFileSync(resolve(process.cwd(), "../tests/fixtures/region_box_cases.json"), "utf8")) as {
+    cases: SharedRegionCase[];
+  }
+).cases;
+
+describe("ca kiểm dùng chung với server (tests/fixtures/region_box_cases.json)", () => {
+  it("has at least eight cases", () => {
+    expect(SHARED_REGION_CASES.length).toBeGreaterThanOrEqual(8);
+  });
+
+  it.each(SHARED_REGION_CASES.map((item) => [item.id, item] as const))("%s", (_id, item) => {
+    const shared: EditableBox = {
+      id: item.id,
+      op: item.box.op,
+      center: item.box.center_m,
+      half: item.box.half_extents_m,
+      yaw: item.box.yaw_rad,
+    };
+    expect(contains(shared, item.point_m)).toBe(item.inside);
   });
 });
