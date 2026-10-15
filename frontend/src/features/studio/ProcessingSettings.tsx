@@ -83,6 +83,7 @@ export function ProcessingSettings({
   const statusOf = (key: string) => evaluation?.parameters.find((item) => item.key === key);
   const flagged = evaluation?.parameters.some((item) => item.status !== "ok") ?? false;
   const reviewSpec = parameters.find((spec) => spec.key === GEOMETRY_REVIEW_KEY);
+  const detailParameters = parameters.filter((spec) => spec.key !== GEOMETRY_REVIEW_KEY);
   return (
     <Card className="p-5 sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -146,11 +147,11 @@ export function ProcessingSettings({
       {/* Thông số chi tiết thu gọn khi đang dùng preset và không có ô cảnh báo (STUDIO_UX_SPEC.md P3). */}
       <details className="group mt-6" open={!editable || (activePreset === null && !scenarioPreset) || flagged}>
         <summary className="cursor-pointer text-sm font-medium text-ink-muted select-none hover:text-ink">
-          Thông số chi tiết ({parameters.length} tham số)
+          Thông số chi tiết ({detailParameters.length} tham số)
         </summary>
       <div className="mt-4 space-y-6">
         {GROUPS.map((group) => {
-          const specs = parameters.filter((spec) => spec.group === group.key);
+          const specs = detailParameters.filter((spec) => spec.group === group.key);
           if (specs.length === 0) return null;
           return (
             <fieldset key={group.key} disabled={!editable}>

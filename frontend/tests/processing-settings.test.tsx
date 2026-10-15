@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ProcessingSettings } from "@/features/studio/ProcessingSettings";
 import { useProcessingForm } from "@/features/studio/useProcessingForm";
@@ -96,5 +96,12 @@ describe("lựa chọn duyệt tách vật", () => {
     render(<ProcessingSettings parameters={reviewParameters} values={reviewValues} editable onChange={onChange} />);
     fireEvent.click(screen.getByRole("radio", { name: AUTO_LABEL }));
     expect(onChange).toHaveBeenCalledWith("scene.geometry_review", "auto");
+  });
+
+  it("không lặp trong thông số nâng cao, và số đếm chỉ tính các ô còn trong danh sách", () => {
+    render(<ProcessingSettings parameters={reviewParameters} values={reviewValues} editable onChange={vi.fn()} />);
+    const details = document.querySelector("details") as HTMLElement;
+    expect(within(details).queryByLabelText("Duyệt tách vật trước khi tạo mesh")).not.toBeInTheDocument();
+    expect(screen.getByText("Thông số chi tiết (7 tham số)")).toBeInTheDocument();
   });
 });
