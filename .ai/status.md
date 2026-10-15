@@ -11,7 +11,7 @@ T-010 | API region preview/apply trên Draft | planned | engineer
 T-011 | Sửa vùng sau khi ready → rebuild vật bị ảnh hưởng | planned | engineer
 T-012 | Khoá Walk/USD/Move khi Draft | planned | engineer
 T-013 | API client + banner Draft + tiến độ build | planned | engineer
-T-014 | Box model TypeScript thuần | in-progress | engineer
+T-014 | Box model TypeScript thuần | implemented | engineer
 T-015 | Box overlay + tay nắm + góc nhìn | planned | engineer
 T-016 | Region Editor panel | planned | engineer
 T-017 | Vỏ phát sáng + điểm thêm/bớt | planned | engineer
