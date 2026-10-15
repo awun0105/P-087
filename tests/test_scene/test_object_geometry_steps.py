@@ -2,6 +2,7 @@
 
 import io
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -118,3 +119,69 @@ def test_environment_support_budget_fails_without_publication(environment_inputs
         build_environment_collision(**environment_inputs.arguments)
     assert error.value.retryable is False
     assert not environment_inputs.published
+
+
+@pytest.mark.parametrize("failure", ["zero_parts", "error", "missing_output", "missing_object"])
+def test_surface_colliders_reject_incomplete_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    from src.services.orchestration.scene.object_geometry_steps import SurfaceInput, run_surface_colliders
+
+    output = tmp_path / "collider.glb"
+    if failure != "missing_output":
+        output.write_bytes(b"collider")
+    item = {"id": "4", "parts": 0 if failure == "zero_parts" else 2}
+    if failure == "error":
+        item["error"] = "fixture failure"
+    monkeypatch.setattr(
+        pipeline, "_run", lambda *args, **kwargs: {"objects": [] if failure == "missing_object" else [item]}
+    )
+    inputs = [SurfaceInput("4", tmp_path / "surface.glb", "sha256:" + "a" * 64, output)]
+    with pytest.raises(pipeline.ObjectifyError, match="Gaussian/OBB fallback is forbidden") as error:
+        run_surface_colliders(tmp_path / "python", inputs, {}, tmp_path, 10, None)
+    assert error.value.retryable is False
+
+
+def test_surface_colliders_send_strict_local_mesh_request(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from threading import Event
+
+    from src.services.orchestration.scene.object_geometry_steps import SurfaceInput, run_surface_colliders
+
+    output = tmp_path / "collider.glb"
+    output.write_bytes(b"collider")
+    checksum = "sha256:" + "a" * 64
+    cancel = Event()
+    seen = {}
+
+    def run(
+        python: Path, script: Path, request: dict, workspace: Path, name: str, timeout: float, **kwargs: object
+    ) -> dict:
+        seen.update(request)
+        assert script == pipeline.CONVEX_RUNNER
+        assert name == "convex" and timeout == 10
+        assert kwargs["cancel_event"] is cancel
+        return {"objects": [{"id": "4", "parts": 2, "volume_m3": 0.2}]}
+
+    monkeypatch.setattr(pipeline, "_run", run)
+    actual = run_surface_colliders(
+        tmp_path / "python",
+        [SurfaceInput("4", tmp_path / "surface.glb", checksum, output)],
+        {"threshold": 0.03},
+        tmp_path,
+        10,
+        cancel,
+    )
+    assert actual == {"4": {"id": "4", "parts": 2, "volume_m3": 0.2}}
+    assert seen == {
+        "objects": [
+            {
+                "id": "4",
+                "surface_mesh": str(tmp_path / "surface.glb"),
+                "surface_checksum": checksum,
+                "coordinate_frame": "object_local",
+                "distance_unit": "m",
+                "output_glb": str(output),
+            }
+        ],
+        "config": {"threshold": 0.03},
+    }

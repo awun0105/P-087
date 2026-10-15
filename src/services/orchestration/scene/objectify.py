@@ -48,7 +48,11 @@ from src.services.orchestration.projects.registry import ProjectRegistry
 from src.services.orchestration.scene.diagnostics import capture_attempt
 from src.services.orchestration.scene.errors import SceneRevisionConflictError
 from src.services.orchestration.scene.floor_evidence import publish_floor_fit_evidence, scene_floor_fit_summary
-from src.services.orchestration.scene.object_geometry_steps import build_environment_collision
+from src.services.orchestration.scene.object_geometry_steps import (
+    SurfaceInput,
+    build_environment_collision,
+    run_surface_colliders,
+)
 from src.services.orchestration.scene.surface_evidence import publish_surface_artifacts
 from src.services.process_control import ProcessCancelledError, ProcessTimeoutError, run_cancellable_process
 from src.services.reconstruction import camera_views, metric_visual_master, package_splat
@@ -772,18 +776,6 @@ def objectify(
         ],
         "config": config.coacd.model_dump(exclude_unset=True),
     }
-    if objectgs_receipt is not None:
-        convex_request["objects"] = [
-            {
-                "id": str(part.index),
-                "surface_mesh": objectgs_receipt["objects"][label_to_object_id[str(part.index)]]["path"],
-                "surface_checksum": objectgs_receipt["objects"][label_to_object_id[str(part.index)]]["checksum"],
-                "coordinate_frame": "object_local",
-                "distance_unit": "m",
-                "output_glb": str(workspace / f"object_{part.index:03d}.glb"),
-            }
-            for part in parts
-        ]
     inpaint_request = {
         "background_ply": str(workspace / "background.ply"),
         "objects_ply": str(workspace / "objects_world.ply"),
@@ -793,16 +785,36 @@ def objectify(
         "config": config.inpaint.model_dump(exclude_unset=True),
     }
     with ThreadPoolExecutor(max_workers=2) as pool:
-        convex_job = pool.submit(
-            _run,
-            python,
-            CONVEX_RUNNER,
-            convex_request,
-            workspace,
-            "convex",
-            timeout,
-            cancel_event=cancel_event,
-        )
+        if objectgs_receipt is not None:
+            inputs = [
+                SurfaceInput(
+                    key=str(part.index),
+                    surface_path=Path(objectgs_receipt["objects"][label_to_object_id[str(part.index)]]["path"]),
+                    surface_checksum=objectgs_receipt["objects"][label_to_object_id[str(part.index)]]["checksum"],
+                    output_glb=workspace / f"object_{part.index:03d}.glb",
+                )
+                for part in parts
+            ]
+            convex_job = pool.submit(
+                run_surface_colliders,
+                python,
+                inputs,
+                config.coacd.model_dump(exclude_unset=True),
+                workspace,
+                timeout,
+                cancel_event,
+            )
+        else:
+            convex_job = pool.submit(
+                _run,
+                python,
+                CONVEX_RUNNER,
+                convex_request,
+                workspace,
+                "convex",
+                timeout,
+                cancel_event=cancel_event,
+            )
         inpaint_job = pool.submit(
             _run,
             python,
@@ -814,16 +826,11 @@ def objectify(
             cancel_event=cancel_event,
         )
         convex, inpaint = convex_job.result(), inpaint_job.result()
-    colliders = {int(item["id"]): item for item in convex["objects"]}
-    if objectgs_receipt is not None and any(
-        not colliders.get(part.index, {}).get("parts")
-        or colliders.get(part.index, {}).get("error")
-        or not (workspace / f"object_{part.index:03d}.glb").is_file()
-        for part in parts
-    ):
-        raise ObjectifyError(
-            "ObjectGS surface collider generation failed; Gaussian/OBB fallback is forbidden", retryable=False
-        )
+    colliders = (
+        {int(key): item for key, item in convex.items()}
+        if objectgs_receipt is not None
+        else {int(item["id"]): item for item in convex["objects"]}
+    )
     try:
         sog = package_splat(
             workspace / "background_inpainted.ply",
