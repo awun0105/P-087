@@ -6,7 +6,8 @@ like a solid, because nothing can enter the hollow. The shell never guesses a cl
 under tables. Shell meshes use a larger intersection budget than other surfaces, and large objects use coarser voxels.
 
 `statistics["solidity"]` is the shell volume over the volume of its convex hull. It only traces hollow faces and never
-gates the shell. A shell scanned without one face has about 55-60% of the true volume, so mass must not come from it.
+gates the shell. A shell scanned without one face keeps only part of the true volume: about 58% for a 0.4-0.6 m box
+and about 29% for a 2 m object, since the wall thickness is fixed in voxels. Do not compute mass from shell volume.
 """
 
 import hashlib
