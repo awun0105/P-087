@@ -65,12 +65,31 @@ def run_cancellable_process(
 
 
 def _kill_and_reap(process: subprocess.Popen[bytes]) -> None:
-    """Kill every descendant in the private process group and wait for its leader."""
-    try:
-        if hasattr(os, "killpg"):
-            os.killpg(process.pid, signal.SIGKILL)
-        else:
+    """Stop owned session groups, including Ninja compiler groups, then reap the leader."""
+    if hasattr(os, "killpg"):
+        # Ninja starts each compiler command in a new group within our private
+        # session. Killing only the leader's group leaves those commands alive.
+        for _ in range(2):
+            groups = {process.pid}
+            proc = Path("/proc")
+            if proc.is_dir():
+                for entry in proc.iterdir():
+                    if not entry.name.isdecimal():
+                        continue
+                    try:
+                        pid = int(entry.name)
+                        if os.getsid(pid) == process.pid:
+                            groups.add(os.getpgid(pid))
+                    except (ProcessLookupError, PermissionError):
+                        continue
+            for group in groups:
+                try:
+                    os.killpg(group, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+    else:
+        try:
             process.kill()
-    except ProcessLookupError:
-        pass
+        except ProcessLookupError:
+            pass
     process.wait()
