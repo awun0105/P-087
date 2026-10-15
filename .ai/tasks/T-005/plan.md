@@ -59,6 +59,11 @@ Không train ObjectGS, không CoACD, không vá nền, không nén SOG nền.
 6. `objectify_with_retry` không cần đổi (config đến từ job). Kiểm job có `geometry_review` trong config niêm phong
    được truyền vào `scene_config` (nhóm `scene`).
 
+7. Dọn từ review T-003: trong `extract_scene` đổi tên biến `objectgs_required` → `strict_geometry_required` và thông điệp
+   "ObjectGS job requires …" → "Job hình học nghiêm ngặt (shell/ObjectGS) cần runtime SAM2/objectify; không được lùi về legacy";
+   xoá alias `job_requires_objectgs` trong `objectify.py` (không còn nơi dùng). Nới `geometry_method` của `objectify_with_retry`
+   và `reobjectify` thành `Literal["legacy", "shell", "objectgs"]`. Commit riêng.
+
 ## Interfaces
 Không đổi chữ ký public. `ObjectifyResult` giữ nguyên.
 

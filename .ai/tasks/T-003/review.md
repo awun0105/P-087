@@ -44,3 +44,26 @@ thay bằng lớp lỗi riêng + thông điệp `detail` tiếng Việt.
 - Đổi tên biến `objectgs_required` trong `extract_scene` và thông điệp "ObjectGS job requires…" sẽ làm ở T-005, khi nhánh shell
   thật sự chạy. Ghi chú này đã có trong Known issues; không cần làm ở đây.
 - Alias `job_requires_objectgs` không còn nơi nào dùng; có thể xoá ở T-005.
+
+---
+
+# Review T-003 — Round 2
+
+Verdict: ACCEPTED
+
+Đã đọc diff `9d4bd2a5`, `f7e23d30`. Chạy lại `test_geometry_state.py`, `tests/test_contracts`, `test_objectify_config_override.py`,
+`test_scene_editor.py`, `test_objectgs_required_stage.py`: 316 passed.
+
+## Required change từ Round 1
+1. `ObjectGeometryNotReadyError(SceneEditRejectedError)` có `code = "OBJECT_GEOMETRY_NOT_READY"`, đặt trong
+   `src/services/orchestration/scene/errors.py`: **pass**.
+2. `require_geometry_ready(scene, action)` raise với "Cần tạo mesh trước khi {action}." khi `awaiting_review`; ready và scene
+   cũ đi qua: **pass**, có test cho lớp lỗi, lớp cha, `code`, thông điệp.
+3. Report Round 2 + status: **pass**. Chỉ commit dòng của task: đúng.
+
+## Ghi chú
+- `src/services/scene/geometry_state.py` import từ `src/services/orchestration/scene/errors.py`. Hướng phụ thuộc này đã có
+  tiền lệ (`worker.py`, `bundle_consumer.py`, `representation_integrity.py`), nên chấp nhận.
+- Việc còn lại đã chuyển đúng chỗ: preset → T-013; đổi tên `objectgs_required` + xoá alias `job_requires_objectgs` → T-005;
+  re-export lỗi mới → khi T-010/T-012 cần.
+- Bỏ qua bước Summarizer theo quyết định của chủ dự án.
