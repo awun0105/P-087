@@ -81,14 +81,15 @@ def test_closing_fills_enclosed_cavities():
     grid = np.zeros((12, 12, 12), dtype=bool)
     grid[2:10, 2:10, 2:10] = True
     grid[4:8, 4:8, 4:8] = False
-    assert _close_shell(grid, dilate_voxels=0, close_iterations=0)[6, 6, 6]
+    closed, _, _ = _close_shell(grid, dilate_voxels=0, close_iterations=0)
+    assert closed[6, 6, 6]
 
 
 def test_closing_does_not_bridge_wide_gaps():
     grid = np.zeros((40, 8, 8), dtype=bool)
     grid[2:10, 2:6, 2:6] = True
     grid[20:28, 2:6, 2:6] = True
-    closed = _close_shell(grid, dilate_voxels=1, close_iterations=2)
+    closed, _, _ = _close_shell(grid, dilate_voxels=1, close_iterations=2)
     assert closed[5, 4, 4] and closed[25, 4, 4]
     assert not closed[15, 4, 4]
 
@@ -122,15 +123,24 @@ BOX_LOW = np.zeros(3)
 BOX_HIGH = np.array([0.4, 0.6, 0.8])
 
 
-def open_bottom_points(rng, low, high, count):
-    """Points projected onto the top and side faces only, as if the camera never saw the bottom."""
-    points = rng.uniform(low, high, size=(count, 3))
-    distance = np.stack([points - low, high - points], axis=-1)
-    distance[:, 2, 0] = np.inf
-    axis, side = np.unravel_index(distance.reshape(count, -1).argmin(axis=1), (3, 2))
-    rows = np.arange(count)
-    points[rows, axis] = np.where(side == 0, low[axis], high[axis])
+def open_face_points(rng, low, high, count, axis, side):
+    """Uniform by area on every face except (axis, side), as if the camera never saw that face."""
+    size = high - low
+    faces = [(a, s) for a in range(3) for s in range(2) if (a, s) != (axis, side)]
+    areas = np.array([np.prod(np.delete(size, a)) for a, _ in faces])
+    choice = rng.choice(len(faces), size=count, p=areas / areas.sum())
+    points = np.empty((count, 3))
+    for index, (a, s) in enumerate(faces):
+        mask = choice == index
+        coords = rng.uniform(low, high, size=(int(mask.sum()), 3))
+        coords[:, a] = high[a] if s else low[a]
+        points[mask] = coords
     return points
+
+
+def sample_parts(rng, parts):
+    """Uniform samples inside each (low, high) box, about 10^6 points per cubic metre."""
+    return np.vstack([rng.uniform(low, high, size=(int(np.prod(high - low) * 1e6), 3)) for low, high in parts])
 
 
 def chair_points(rng):
@@ -139,7 +149,16 @@ def chair_points(rng):
     for x in (-0.2, 0.2):
         for y in (-0.2, 0.2):
             parts.append((np.array([x - 0.02, y - 0.02, 0.0]), np.array([x + 0.02, y + 0.02, 0.40])))
-    return np.vstack([rng.uniform(low, high, size=(int(np.prod(high - low) * 1e6), 3)) for low, high in parts])
+    return sample_parts(rng, parts)
+
+
+def table_points(rng):
+    """Tabletop and four 4 cm legs 0.7 m tall, sampled uniformly inside each part."""
+    parts = [(np.array([-0.4, -0.25, 0.70]), np.array([0.4, 0.25, 0.74]))]
+    for x in (-0.36, 0.36):
+        for y in (-0.2, 0.2):
+            parts.append((np.array([x - 0.02, y - 0.02, 0.0]), np.array([x + 0.02, y + 0.02, 0.70])))
+    return sample_parts(rng, parts)
 
 
 def mesh_of(shell):
@@ -174,18 +193,68 @@ def test_filled_box_gives_watertight_shell_that_passes_qa():
     assert np.all(np.abs(mesh.bounds - [BOX_LOW, BOX_HIGH]) <= 2 * VOXEL)
 
 
+def test_open_bottom_face_is_detected_as_open():
+    rng = np.random.default_rng(12)
+    shell = build_gaussian_shell(open_face_points(rng, BOX_LOW, BOX_HIGH, 20000, axis=2, side=0), None)
+    assert mesh_of(shell).is_watertight
+    assert shell.quality["passed"]
+    assert "-z" in shell.statistics["capped_directions"]
+
+
 @pytest.mark.xfail(
     strict=True,
     raises=AssertionError,
-    reason="Open question Q1 in report.md: the plan's steps only close an open bottom as a hollow rim (volume ~50%)",
+    reason="Open question Q4 in report.md: the reviewed rim-cap rule leaves wall through-holes open (volume ~58%)",
 )
 def test_open_bottom_scan_is_closed_watertight():
     rng = np.random.default_rng(12)
-    shell = build_gaussian_shell(open_bottom_points(rng, BOX_LOW, BOX_HIGH, 20000), None)
+    shell = build_gaussian_shell(open_face_points(rng, BOX_LOW, BOX_HIGH, 20000, axis=2, side=0), None)
     mesh = mesh_of(shell)
     assert mesh.is_watertight
     assert shell.quality["passed"]
     assert mesh.volume >= 0.8 * np.prod(BOX_HIGH - BOX_LOW)
+
+
+def test_box_missing_back_face_is_detected_as_capped():
+    rng = np.random.default_rng(21)
+    shell = build_gaussian_shell(open_face_points(rng, BOX_LOW, BOX_HIGH, 20000, axis=1, side=1), None)
+    assert mesh_of(shell).is_watertight
+    assert shell.quality["passed"]
+    assert "+y" in shell.statistics["capped_directions"]
+
+
+@pytest.mark.xfail(
+    strict=True,
+    raises=AssertionError,
+    reason="Open question Q4 in report.md: the reviewed rim-cap rule leaves wall through-holes open (volume ~55%)",
+)
+def test_box_missing_back_face_is_capped():
+    rng = np.random.default_rng(21)
+    shell = build_gaussian_shell(open_face_points(rng, BOX_LOW, BOX_HIGH, 20000, axis=1, side=1), None)
+    mesh = mesh_of(shell)
+    assert mesh.is_watertight
+    assert shell.quality["passed"]
+    assert mesh.volume >= 0.8 * np.prod(BOX_HIGH - BOX_LOW)
+
+
+def test_table_underside_stays_open():
+    rng = np.random.default_rng(20)
+    shell = build_gaussian_shell(table_points(rng), None)
+    mesh = mesh_of(shell)
+    assert shell.quality["passed"]
+    assert "-z" not in shell.statistics["capped_directions"]
+    assert not inside(mesh, [0.0, 0.0, 0.3])
+    assert inside(mesh, [0.36, 0.2, 0.35]) and inside(mesh, [-0.36, -0.2, 0.35])
+    assert inside(mesh, [0.0, 0.0, 0.72])
+
+
+def test_cap_can_be_disabled():
+    rng = np.random.default_rng(12)
+    shell = build_gaussian_shell(
+        open_face_points(rng, BOX_LOW, BOX_HIGH, 20000, axis=2, side=0), None, ShellParams(cap_open_faces=False)
+    )
+    assert shell.statistics["capped_directions"] == []
+    assert 0.4 * np.prod(BOX_HIGH - BOX_LOW) < mesh_of(shell).volume < 0.6 * np.prod(BOX_HIGH - BOX_LOW)
 
 
 def test_chair_leg_gaps_stay_open():
