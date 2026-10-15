@@ -609,6 +609,8 @@ def build_object_geometry(
         raise StaleObjectMembershipRevisionError(
             f"scene đã đổi: yêu cầu {expected_revision}, hiện tại {scene.scene_revision}"
         )
+    if object_ids is not None and object_geometry_state(scene) != "ready":
+        raise ObjectGeometryBuildError("Scene Draft cần dựng hình học toàn bộ vật trước khi dựng lại từng vật.")
     if scene.environment.membership is None:
         raise ObjectGeometryBuildError("Scene không có source membership để dựng hình học.")
     if membership_override is not None and (object_geometry_state(scene) != "ready" or not object_ids):

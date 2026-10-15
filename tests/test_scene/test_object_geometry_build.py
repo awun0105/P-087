@@ -695,6 +695,19 @@ def test_reviewed_build_composes_source_collision_and_restores_deleted_object(
         assert_source_restored(compose(restored))
 
 
+def test_partial_draft_build_does_not_publish_ready(
+    draft_scene: SimpleNamespace, cpu_providers: SimpleNamespace
+) -> None:
+    from src.services.orchestration.scene.object_geometry_build import ObjectGeometryBuildError
+
+    resolver = draft_scene.registry.runtime_resolver
+    before = set(resolver.list_uris(f"artifact://jobs/{draft_scene.job_id}/"))
+    with pytest.raises(ObjectGeometryBuildError, match="toàn bộ"):
+        build(draft_scene, object_ids={draft_scene.scene.objects[0].id})
+    assert draft_scene.registry.scene.current(draft_scene.job_id).scene == draft_scene.scene
+    assert set(resolver.list_uris(f"artifact://jobs/{draft_scene.job_id}/")) == before
+
+
 def test_explicit_object_ids_build_only_requested_reviewed_objects(
     draft_scene: SimpleNamespace, cpu_providers: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
