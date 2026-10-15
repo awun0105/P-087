@@ -1,12 +1,18 @@
 """Closed shell of one object from its Gaussians: opacity and floater filters, voxel closing, strict QA."""
 
+import hashlib
+import json
 import math
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
 import numpy as np
+import trimesh
 from scipy import ndimage
 from scipy.spatial import cKDTree
 from scipy.special import expit
+
+from src.services.scene.object_aware_geometry import occupancy_surface
+from src.services.scene.surface_mesh import assess_surface
 
 MIN_GAUSSIANS = 50
 _CROSS = ndimage.generate_binary_structure(3, 1)  # 6-connected neighbourhood for every morphology step
@@ -96,3 +102,132 @@ def _keep_large_components(grid: np.ndarray, min_fraction: float) -> tuple[np.nd
         raise GaussianShellError("no connected component reaches min_component_fraction")
     lookup = np.concatenate(([False], keep))
     return lookup[labels], int(keep.sum()), int(count - keep.sum())
+
+
+_MAX_DIAGONAL_ROUNDS = 10
+_BODY_DIAGONALS = (((0, 0, 0), (1, 1, 1)), ((0, 1, 1), (1, 0, 0)), ((0, 1, 0), (1, 0, 1)), ((0, 0, 1), (1, 1, 0)))
+
+
+def _window(shape: tuple[int, ...], axes: tuple[int, ...], offsets: tuple[int, ...]) -> tuple[slice, ...]:
+    """Slices picking, for every block origin, the cell shifted by offsets on axes; other axes span fully."""
+    index = [slice(None)] * len(shape)
+    for axis, offset in zip(axes, offsets, strict=True):
+        index[axis] = slice(offset, shape[axis] - 1 + offset)
+    return tuple(index)
+
+
+def _planar_diagonal_targets(grid: np.ndarray) -> np.ndarray:
+    """Empty cells that break a 2x2 checkerboard in an axis-aligned plane (would make a non-manifold edge)."""
+    targets = np.zeros_like(grid)
+    for a, b in ((0, 1), (0, 2), (1, 2)):
+        w00, w10, w01, w11 = (grid[_window(grid.shape, (a, b), shift)] for shift in ((0, 0), (1, 0), (0, 1), (1, 1)))
+        # One diagonal occupied and the other empty: turn on the empty corner with the lower index.
+        targets[_window(grid.shape, (a, b), (0, 1))] |= w00 & w11 & ~w10 & ~w01
+        targets[_window(grid.shape, (a, b), (0, 0))] |= w10 & w01 & ~w00 & ~w11
+    return targets
+
+
+def _body_diagonal_targets(grid: np.ndarray) -> np.ndarray:
+    """Repair 2x2x2 vertices where two body-diagonal cells touch, or two body-diagonal holes touch."""
+    corners = {
+        (dx, dy, dz): grid[_window(grid.shape, (0, 1, 2), (dx, dy, dz))]
+        for dx in (0, 1)
+        for dy in (0, 1)
+        for dz in (0, 1)
+    }
+    occupied = sum(corner.astype(np.uint8) for corner in corners.values())
+    targets = np.zeros_like(grid)
+    for low, high in _BODY_DIAGONALS:
+        # Two touching cells: occupy a face neighbour of the lower one. Two touching holes: occupy the lower hole.
+        touching_cells = corners[low] & corners[high] & (occupied == 2)
+        touching_holes = ~corners[low] & ~corners[high] & (occupied == 6)
+        targets[_window(grid.shape, (0, 1, 2), (1 - low[0], low[1], low[2]))] |= touching_cells
+        targets[_window(grid.shape, (0, 1, 2), low)] |= touching_holes
+    return targets
+
+
+def _repair_diagonals(grid: np.ndarray) -> tuple[np.ndarray, int]:
+    """Turn on empty cells in rounds until no diagonal contact is left; returns grid and cells added."""
+    fixes = 0
+    for _ in range(_MAX_DIAGONAL_ROUNDS):
+        targets = _planar_diagonal_targets(grid) | _body_diagonal_targets(grid)
+        if not targets.any():
+            return grid, fixes
+        fixes += int(np.count_nonzero(targets & ~grid))
+        grid = grid | targets
+    if (_planar_diagonal_targets(grid) | _body_diagonal_targets(grid)).any():
+        raise GaussianShellError("diagonal contacts remain after the repair round limit")
+    return grid, fixes
+
+
+def _as_float_array(value: object, message: str) -> np.ndarray:
+    try:
+        return np.asarray(value, dtype=np.float64)
+    except (TypeError, ValueError) as error:
+        raise GaussianShellError(message) from error
+
+
+def _validated_rows(positions: np.ndarray, opacity_logit: np.ndarray | None) -> tuple[np.ndarray, np.ndarray | None]:
+    points = _as_float_array(positions, "positions must be numeric (n, 3)")
+    if points.ndim != 2 or points.shape[1] != 3 or len(points) < MIN_GAUSSIANS or not np.isfinite(points).all():
+        raise GaussianShellError(f"shell needs at least {MIN_GAUSSIANS} finite (n, 3) Gaussian positions")
+    if opacity_logit is None:
+        return points, None
+    logit = _as_float_array(opacity_logit, "opacity logit must be numeric")
+    if logit.shape != (len(points),) or not np.isfinite(logit).all():
+        raise GaussianShellError("opacity logit must be finite with one value per position")
+    return points, logit
+
+
+def _checksum(params: ShellParams, cells: np.ndarray, origin: np.ndarray) -> str:
+    digest = hashlib.sha256(json.dumps(asdict(params), sort_keys=True).encode("utf-8"))
+    digest.update((cells + origin).astype("<i8").tobytes())
+    return "sha256:" + digest.hexdigest()
+
+
+@dataclass(frozen=True)
+class GaussianShell:
+    vertices: np.ndarray  # (N, 3) float64, object-local metres
+    faces: np.ndarray  # (M, 3) int64
+    checksum: str  # "sha256:" of the params JSON plus the final occupied cells
+    statistics: dict[str, int | float]
+    quality: dict  # assess_surface result
+
+
+def build_gaussian_shell(
+    positions: np.ndarray, opacity_logit: np.ndarray | None, params: ShellParams = ShellParams()
+) -> GaussianShell:
+    """Closed, QA-passed shell of one object's Gaussians; raises GaussianShellError rather than return an unsound mesh."""
+    points, logit = _validated_rows(positions, opacity_logit)
+    rows = len(points)
+    points, opacity_dropped, outliers_dropped = _filter_gaussians(points, logit, params)
+    pad = params.dilate_voxels + params.close_iterations + 1
+    grid, origin, occupied = _voxelize(points, params.voxel_m, pad, params.max_grid_cells)
+    grid = _close_shell(grid, params.dilate_voxels, params.close_iterations)
+    filled = int(np.count_nonzero(grid)) - occupied
+    grid, components_kept, components_dropped = _keep_large_components(grid, params.min_component_fraction)
+    grid, diagonal_fixes = _repair_diagonals(grid)
+    cells = np.argwhere(grid)
+    vertices, faces = occupancy_surface({tuple(cell) for cell in cells.tolist()}, params.voxel_m)
+    mesh = trimesh.Trimesh(vertices + origin * params.voxel_m, faces, process=False)
+    if params.smooth_iterations:
+        mesh = trimesh.smoothing.filter_taubin(mesh, iterations=params.smooth_iterations)
+    quality = assess_surface(mesh)
+    if not quality["passed"]:
+        raise GaussianShellError("gaussian shell failed surface QA: " + ", ".join(quality["reasons"]))
+    return GaussianShell(
+        vertices=np.asarray(mesh.vertices, dtype=np.float64),
+        faces=np.asarray(mesh.faces, dtype=np.int64),
+        checksum=_checksum(params, cells, origin),
+        statistics={
+            "input_rows": rows,
+            "opacity_dropped": opacity_dropped,
+            "outliers_dropped": outliers_dropped,
+            "occupied_cells": occupied,
+            "filled_cells": filled,
+            "components_kept": components_kept,
+            "components_dropped": components_dropped,
+            "diagonal_fixes": diagonal_fixes,
+        },
+        quality=quality,
+    )

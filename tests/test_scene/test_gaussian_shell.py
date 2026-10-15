@@ -2,14 +2,19 @@
 
 import numpy as np
 import pytest
+import trimesh
 
 from src.services.scene.gaussian_shell import (
     GaussianShellError,
     ShellParams,
+    _body_diagonal_targets,
     _close_shell,
     _filter_gaussians,
     _keep_large_components,
+    _planar_diagonal_targets,
+    _repair_diagonals,
     _voxelize,
+    build_gaussian_shell,
 )
 
 
@@ -108,3 +113,150 @@ def test_no_component_above_fraction_fails_closed():
     grid[::4, ::4, ::4] = True
     with pytest.raises(GaussianShellError, match="min_component_fraction"):
         _keep_large_components(grid, 0.05)
+
+
+VOXEL = 0.02
+BOX_LOW = np.zeros(3)
+BOX_HIGH = np.array([0.4, 0.6, 0.8])
+
+
+def open_bottom_points(rng, low, high, count):
+    """Points projected onto the top and side faces only, as if the camera never saw the bottom."""
+    points = rng.uniform(low, high, size=(count, 3))
+    distance = np.stack([points - low, high - points], axis=-1)
+    distance[:, 2, 0] = np.inf
+    axis, side = np.unravel_index(distance.reshape(count, -1).argmin(axis=1), (3, 2))
+    rows = np.arange(count)
+    points[rows, axis] = np.where(side == 0, low[axis], high[axis])
+    return points
+
+
+def chair_points(rng):
+    """Seat plate and four 4 cm legs spaced 40 cm apart, sampled uniformly inside each part."""
+    parts = [(np.array([-0.24, -0.24, 0.40]), np.array([0.24, 0.24, 0.44]))]
+    for x in (-0.2, 0.2):
+        for y in (-0.2, 0.2):
+            parts.append((np.array([x - 0.02, y - 0.02, 0.0]), np.array([x + 0.02, y + 0.02, 0.40])))
+    return np.vstack([rng.uniform(low, high, size=(int(np.prod(high - low) * 1e6), 3)) for low, high in parts])
+
+
+def mesh_of(shell):
+    return trimesh.Trimesh(shell.vertices, shell.faces, process=False)
+
+
+def inside(mesh, point):
+    """Parity of ray crossings from point; trimesh.contains needs rtree, which the venv does not provide."""
+    direction = np.array([1.0, 0.37, 0.19])
+    triangles = mesh.triangles
+    e1 = triangles[:, 1] - triangles[:, 0]
+    e2 = triangles[:, 2] - triangles[:, 0]
+    h = np.cross(direction, e2)
+    det = np.einsum("ij,ij->i", e1, h)
+    valid = np.abs(det) > 1e-12
+    inv = np.divide(1.0, det, out=np.zeros_like(det), where=valid)
+    s = np.asarray(point, dtype=float) - triangles[:, 0]
+    u = inv * np.einsum("ij,ij->i", s, h)
+    q = np.cross(s, e1)
+    v = inv * (q @ direction)
+    t = inv * np.einsum("ij,ij->i", e2, q)
+    hits = valid & (u >= 0) & (v >= 0) & (u + v <= 1) & (t > 1e-9)
+    return bool(hits.sum() % 2)
+
+
+def test_filled_box_gives_watertight_shell_that_passes_qa():
+    rng = np.random.default_rng(11)
+    shell = build_gaussian_shell(rng.uniform(BOX_LOW, BOX_HIGH, size=(20000, 3)), None)
+    mesh = mesh_of(shell)
+    assert mesh.is_watertight
+    assert shell.quality["passed"]
+    assert np.all(np.abs(mesh.bounds - [BOX_LOW, BOX_HIGH]) <= 2 * VOXEL)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    raises=AssertionError,
+    reason="Open question Q1 in report.md: the plan's steps only close an open bottom as a hollow rim (volume ~50%)",
+)
+def test_open_bottom_scan_is_closed_watertight():
+    rng = np.random.default_rng(12)
+    shell = build_gaussian_shell(open_bottom_points(rng, BOX_LOW, BOX_HIGH, 20000), None)
+    mesh = mesh_of(shell)
+    assert mesh.is_watertight
+    assert shell.quality["passed"]
+    assert mesh.volume >= 0.8 * np.prod(BOX_HIGH - BOX_LOW)
+
+
+def test_chair_leg_gaps_stay_open():
+    rng = np.random.default_rng(13)
+    shell = build_gaussian_shell(chair_points(rng), None)
+    mesh = mesh_of(shell)
+    assert shell.quality["passed"]
+    assert not inside(mesh, [0.0, -0.2, 0.2])
+    assert inside(mesh, [-0.2, -0.2, 0.2]) and inside(mesh, [0.2, 0.2, 0.2])
+
+
+def test_floaters_are_rejected():
+    rng = np.random.default_rng(14)
+    obj = rng.uniform(BOX_LOW, BOX_HIGH, size=(20000, 3))
+    floaters = rng.uniform([1.0, 0.0, 0.0], [2.0, 1.0, 1.0], size=(200, 3))
+    shell = build_gaussian_shell(np.vstack([obj, floaters]), None)
+    assert shell.statistics["outliers_dropped"] >= 150
+    assert np.all(np.abs(mesh_of(shell).bounds - [BOX_LOW, BOX_HIGH]) <= 2 * VOXEL)
+
+
+def test_low_opacity_gaussians_do_not_contribute():
+    rng = np.random.default_rng(15)
+    obj = rng.uniform(BOX_LOW, BOX_HIGH, size=(20000, 3))
+    stray = rng.uniform([3.0, 0.0, 0.0], [4.0, 1.0, 1.0], size=(500, 3))
+    logit = np.concatenate([np.full(len(obj), 5.0), np.full(len(stray), -5.0)])
+    with_stray = build_gaussian_shell(np.vstack([obj, stray]), logit)
+    alone = build_gaussian_shell(obj, None)
+    assert with_stray.statistics["opacity_dropped"] == 500
+    assert with_stray.checksum == alone.checksum
+    np.testing.assert_array_equal(with_stray.vertices, alone.vertices)
+
+
+def test_two_separate_blocks_keep_two_components():
+    rng = np.random.default_rng(16)
+    blocks = np.vstack(
+        [
+            rng.uniform([0.0, 0.0, 0.0], [0.2, 0.2, 0.2], size=(8000, 3)),
+            rng.uniform([0.7, 0.0, 0.0], [0.9, 0.2, 0.2], size=(8000, 3)),  # 0.5 m apart
+        ]
+    )
+    shell = build_gaussian_shell(blocks, None)
+    assert shell.statistics["components_kept"] == 2
+    assert mesh_of(shell).is_watertight
+    assert shell.quality["passed"]
+
+
+def test_invalid_inputs_fail_without_returning_a_mesh():
+    rng = np.random.default_rng(17)
+    points = rng.uniform(BOX_LOW, BOX_HIGH, size=(20000, 3))
+    with pytest.raises(GaussianShellError, match="at least 50"):
+        build_gaussian_shell(points[:49], None)
+    nan_points = points.copy()
+    nan_points[0, 0] = np.nan
+    with pytest.raises(GaussianShellError, match="finite"):
+        build_gaussian_shell(nan_points, None)
+    with pytest.raises(GaussianShellError, match="opacity logit"):
+        build_gaussian_shell(points, np.zeros(10))
+    with pytest.raises(GaussianShellError, match="max_grid_cells"):
+        build_gaussian_shell(points, None, ShellParams(max_grid_cells=1000))
+
+
+def test_planar_checkerboard_gets_one_bridging_cell():
+    grid = np.zeros((5, 5, 5), dtype=bool)
+    grid[1, 1, 1] = grid[2, 2, 1] = True
+    repaired, fixes = _repair_diagonals(grid)
+    assert fixes == 1
+    assert repaired[1, 2, 1]
+
+
+def test_body_diagonal_contact_is_repaired_until_no_pattern_remains():
+    grid = np.zeros((5, 5, 5), dtype=bool)
+    grid[1, 1, 1] = grid[2, 2, 2] = True
+    repaired, fixes = _repair_diagonals(grid)
+    assert fixes >= 1
+    assert not _planar_diagonal_targets(repaired).any()
+    assert not _body_diagonal_targets(repaired).any()
