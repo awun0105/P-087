@@ -137,3 +137,41 @@ Các lựa chọn:
 - Trạng thái T-002: `changes-requested | architect`. Nếu chọn (a), yêu cầu 1 đổi thành test phát hiện. Nếu chọn (b) hoặc (c), tôi làm trong vòng tiếp theo.
 - Test file chạy 14 s, dưới giới hạn 20 s.
 - Lệnh `graphify update .` đã chạy sau thay đổi code.
+
+## Round 3
+
+Đọc mục Round 2 của `review.md` (quyết định Q4: chọn (a), bỏ luật nắp vành). Trạng thái: **implemented, sẵn sàng cho summarizer**. T-002 không còn câu hỏi mở.
+
+### Đã làm
+1. **Xoá luật nắp vành** (`59e00968`). Xoá `_cap_open_faces`, `ShellParams.cap_open_faces`, `statistics.capped_cells`, `statistics.capped_directions`, các hằng `_CROSS_2D` và `_DIRECTIONS`, và phần docstring về nắp. `_close_shell` trở về dạng gốc, trả mảng.
+2. **Thêm `solidity`** (`45f9371f`). `solidity = volume(vỏ) / volume(bao lồi của vỏ)`, tính trên mesh sau Taubin và sau QA, ghi vào `statistics["solidity"]`. Chỉ để truy vết, không chặn.
+3. **Sửa docstring** (`74d6ab4d`). Con số 55–60% trong docstring đúng cho hộp 0,4–0,6 m nhưng sai cho vật lớn. Xem mục giới hạn bên dưới.
+4. **Test**:
+   - `test_open_bottom_scan_gives_watertight_shell_that_passes_qa` và `test_missing_back_face_gives_watertight_shell_that_passes_qa`: watertight, QA pass, `0 < solidity < 1`. Không xfail, không khẳng định thể tích.
+   - `test_solidity_is_close_to_one_for_filled_box`: hộp đặc, `solidity > 0.9`.
+   - Giữ `test_table_underside_stays_open` và `test_chair_leg_gaps_stay_open` làm kiểm tra hồi quy. Bỏ khẳng định `capped_directions` trong test gầm bàn.
+   - Xoá `test_cap_can_be_disabled`, `test_open_bottom_face_is_detected_as_open`, `test_box_missing_back_face_is_detected_as_capped`.
+   - Giữ bộ sinh dữ liệu bề mặt đều (`open_face_points`).
+
+### Kết quả
+- 4 file theo lệnh review: **57 passed, 0 xfailed** (24,1 s). T-002 không còn xfail.
+- `ruff check` và `ruff format --check` sạch trên 4 file đã sửa.
+- Solidity đo trên 6 seed (100–105): hở đáy 0,432–0,433; thiếu mặt +y 0,418–0,420; hộp đặc 0,906–0,910.
+- Test hộp đặc có biên mỏng: 0,906 so với ngưỡng 0,9. Taubin làm tròn góc nên solidity thấp hơn 1. Giữ ngưỡng theo review, không nới.
+- Dựng vỏ 2,0×0,9×0,8 m, hở đáy, 300k điểm: 3,63 s, QA pass. Trước đó là 4,93 s khi còn luật nắp. Vẫn đạt ngưỡng 15 s.
+
+### Giới hạn cần biết (đã đo, sửa so với ghi chú ban đầu)
+Thể tích vỏ của vật quét thiếu mặt nhỏ hơn thật. Tỉ lệ này phụ thuộc kích thước vật:
+- Hộp 0,4–0,6 m: vỏ/thật = 0,58 (seed 100–105: 0,581–0,583). Khớp với "khoảng 55–60%".
+- Vật 2,0×0,9×0,8 m: vỏ/thật = 0,286 (seed 12–14: 0,286 cả ba). Chỉ khoảng 29%.
+
+Lý do: tường dày khoảng 3 voxel, cố định theo voxel. Vật nhỏ có tường dày tương đối nên vỏ chiếm phần lớn thể tích. Vật lớn có tường mỏng so với kích thước nên phần rỗng chiếm nhiều hơn. Vì vậy "khoảng 55–60%" chỉ đúng cho vật nhỏ. Docstring đã sửa theo số đo.
+
+- Hiện khối lượng lấy theo nhãn vật, nên chưa ảnh hưởng. Nếu sau này tính khối lượng từ thể tích vỏ thì sẽ lệch, và với vật lớn lệch nhiều hơn.
+- Khi chạy CoACD thật trên vỏ rỗng (T-007), cần xem số mảnh collider có hợp lý không. T-002 chưa kiểm được điều này.
+
+### Commit
+- `59e00968` Remove rim cap so unseen faces stay open and the shell still passes QA
+- `45f9371f` Record shell solidity against its convex hull for traceability only
+- `74d6ab4d` Correct shell docstring: hollow volume ratio depends on object size
+- Báo cáo và status: commit riêng ngay sau đó.
