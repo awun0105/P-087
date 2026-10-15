@@ -77,11 +77,11 @@ def build_object_geometry(
 7. Vật đã Ignored/Deleted không được dựng; vật khác vẫn dựng.
 8. Dùng `source_transform`, không dùng `transform`: vật có `transform` khác `source_transform` vẫn cho collider khớp hình dạng
    (bounds object-local giống trường hợp chưa Move).
+9. Khi runtime CoACD thật có sẵn (`data/scene_runtime`), test tích hợp chạy CoACD thật; không có → `pytest.skip` kèm lý do rõ.
 10. Vỏ rỗng (quét thiếu đáy, dữ liệu `open_face_points` của `tests/test_scene/test_gaussian_shell.py`) qua CoACD thật cho số mảnh
    ≤ `max_convex_hull` của config và collider bao phủ vật (bounds collider lệch bounds vỏ ≤ 2·voxel). Ghi số mảnh và thời gian
    vào report. Nếu vượt ngân sách mảnh: báo Architect, không tự lấp vỏ.
 11. Không có trường khối lượng/quán tính nào tính từ `mesh.volume` của vỏ hay collider (grep trong code mới).
-9. Khi runtime CoACD thật có sẵn (`data/scene_runtime`), test tích hợp chạy CoACD thật; không có → `pytest.skip` kèm lý do rõ.
 
 ## Tests required
 `tests/test_scene/test_object_geometry_build.py`: fixture registry + Draft scene giống `tests/test_scene/test_membership_regeneration.py`
