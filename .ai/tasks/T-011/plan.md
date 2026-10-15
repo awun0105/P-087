@@ -49,6 +49,7 @@ Route `region/apply` trên Ready → 202 `ObjectifyState(mode="region")`. Lưu c
 4. Route `region/apply` trên Ready → 202; frontend type. Commit.
 
 ## Acceptance criteria
+0. Vật bị ảnh hưởng ở trạng thái IGNORED/DELETED/MERGED vẫn được dựng lại collider (xem review T-007).
 1. Scene ready 3 vật, sửa vùng vật A (shell): chỉ A có `collider.geometry_ref` mới; B, C giữ ref cũ (so checksum);
    collision môi trường + nền có ref mới; một revision duy nhất được publish.
 2. Không gọi ObjectGS khi `geometry_method = shell` (monkeypatch raise).

@@ -4,7 +4,7 @@ T-003 | Contract vỏ + trạng thái hình học | accepted | -
 T-004 | Box → membership (region command + preview diff) | accepted | -
 T-005 | Tách vật dừng ở Draft SceneIR | accepted | -
 T-006 | Tách helper dùng chung khỏi objectify() | accepted | -
-T-007 | Build hình học từ vỏ (Draft → ready) | implemented | engineer
+T-007 | Build hình học từ vỏ (Draft → ready) | changes-requested | engineer
 T-008 | Nâng cấp ObjectGS theo từng vật | planned | engineer
 T-009 | Hàng đợi mode geometry + API build | planned | engineer
 T-010 | API region preview/apply trên Draft | planned | engineer

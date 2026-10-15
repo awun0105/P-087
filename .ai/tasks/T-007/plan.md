@@ -75,7 +75,8 @@ def build_object_geometry(
 4. Huỷ (`cancel_event.set()` sau bước shell) → `ProcessCancelledError`/lỗi huỷ, scene không đổi, không có revision mới.
 5. Một vật vỏ lỗi → `ObjectGeometryBuildError(object_id=…)`, scene không đổi, **không** có collider OBB nào được tạo.
 6. CoACD trả 0 part → lỗi, scene không đổi.
-7. Vật đã Ignored/Deleted không được dựng; vật khác vẫn dựng.
+7. (Sửa sau review) Mọi vật trong membership đều được dựng collider, kể cả IGNORED/DELETED/MERGED: compositor Walk/USD khôi phục
+   collider tại pose nguồn cho vật không bị loại khỏi nền và cần collider khi vật DELETED được Restore.
 8. Dùng `source_transform`, không dùng `transform`: vật có `transform` khác `source_transform` vẫn cho collider khớp hình dạng
    (bounds object-local giống trường hợp chưa Move).
 9. Khi runtime CoACD thật có sẵn (`data/scene_runtime`), test tích hợp chạy CoACD thật; không có → `pytest.skip` kèm lý do rõ.
