@@ -6,7 +6,7 @@ T-005 | Tách vật dừng ở Draft SceneIR | accepted | -
 T-006 | Tách helper dùng chung khỏi objectify() | accepted | -
 T-007 | Build hình học từ vỏ (Draft → ready) | accepted | -
 T-008 | Nâng cấp ObjectGS theo từng vật | accepted | -
-T-009 | Hàng đợi mode geometry + API build | changes-requested | engineer
+T-009 | Hàng đợi mode geometry + API build | in-progress | engineer
 T-010 | API region preview/apply trên Draft | in-progress | engineer
 T-011 | Sửa vùng sau khi ready → rebuild vật bị ảnh hưởng | planned | engineer
 T-012 | Khoá Walk/USD/Move khi Draft | accepted | -
