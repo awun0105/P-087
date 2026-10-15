@@ -13,7 +13,7 @@ from src.models.contracts.coordinates import CoordinateSystem, Transform
 from src.models.contracts.manifests import StageId
 from src.models.contracts.object_membership import ObjectMembershipArtifact, ObjectRegionCommand, RegionBox
 from src.services.scene.editing.membership import ObjectMembershipValidationError
-from src.services.scene.editing.region_box import boxes_contain, resolve_region
+from src.services.scene.editing.region_box import apply_resolution, boxes_contain, preview_payload, resolve_region
 
 
 def box(**changes: object) -> dict:
@@ -290,3 +290,43 @@ def test_criterion_12_three_hundred_thousand_rows_resolve_within_the_budget() ->
     elapsed = time.perf_counter() - started
     assert int(res.object_mask.sum()) >= 50
     assert elapsed < 0.3
+
+
+def test_criterion_11_apply_relabels_rows_and_never_touches_the_input() -> None:
+    res = resolve_scene(add_box((0.5, 0.5, 0.875), (0.52, 0.52, 0.325)))
+    before = LABELS.copy()
+    updated = apply_resolution(LABELS, MANIFEST, "a", res)
+    assert np.array_equal(LABELS, before)
+    assert set(updated[res.removed]) == {-1}
+    untouched = np.ones(len(LABELS), dtype=bool)
+    untouched[res.added] = False
+    untouched[res.removed] = False
+    assert np.array_equal(updated[untouched], LABELS[untouched])
+
+
+def test_apply_gives_added_rows_the_object_label() -> None:
+    res = resolve_scene(add_box((1.0, 0.5, 0.55), (1.0, 0.52, 0.52)), claim_from=("b",))
+    updated = apply_resolution(LABELS, MANIFEST, "a", res)
+    assert set(updated[res.added]) == {1}
+    assert np.count_nonzero(updated == 1) == np.count_nonzero(LABELS == 1) + len(res.added)
+
+
+def test_preview_payload_reports_counts_and_deterministic_samples() -> None:
+    res = resolve_scene(add_box((1.0, 0.5, 0.55), (1.0, 0.52, 0.52)), claim_from=("b",))
+    payload = preview_payload(res, POSITIONS, sample_limit=50)
+    assert payload["added_count"] == len(res.added) == 330 + 990
+    assert payload["removed_count"] == 0
+    assert payload["object_gaussian_count"] == int(res.object_mask.sum())
+    assert payload["claimed"] == {"b": 990}
+    assert payload["overlaps"] == {}
+    assert payload["protected_floor_count"] == 0
+    assert len(payload["added_sample_m"]) == 50
+    assert payload["removed_sample_m"] == []
+    assert payload == preview_payload(res, POSITIONS, sample_limit=50)
+
+
+def test_preview_samples_are_complete_below_the_limit() -> None:
+    res = resolve_scene(add_box((1.0, 0.5, 0.55), (1.0, 0.52, 0.52)), claim_from=("b",))
+    payload = preview_payload(res, POSITIONS)
+    assert len(payload["added_sample_m"]) == len(res.added)
+    assert payload["added_sample_m"][0] == POSITIONS[res.added[0]].tolist()

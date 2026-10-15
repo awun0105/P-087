@@ -133,3 +133,34 @@ def resolve_region(
         overlaps=overlaps,
         protected_floor_count=int(np.count_nonzero(inside & background & floor)),
     )
+
+
+def apply_resolution(
+    labels: np.ndarray, manifest: ObjectMembershipArtifact, object_id: str, resolution: RegionResolution
+) -> np.ndarray:
+    """Nhãn mới: hàng thêm vào nhận nhãn nhỏ nhất của vật; hàng bớt về -1. Không sửa mảng đầu vào."""
+    updated = labels.copy()
+    updated[resolution.added] = min(_labels_of(manifest, object_id))
+    updated[resolution.removed] = BACKGROUND_LABEL
+    return updated
+
+
+def preview_payload(resolution: RegionResolution, positions_local: np.ndarray, sample_limit: int = 20_000) -> dict:
+    """Thống kê và mẫu toạ độ object-local cho preview. Mẫu lấy đều theo chỉ số nên cùng đầu vào cho cùng kết quả."""
+    return {
+        "added_count": int(resolution.added.size),
+        "removed_count": int(resolution.removed.size),
+        "object_gaussian_count": int(np.count_nonzero(resolution.object_mask)),
+        "protected_floor_count": resolution.protected_floor_count,
+        "overlaps": dict(resolution.overlaps),
+        "claimed": dict(resolution.claimed),
+        "added_sample_m": _even_sample(positions_local[resolution.added], sample_limit),
+        "removed_sample_m": _even_sample(positions_local[resolution.removed], sample_limit),
+    }
+
+
+def _even_sample(points: np.ndarray, limit: int) -> list[list[float]]:
+    if len(points) <= limit:
+        return points.tolist()
+    indices = np.linspace(0, len(points) - 1, num=limit).round().astype(np.int64)
+    return points[indices].tolist()
