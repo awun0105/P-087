@@ -4,7 +4,7 @@ import { useEffect, useState, type RefObject } from "react";
 
 import { Loader2 } from "lucide-react";
 import { Button, Notice } from "@/components/studio/primitives";
-import { validateBoxes } from "@/features/studio/region/box-model";
+import { toCommandBoxes, validateBoxes } from "@/features/studio/region/box-model";
 import {
   addAddBox,
   addSubtractBox,
@@ -19,6 +19,8 @@ import {
 } from "@/features/studio/region/region-session";
 import { useRegionPreview } from "@/features/studio/region/useRegionPreview";
 import type { ViewPreset } from "@/features/viewer/region-overlay";
+import { ApiError } from "@/lib/api/client";
+import { applyObjectRegion } from "@/lib/api/studio";
 import type { SceneObject } from "@/lib/contracts/api";
 
 const VIEWS: { preset: ViewPreset; label: string }[] = [
@@ -28,6 +30,9 @@ const VIEWS: { preset: ViewPreset; label: string }[] = [
 ];
 
 const NOT_READY_VIEW = "Góc nhìn chưa sẵn sàng: viewer chưa nối lệnh chuyển camera.";
+
+/** Kết quả Apply: 201 trên Draft (scene mới) hoặc 202 trên Ready (đang dựng lại vật). */
+type ApplyResult = Awaited<ReturnType<typeof applyObjectRegion>>;
 
 /** Phím Delete đang gõ trong ô nhập thì không được xoá box. */
 function isTextField(target: EventTarget | null): boolean {
@@ -47,6 +52,8 @@ export function RegionEditor({
   nameOf,
   session,
   onSession,
+  onApplied,
+  onReload,
   onClose,
   viewApi,
 }: {
@@ -60,6 +67,10 @@ export function RegionEditor({
   nameOf(id: string): string;
   session: RegionSession;
   onSession(next: RegionSession): void;
+  /** Máy chủ đã nhận Apply: cha đóng panel và tải lại theo kết quả (201 scene mới, 202 đang dựng lại). */
+  onApplied(result: ApplyResult): void;
+  /** Tải lại scene sau xung đột (409); box trong panel được giữ nguyên. */
+  onReload(): void;
   onClose(): void;
   /** Cầu nối tới overlay vùng trong viewer; null khi viewer chưa sẵn sàng. */
   viewApi: RefObject<RegionViewApi | null>;
@@ -79,6 +90,32 @@ export function RegionEditor({
   // Kết quả chỉ có khi khớp box hiện tại; đổi box thì bộ đếm cũ ẩn đi trong lúc tính lại.
   const preview = region.preview;
   const overlaps = preview ? Object.entries(preview.overlaps).filter(([, count]) => count > 0) : [];
+  const [applying, setApplying] = useState(false);
+  const [applyError, setApplyError] = useState<string | null>(null);
+  const [conflict, setConflict] = useState(false);
+  // Apply chỉ bật khi có xem trước khớp box hiện tại và box hợp lệ; đổi box là tắt lại tới khi xem trước mới về.
+  const canApply = preview !== null && boxError === null && !applying;
+
+  async function apply() {
+    if (!canApply) return;
+    setApplying(true);
+    setApplyError(null);
+    setConflict(false);
+    try {
+      const result = await applyObjectRegion(jobId, object.id, {
+        expected_scene_revision: sceneRevision,
+        membership_checksum: membershipChecksum,
+        boxes: toCommandBoxes(session.boxes),
+        claim_from: [...session.claimFrom],
+      });
+      onApplied(result);
+    } catch (cause) {
+      if (cause instanceof ApiError && cause.status === 409) setConflict(true);
+      else setApplyError(cause instanceof ApiError ? cause.detail : "Không áp dụng được vùng.");
+    } finally {
+      setApplying(false);
+    }
+  }
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -237,6 +274,36 @@ export function RegionEditor({
           {boxError}
         </p>
       )}
+      {conflict && (
+        <div role="alert" className="space-y-2 text-rust">
+          <p>Scene đã đổi ở lượt khác. Tải lại để chỉnh tiếp.</p>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => {
+              setConflict(false);
+              onReload();
+            }}
+          >
+            Tải lại
+          </Button>
+        </div>
+      )}
+      {applyError && (
+        <p role="alert" className="text-rust">
+          {applyError}
+        </p>
+      )}
+
+      <div className="flex justify-end gap-2 border-t border-line-dark pt-3">
+        <Button size="sm" variant="ghost" onClick={onClose}>
+          Huỷ
+        </Button>
+        <Button size="sm" disabled={!canApply} onClick={() => void apply()}>
+          {applying && <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden />}
+          Apply
+        </Button>
+      </div>
     </section>
   );
 }

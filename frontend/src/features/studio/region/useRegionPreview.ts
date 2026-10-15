@@ -37,7 +37,8 @@ interface PreviewState {
  */
 export function useRegionPreview(input: RegionPreviewInput) {
   const { jobId, objectId, expectedRevision, membershipChecksum, boxes, claimFrom, enabled } = input;
-  const key = regionKey(boxes, claimFrom);
+  // Khoá gồm cả revision và checksum: đổi scene hoặc membership thì kết quả cũ không còn hợp lệ.
+  const key = `${regionKey(boxes, claimFrom)}|${expectedRevision}|${membershipChecksum}`;
   const [state, setState] = useState<PreviewState | null>(null);
 
   useEffect(() => {

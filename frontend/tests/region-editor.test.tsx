@@ -3,7 +3,7 @@
  * MetricSceneView.
  */
 
-import { act, fireEvent, render, renderHook, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { useState, type RefObject } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
@@ -30,9 +30,14 @@ import type { ObjectRegionCommand, SceneObject } from "@/lib/contracts/api";
 // Các test API dùng bản thật; test hook thay bằng bản giả và trả về bản thật sau mỗi test.
 vi.mock("@/lib/api/studio", async (original) => {
   const actual = await original<typeof import("@/lib/api/studio")>();
-  return { ...actual, previewObjectRegion: vi.fn(actual.previewObjectRegion) };
+  return {
+    ...actual,
+    previewObjectRegion: vi.fn(actual.previewObjectRegion),
+    applyObjectRegion: vi.fn(actual.applyObjectRegion),
+  };
 });
 const realPreview = (await vi.importActual<typeof import("@/lib/api/studio")>("@/lib/api/studio")).previewObjectRegion;
+const realApply = (await vi.importActual<typeof import("@/lib/api/studio")>("@/lib/api/studio")).applyObjectRegion;
 
 function reply(body: unknown, status = 200): Response {
   return { ok: status < 400, status, json: async () => body, text: async () => JSON.stringify(body) } as Response;
@@ -185,6 +190,23 @@ describe("hook xem trước vùng", () => {
     expect(hook.current.loading).toBe(true);
   });
 
+  it("đổi revision của scene thì kết quả cũ ẩn đi và tính lại", async () => {
+    vi.mocked(previewObjectRegion).mockResolvedValue({ ...preview, added_count: 5 });
+    const { result: hook, rerender } = renderHook(
+      (props: { expectedRevision: string }) => useRegionPreview({ ...hookBase, boxes: [box(0.5)], ...props }),
+      { initialProps: { expectedRevision: "rev-001" } },
+    );
+    await act(async () => {
+      vi.advanceTimersByTime(PREVIEW_DEBOUNCE_MS);
+      await Promise.resolve();
+    });
+    expect(hook.current.preview?.added_count).toBe(5);
+
+    rerender({ expectedRevision: "rev-002" });
+    expect(hook.current.preview).toBeNull();
+    expect(hook.current.loading).toBe(true);
+  });
+
   it("không gọi preview khi bị tắt (box không hợp lệ)", () => {
     const { result } = renderHook(() => useRegionPreview({ ...hookBase, boxes: [box(0.5)], enabled: false }));
     act(() => vi.advanceTimersByTime(PREVIEW_DEBOUNCE_MS * 2));
@@ -266,14 +288,20 @@ describe("phiên chỉnh vùng", () => {
   });
 });
 
+type ApplyResult = Awaited<ReturnType<typeof applyObjectRegion>>;
+
 function Panel({
   start = initial,
   viewApi = { current: null },
   onClose = () => {},
+  onApplied = () => {},
+  onReload = () => {},
 }: {
   start?: RegionSession;
   viewApi?: RefObject<RegionViewApi | null>;
   onClose?: () => void;
+  onApplied?: (result: ApplyResult) => void;
+  onReload?: () => void;
 }) {
   const [session, setSession] = useState(start);
   return (
@@ -285,6 +313,8 @@ function Panel({
       nameOf={(id) => (id === "chair" ? "Ghế" : id)}
       session={session}
       onSession={setSession}
+      onApplied={onApplied}
+      onReload={onReload}
       onClose={onClose}
       viewApi={viewApi}
     />
@@ -446,6 +476,91 @@ describe("panel chỉnh vùng", () => {
     vi.mocked(previewObjectRegion).mockRejectedValue(new ApiError(422, "Box lệch khỏi sàn"));
     render(<Panel />);
     expect(await screen.findByRole("alert")).toHaveTextContent("Box lệch khỏi sàn");
+  });
+});
+
+describe("Apply và Huỷ", () => {
+  const applied = { job_id: "job-a", previous_scene_revision: "rev-001", scene_revision: "rev-002", scene: {} } as unknown as ApplyResult;
+
+  beforeEach(() => {
+    vi.mocked(previewObjectRegion).mockClear();
+    vi.mocked(previewObjectRegion).mockResolvedValue(preview);
+    vi.mocked(applyObjectRegion).mockClear();
+  });
+  afterEach(() => {
+    vi.mocked(previewObjectRegion).mockImplementation(realPreview);
+    vi.mocked(applyObjectRegion).mockImplementation(realApply);
+  });
+
+  it("Apply tắt cho tới khi có xem trước khớp box; đổi box thì tắt lại", async () => {
+    render(<Panel />);
+    expect(screen.getByRole("button", { name: "Apply" })).toBeDisabled();
+    expect(await screen.findByText("+3 / −0 · tổng 120")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Apply" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "+ Box cộng" }));
+    expect(screen.getByRole("button", { name: "Apply" })).toBeDisabled();
+    expect(await screen.findByText("+3 / −0 · tổng 120")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Apply" })).toBeEnabled();
+  });
+
+  it("Apply gửi revision, membership, box và claim hiện tại; kết quả 201 đưa cho cha", async () => {
+    vi.mocked(previewObjectRegion).mockResolvedValue({ ...preview, overlaps: { chair: 42 } });
+    vi.mocked(applyObjectRegion).mockResolvedValue(applied);
+    const onApplied = vi.fn();
+    render(<Panel onApplied={onApplied} />);
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Lấy luôn từ Ghế" }));
+    expect(await screen.findByText("Box chồng lên Ghế (42 Gaussian) — sẽ lấy về vật này")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    await waitFor(() => expect(onApplied).toHaveBeenCalledWith(applied));
+    expect(applyObjectRegion).toHaveBeenCalledWith("job-a", "pallet", {
+      expected_scene_revision: "rev-001",
+      membership_checksum: command.membership_checksum,
+      boxes: [{ op: "add", center_m: [0, 0, 0], half_extents_m: [0.6, 0.4, 0.075], yaw_rad: 0 }],
+      claim_from: ["chair"],
+    });
+  });
+
+  it("Apply trên scene Ready (202) đưa kết quả tiến độ cho cha", async () => {
+    const queued = { status: "queued", mode: "region", scene_revision: "rev-001", operation_id: "op-1" } as unknown as ApplyResult;
+    vi.mocked(applyObjectRegion).mockResolvedValue(queued);
+    const onApplied = vi.fn();
+    render(<Panel onApplied={onApplied} />);
+    await screen.findByText("+3 / −0 · tổng 120");
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    await waitFor(() => expect(onApplied).toHaveBeenCalledWith(queued));
+  });
+
+  it("409: báo scene đã đổi, giữ nguyên box, nút Tải lại gọi onReload", async () => {
+    vi.mocked(applyObjectRegion).mockRejectedValue(new ApiError(409, "revision đã đổi"));
+    const onReload = vi.fn();
+    render(<Panel onReload={onReload} />);
+    await screen.findByText("+3 / −0 · tổng 120");
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    expect(await screen.findByText("Scene đã đổi ở lượt khác. Tải lại để chỉnh tiếp.")).toBeInTheDocument();
+    expect(within(screen.getByRole("list", { name: "Box vùng" })).getAllByRole("listitem")).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Tải lại" }));
+    expect(onReload).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("Scene đã đổi ở lượt khác. Tải lại để chỉnh tiếp.")).not.toBeInTheDocument();
+  });
+
+  it("422: hiện câu của máy chủ", async () => {
+    vi.mocked(applyObjectRegion).mockRejectedValue(
+      new ApiError(422, "Scene đã có hình học; tính năng dựng lại vật sẽ có ở bước sau."),
+    );
+    render(<Panel />);
+    await screen.findByText("+3 / −0 · tổng 120");
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Scene đã có hình học");
+  });
+
+  it("Huỷ đóng panel và không gửi ghi nào", () => {
+    const onClose = vi.fn();
+    render(<Panel onClose={onClose} />);
+    fireEvent.click(screen.getByRole("button", { name: "Huỷ" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(applyObjectRegion).not.toHaveBeenCalled();
   });
 });
 
