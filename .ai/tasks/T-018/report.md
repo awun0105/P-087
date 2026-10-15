@@ -61,6 +61,7 @@ Không đổi `src/` nào: `effective_collision.py`, `usd/builder.py` và các r
 - `pytest tests/test_scene/test_shell_geometry_walk_usd.py -q`: **6 passed**, 39 s. CoACD thật và pxr chạy qua
   `data/scene_runtime/bin/python` (không skip).
 - Bộ Tests required của plan (6 file), trên **HEAD sạch** (export `git archive HEAD` ra thư mục tạm, đã xoá): **48 passed**.
+  Chạy lại trên HEAD `3eabe47f` (đã gồm `1beebc1d` của T-011): **48 passed**. Lỗi trên working tree ở dưới không còn.
 - Bộ Tests required trên **working tree dùng chung**: 47 passed, **1 failed**:
   `tests/test_scene/test_objectgs_objectify_flow.py::test_objectgs_surface_reaches_real_coacd_and_publishes_separate_background[legacy-False-True]`.
   Nguyên nhân nằm ngoài T-018: thay đổi chưa commit trong `membership_regeneration.py` (có khả năng là phần T-011 đang
