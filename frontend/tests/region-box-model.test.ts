@@ -263,6 +263,18 @@ describe("fitBoxToPoints", () => {
     expect(fit.center).toEqual([3, 4, 5 + MIN_HALF_M]);
   });
 
+  it("puts the longer extent on x even when the principal axis is the shorter one", () => {
+    // Dense points along X plus two far Y outliers: PCA picks X, but the Y extent is longer.
+    const points: number[] = [];
+    for (let i = 0; i < 100; i++) points.push(-1 + (2 * i) / 99, 0, 0);
+    points.push(0, -1.5, 0, 0, 1.5, 0);
+    const fit = fitBoxToPoints(new Float32Array(points), 0);
+    expect(fit.half[0]).toBeCloseTo(1.5, 6);
+    expect(fit.half[1]).toBeCloseTo(1, 6);
+    // Yaw is only defined mod π, so ±π/2 are the same box.
+    expect(Math.abs(Math.abs(fit.yaw) - Math.PI / 2)).toBeLessThan(1e-6);
+  });
+
   it("rejects an empty or malformed point array", () => {
     expect(() => fitBoxToPoints(new Float32Array())).toThrow("cần mảng xyz");
     expect(() => fitBoxToPoints(new Float32Array([1, 2]))).toThrow("cần mảng xyz");
