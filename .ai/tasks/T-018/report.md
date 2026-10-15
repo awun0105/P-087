@@ -61,7 +61,8 @@ Không đổi `src/` nào: `effective_collision.py`, `usd/builder.py` và các r
 - `pytest tests/test_scene/test_shell_geometry_walk_usd.py -q`: **6 passed**, 39 s. CoACD thật và pxr chạy qua
   `data/scene_runtime/bin/python` (không skip).
 - Bộ Tests required của plan (6 file), trên **HEAD sạch** (export `git archive HEAD` ra thư mục tạm, đã xoá): **48 passed**.
-  Chạy lại trên HEAD `3eabe47f` (đã gồm `1beebc1d` của T-011): **48 passed**. Lỗi trên working tree ở dưới không còn.
+  Chạy lại trên HEAD hiện tại (đã gồm `07166cbf` và `1beebc1d` của T-011): **48 passed**. Lỗi trên working tree ở trên đã
+  hết. `07166cbf` cũng sửa `test_objectgs_objectify_flow.py` cho khớp hành vi regenerate mới; T-018 không đụng file đó.
 - Bộ Tests required trên **working tree dùng chung**: 47 passed, **1 failed**:
   `tests/test_scene/test_objectgs_objectify_flow.py::test_objectgs_surface_reaches_real_coacd_and_publishes_separate_background[legacy-False-True]`.
   Nguyên nhân nằm ngoài T-018: thay đổi chưa commit trong `membership_regeneration.py` (có khả năng là phần T-011 đang
@@ -85,8 +86,8 @@ Không đổi `src/` nào: `effective_collision.py`, `usd/builder.py` và các r
 - **Trùng tham chiếu trong inventory USD.** Với vật dựng từ vỏ, `geometry_ref` và `collider.geometry_ref` là cùng một
   `ObjectCollider`. `_collect_scene_refs` nên liệt kê collider hai lần (trong `geometry` và `colliders`), nên
   `artifact_checksums` có phần tử trùng. Manifest vẫn khớp, USD vẫn đúng. Không sửa vì ngoài phạm vi. Đề xuất T-019 kiểm.
-- **`membership_regeneration.py:225`** (đã có trong HEAD) gắn cứng `geometry_method="objectgs"` khi regenerate. Nếu scene
-  nguồn là vỏ, provenance sẽ sai. Người làm T-011 cần kiểm trước khi commit phần đang sửa file này.
+- **`membership_regeneration.py`**: trước đây gắn cứng `geometry_method="objectgs"` khi regenerate, nên scene vỏ có thể bị
+  ghi sai provenance. `07166cbf` (T-011) đã bỏ dòng đó và gọi `build_object_geometry`. Không còn mục theo dõi.
 - **`objectify_queue.py:257` (T-009)**: `object_centric` chỉ True khi `geometry_method == "objectgs"`, nên scene vỏ báo
   `object_centric=false`. Cần xác nhận Studio hiển thị đúng ý.
 - **Chưa có test `build_simulation_package` trên scene vỏ.** Plan chỉ yêu cầu USD bằng `hybrid_runner`. Đường package đầy đủ
