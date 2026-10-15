@@ -1,6 +1,6 @@
 # Review T-016
 
-Verdict: CHANGES REQUESTED
+Verdict: ACCEPTED (vòng 2)
 
 Review **code** (không chỉ diff): đọc trọn `RegionEditor.tsx`, `region-session.ts`, `useRegionPreview.ts`, phần sửa `MetricSceneView.tsx`,
 `ObjectReviewView.tsx`, `useObjectify.ts`, và đối chiếu `src/services/scene/editing/region_box.py`.
@@ -45,3 +45,23 @@ cd frontend
 npm run typecheck && ./node_modules/.bin/eslint <các file đã sửa>
 ```
 Thêm "Round 2" vào report, đặt `implemented`.
+
+
+## Round 2 — ACCEPTED
+
+Đọc diff `2ab02fee`, `7e99a225`; đối chiếu `region_box.py` và `objectify._publish_draft`. Chạy lại
+`object-review`, `region-editor`, `region-overlay`: 143/143 PASS.
+
+1. Pass. Nhóm nút mới chỉ cần membership chứa vật; nhánh scene cũ (không có khóa `object_geometry`) vẫn đòi
+   `object_aware_collision_ref`. Nút "Chỉnh vùng" còn cần `primitive_dimensions_xyz_m`; Draft có trường này
+   (`objectify.py:399`), nên không bị khoá trên Draft thật.
+2. Pass. Brush/Lasso disable + tooltip khi `awaiting_review`; Ready vẫn bật (có test).
+3. Pass. Danh sách = hợp `claimed` ∪ `overlaps` ∪ `claimFrom`, không trùng; vật đã tick mà rời box hiện
+   "không còn trong box" và bỏ tick được. Test tick → claimed → bỏ tick kiểm `claim_from: []`.
+
+Agent đã kiểm test bắt được lỗi cũ (đặt lại điều kiện cũ → đỏ). Lệch nhỏ (id `chair` thay `b`) chấp nhận.
+
+Suggestion (không chặn): thứ tự dòng có thể nhảy khi một vật đổi từ `overlap` sang `claimed`; nếu thấy khó chịu khi
+dùng thật, sắp theo tên.
+
+Còn lại cho chủ dự án: kiểm bằng mắt trên Draft thật và đường Ready (202) với scene thật.
