@@ -3,6 +3,7 @@
 import hashlib
 import json
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from threading import Event
 
@@ -17,7 +18,7 @@ from src.models.contracts.object_membership import (
     ObjectMembershipReassignCommand,
 )
 from src.models.contracts.scene import SceneIR
-from src.services.orchestration.artifacts import FilesystemArtifactStore
+from src.services.orchestration.artifacts import ArtifactResolver, FilesystemArtifactStore
 from src.services.orchestration.jobs.database import RuntimeTransaction
 from src.services.orchestration.jobs.stage_views import job_bundle
 from src.services.orchestration.projects.registry import ProjectRegistry
@@ -39,21 +40,46 @@ from src.services.scene.editing.membership import (
 from src.services.scene.floor_model import above_floor_mask, fit_canonical_floor_model, point_cloud_checksum
 
 
+@dataclass(frozen=True)
+class MembershipSource:
+    positions: np.ndarray
+    rows: np.ndarray
+    labels: np.ndarray
+    manifest: ObjectMembershipArtifact
+    floor_protected: np.ndarray | None
+
+
+def _load_membership_source(
+    resolver: ArtifactResolver, membership: ObjectMembershipArtifact, *, protect_floor: bool
+) -> MembershipSource:
+    payload = resolver.require(membership.source_visual_ref).read_bytes()
+    if "sha256:" + hashlib.sha256(payload).hexdigest() != membership.source_visual_ref.artifact_checksum:
+        raise ObjectMembershipValidationError("source PLY checksum mismatch")
+    rows = read_gaussian_ply(payload)
+    xyz = positions(rows)
+    labels = decode_gaussian_membership_labels(resolver.require(membership.labels_ref).read_bytes(), membership)
+    protected = None
+    if protect_floor:
+        floor = fit_canonical_floor_model(xyz, point_cloud_checksum(xyz))
+        protected = ~above_floor_mask(xyz, floor)
+    return MembershipSource(xyz, rows, labels, membership, protected)
+
+
+def load_membership_source(registry: ProjectRegistry, job_id: str, scene: SceneIR) -> MembershipSource:
+    """Read immutable source rows, current labels and the canonical floor mask."""
+    membership = scene.environment.membership
+    if membership is None:
+        raise ObjectMembershipValidationError("scene has no persisted Gaussian membership")
+    return _load_membership_source(registry.runtime_resolver, membership, protect_floor=True)
+
+
 def prepare_correction(
     editor: SceneEditor, job_id: str, command: ObjectMembershipReassignCommand
 ) -> tuple[SceneIR, ObjectMembershipArtifact, np.ndarray, dict[str, object]]:
     scene = editor.current(job_id).scene
     membership = validate_object_membership_command(scene, command)
-    payload = editor.resolver.require(membership.source_visual_ref).read_bytes()
-    if "sha256:" + hashlib.sha256(payload).hexdigest() != membership.source_visual_ref.artifact_checksum:
-        raise ObjectMembershipValidationError("source PLY checksum mismatch")
-    rows = read_gaussian_ply(payload)
-    xyz = positions(rows)
-    labels = decode_gaussian_membership_labels(editor.resolver.require(membership.labels_ref).read_bytes(), membership)
-    protected = None
-    if command.source_object_id is None:
-        floor = fit_canonical_floor_model(xyz, point_cloud_checksum(xyz))
-        protected = ~above_floor_mask(xyz, floor)
+    source = _load_membership_source(editor.resolver, membership, protect_floor=command.source_object_id is None)
+    xyz, labels, protected = source.positions, source.labels, source.floor_protected
     selected, preview = select_source_gaussians(
         xyz,
         labels,

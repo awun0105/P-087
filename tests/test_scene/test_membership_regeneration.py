@@ -115,3 +115,17 @@ def test_regeneration_preserves_active_scene_until_fenced_publish(tmp_path, monk
             else current.scene_revision != base.scene_revision
         )
     assert len(seen) == 1
+
+
+def test_load_membership_source_preserves_rows_labels_and_floor(tmp_path, monkeypatch):
+    rows = _source_rows()
+    fixture = _fixture(tmp_path, source_rows=rows)
+    registry = SimpleNamespace(scene=fixture.editor, runtime_resolver=fixture.editor.resolver)
+    monkeypatch.setattr(module, "fit_canonical_floor_model", lambda *args: None)
+    monkeypatch.setattr(module, "above_floor_mask", lambda xyz, _: xyz[:, 2] > 1.05)
+    source = module.load_membership_source(registry, "job-fixture-001", fixture.scene)
+    np.testing.assert_array_equal(source.rows, rows)
+    np.testing.assert_array_equal(source.positions, np.column_stack([rows[name] for name in ("x", "y", "z")]))
+    np.testing.assert_array_equal(source.labels, fixture.source_labels)
+    np.testing.assert_array_equal(source.floor_protected, rows["z"] <= 1.05)
+    assert source.manifest == fixture.membership
