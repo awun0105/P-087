@@ -2,6 +2,8 @@
 
 import base64
 import io
+from pathlib import Path
+from threading import Event
 from types import SimpleNamespace
 
 import numpy as np
@@ -12,6 +14,7 @@ from src.models.contracts.object_membership import ObjectRegionCommand, RegionBo
 from src.services.orchestration.scene import membership_regeneration
 from src.services.scene.editing.membership import ObjectMembershipValidationError, StaleObjectMembershipRevisionError
 from tests.test_scene.test_object_correction import _fixture, _source_rows
+from tests.test_scene.test_object_geometry_build import build, cpu_providers, draft_scene  # noqa: F401
 
 JOB = "job-fixture-001"
 TARGET = "candidate-001"
@@ -254,3 +257,230 @@ def test_preview_three_hundred_thousand_rows_budget(tmp_path, monkeypatch):
     assert result["shell_glb_base64"] is not None
     assert result["shell_sample_rows"] <= 100_000
     assert elapsed <= 1.5
+
+
+@pytest.mark.parametrize("finish", ["success", "cancelled", "failure"])
+def test_ready_region_claim_rebuilds_both_owners_without_draft_publication(draft, monkeypatch, finish):
+    from src.services.orchestration.scene import object_region as module
+    from src.services.orchestration.scene.object_geometry_build import ObjectGeometryBuildError
+    from src.services.process_control import ProcessCancelledError
+    from src.services.scene.editing.membership import decode_gaussian_membership_labels
+
+    registry, scene, command, rows, old_labels = draft
+    scene = registry.scene.publish_next(
+        JOB,
+        scene.scene_revision,
+        scene.model_copy(update={"provenance": {"object_geometry": "ready"}}),
+        "ready-fixture",
+    ).revision.scene
+    command = command.model_copy(update={"expected_scene_revision": scene.scene_revision, "claim_from": [OTHER]})
+    seen = []
+
+    def build(registry_arg, settings, job_id, *, membership_override, object_ids, expected_revision, **kwargs):
+        assert registry_arg is registry and job_id == JOB
+        assert registry.scene.current(JOB).scene == scene
+        assert object_ids == {TARGET, OTHER}
+        updated = membership_override
+        actual = decode_gaussian_membership_labels(
+            registry.runtime_resolver.require(updated.manifest.labels_ref).read_bytes(), updated.manifest
+        )
+        np.testing.assert_array_equal(actual, updated.labels)
+        assert np.count_nonzero(actual == 2) < np.count_nonzero(old_labels == 2)
+        assert updated.evidence_ref.artifact_type == "ObjectRegionEdit"
+        seen.append(updated)
+        if finish == "cancelled":
+            raise ProcessCancelledError("cancelled")
+        if finish == "failure":
+            raise ObjectGeometryBuildError("shell failed", object_id=TARGET)
+        return registry.scene.publish_next(
+            JOB,
+            expected_revision,
+            scene.model_copy(
+                update={"environment": scene.environment.model_copy(update={"membership": updated.manifest})}
+            ),
+            "fixture-build",
+        ).revision.scene.scene_revision
+
+    monkeypatch.setattr(module, "build_object_geometry", build, raising=False)
+    arguments = dict(command=command, actor_id="reviewer", expected_revision=scene.scene_revision)
+    if finish == "success":
+        revision = module.rebuild_region_ready(registry, None, JOB, Path("fixture-work"), object_id=TARGET, **arguments)
+        assert registry.scene.current(JOB).scene.scene_revision == revision
+        assert int(revision.split("-")[1]) == int(scene.scene_revision.split("-")[1]) + 1
+    else:
+        with pytest.raises(ProcessCancelledError if finish == "cancelled" else ObjectGeometryBuildError):
+            module.rebuild_region_ready(registry, None, JOB, Path("fixture-work"), object_id=TARGET, **arguments)
+        assert registry.scene.current(JOB).scene == scene
+    assert len(seen) == 1
+
+
+def test_ready_queue_validation_rejects_claim_that_discards_an_owner(draft):
+    from src.services.orchestration.scene.object_region import validate_region_rebuild
+
+    registry, scene, command, *_ = draft
+    scene = registry.scene.publish_next(
+        JOB,
+        scene.scene_revision,
+        scene.model_copy(update={"provenance": {"object_geometry": "ready"}}),
+        "ready-fixture",
+    ).revision.scene
+    command = command.model_copy(
+        update={
+            "expected_scene_revision": scene.scene_revision,
+            "claim_from": [OTHER],
+            "boxes": [RegionBox(op="add", center_m=(0, -1, 0), half_extents_m=(1, 2, 1), yaw_rad=0)],
+        }
+    )
+    with pytest.raises(ObjectMembershipValidationError, match="50"):
+        validate_region_rebuild(registry, JOB, TARGET, command)
+
+
+def _ready(fixture, monkeypatch):  # noqa: ANN001, ANN202
+    from src.services.orchestration.scene import membership_regeneration
+
+    monkeypatch.setattr(membership_regeneration, "fit_canonical_floor_model", lambda *args: None)
+    monkeypatch.setattr(membership_regeneration, "above_floor_mask", lambda xyz, _: xyz[:, 2] > 0.05)
+    build(fixture)
+    fixture.scene = fixture.registry.scene.current(fixture.job_id).scene
+    assert fixture.scene.provenance["object_geometry"] == "ready"
+    return fixture.scene
+
+
+def _command(scene, boxes, claim_from=()):  # noqa: ANN001, ANN202
+    from src.models.contracts.object_membership import ObjectRegionCommand
+
+    return ObjectRegionCommand(
+        expected_scene_revision=scene.scene_revision,
+        membership_checksum=scene.environment.membership.labels_ref.artifact_checksum,
+        boxes=boxes,
+        claim_from=list(claim_from),
+    )
+
+
+def _box(center, half):  # noqa: ANN001, ANN202
+    return {"op": "add", "center_m": center, "half_extents_m": half, "yaw_rad": 0.0}
+
+
+def _rebuild(fixture, command, **kwargs):  # noqa: ANN001, ANN202
+    from src.services.orchestration.scene.object_region import rebuild_region_ready
+
+    return rebuild_region_ready(
+        fixture.registry,
+        fixture.settings,
+        fixture.job_id,
+        fixture.workspace / "region",
+        object_id="candidate-001",
+        command=command,
+        actor_id="tester",
+        expected_revision=command.expected_scene_revision,
+        **kwargs,
+    )
+
+
+def test_ready_region_edit_rebuilds_only_the_edited_object_and_the_environment(
+    draft_scene,  # noqa: F811
+    cpu_providers,  # noqa: F811
+    monkeypatch,  # noqa: F811
+) -> None:
+    before = _ready(draft_scene, monkeypatch)
+    old = {item.id: item for item in before.objects}
+    # Trim the three lowest grid layers of candidate-001 (object-local z below -0.11 m).
+    command = _command(before, [_box([0, 0, 0.05], [0.2, 0.2, 0.16])])
+
+    revision = _rebuild(draft_scene, command)
+
+    after = draft_scene.registry.scene.current(draft_scene.job_id).scene
+    new = {item.id: item for item in after.objects}
+    assert revision == after.scene_revision != before.scene_revision
+    assert after.provenance["object_geometry"] == "ready"
+    assert after.provenance["membership_correction"]["evidence_ref"]["artifact_type"] == "ObjectRegionEdit"
+    assert after.environment.membership.labels_ref != before.environment.membership.labels_ref
+    assert after.environment.object_aware_collision_ref != before.environment.object_aware_collision_ref
+    assert new["candidate-001"].collider.geometry_ref != old["candidate-001"].collider.geometry_ref
+    assert new["candidate-001"].provenance["gaussians"] == 990
+    # The untouched object keeps its exact geometry and collider.
+    assert new["candidate-002"].collider == old["candidate-002"].collider
+    assert new["candidate-002"].surface_mesh_ref == old["candidate-002"].surface_mesh_ref
+    assert new["candidate-001"].provenance["surface_selection"]["chosen"] == "gaussian_shell"
+    assert cpu_providers is not None
+
+
+def test_claimed_object_is_rebuilt_with_the_edited_object(draft_scene, cpu_providers, monkeypatch) -> None:  # noqa: F811
+    before = _ready(draft_scene, monkeypatch)
+    old = {item.id: item for item in before.objects}
+    # Keep all of candidate-001 and take one grid column (x = -1.88 m local) from candidate-002.
+    command = _command(
+        before,
+        [_box([0, 0, 0], [0.13, 0.17, 0.21]), _box([-1.88, 0, 0], [0.01, 0.17, 0.21])],
+        claim_from=["candidate-002"],
+    )
+
+    _rebuild(draft_scene, command)
+
+    after = {item.id: item for item in draft_scene.registry.scene.current(draft_scene.job_id).scene.objects}
+    assert after["candidate-001"].provenance["gaussians"] == 1287 + 143
+    assert after["candidate-002"].provenance["gaussians"] == 1287 - 143
+    for object_id in ("candidate-001", "candidate-002"):
+        assert after[object_id].collider.geometry_ref != old[object_id].collider.geometry_ref
+
+
+def test_shell_method_never_runs_objectgs(draft_scene, cpu_providers, monkeypatch) -> None:  # noqa: F811
+    from src.services.orchestration.scene import object_geometry_build as module
+
+    before = _ready(draft_scene, monkeypatch)
+
+    def forbidden(*args: object, **kwargs: object) -> None:
+        raise AssertionError("ObjectGS must not run for a shell region rebuild")
+
+    monkeypatch.setattr(module, "run_prepared_objectgs", forbidden)
+    _rebuild(draft_scene, _command(before, [_box([0, 0, 0.05], [0.2, 0.2, 0.16])]))
+
+
+@pytest.mark.parametrize("failure", ["stale", "cancelled", "below_minimum"])
+def test_failed_region_rebuild_keeps_the_ready_head(draft_scene, cpu_providers, monkeypatch, failure) -> None:  # noqa: F811
+    from src.services.process_control import ProcessCancelledError
+    from src.services.scene.editing.membership import (
+        ObjectMembershipValidationError,
+        StaleObjectMembershipRevisionError,
+    )
+
+    before = _ready(draft_scene, monkeypatch)
+    if failure == "below_minimum":
+        command = _command(before, [_box([0, 0, 0.2], [0.02, 0.02, 0.01])])
+        expected, kwargs = ObjectMembershipValidationError, {}
+    else:
+        command = _command(before, [_box([0, 0, 0.05], [0.2, 0.2, 0.16])])
+        if failure == "stale":
+            command = command.model_copy(update={"expected_scene_revision": "rev-999"})
+            expected, kwargs = StaleObjectMembershipRevisionError, {}
+        else:
+            cancel = Event()
+            cancel.set()
+            expected, kwargs = ProcessCancelledError, {"cancel_event": cancel}
+
+    with pytest.raises(expected):
+        _rebuild(draft_scene, command, **kwargs)
+
+    current = draft_scene.registry.scene.current(draft_scene.job_id).scene
+    assert current.scene_revision == before.scene_revision
+    assert np.array_equal(
+        np.frombuffer(
+            draft_scene.registry.runtime_resolver.require(current.environment.membership.labels_ref).read_bytes(),
+            dtype="<i4",
+        ),
+        np.frombuffer(
+            draft_scene.registry.runtime_resolver.require(before.environment.membership.labels_ref).read_bytes(),
+            dtype="<i4",
+        ),
+    )
+
+
+def test_draft_scene_is_refused_by_the_ready_rebuild(draft_scene, monkeypatch) -> None:  # noqa: F811
+    from src.services.orchestration.scene import membership_regeneration
+    from src.services.orchestration.scene.object_region import validate_region_rebuild
+    from src.services.scene.editing.membership import ObjectMembershipValidationError
+
+    monkeypatch.setattr(membership_regeneration, "fit_canonical_floor_model", lambda *args: None)
+    command = _command(draft_scene.scene, [_box([0, 0, 0.05], [0.2, 0.2, 0.16])])
+    with pytest.raises(ObjectMembershipValidationError, match="Draft"):
+        validate_region_rebuild(draft_scene.registry, draft_scene.job_id, "candidate-001", command)

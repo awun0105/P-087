@@ -23,7 +23,7 @@ from src.config import Settings
 from src.models.contracts.artifacts import Checksum, JsonObject
 from src.models.contracts.floor_model import FloorFitProfile
 from src.models.contracts.manifests import JobManifest
-from src.models.contracts.object_membership import ObjectMembershipReassignCommand
+from src.models.contracts.object_membership import ObjectMembershipReassignCommand, ObjectRegionCommand
 from src.models.contracts.reconstruction import ReconstructionBundle
 from src.services.orchestration.artifacts import ArtifactStoreError, sha256_bytes
 from src.services.orchestration.jobs.admission import (
@@ -41,6 +41,7 @@ from src.services.orchestration.scene.errors import SceneError, SceneRevisionCon
 from src.services.orchestration.scene.extraction import box_candidates_require_gpu, use_boxes
 from src.services.orchestration.scene.membership_regeneration import preview_correction, regenerate_membership
 from src.services.orchestration.scene.object_geometry_build import ObjectGeometryBuildError, build_object_geometry
+from src.services.orchestration.scene.object_region import rebuild_region_ready, validate_region_rebuild
 from src.services.orchestration.scene.objectify import AWAITING_CHOICE, METHOD, ObjectifyError, reobjectify
 from src.services.process_control import ProcessCancelledError
 from src.services.scene.geometry_state import object_geometry_state
@@ -48,7 +49,7 @@ from src.services.scene.geometry_state import object_geometry_state
 logger = logging.getLogger(__name__)
 
 ObjectifyStatus = Literal["idle", "queued", "running", "done", "failed", "cancelled"]
-ObjectifyMode = Literal["objectify", "boxes", "membership", "geometry"]
+ObjectifyMode = Literal["objectify", "boxes", "membership", "geometry", "region"]
 _LEASE_TTL = timedelta(seconds=90)
 _LEASE_HEARTBEAT_SECONDS = 20.0
 _CANCEL_POLL_SECONDS = 0.5
@@ -140,6 +141,8 @@ class _Record(BaseModel):
     config_checksum: Checksum | None = None
     resource_wait: ObjectifyResourceWait | None = None
     correction_command: ObjectMembershipReassignCommand | None = None
+    region_object_id: str | None = None
+    region_command: ObjectRegionCommand | None = None
     actor_id: str | None = None
     lease_generation: int = 0
     lease_token: str | None = None
@@ -189,12 +192,17 @@ def _input_checksum(
 
 
 def _config_checksum(
-    job: JobManifest, settings: Settings, mode: ObjectifyMode, correction: ObjectMembershipReassignCommand | None = None
+    job: JobManifest,
+    settings: Settings,
+    mode: ObjectifyMode,
+    correction: ObjectMembershipReassignCommand | None = None,
+    region: tuple[str, ObjectRegionCommand] | None = None,
 ) -> Checksum:
     """Bind the user's mode and shared runtime knobs without persisting local paths."""
     return _digest(
         {
             **({"correction": correction.model_dump(mode="json")} if correction else {}),
+            **({"region": {"object_id": region[0], "command": region[1].model_dump(mode="json")}} if region else {}),
             "operation": "reobjectify",
             "mode": mode,
             "runtime_manifest_checksum": job.runtime_manifest_checksum,
@@ -247,8 +255,13 @@ def state(registry: ProjectRegistry, settings: Settings, job_id: str) -> Objecti
         public["retryable"] = None
     if record is not None and record.status == "failed" and record.base_revision == scene.scene_revision:
         public["floor_fit"] = record.floor_fit or public["floor_fit"]
-        if record.mode in {"objectify", "geometry"} and record.config_checksum == _config_checksum(
-            registry.get_job(job_id), settings, record.mode
+        region = (
+            (record.region_object_id, record.region_command)
+            if record.region_object_id is not None and record.region_command is not None
+            else None
+        )
+        if record.config_checksum == _config_checksum(
+            registry.get_job(job_id), settings, record.mode, record.correction_command, region
         ):
             public["retryable"] = record.retryable
     return ObjectifyState(
@@ -269,6 +282,7 @@ def request(
     mode: ObjectifyMode,
     *,
     correction: ObjectMembershipReassignCommand | None = None,
+    region: tuple[str, ObjectRegionCommand] | None = None,
     actor_id: str | None = None,
 ) -> ObjectifyState:
     """Accept a request only for the current scene and freeze its input/config identity."""
@@ -287,11 +301,17 @@ def request(
     if mode == "membership":
         if correction is None or not actor_id or correction.expected_scene_revision != expected_revision:
             raise ObjectifyRequestError("membership request requires an actor and matching correction command")
-        if current.environment.object_aware_collision_ref is None:
-            raise ObjectifyRequestError("queued membership regeneration requires ObjectGS")
+        if object_geometry_state(current) != "ready":
+            raise ObjectifyRequestError("queued membership regeneration requires a Ready scene")
         preview_correction(registry.scene, job_id, correction)
     elif correction is not None:
         raise ObjectifyRequestError("correction command requires membership mode")
+    if mode == "region":
+        if region is None or not actor_id or region[1].expected_scene_revision != expected_revision:
+            raise ObjectifyRequestError("region request requires an actor and matching region command")
+        validate_region_rebuild(registry, job_id, region[0], region[1])
+    elif region is not None:
+        raise ObjectifyRequestError("region command requires region mode")
     bundle = job_bundle(registry, job)
     if bundle is None:
         raise ObjectifyRequestError("Job chưa có kết quả dựng hình hệ mét nên chưa dựng được tập vật")
@@ -302,8 +322,10 @@ def request(
         requested_at=datetime.now(UTC),
         operation_id=uuid4().hex,
         input_checksum=_input_checksum(job_id, current.scene_revision, current.scene_ir_checksum, bundle),
-        config_checksum=_config_checksum(job, settings, mode, correction),
+        config_checksum=_config_checksum(job, settings, mode, correction, region),
         correction_command=correction,
+        region_object_id=region[0] if region else None,
+        region_command=region[1] if region else None,
         actor_id=actor_id,
         phase=None if mode == "geometry" else "queued",
     )
@@ -672,13 +694,20 @@ def process_next(registry: ProjectRegistry, settings: Settings) -> bool:
         if bundle is None:
             raise ObjectifyError("job chưa có ReconstructionBundle hệ mét")
         input_checksum = _input_checksum(job_id, current.scene_revision, current.scene_ir_checksum, bundle)
-        config_checksum = _config_checksum(job, settings, running.mode, running.correction_command)
+        region = (
+            (running.region_object_id, running.region_command)
+            if running.region_object_id is not None and running.region_command is not None
+            else None
+        )
+        config_checksum = _config_checksum(job, settings, running.mode, running.correction_command, region)
         bound, bind_error = _bind_checksums(settings, job_id, running, input_checksum, config_checksum)
         if bound is None:
             raise ObjectifyError(bind_error or "không thể giữ snapshot operation")
         running = bound
 
-        uses_gpu = running.mode in {"objectify", "membership", "geometry"} or box_candidates_require_gpu(settings)
+        uses_gpu = running.mode in {"objectify", "membership", "geometry", "region"} or box_candidates_require_gpu(
+            settings
+        )
         profile = admission.operation_profile_for_job(job, gpu_required=uses_gpu)
         request = OperationAdmissionRequest(
             operation_kind="reobjectify",
@@ -709,7 +738,7 @@ def process_next(registry: ProjectRegistry, settings: Settings) -> bool:
             commit_guard=_commit_guard(job_id, running, admission, request),
             cancel_event=cancel_event,
         )
-        if running.mode in {"membership", "geometry"}:
+        if running.mode in {"membership", "geometry", "region"}:
 
             def progress(phase: str) -> None:
                 with _database(settings).transaction(write=True) as tx:
@@ -724,6 +753,20 @@ def process_next(registry: ProjectRegistry, settings: Settings) -> bool:
             if running.mode == "geometry":
                 revision = build_object_geometry(
                     registry, settings, job_id, workspace=workspace, progress=progress, **arguments
+                )
+            elif running.mode == "region":
+                if running.region_command is None or running.region_object_id is None or running.actor_id is None:
+                    raise ObjectifyRequestError("queued region payload is missing")
+                revision = rebuild_region_ready(
+                    registry,
+                    settings,
+                    job_id,
+                    workspace,
+                    object_id=running.region_object_id,
+                    command=running.region_command,
+                    actor_id=running.actor_id,
+                    progress=progress,
+                    **arguments,
                 )
             else:
                 if running.correction_command is None or running.actor_id is None:

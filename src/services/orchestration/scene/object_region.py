@@ -2,21 +2,27 @@
 
 import base64
 import json
+from collections.abc import Callable
+from pathlib import Path
+from threading import Event
 
 import numpy as np
 import trimesh
 from scipy.spatial.transform import Rotation
 
+from src.config import Settings
 from src.models.contracts.artifacts import ProductArtifactRef
 from src.models.contracts.coordinates import Transform
 from src.models.contracts.manifests import StageId
 from src.models.contracts.object_membership import ObjectRegionCommand
 from src.models.contracts.scene import SceneIR, SceneObject
 from src.services.orchestration.artifacts import FilesystemArtifactStore
+from src.services.orchestration.jobs.database import RuntimeTransaction
 from src.services.orchestration.projects.registry import ProjectRegistry
 from src.services.orchestration.scene.membership_regeneration import MembershipSource, load_membership_source
 from src.services.orchestration.scene.models import SceneEditResult
-from src.services.orchestration.scene.objectify import _reference
+from src.services.orchestration.scene.object_geometry_build import MembershipOverride, build_object_geometry
+from src.services.orchestration.scene.objectify import _ensure_not_cancelled, _reference
 from src.services.reconstruction.alignment.similarity import rotation_matrix
 from src.services.scene.decomposition.gaussian_split import write_gaussian_ply
 from src.services.scene.editing.membership import (
@@ -227,3 +233,91 @@ def apply_region_draft(
         deep=True,
     )
     return registry.scene.publish_next(job_id, command.expected_scene_revision, updated, "object_region_edit")
+
+
+def validate_region_rebuild(
+    registry: ProjectRegistry, job_id: str, object_id: str, command: ObjectRegionCommand
+) -> None:
+    """Reject a Ready region edit before it is queued; Draft edits use `apply_region_draft` instead."""
+    scene = registry.scene.current(job_id).scene
+    if object_geometry_state(scene) != "ready":
+        raise ObjectMembershipValidationError("Scene đang duyệt tách vật; Apply chỉnh vùng trực tiếp trên Draft.")
+    _, _, source, resolution, _ = _resolve(registry, job_id, object_id, command)
+    labels = apply_resolution(source.labels, source.manifest, object_id, resolution)
+    _require_remaining_rows(labels, source, {object_id, *resolution.claimed})
+
+
+def _require_remaining_rows(labels: np.ndarray, source: MembershipSource, affected: set[str]) -> None:
+    for owner in affected:
+        keys = [int(key) for key, value in source.manifest.label_to_object_id.items() if value == owner]
+        if np.count_nonzero(np.isin(labels, keys)) < MIN_OBJECT_ROWS:
+            raise ObjectMembershipValidationError(f"vật {owner} còn dưới 50 Gaussian; dùng Xoá vật thay vì thu box")
+
+
+def rebuild_region_ready(
+    registry: ProjectRegistry,
+    settings: Settings,
+    job_id: str,
+    workspace: Path,
+    *,
+    object_id: str,
+    command: ObjectRegionCommand,
+    actor_id: str,
+    expected_revision: str,
+    commit_guard: Callable[[RuntimeTransaction], bool] | None = None,
+    cancel_event: Event | None = None,
+    progress: Callable[[str], None] | None = None,
+) -> str:
+    """Apply a region edit on a Ready scene and rebuild only the affected objects in one fenced revision."""
+    _ensure_not_cancelled(cancel_event)
+    if command.expected_scene_revision != expected_revision:
+        raise StaleObjectMembershipRevisionError("region command and queue base revision differ")
+    scene, _, source, resolution, local = _resolve(registry, job_id, object_id, command)
+    if object_geometry_state(scene) != "ready":
+        raise ObjectMembershipValidationError("Scene đang duyệt tách vật; Apply chỉnh vùng trực tiếp trên Draft.")
+    labels = apply_resolution(source.labels, source.manifest, object_id, resolution)
+    affected = {object_id, *resolution.claimed}
+    _require_remaining_rows(labels, source, affected)
+    store = FilesystemArtifactStore(registry.runtime_resolver)
+
+    def publish(payload: bytes, tail: str, kind: str) -> ProductArtifactRef:
+        _ensure_not_cancelled(cancel_event)
+        reference = _reference(job_id, tail, kind, StageId.SCENE_DECOMPOSE, payload)
+        if registry.runtime_resolver.locate(reference.artifact_uri) is not None:
+            registry.runtime_resolver.require(reference)
+            return reference
+        return store.publish(reference, payload)
+
+    encoded = encode_gaussian_membership_labels(
+        labels, gaussian_count=source.manifest.gaussian_count, label_to_object_id=source.manifest.label_to_object_id
+    )
+    labels_ref = publish(encoded, "objects/membership/{digest}.i32le", "ObjectMembershipLabels")
+    membership = source.manifest.model_copy(update={"labels_ref": labels_ref}, deep=True)
+    preview = {
+        key: value
+        for key, value in preview_payload(resolution, local).items()
+        if key not in {"added_sample_m", "removed_sample_m"}
+    }
+    evidence = {
+        "command": command.model_dump(mode="json"),
+        "object_id": object_id,
+        "preview": preview,
+        "actor_id": actor_id,
+        "source_membership": source.manifest.model_dump(mode="json"),
+        "corrected_membership": membership.model_dump(mode="json"),
+    }
+    evidence_ref = publish(
+        json.dumps(evidence, sort_keys=True).encode(), "objects/regions/{digest}.json", "ObjectRegionEdit"
+    )
+    return build_object_geometry(
+        registry,
+        settings,
+        job_id,
+        expected_revision=expected_revision,
+        workspace=workspace,
+        object_ids=affected,
+        membership_override=MembershipOverride(labels, membership, evidence_ref),
+        commit_guard=commit_guard,
+        cancel_event=cancel_event,
+        progress=progress,
+    )
