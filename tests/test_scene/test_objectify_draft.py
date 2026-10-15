@@ -13,16 +13,19 @@ from src.services.orchestration.scene import objectify as module
 def draft_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     grid = np.array(np.meshgrid(*[np.linspace(-0.15, 0.15, 7)] * 3)).reshape(3, -1).T
     points = np.vstack([grid + [2, 3, 1], grid + [-2, 1, 2], [[0, 0, 0]]])
-    rows = np.zeros(len(points), dtype=[(name, "<f4") for name in ("x", "y", "z", "opacity")])
+    rows = np.zeros(
+        len(points), dtype=[(name, "<f4") for name in ("x", "y", "z", "opacity", "scale_0", "rot_0", "f_dc_0")]
+    )
     for axis, name in enumerate(("x", "y", "z")):
         rows[name] = points[:, axis]
     rows["opacity"] = 5
     labels = np.repeat([2, 5, -1], [len(grid), len(grid), 1]).astype(np.int32)
     master = tmp_path / "master.ply"
     master.write_bytes(module.gaussian_split.write_gaussian_ply(rows))
-    reference = lambda kind: module._reference(
-        "job-draft", kind + "/{digest}", kind, module.StageId.SCENE_DECOMPOSE, kind.encode()
-    )
+
+    def reference(kind: str) -> module.ProductArtifactRef:
+        return module._reference("job-draft", kind + "/{digest}", kind, module.StageId.SCENE_DECOMPOSE, kind.encode())
+
     source = reference("GaussianPLY")
     bundle = SimpleNamespace(
         visual_artifact_ref=reference("VisualArtifact"),
@@ -92,12 +95,12 @@ def draft_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 def test_objectgs_draft_does_not_require_objectgs_runtime(draft_inputs, monkeypatch):
-    class ReachedSegmentation(Exception):
+    class ReachedSegmentationError(Exception):
         pass
 
     def stop(*args, **kwargs):
-        raise ReachedSegmentation
+        raise ReachedSegmentationError
 
     monkeypatch.setattr(module, "_seeds", stop)
-    with pytest.raises(ReachedSegmentation):
+    with pytest.raises(ReachedSegmentationError):
         draft_inputs.extract("objectgs")
