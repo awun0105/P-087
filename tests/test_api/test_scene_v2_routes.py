@@ -508,3 +508,51 @@ def test_cc0_previews_match_the_nvidia_asset_sizes() -> None:
         low, high = glb_bounds((root / "catalog_previews" / f"{family}.glb").read_bytes())
         assert (high - low) == pytest.approx(catalog[family]["size_xyz_m"], abs=2e-3), family
         assert (high + low) / 2 == pytest.approx([0, 0, 0], abs=2e-3), family
+
+
+@pytest.mark.asyncio
+async def test_visual_membership_preview_rejects_stale_and_legacy_without_mutation(client, isolated_registry):
+    before = isolated_registry.scene.current("job-fixture-001").scene
+    command = {
+        "expected_scene_revision": "rev-stale",
+        "membership_checksum": "sha256:" + "a" * 64,
+        "source_visual_checksum": "sha256:" + "b" * 64,
+        "source_gaussian_indices": [0, 2],
+        "source_object_id": _PALLET,
+        "target_object_id": None,
+    }
+    stale = await client.post(f"{_JOB}/scene/membership/preview", json=command)
+    assert stale.status_code == 409
+    command["expected_scene_revision"] = before.scene_revision
+    legacy = await client.post(f"{_JOB}/scene/membership/preview", json=command)
+    assert legacy.status_code == 422
+    assert isolated_registry.scene.current("job-fixture-001").scene == before
+
+
+@pytest.mark.asyncio
+async def test_visual_membership_apply_enqueues_exact_command_and_returns_202(client, monkeypatch):
+    from src.api.product import scene as scene_api
+    from src.services.orchestration.scene.objectify_queue import ObjectifyState
+
+    seen = []
+
+    def request(registry, settings, job_id, revision, mode, *, correction, actor_id):
+        seen.append((job_id, revision, mode, correction, actor_id))
+        return ObjectifyState(status="queued", mode="membership", base_revision=revision, phase="queued")
+
+    monkeypatch.setattr(scene_api.objectify_queue, "request", request)
+    monkeypatch.setattr(scene_api, "record_gpu_run", lambda *a: None)
+    command = {
+        "expected_scene_revision": "rev-001",
+        "membership_checksum": "sha256:" + "a" * 64,
+        "source_visual_checksum": "sha256:" + "b" * 64,
+        "source_gaussian_indices": [0, 2],
+        "source_object_id": _PALLET,
+        "target_object_id": None,
+    }
+    response = await client.post(f"{_JOB}/scene/membership/regenerate", json=command)
+    assert response.status_code == 202
+    assert response.json()["mode"] == "membership" and response.json()["phase"] == "queued"
+    assert seen[0][:3] == ("job-fixture-001", "rev-001", "membership")
+    assert seen[0][3].source_gaussian_indices == [0, 2]
+    assert seen[0][4] == "local"

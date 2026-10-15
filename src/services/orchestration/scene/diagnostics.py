@@ -110,7 +110,13 @@ def seal_attempt(
             except OSError:
                 errors.append(f"{path.name}: log unavailable")
     if status == "produced":
-        for stage in ("inputs", "seeds", "sam2", "segmentation", "lift", "membership", "collider", "object_binding"):
+        corrected = any(event.get("kind") == "corrected_membership" for event in events)
+        required = (
+            ("inputs", "correction", "membership", "collider", "object_binding")
+            if corrected
+            else ("inputs", "seeds", "sam2", "segmentation", "lift", "membership", "collider", "object_binding")
+        )
+        for stage in required:
             if not (directory / f"{stage}.coverage.json").is_file():
                 errors.append(f"{stage}: missing trace; producer evidence is incomplete")
     manifest = ObjectPipelineEvidence(

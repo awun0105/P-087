@@ -98,3 +98,58 @@ print('CPU_RUNNERS_PRESERVED')
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "CPU_RUNNERS_PRESERVED" in result.stdout
+
+
+def test_corrected_masks_follow_source_rows_across_channel_chunks_without_sam(tmp_path):
+    script = r"""
+import importlib.util,sys,types
+from pathlib import Path
+import numpy as np
+import torch
+from PIL import Image
+torch.set_num_threads(1)
+original_device=torch.device
+torch.device=lambda *a,**kw: original_device('cpu')
+calls=[]
+def raster(means,quats,scales,opacity,colors,views,intrinsics,w,h,**kw):
+ assert len(means)==70 and colors.shape[0]==70
+ assert tuple(intrinsics[0].cpu().numpy()[0])==(50,0,20)
+ calls.append(colors.shape[1])
+ return colors.reshape(1,1,w,-1).expand(1,h,w,-1),None,None
+sys.modules['gsplat']=types.SimpleNamespace(rasterization=raster)
+sys.path.insert(0,str(Path('src/services/scene/association').resolve()))
+import correction_observations as module
+work=Path(sys.argv[1]);work.mkdir(exist_ok=True)
+fields=['x','y','z','opacity','scale_0','scale_1','scale_2','rot_0','rot_1','rot_2','rot_3']
+rows=np.zeros(70,dtype=[(key,'<f4') for key in fields]);rows['rot_0']=1;rows['z']=1
+header='ply\nformat binary_little_endian 1.0\nelement vertex 70\n'+''.join('property float '+key+'\n' for key in fields)+'end_header\n'
+ply=work/'source.ply';ply.write_bytes(header.encode()+rows.tobytes())
+image=work/'image.png';Image.new('RGB',(70,2)).save(image)
+labels=np.repeat(np.array([-1,*range(34)],dtype='<i4'),2)
+path=work/'labels.i32le';labels.tofile(path)
+view=dict(model='PINHOLE',width=70,height=2,parameters=[50,60,20,1],center=[2,3,4],rotation_xyzw=[0,0,0,1],image_path=str(image))
+request=dict(gaussians_ply=str(ply),labels_path=str(path),label_to_object_id={str(i):f'object-{i}' for i in range(34)},views=[view],output_dir=str(work/'before'))
+before=module.run(request)
+mask_before=np.load(before['objectgs_views'][0]['mask_path'])
+np.testing.assert_array_equal(mask_before,np.tile(labels,(2,1)))
+labels[4]=-1;labels.tofile(path)
+after=module.run(dict(request,output_dir=str(work/'after')))
+mask_after=np.load(after['objectgs_views'][0]['mask_path'])
+np.testing.assert_array_equal(mask_after,np.tile(labels,(2,1)))
+assert np.flatnonzero(mask_after[0]!=mask_before[0]).tolist()==[4]
+assert calls==[31,4,31,4]
+assert after['objectgs_views'][0]['parameters']==[50,60,20,1]
+assert after['objectgs_views'][0]['center']==[2,3,4]
+assert not torch.cuda.is_initialized()
+print('CORRECTED_MASKS_SOURCE_ROWS_CPU')
+"""
+    result = subprocess.run(
+        [str(RUNTIME), "-c", script, str(tmp_path / "work")],
+        cwd=ROOT,
+        env={**os.environ, "CUDA_VISIBLE_DEVICES": "", "OMP_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1"},
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "CORRECTED_MASKS_SOURCE_ROWS_CPU" in result.stdout

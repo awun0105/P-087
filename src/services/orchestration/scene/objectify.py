@@ -16,7 +16,7 @@ import json
 import logging
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from threading import Event
 from typing import Literal
@@ -74,6 +74,7 @@ AWAITING_CHOICE = "objectify_failed_awaiting_choice"
 _REPO = Path(__file__).resolve().parents[4]
 LIFT_RUNNER = _REPO / "src/services/scene/association/lift_runner.py"
 CONVEX_RUNNER = _REPO / "src/services/simulation/colliders/convex_runner.py"
+CORRECTION_OBSERVATIONS_RUNNER = _REPO / "src/services/scene/association/correction_observations.py"
 INPAINT_RUNNER = _REPO / "src/services/reconstruction/rgb/inpaint/inpaint_runner.py"
 #: Vùng làm việc quanh quỹ đạo camera, cùng quy tắc với REC-05 (geometry_v1).
 _CROP_MARGIN_M = 6.0
@@ -303,6 +304,16 @@ def _seeds(
     return kept[:max_objects]
 
 
+@dataclass(frozen=True)
+class CorrectedMembership:
+    """Explicit immutable source frame for regeneration, bypassing segmentation."""
+
+    membership: ObjectMembershipArtifact
+    labels: np.ndarray
+    source_poses: dict[str, Transform]
+    evidence_ref: ProductArtifactRef | None = None
+
+
 def objectify(
     registry: ProjectRegistry,
     job: JobManifest,
@@ -314,9 +325,14 @@ def objectify(
     extraction_revision: str = "rev-001",
     cancel_event: Event | None = None,
     scene_config: dict[str, object] | None = None,
+    correction: CorrectedMembership | None = None,
+    progress: Callable[[str], None] | None = None,
 ) -> ObjectifyResult:
     """Chạy toàn bộ chặng 4–7 cho một bundle hệ mét; publish artifact và trả phần SceneIR."""
     config = ObjectifyConfig.model_validate({} if scene_config is None else scene_config)
+    if correction is not None and config.scene.geometry_method != "objectgs":
+        raise ObjectifyError("corrected membership requires strict ObjectGS geometry", retryable=False)
+    report_progress = progress or (lambda stage: None)
     objectgs_runtime = None
     if config.scene.geometry_method == "objectgs":
         paths = (
@@ -340,16 +356,20 @@ def objectify(
             glm_repository=settings.product_objectgs_glm_repository,
         )
     python, checkpoint = settings.product_scene_runtime_python, settings.product_sam2_checkpoint
-    if python is None or checkpoint is None:
+    if python is None or (checkpoint is None and correction is None):
         raise ObjectifyError("chưa cấu hình runtime scene (PRODUCT_SCENE_RUNTIME_PYTHON / PRODUCT_SAM2_CHECKPOINT)")
-    runtime = Sam2Runtime(python, checkpoint, timeout_seconds=settings.product_scene_timeout_seconds)
-    if not runtime.available():
+    runtime = (
+        Sam2Runtime(python, checkpoint, timeout_seconds=settings.product_scene_timeout_seconds)
+        if correction is None
+        else None
+    )
+    if correction is None and not runtime.available():
         raise ObjectifyError("runtime scene không tồn tại trên máy này")
     resolve = registry.runtime_resolver.require
     timeout = settings.product_scene_timeout_seconds
     workspace.mkdir(parents=True, exist_ok=True)
 
-    source_visual_ref = metric_visual_master(bundle, resolve)
+    source_visual_ref = correction.membership.source_visual_ref if correction else metric_visual_master(bundle, resolve)
     master = resolve(source_visual_ref)
     if isinstance(source_visual_ref, ProductArtifactRef):
         EvidenceRecorder(workspace / "evidence", "inputs").emit(
@@ -369,74 +389,120 @@ def objectify(
     ]
     view_requests = [{**frame.view, "image_path": str(frame.image_path)} for frame in frames]
     _ensure_not_cancelled(cancel_event)
-    try:
-        seeds = _seeds(
-            rows,
-            frames,
-            np.array([view.center for view in views]),
-            runtime,
-            workspace,
-            floor_model,
-            cancel_event,
-            **({"max_objects": config.scene.max_objects} if scene_config is not None else {}),
-            **({"refinement": config.scene.refinement} if config.scene.refinement != "legacy" else {}),
-        )
-    except ObjectifyError as error:
-        error.floor_fit = floor_fit
-        raise
-    if not seeds:
-        raise ObjectifyError("không tìm thấy vật nào để tách", retryable=False, floor_fit=floor_fit)
+    if correction is None:
+        try:
+            seeds = _seeds(
+                rows,
+                frames,
+                np.array([view.center for view in views]),
+                runtime,
+                workspace,
+                floor_model,
+                cancel_event,
+                **({"max_objects": config.scene.max_objects} if scene_config is not None else {}),
+                **({"refinement": config.scene.refinement} if config.scene.refinement != "legacy" else {}),
+            )
+        except ObjectifyError as error:
+            error.floor_fit = floor_fit
+            raise
+        if not seeds:
+            raise ObjectifyError("không tìm thấy vật nào để tách", retryable=False, floor_fit=floor_fit)
 
-    np.savez(
-        workspace / "seeds.npz",
-        offsets=np.cumsum([0, *[len(seed) for seed in seeds]]),
-        members=np.concatenate(seeds),
-    )
-    lift = _run(
-        python,
-        LIFT_RUNNER,
-        {
-            "gaussians_ply": str(master),
-            "seeds_npz": str(workspace / "seeds.npz"),
-            "sam2_config": runtime.model_config,
-            "sam2_checkpoint": str(checkpoint.resolve()),
-            "output_npz": str(workspace / "labels.npz"),
-            "views": view_requests,
-            "config": config.scene.model_dump(
-                exclude={"max_objects", "geometry_method", "objectgs_iterations", "objectgs_background_voxel_m"},
-                exclude_unset=True,
-            ),
-            **(
-                {"objectgs_observations_dir": str((workspace / "objectgs-observations").resolve())}
-                if objectgs_runtime
-                else {}
-            ),
-        },
-        workspace,
-        "lift",
-        timeout,
-        cancel_event=cancel_event,
-    )
-    labels = np.load(workspace / "labels.npz")["labels"]
-    trace = EvidenceRecorder(workspace / "evidence", "membership")
-    before_floor_labels = labels
-    labels = gaussian_split.assign_floor_gaussians_to_background(
-        rows, labels, floor_model, **({"refinement": True} if config.scene.refinement == "multiview_v1" else {})
-    )
-    for label in np.unique(before_floor_labels[before_floor_labels >= 0]):
-        trace.emit(
-            "floor_filter",
-            seed=int(label),
-            before=int((before_floor_labels == label).sum()),
-            returned_to_background=int(((before_floor_labels == label) & (labels < 0)).sum()),
-            reason="floor_noise_and_covariance_guard"
-            if config.scene.refinement == "multiview_v1"
-            else "floor_protection",
-            refinement=config.scene.refinement,
+        np.savez(
+            workspace / "seeds.npz",
+            offsets=np.cumsum([0, *[len(seed) for seed in seeds]]),
+            members=np.concatenate(seeds),
         )
+        lift = _run(
+            python,
+            LIFT_RUNNER,
+            {
+                "gaussians_ply": str(master),
+                "seeds_npz": str(workspace / "seeds.npz"),
+                "sam2_config": runtime.model_config,
+                "sam2_checkpoint": str(checkpoint.resolve()),
+                "output_npz": str(workspace / "labels.npz"),
+                "views": view_requests,
+                "config": config.scene.model_dump(
+                    exclude={"max_objects", "geometry_method", "objectgs_iterations", "objectgs_background_voxel_m"},
+                    exclude_unset=True,
+                ),
+                **(
+                    {"objectgs_observations_dir": str((workspace / "objectgs-observations").resolve())}
+                    if objectgs_runtime
+                    else {}
+                ),
+            },
+            workspace,
+            "lift",
+            timeout,
+            cancel_event=cancel_event,
+        )
+        labels = np.load(workspace / "labels.npz")["labels"]
+        trace = EvidenceRecorder(workspace / "evidence", "membership")
+        before_floor_labels = labels
+        labels = gaussian_split.assign_floor_gaussians_to_background(
+            rows, labels, floor_model, **({"refinement": True} if config.scene.refinement == "multiview_v1" else {})
+        )
+        for label in np.unique(before_floor_labels[before_floor_labels >= 0]):
+            trace.emit(
+                "floor_filter",
+                seed=int(label),
+                before=int((before_floor_labels == label).sum()),
+                returned_to_background=int(((before_floor_labels == label) & (labels < 0)).sum()),
+                reason="floor_noise_and_covariance_guard"
+                if config.scene.refinement == "multiview_v1"
+                else "floor_protection",
+                refinement=config.scene.refinement,
+            )
+    else:
+        EvidenceRecorder(workspace / "evidence", "correction").emit(
+            "corrected_membership",
+            membership_checksum=correction.membership.labels_ref.artifact_checksum,
+            evidence_ref=correction.evidence_ref.model_dump(mode="json") if correction.evidence_ref else None,
+        )
+        report_progress("observations")
+        labels = correction.labels.copy()
+        if len(labels) != len(rows):
+            raise ObjectifyError("corrected source membership row count mismatch", retryable=False)
+        source_labels_path = workspace / "corrected.i32le"
+        source_labels_path.write_bytes(labels.astype("<i4").tobytes())
+        seeds = {int(label): np.flatnonzero(labels == int(label)) for label in correction.membership.label_to_object_id}
+        lift = _run(
+            python,
+            CORRECTION_OBSERVATIONS_RUNNER,
+            {
+                "gaussians_ply": str(master),
+                "labels_path": str(source_labels_path),
+                "label_to_object_id": correction.membership.label_to_object_id,
+                "views": view_requests,
+                "output_dir": str(workspace / "corrected-observations"),
+            },
+            workspace,
+            "correction-observations",
+            timeout,
+            cancel_event=cancel_event,
+        )
+    trace = EvidenceRecorder(workspace / "evidence", "membership")
     background, parts = gaussian_split.split(rows, labels)
     if not parts:
         raise ObjectifyError("gán nhãn không cho ra vật nào đủ lớn")
+    if correction is not None:
+        if set(correction.membership.label_to_object_id) != {str(part.index) for part in parts}:
+            raise ObjectifyError(
+                "correction would discard an object; retain enough rows or delete it separately", retryable=False
+            )
+        adjusted = []
+        for part in parts:
+            object_id = correction.membership.label_to_object_id[str(part.index)]
+            pose = correction.source_poses[object_id]
+            if not np.allclose(pose.rotation_quaternion_xyzw, _IDENTITY):
+                raise ObjectifyError("rotated immutable source frames require SH rotation support", retryable=False)
+            local = rows[labels == part.index].copy()
+            for axis, name in enumerate(("x", "y", "z")):
+                local[name] -= pose.translation_xyz[axis]
+            adjusted.append(replace(part, rows=local, center=pose.translation_xyz))
+        parts = adjusted
 
     _ensure_not_cancelled(cancel_event)
     kept = np.isin(labels, [part.index for part in parts])
@@ -446,7 +512,11 @@ def objectify(
         (workspace / f"object_{part.index:03d}.ply").write_bytes(gaussian_split.write_gaussian_ply(part.rows))
 
     job_id = job.job_id
-    label_to_object_id = {str(part.index): f"candidate-{number:03d}" for number, part in enumerate(parts, start=1)}
+    label_to_object_id = (
+        dict(correction.membership.label_to_object_id)
+        if correction
+        else {str(part.index): f"candidate-{number:03d}" for number, part in enumerate(parts, start=1)}
+    )
     for label in np.unique(labels[labels >= 0]):
         object_id = label_to_object_id.get(str(label))
         trace.emit(
@@ -485,7 +555,7 @@ def objectify(
         return ObjectMembershipArtifact(
             source_visual_ref=source_visual_ref,
             source_geometry_ref=bundle.canonical_geometry_ref,
-            extraction_revision=extraction_revision,
+            extraction_revision=correction.membership.extraction_revision if correction else extraction_revision,
             coordinate_system=CoordinateSystem(),
             gaussian_count=len(rows),
             labels_ref=membership_labels_ref,
@@ -536,7 +606,7 @@ def objectify(
                     job_id, object_id, item, publish
                 ),
                 cancel_event=cancel_event,
-                progress=lambda stage: logger.info("ObjectGS stage=%s job=%s", stage, job_id),
+                progress=report_progress,
             )
         except (RuntimeError, ValueError, OSError) as error:
             if isinstance(error, ProcessCancelledError):
@@ -555,6 +625,7 @@ def objectify(
         ):
             raise ObjectifyError("ObjectGS output frame/membership/source-pose receipt mismatch", retryable=False)
 
+    report_progress("collider_and_background")
     # Collider chỉ dùng CPU, vá nền chỉ dùng GPU, và hai bước không đọc kết quả của nhau → chạy song song.
     convex_request = {
         "objects": [
@@ -733,7 +804,7 @@ def objectify(
     binding_trace = EvidenceRecorder(workspace / "evidence", "object_binding")
     for number, part in enumerate(parts, start=1):
         _ensure_not_cancelled(cancel_event)
-        object_id = f"candidate-{number:03d}"
+        object_id = label_to_object_id[str(part.index)]
         gaussians = gaussian_split.write_gaussian_ply(part.rows)
         visual = publish(
             _reference(job_id, "objects/{digest}.ply", "ObjectGaussians", StageId.SCENE_DECOMPOSE, gaussians), gaussians
@@ -815,7 +886,11 @@ def objectify(
                     "method": METHOD,
                     "gaussians": int(len(part.rows)),
                     "seed_gaussians": int(len(seeds[part.index])),
-                    "masks": int(lift["masks_per_object"][part.index]),
+                    "masks": int(
+                        lift["masks_per_object"].get(str(part.index), 0)
+                        if isinstance(lift["masks_per_object"], dict)
+                        else lift["masks_per_object"][part.index]
+                    ),
                     "note": "ứng viên, cần người xác nhận",
                     **(
                         {"surface_manifest_ref": surface_manifests[object_id].model_dump(mode="json")}
@@ -853,8 +928,12 @@ def objectify(
         if floor_model.status in {"supported", "confirmed_prior_fallback"}:
             normal = np.asarray(floor_model.plane_normal_world)
             for part in parts:
-                low = np.asarray(part.center) - np.asarray(part.dimensions) / 2
-                high = np.asarray(part.center) + np.asarray(part.dimensions) / 2
+                if correction is None:
+                    low = np.asarray(part.center) - np.asarray(part.dimensions) / 2
+                    high = np.asarray(part.center) + np.asarray(part.dimensions) / 2
+                else:
+                    anchors = source_points[membership_labels == part.index]
+                    low, high = anchors.min(axis=0), anchors.max(axis=0)
                 base = np.array([part.center[0], part.center[1], low[2]])
                 if abs(float(normal @ base + floor_model.plane_offset_m)) > floor_model.floor_band_m + 2 * voxel:
                     continue
@@ -942,6 +1021,8 @@ def objectify_with_retry(
     scene_config: dict[str, object] | None = None,
     geometry_method: Literal["legacy", "objectgs"] | None = None,
     refinement: Literal["legacy", "multiview_v1"] | None = None,
+    correction: CorrectedMembership | None = None,
+    progress: Callable[[str], None] | None = None,
 ) -> ObjectifyResult:
     """Thử `objectify` tối đa `product_objectify_attempts` lần, mỗi lần một workspace riêng (giữ log từng lần).
 
@@ -972,6 +1053,9 @@ def objectify_with_retry(
             arguments = {"cancel_event": cancel_event} if cancel_event is not None else {}
             if scene_config is not None:
                 arguments["scene_config"] = scene_config
+            if correction is not None:
+                arguments["correction"] = correction
+                arguments["progress"] = progress
             attempt_workspace = workspace / f"attempt-{number}"
             return capture_attempt(
                 lambda: objectify(

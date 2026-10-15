@@ -11,7 +11,11 @@ from src.api.auth import enforce_gpu_quota, record_gpu_run, require_contributor
 from src.api.ownership import authorize_job_mutation
 from src.api.product import deps
 from src.config import Settings
-from src.models.contracts.object_membership import ObjectMembershipMergeCommand, ObjectMembershipReassignCommand
+from src.models.contracts.object_membership import (
+    ObjectMembershipMergeCommand,
+    ObjectMembershipPreview,
+    ObjectMembershipReassignCommand,
+)
 from src.services.orchestration.artifacts import ArtifactNotFoundError, ArtifactStoreError
 from src.services.orchestration.auth import UserRecord
 from src.services.orchestration.jobs.stage_views import job_bundle
@@ -26,6 +30,7 @@ from src.services.orchestration.scene.catalog import load_catalog, suggest_class
 from src.services.orchestration.scene.collision_source_selection import select_lidar_collision_candidate
 from src.services.orchestration.scene.collision_surfaces import CollisionSurfaceCommand, publish_collision_surface
 from src.services.orchestration.scene.errors import SceneNotAvailableError
+from src.services.orchestration.scene.membership_regeneration import preview_correction
 from src.services.orchestration.scene.object_correction import merge_object_candidates, reassign_object_membership
 from src.services.orchestration.scene.objectify import ObjectifyError
 from src.services.orchestration.scene.objectify_queue import ObjectifyRequestError, ObjectifyState
@@ -335,6 +340,55 @@ def request_objectify(
     return result
 
 
+@router.post("/jobs/{job_id}/scene/membership/preview")
+def preview_scene_membership(
+    job_id: str,
+    request: ObjectMembershipReassignCommand,
+    user: UserRecord | None = Depends(require_contributor),
+) -> ObjectMembershipPreview:
+    registry = deps.registry()
+    authorize_job_mutation(user, registry, job_id, operation="xem hiệu chỉnh membership của")
+    deps.job_or_404(job_id)
+    try:
+        return preview_correction(registry.scene, job_id, request)
+    except StaleObjectMembershipRevisionError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except ObjectMembershipValidationError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except (ArtifactStoreError, SceneError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.post("/jobs/{job_id}/scene/membership/regenerate", response_model=ObjectifyState, status_code=202)
+def regenerate_scene_membership(
+    job_id: str,
+    request: ObjectMembershipReassignCommand,
+    user: UserRecord | None = Depends(require_contributor),
+) -> ObjectifyState:
+    registry, settings = deps.registry(), deps.settings()
+    authorize_job_mutation(user, registry, job_id, operation="tái tạo membership vật thể của")
+    deps.job_or_404(job_id)
+    enforce_gpu_quota(user)
+    try:
+        result = objectify_queue.request(
+            registry,
+            settings,
+            job_id,
+            request.expected_scene_revision,
+            "membership",
+            correction=request,
+            actor_id=user.user_id if user else "local",
+        )
+    except (SceneRevisionConflictError, StaleObjectMembershipRevisionError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except (ObjectifyRequestError, ObjectMembershipValidationError) as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except (ArtifactStoreError, SceneError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    record_gpu_run(user, job_id, {"kind": "scene.membership_regeneration"})
+    return result
+
+
 def _membership_correction(
     job_id: str,
     request: ObjectMembershipMergeCommand | ObjectMembershipReassignCommand,
@@ -486,13 +540,17 @@ def reassign_scene_membership(
     response_model=ObjectifyState,
     responses={404: {"model": schemas.ApiErrorResponse}, 409: {"model": schemas.ApiErrorResponse}},
 )
-def cancel_objectify(job_id: str, user: UserRecord | None = Depends(require_contributor)) -> ObjectifyState:
+def cancel_objectify(
+    job_id: str, user: UserRecord | None = Depends(require_contributor), operation_id: str | None = None
+) -> ObjectifyState:
     """Cancel queued objectify immediately or request child-process shutdown for a running attempt."""
     registry = deps.registry()
     authorize_job_mutation(user, registry, job_id, operation="hủy yêu cầu dựng lại vật thể của")
     deps.job_or_404(job_id)
     try:
-        return objectify_queue.cancel(registry, deps.settings(), job_id)
+        return objectify_queue.cancel(
+            registry, deps.settings(), job_id, **({"expected_operation_id": operation_id} if operation_id else {})
+        )
     except SceneNotAvailableError as error:
         raise deps.scene_unavailable(error) from error
     except ObjectifyRequestError as error:

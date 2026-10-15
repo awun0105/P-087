@@ -23,6 +23,7 @@ from src.config import Settings
 from src.models.contracts.artifacts import Checksum, JsonObject
 from src.models.contracts.floor_model import FloorFitProfile
 from src.models.contracts.manifests import JobManifest
+from src.models.contracts.object_membership import ObjectMembershipReassignCommand
 from src.models.contracts.reconstruction import ReconstructionBundle
 from src.services.orchestration.artifacts import ArtifactStoreError, sha256_bytes
 from src.services.orchestration.jobs.admission import (
@@ -38,13 +39,14 @@ from src.services.orchestration.processing.capability import worker_identity
 from src.services.orchestration.projects.registry import ProjectRegistry
 from src.services.orchestration.scene.errors import SceneError, SceneRevisionConflictError
 from src.services.orchestration.scene.extraction import box_candidates_require_gpu, use_boxes
+from src.services.orchestration.scene.membership_regeneration import preview_correction, regenerate_membership
 from src.services.orchestration.scene.objectify import AWAITING_CHOICE, METHOD, ObjectifyError, reobjectify
 from src.services.process_control import ProcessCancelledError
 
 logger = logging.getLogger(__name__)
 
 ObjectifyStatus = Literal["idle", "queued", "running", "done", "failed", "cancelled"]
-ObjectifyMode = Literal["objectify", "boxes"]
+ObjectifyMode = Literal["objectify", "boxes", "membership"]
 _LEASE_TTL = timedelta(seconds=90)
 _LEASE_HEARTBEAT_SECONDS = 20.0
 _CANCEL_POLL_SECONDS = 0.5
@@ -107,6 +109,8 @@ class ObjectifyState(BaseModel):
     started_at: datetime | None = None
     finished_at: datetime | None = None
     resource_wait: ObjectifyResourceWait | None = None
+    operation_id: str | None = None
+    phase: str | None = None
     cancellation_requested: bool = False
 
 
@@ -129,6 +133,8 @@ class _Record(BaseModel):
     input_checksum: Checksum | None = None
     config_checksum: Checksum | None = None
     resource_wait: ObjectifyResourceWait | None = None
+    correction_command: ObjectMembershipReassignCommand | None = None
+    actor_id: str | None = None
     lease_generation: int = 0
     lease_token: str | None = None
     lease_expires_at: datetime | None = None
@@ -136,6 +142,7 @@ class _Record(BaseModel):
     worker_id: str | None = None
     worker_host: str | None = None
     worker_pid: int | None = None
+    phase: str | None = None
     cancellation_requested: bool = False
 
 
@@ -175,10 +182,13 @@ def _input_checksum(
     )
 
 
-def _config_checksum(job: JobManifest, settings: Settings, mode: ObjectifyMode) -> Checksum:
+def _config_checksum(
+    job: JobManifest, settings: Settings, mode: ObjectifyMode, correction: ObjectMembershipReassignCommand | None = None
+) -> Checksum:
     """Bind the user's mode and shared runtime knobs without persisting local paths."""
     return _digest(
         {
+            **({"correction": correction.model_dump(mode="json")} if correction else {}),
             "operation": "reobjectify",
             "mode": mode,
             "runtime_manifest_checksum": job.runtime_manifest_checksum,
@@ -210,6 +220,8 @@ def _public_record(record: _Record) -> dict[str, object]:
         "finished_at",
         "resource_wait",
         "cancellation_requested",
+        "phase",
+        "operation_id",
     )
     return {name: getattr(record, name) for name in names}
 
@@ -236,7 +248,7 @@ def state(registry: ProjectRegistry, settings: Settings, job_id: str) -> Objecti
     return ObjectifyState(
         **public,
         scene_revision=scene.scene_revision,
-        object_centric=provenance.get("object_extraction") == METHOD,
+        object_centric=provenance.get("object_extraction") == METHOD or provenance.get("geometry_method") == "objectgs",
         awaiting_choice=provenance.get("object_extraction") == AWAITING_CHOICE,
         available=runtime_available(settings) or settings.product_objectify_remote_worker,
         note=str(note) if note else None,
@@ -244,7 +256,14 @@ def state(registry: ProjectRegistry, settings: Settings, job_id: str) -> Objecti
 
 
 def request(
-    registry: ProjectRegistry, settings: Settings, job_id: str, expected_revision: str, mode: ObjectifyMode
+    registry: ProjectRegistry,
+    settings: Settings,
+    job_id: str,
+    expected_revision: str,
+    mode: ObjectifyMode,
+    *,
+    correction: ObjectMembershipReassignCommand | None = None,
+    actor_id: str | None = None,
 ) -> ObjectifyState:
     """Accept a request only for the current scene and freeze its input/config identity."""
     job = registry.get_job(job_id)
@@ -257,6 +276,14 @@ def request(
         raise ObjectifyRequestError("Máy xử lý chưa cài runtime tách theo vật (xem scripts/gpu/README.md)")
     if mode == "objectify" and state(registry, settings, job_id).retryable is False:
         raise ObjectifyRequestError("Dữ liệu tách vật chưa đạt điều kiện; cần sửa dữ liệu hoặc dùng hộp ứng viên")
+    if mode == "membership":
+        if correction is None or not actor_id or correction.expected_scene_revision != expected_revision:
+            raise ObjectifyRequestError("membership request requires an actor and matching correction command")
+        if current.environment.object_aware_collision_ref is None:
+            raise ObjectifyRequestError("queued membership regeneration requires ObjectGS")
+        preview_correction(registry.scene, job_id, correction)
+    elif correction is not None:
+        raise ObjectifyRequestError("correction command requires membership mode")
     bundle = job_bundle(registry, job)
     if bundle is None:
         raise ObjectifyRequestError("Job chưa có kết quả dựng hình hệ mét nên chưa dựng được tập vật")
@@ -267,7 +294,10 @@ def request(
         requested_at=datetime.now(UTC),
         operation_id=uuid4().hex,
         input_checksum=_input_checksum(job_id, current.scene_revision, current.scene_ir_checksum, bundle),
-        config_checksum=_config_checksum(job, settings, mode),
+        config_checksum=_config_checksum(job, settings, mode, correction),
+        correction_command=correction,
+        actor_id=actor_id,
+        phase="queued",
     )
     with _database(settings).transaction(write=True) as tx:
         previous = _read(tx, job_id, lock=True)
@@ -279,13 +309,17 @@ def request(
     return state(registry, settings, job_id)
 
 
-def cancel(registry: ProjectRegistry, settings: Settings, job_id: str) -> ObjectifyState:
+def cancel(
+    registry: ProjectRegistry, settings: Settings, job_id: str, *, expected_operation_id: str | None = None
+) -> ObjectifyState:
     """Request cancellation; queued work stops immediately and running work waits for child reap."""
     now = datetime.now(UTC)
     with _database(settings).transaction(write=True) as tx:
         record = _read(tx, job_id, lock=True)
         if record is None:
             raise ObjectifyRequestError("Không có yêu cầu dựng lại tập vật để hủy")
+        if expected_operation_id is not None and record.operation_id != expected_operation_id:
+            raise ObjectifyRequestError("operation changed; reload before cancelling")
         if record.status == "queued":
             _write(
                 tx,
@@ -630,13 +664,13 @@ def process_next(registry: ProjectRegistry, settings: Settings) -> bool:
         if bundle is None:
             raise ObjectifyError("job chưa có ReconstructionBundle hệ mét")
         input_checksum = _input_checksum(job_id, current.scene_revision, current.scene_ir_checksum, bundle)
-        config_checksum = _config_checksum(job, settings, running.mode)
+        config_checksum = _config_checksum(job, settings, running.mode, running.correction_command)
         bound, bind_error = _bind_checksums(settings, job_id, running, input_checksum, config_checksum)
         if bound is None:
             raise ObjectifyError(bind_error or "không thể giữ snapshot operation")
         running = bound
 
-        uses_gpu = running.mode == "objectify" or box_candidates_require_gpu(settings)
+        uses_gpu = running.mode in {"objectify", "membership"} or box_candidates_require_gpu(settings)
         profile = admission.operation_profile_for_job(job, gpu_required=uses_gpu)
         request = OperationAdmissionRequest(
             operation_kind="reobjectify",
@@ -662,18 +696,41 @@ def process_next(registry: ProjectRegistry, settings: Settings) -> bool:
 
         root = settings.product_worker_root.expanduser().resolve() / job_id
         workspace = root / f"{running.mode}-{uuid4().hex}"
-        operation = reobjectify if running.mode == "objectify" else use_boxes
-        revision = operation(
-            registry,
-            job_id,
-            settings,
-            workspace,
+        arguments = dict(
             expected_revision=running.base_revision,
             commit_guard=_commit_guard(job_id, running, admission, request),
             cancel_event=cancel_event,
         )
+        if running.mode == "membership":
+
+            def progress(phase: str) -> None:
+                with _database(settings).transaction(write=True) as tx:
+                    record = _read(tx, job_id, lock=True)
+                    if not _active_lease(
+                        record, running.lease_token or "", running.lease_generation, datetime.now(UTC)
+                    ):
+                        cancel_event.set()
+                        raise ProcessCancelledError("membership progress lost worker lease")
+                    _write(tx, job_id, record.model_copy(update={"phase": phase}))
+
+            if running.correction_command is None or running.actor_id is None:
+                raise ObjectifyRequestError("queued correction payload is missing")
+            revision = regenerate_membership(
+                registry,
+                job_id,
+                settings,
+                workspace,
+                command=running.correction_command,
+                actor_id=running.actor_id,
+                progress=progress,
+                **arguments,
+            )
+        else:
+            operation = reobjectify if running.mode == "objectify" else use_boxes
+            revision = operation(registry, job_id, settings, workspace, **arguments)
         outcome = {
             "status": "done",
+            "phase": "done",
             "result_revision": revision,
             "error": None,
             "resource_wait": None,

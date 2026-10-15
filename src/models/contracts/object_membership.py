@@ -115,3 +115,19 @@ class ObjectMembershipReassignCommand(MembershipCommandBase):
         if self.source_object_id == self.target_object_id:
             raise ValueError("source and target owners must differ; null denotes background")
         return self
+
+
+class ObjectMembershipPreview(ContractModel):
+    """Read-only effective selection after ownership and background floor protection."""
+
+    scene_revision: Identifier
+    membership_checksum: Checksum
+    source_visual_checksum: Checksum
+    source_object_id: Identifier | None
+    target_object_id: Identifier | None
+    affected_object_ids: list[Identifier]
+    gaussian_count: int = Field(gt=0, strict=True)
+    protected_count: int = Field(ge=0, strict=True)
+    wrong_owner_count: int = Field(ge=0, strict=True)
+    source_gaussian_indices: list[StrictInt] = Field(min_length=1, max_length=250_000)
+    remaining_gaussians: dict[Identifier, int]

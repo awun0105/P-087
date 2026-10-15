@@ -238,6 +238,15 @@ class SceneEditor:
         không thể xuất hiện ở đây — contract đã chặn từ lúc dựng SceneIR.
         """
         references = [scene.environment.geometry_ref]
+        correction = scene.provenance.get("membership_correction")
+        if isinstance(correction, dict) and isinstance(correction.get("evidence_ref"), dict):
+            reference = ProductArtifactRef.model_validate(correction["evidence_ref"])
+            if (
+                reference.artifact_type != "ObjectMembershipCorrection"
+                or reference.job_id != scene.environment.geometry_ref.job_id
+            ):
+                raise SceneEditRejectedError("membership correction evidence does not belong to this scene")
+            references.append(reference)
         if scene.environment.collider_ref is not None:
             references.append(scene.environment.collider_ref)
         for reference in (

@@ -365,6 +365,10 @@ def reassign_object_membership(
             "OBJECTGS_RETRAIN_REQUIRED: membership reassignment requires regenerated masks and ObjectGS training; "
             "existing checkpoints and geometry cannot be reused as corrected output"
         )
+    if command.region is None:
+        raise ObjectMembershipValidationError(
+            "explicit source-row selection requires ObjectGS regeneration; legacy ROI remains supported"
+        )
     source_ply = editor.resolver.require(manifest.source_visual_ref).read_bytes()
     source_rows = gaussian_split.read_gaussian_ply(source_ply)
     if len(source_rows) != manifest.gaussian_count:

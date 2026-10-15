@@ -734,3 +734,125 @@ def test_reobjectify_binds_source_collision_ownership_to_the_new_objects(world, 
     assert ownership.extraction_revision == "rev-001"
     assert ownership.source_geometry_ref == scene.environment.geometry_ref
     assert ownership.source_transform.translation_xyz == new_object.transform.translation_xyz
+
+
+@pytest.mark.parametrize("finish", ["success", "quality_failure", "queued_cancel", "running_cancel", "stale"])
+def test_membership_queue_reuses_admission_revision_fence_and_cancellation(world, monkeypatch, tmp_path, finish):
+    from src.models.contracts.object_membership import ObjectMembershipReassignCommand
+    from src.services.process_control import ProcessCancelledError
+
+    registry, job, bundle, settings = world
+    monkeypatch.setattr(scene_extraction, "objectify_with_retry", _always_fail)
+    extract_scene(registry, job, bundle, settings, tmp_path / "work")
+    initial = registry.scene.current(job.job_id).scene
+    reference = initial.environment.geometry_ref.model_copy(update={"artifact_type": "ObjectAwareEnvironmentManifest"})
+    from src.models.contracts.coordinates import CoordinateSystem
+    from src.models.contracts.object_membership import ObjectMembershipArtifact
+
+    membership = ObjectMembershipArtifact(
+        source_visual_ref=initial.environment.geometry_ref.model_copy(update={"artifact_type": "GaussianPLY"}),
+        source_geometry_ref=initial.environment.geometry_ref,
+        labels_ref=initial.environment.geometry_ref.model_copy(update={"artifact_type": "ObjectMembershipLabels"}),
+        gaussian_count=5,
+        label_to_object_id={"0": "object-a", "1": "object-b"},
+        coordinate_system=CoordinateSystem(),
+        extraction_revision=initial.scene_revision,
+    )
+    draft = initial.model_copy(
+        update={
+            "environment": initial.environment.model_copy(
+                update={
+                    "object_aware_collision_ref": reference,
+                    "membership": membership,
+                    "collider_ref": initial.environment.geometry_ref,
+                }
+            )
+        }
+    )
+    base = registry.scene.publish_next(job.job_id, initial.scene_revision, draft, "fixture").revision.scene
+    command = ObjectMembershipReassignCommand(
+        expected_scene_revision=base.scene_revision,
+        membership_checksum="sha256:" + "a" * 64,
+        source_visual_checksum="sha256:" + "b" * 64,
+        source_gaussian_indices=[1, 3],
+        source_object_id="object-a",
+        target_object_id="object-b",
+    )
+    monkeypatch.setattr(scene_objectify_queue, "preview_correction", lambda *a: {})
+    calls = []
+
+    def operation(
+        registry,
+        job_id,
+        settings,
+        workspace,
+        *,
+        command,
+        actor_id,
+        expected_revision,
+        commit_guard,
+        cancel_event,
+        progress,
+    ):
+        calls.append(command)
+        assert actor_id == "fixture-user"
+        progress("surface_quality")
+        assert scene_objectify_queue.state(registry, settings, job_id).phase == "surface_quality"
+        if finish == "quality_failure":
+            raise ValueError("surface quality gate failed")
+        if finish == "running_cancel":
+            scene_objectify_queue.cancel(registry, settings, job_id)
+            # The CAS guard must reject even before the polling thread notices.
+            with pytest.raises(SceneRevisionConflictError):
+                registry.scene.publish_next(job_id, expected_revision, base, "correction", commit_guard=commit_guard)
+            raise ProcessCancelledError("cancelled")
+        return registry.scene.publish_next(
+            job_id, expected_revision, base, "correction", commit_guard=commit_guard
+        ).revision.scene.scene_revision
+
+    monkeypatch.setattr(scene_objectify_queue, "regenerate_membership", operation)
+    accepted = scene_objectify_queue.request(
+        registry, settings, job.job_id, base.scene_revision, "membership", correction=command, actor_id="fixture-user"
+    )
+    assert accepted.mode == "membership" and accepted.status == "queued"
+    with pytest.raises(ObjectifyRequestError, match="operation changed"):
+        scene_objectify_queue.cancel(registry, settings, job.job_id, expected_operation_id="old-operation")
+    assert scene_objectify_queue.state(registry, settings, job.job_id).status == "queued"
+
+    with pytest.raises(ObjectifyRequestError):
+        scene_objectify_queue.request(
+            registry,
+            settings,
+            job.job_id,
+            base.scene_revision,
+            "membership",
+            correction=command,
+            actor_id="fixture-user",
+        )
+    if finish == "queued_cancel":
+        scene_objectify_queue.cancel(registry, settings, job.job_id)
+    elif finish == "stale":
+        registry.scene.publish_next(job.job_id, base.scene_revision, base, "concurrent-edit")
+    scene_objectify_queue.process_next(registry, settings)
+    state = scene_objectify_queue.state(registry, settings, job.job_id)
+    if finish == "success":
+        assert state.status == "done" and state.result_revision != base.scene_revision
+    else:
+        assert state.status == ("cancelled" if "cancel" in finish else "failed")
+        assert state.result_revision is None
+        assert registry.scene.current(job.job_id).scene.environment == base.environment
+    assert len(calls) == (0 if finish in {"queued_cancel", "stale"} else 1)
+    # Repeating a failed or cancelled correction uses a new durable operation.
+    if finish in {"quality_failure", "queued_cancel", "running_cancel"}:
+        assert (
+            scene_objectify_queue.request(
+                registry,
+                settings,
+                job.job_id,
+                base.scene_revision,
+                "membership",
+                correction=command,
+                actor_id="fixture-user",
+            ).status
+            == "queued"
+        )

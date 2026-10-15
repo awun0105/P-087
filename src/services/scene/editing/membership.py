@@ -175,6 +175,8 @@ def select_source_gaussians(
         protected_count = int(np.count_nonzero(selected & protected))
         selected &= ~protected
     indices = np.flatnonzero(selected)
+    if len(indices) > 250_000:
+        raise ObjectMembershipValidationError("select at most 250000 source Gaussians per preview")
     if not len(indices):
         raise ObjectMembershipValidationError("selection contains no transferable source Gaussian rows")
     return selected, {
