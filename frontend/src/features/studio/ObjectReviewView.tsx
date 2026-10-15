@@ -651,6 +651,8 @@ export function ObjectReviewView({
   const previous = typeof scene.provenance.edited_from === "string" ? scene.provenance.edited_from : null;
   const membership = scene.environment.membership ?? null;
   const regionOpen = regionSession && regionSession.objectId === selected ? regionSession : null;
+  // Brush/Lasso (GaussianMembershipEditor) áp qua membership/regenerate, chỉ chạy được khi scene đã Ready.
+  const awaitingGeometry = objectGeometryState(scene) === "awaiting_review";
   const openRegionEditor = () => {
     if (!current || !membership) return;
     setRegionSession((session) => (session?.objectId === current.id ? session : initialRegionSession(current)));
@@ -1004,14 +1006,15 @@ export function ObjectReviewView({
                 <span>Gộp ứng viên / Sửa nhóm Gaussian</span>
                 <span className="font-normal text-on-dark/60">{membership ? `${eligibleCorrections.length} ứng viên khả dụng` : "chưa có membership"}</span>
               </button>
-              {scene.environment.object_aware_collision_ref && selected && membership && Object.values(membership.label_to_object_id).includes(selected) && (
+              {selected && membership && Object.values(membership.label_to_object_id).includes(selected) && (
                 "object_geometry" in scene.provenance ? (
                   <div className="flex flex-wrap gap-2">
                     <Button size="sm" disabled={busy || !current?.primitive_dimensions_xyz_m} onClick={openRegionEditor}>Chỉnh vùng</Button>
                     <Button
                       size="sm"
                       variant="ghost"
-                      disabled={busy}
+                      disabled={busy || awaitingGeometry}
+                      title={awaitingGeometry ? "Dùng Chỉnh vùng khi đang duyệt; Brush/Lasso dùng được sau khi Tạo mesh" : undefined}
                       onClick={() => {
                         setRegionSession(null);
                         setMembershipEditorOpen(true);
@@ -1020,7 +1023,7 @@ export function ObjectReviewView({
                       Chỉnh chi tiết (Brush/Lasso)
                     </Button>
                   </div>
-                ) : (
+                ) : scene.environment.object_aware_collision_ref && (
                   <Button size="sm" disabled={busy} onClick={() => setMembershipEditorOpen(true)}>Chỉnh vùng Gaussian · Box / Brush / Lasso</Button>
                 )
               )}

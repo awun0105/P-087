@@ -1297,6 +1297,12 @@ function regionScene(revision = "rev-001") {
   };
 }
 
+/** Scene Draft thật: `object_geometry` đang chờ duyệt, có membership, không có collision theo vật. */
+function draftRegionScene(revision = "rev-001") {
+  const result = membershipScene(revision);
+  return { ...result, provenance: { ...result.provenance, object_geometry: "awaiting_review" } };
+}
+
 const regionPreview = {
   scene_revision: "rev-001",
   membership_checksum: `sha256:${"b".repeat(64)}`,
@@ -1331,9 +1337,26 @@ describe("ObjectReviewView chỉnh vùng (T-016)", () => {
     expect(screen.getByRole("region", { name: "Chỉnh vùng" })).toHaveTextContent("Chỉnh vùng · Vật thể 1");
     expect(screen.getByRole("list", { name: "Box vùng" })).toHaveTextContent("Cộng #1");
 
+    expect(screen.getByRole("button", { name: "Chỉnh chi tiết (Brush/Lasso)" })).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: "Chỉnh chi tiết (Brush/Lasso)" }));
     expect(screen.queryByRole("region", { name: "Chỉnh vùng" })).not.toBeInTheDocument();
     expect(screen.getByRole("dialog", { name: "Chỉnh vùng Gaussian nguồn" })).toBeInTheDocument();
+  });
+
+  it("Draft (object_geometry đang duyệt, không có collision theo vật): Chỉnh vùng vẫn mở panel; Brush/Lasso bị khoá kèm lý do", async () => {
+    routeFetch({
+      "/region/preview": Array.from({ length: 4 }, () => reply(regionPreview)),
+      "/scene": [reply({ scene: draftRegionScene() })],
+    });
+    render(<ObjectReviewView jobId="job-a" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Chọn Vật thể 1" }));
+
+    const brush = screen.getByRole("button", { name: "Chỉnh chi tiết (Brush/Lasso)" });
+    expect(brush).toBeDisabled();
+    expect(brush).toHaveAttribute("title", "Dùng Chỉnh vùng khi đang duyệt; Brush/Lasso dùng được sau khi Tạo mesh");
+
+    fireEvent.click(screen.getByRole("button", { name: "Chỉnh vùng" }));
+    expect(screen.getByRole("region", { name: "Chỉnh vùng" })).toHaveTextContent("Chỉnh vùng · Vật thể 1");
   });
 
   it("scene cũ chưa có object_geometry giữ nút Chỉnh vùng Gaussian cũ", async () => {
