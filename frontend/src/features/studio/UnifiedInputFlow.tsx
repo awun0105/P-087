@@ -23,7 +23,7 @@ import {
 } from "@/lib/api/inputAssemblies";
 import { uploadPreparedVideo } from "@/lib/api/studio";
 import { temporaryUploads } from "@/lib/api/temporaryUploads";
-import type { DataOrigin, SourceRightsAttestation } from "@/lib/contracts/studio";
+import type { DataOrigin, ParameterSpec, ParamValue, SourceRightsAttestation } from "@/lib/contracts/studio";
 import type {
   CandidateState,
   AssemblyUploadResponse,
@@ -245,6 +245,12 @@ const UNUSABLE_FORMATS = new Set(["unknown", "calibration_kalibr_camchain"]);
 function unusableStaged(staged: AssemblyUploadResponse | null): { unusable: number; total: number } {
   const files = staged?.staged_files ?? [];
   return { unusable: files.filter((item) => UNUSABLE_FORMATS.has(item.observed_format)).length, total: files.length };
+}
+
+/** Giá trị trong tóm tắt thông số: tham số kiểu choice hiện nhãn của lựa chọn, không hiện mã kỹ thuật như "shell". */
+function summaryValue(parameter: ParameterSpec, value: ParamValue | undefined): string {
+  if (parameter.kind === "choice") return parameter.choices?.find((choice) => choice.value === value)?.label ?? String(value ?? "");
+  return String(value ?? "");
 }
 
 function formatLabel(format: string): string {
@@ -1476,7 +1482,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
                   {processing.options?.parameters.map((parameter) => (
                     <div key={parameter.key}>
                       <dt className="text-ink-muted">{parameter.label}</dt>
-                      <dd>{String(processing.values?.[parameter.key] ?? "")} {parameter.unit}</dd>
+                      <dd>{summaryValue(parameter, processing.values?.[parameter.key])} {parameter.unit}</dd>
                     </div>
                   ))}
                 </dl>
