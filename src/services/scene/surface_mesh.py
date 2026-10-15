@@ -120,7 +120,11 @@ def _intersections(mesh: trimesh.Trimesh, budget: int = 250_000) -> tuple[int, b
 
 
 def assess_surface(
-    mesh: trimesh.Trimesh, *, expected_bounds: np.ndarray | None = None, tolerance_m: float = 0.0
+    mesh: trimesh.Trimesh,
+    *,
+    expected_bounds: np.ndarray | None = None,
+    tolerance_m: float = 0.0,
+    intersection_budget: int = 250_000,
 ) -> dict:
     reasons = []
     finite = bool(np.isfinite(mesh.vertices).all())
@@ -181,7 +185,7 @@ def assess_surface(
             reasons.append("source_bounds_or_metric_scale_mismatch")
     metrics["intersection_scope"] = "nonadjacent_non_shared_vertex_triangles"
     if not reasons:
-        crossing, complete = _intersections(mesh)
+        crossing, complete = _intersections(mesh, intersection_budget)
         metrics.update(nonadjacent_triangle_intersections=crossing, intersection_check_complete=complete)
         if crossing:
             reasons.append("self_intersection")

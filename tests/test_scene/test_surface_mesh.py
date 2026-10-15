@@ -130,6 +130,12 @@ def test_degenerate_surface_scale_mismatch_and_intersecting_shells_fail_closed()
     assert not report["passed"] and "self_intersection" in report["reasons"]
 
 
+def test_intersection_budget_is_an_explicit_keyword_with_unchanged_default():
+    box = trimesh.creation.box()
+    assert assess_surface(box)["passed"]
+    assert "intersection_budget_exceeded" in assess_surface(box, intersection_budget=0)["reasons"]
+
+
 def test_glb_child_rigid_transform_is_applied_once_but_scale_layout_is_rejected(tmp_path):
     from src.services.scene.surface_mesh import load_surface
 
