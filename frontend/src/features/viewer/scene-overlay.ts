@@ -34,7 +34,7 @@ import {
 
 import type { CollisionSurfacePlane } from "@/lib/api/studio";
 import { rotateVector, multiplyQuaternions } from "@/features/viewer/layers";
-import { DISPLAY_EULER, type Vec3 } from "@/features/viewer/source-frame";
+import { DISPLAY_EULER, type DisplayCameraPose, type Vec3 } from "@/features/viewer/source-frame";
 import { themeColor } from "@/lib/theme";
 import type { ViewerAppLike } from "@/features/viewer/PlayCanvasScene";
 
@@ -103,6 +103,145 @@ export function rayTriangles(
     if (distance > 1e-9 && (nearest === null || distance < nearest)) nearest = distance;
   }
   return nearest;
+}
+
+/** Cử chỉ kéo bắt bằng pointer trên canvas, xem `isolatePointerGesture`. */
+export interface PointerGesture {
+  /** Bấm chuột trái có trúng điều khiển này không; trúng thì sự kiện bị nuốt để camera không thấy. */
+  hit(e: PointerEvent): boolean;
+  press(e: PointerEvent): void;
+  /** Di chuyển lúc đang kéo; sự kiện đã bị nuốt. */
+  move(e: PointerEvent): void;
+  /** Di chuyển khi không kéo (hover); sự kiện không bị nuốt. */
+  hover?(e: PointerEvent): void;
+  release(e: PointerEvent): void;
+  /** Huỷ giữa chừng: kết thúc cử chỉ mà không xác nhận thay đổi. `last` là sự kiện gần nhất, hoặc null. */
+  abort?(last: PointerEvent | null): void;
+}
+
+export interface PointerIsolation {
+  /** Gỡ mọi listener và trả pointer capture. */
+  dispose(): void;
+  /** Kết thúc cử chỉ đang kéo ngay (gọi `abort`) và trả quyền điều khiển cho camera. */
+  cancel(): void;
+}
+
+/**
+ * Cô lập cử chỉ kéo khỏi Camera Controller của supersplat-viewer. Controller nghe pointer ở pha bubble trên canvas
+ * và đổi dịch chuyển chuột thành xoay/di chuyển camera. Listener ở pha CAPTURE chạy trước nên:
+ * - Bấm trúng điều khiển: `stopImmediatePropagation()` để camera không thấy cử chỉ; move/up của cử chỉ đó cũng bị nuốt.
+ * - Bấm ngoài điều khiển: sự kiện lan bình thường để xoay camera hoặc chọn vật.
+ */
+export function isolatePointerGesture(canvas: HTMLCanvasElement, gesture: PointerGesture): PointerIsolation {
+  let dragging = false;
+  let activePointerId: number | null = null;
+  let lastEvent: PointerEvent | null = null;
+
+  const releaseCapture = () => {
+    if (activePointerId === null) return;
+    try {
+      if (canvas.hasPointerCapture?.(activePointerId)) {
+        canvas.releasePointerCapture(activePointerId);
+      }
+    } catch {
+      // Không lỗi nếu browser đã giải phóng trước
+    }
+  };
+
+  const onCapturePointerDown = (e: PointerEvent) => {
+    if (e.target !== canvas) return;
+    if (typeof document !== "undefined" && document.pointerLockElement) return;
+    if (e.button !== 0) return;
+    if (!gesture.hit(e)) return;
+    dragging = true;
+    activePointerId = e.pointerId;
+    lastEvent = e;
+    e.stopImmediatePropagation();
+    e.preventDefault();
+    gesture.press(e);
+  };
+
+  const onCapturePointerMove = (e: PointerEvent) => {
+    if (dragging && e.pointerId === activePointerId) {
+      lastEvent = e;
+      e.stopImmediatePropagation();
+      e.preventDefault();
+      gesture.move(e);
+    } else if (!dragging) {
+      gesture.hover?.(e);
+    }
+  };
+
+  const onCapturePointerUp = (e: PointerEvent) => {
+    if (dragging && (activePointerId === null || e.pointerId === activePointerId)) {
+      dragging = false;
+      activePointerId = null;
+      e.stopImmediatePropagation();
+      e.preventDefault();
+      gesture.release(e);
+    }
+  };
+
+  const onLostPointerCapture = (e: PointerEvent) => {
+    if (dragging && (activePointerId === null || e.pointerId === activePointerId)) {
+      dragging = false;
+      activePointerId = null;
+      gesture.release(e);
+    }
+  };
+
+  canvas.addEventListener("pointerdown", onCapturePointerDown, { capture: true });
+  canvas.addEventListener("pointermove", onCapturePointerMove, { capture: true });
+  canvas.addEventListener("pointerup", onCapturePointerUp, { capture: true });
+  canvas.addEventListener("pointercancel", onCapturePointerUp, { capture: true });
+  canvas.addEventListener("lostpointercapture", onLostPointerCapture);
+
+  return {
+    dispose() {
+      releaseCapture();
+      dragging = false;
+      activePointerId = null;
+      canvas.removeEventListener("pointerdown", onCapturePointerDown, { capture: true });
+      canvas.removeEventListener("pointermove", onCapturePointerMove, { capture: true });
+      canvas.removeEventListener("pointerup", onCapturePointerUp, { capture: true });
+      canvas.removeEventListener("pointercancel", onCapturePointerUp, { capture: true });
+      canvas.removeEventListener("lostpointercapture", onLostPointerCapture);
+    },
+    cancel() {
+      if (!dragging) return;
+      releaseCapture();
+      dragging = false;
+      activePointerId = null;
+      gesture.abort?.(lastEvent);
+    },
+  };
+}
+
+/**
+ * Cô lập một Gizmo PlayCanvas khỏi Camera Controller. Gizmo tự nghe `pointerdown/move/up` ở pha bubble, nên gỡ các
+ * listener đó rồi nối lại qua `isolatePointerGesture`: chỉ khi bấm trúng trục mới chuyển cử chỉ cho gizmo.
+ */
+export function isolateGizmoPointer(gizmo: TranslateGizmo | RotateGizmo, canvas: HTMLCanvasElement): PointerIsolation {
+  type GizmoInternal = {
+    _onPointerDown: (e: PointerEvent) => void;
+    _onPointerMove: (e: PointerEvent) => void;
+    _onPointerUp: (e: PointerEvent) => void;
+    _getSelection: (x: number, y: number) => unknown[];
+  };
+  const internal = gizmo as unknown as GizmoInternal;
+  canvas.removeEventListener("pointerdown", internal._onPointerDown);
+  canvas.removeEventListener("pointermove", internal._onPointerMove);
+  canvas.removeEventListener("pointerup", internal._onPointerUp);
+  return isolatePointerGesture(canvas, {
+    hit: (e) => gizmo.enabled && (internal._getSelection?.(e.offsetX, e.offsetY)?.length ?? 0) > 0,
+    press: (e) => internal._onPointerDown(e),
+    move: (e) => internal._onPointerMove(e),
+    hover: (e) => internal._onPointerMove(e),
+    release: (e) => internal._onPointerUp(e),
+    abort: (last) => {
+      if (last) internal._onPointerUp(last);
+    },
+  });
 }
 
 export interface OverlayBox {
@@ -248,6 +387,7 @@ export class SceneOverlay {
   private gizmoLayer: Layer | null = null;
   private gizmo: TranslateGizmo | RotateGizmo | null = null;
   private gizmoCleanup: (() => void) | null = null;
+  private viewerGotoPose: ((pose: DisplayCameraPose) => boolean) | null = null;
   private destroyed = false;
 
   /**
@@ -680,100 +820,57 @@ export class SceneOverlay {
     this.gizmo = gizmo;
     this.gizmoTarget = id;
 
-    // Cô lập cử chỉ kéo của Gizmo khỏi Camera Controller của supersplat-viewer:
-    // Mặc định PlayCanvas Gizmo nghe `pointerdown` ở pha bubbling trên canvas. Cùng lúc đó,
-    // KeyboardMouseSource của supersplat cũng nhận sự kiện và ghi nhận dịch chuyển chuột làm xoay/di
-    // chuyển camera.
-    // Bằng cách gỡ listener bubble mặc định và chặn ở pha CAPTURE:
-    // - Khi người dùng bấm trúng trục/mặt điều khiển của Gizmo: gọi `stopImmediatePropagation()` để
-    //   Camera Controller hoàn toàn không thấy sự kiện bắt đầu kéo, chỉ Gizmo xử lý biến đổi vật.
-    // - Khi bấm ngoài Gizmo: sự kiện lan truyền bình thường để xoay camera hoặc chọn vật.
     const canvas = (gizmo as unknown as { _device?: { canvas?: HTMLCanvasElement } })._device?.canvas
       ?? (this.app as unknown as { graphicsDevice?: { canvas?: HTMLCanvasElement } }).graphicsDevice?.canvas;
 
     if (canvas) {
-      type GizmoInternal = {
-        _onPointerDown: (e: PointerEvent) => void;
-        _onPointerMove: (e: PointerEvent) => void;
-        _onPointerUp: (e: PointerEvent) => void;
-        _getSelection: (x: number, y: number) => unknown[];
-      };
-      const gizmoInternal = gizmo as unknown as GizmoInternal;
-      canvas.removeEventListener("pointerdown", gizmoInternal._onPointerDown);
-      canvas.removeEventListener("pointermove", gizmoInternal._onPointerMove);
-      canvas.removeEventListener("pointerup", gizmoInternal._onPointerUp);
-
-      let dragging = false;
-      let activePointerId: number | null = null;
-
-      const onCapturePointerDown = (e: PointerEvent) => {
-        if (e.target !== canvas || !gizmo.enabled) return;
-        if (typeof document !== "undefined" && document.pointerLockElement) return;
-        if (e.button !== 0) return;
-
-        const selection = gizmoInternal._getSelection?.(e.offsetX, e.offsetY);
-        if (selection && selection.length > 0) {
-          dragging = true;
-          activePointerId = e.pointerId;
-          e.stopImmediatePropagation();
-          e.preventDefault();
-          gizmoInternal._onPointerDown(e);
-        }
-      };
-
-      const onCapturePointerMove = (e: PointerEvent) => {
-        if (dragging && e.pointerId === activePointerId) {
-          e.stopImmediatePropagation();
-          e.preventDefault();
-          gizmoInternal._onPointerMove(e);
-        } else if (!dragging) {
-          gizmoInternal._onPointerMove(e);
-        }
-      };
-
-      const onCapturePointerUp = (e: PointerEvent) => {
-        if (dragging && (activePointerId === null || e.pointerId === activePointerId)) {
-          dragging = false;
-          activePointerId = null;
-          e.stopImmediatePropagation();
-          e.preventDefault();
-          gizmoInternal._onPointerUp(e);
-        }
-      };
-
-      const onLostPointerCapture = (e: PointerEvent) => {
-        if (dragging && (activePointerId === null || e.pointerId === activePointerId)) {
-          dragging = false;
-          activePointerId = null;
-          gizmoInternal._onPointerUp(e);
-        }
-      };
-
-      canvas.addEventListener("pointerdown", onCapturePointerDown, { capture: true });
-      canvas.addEventListener("pointermove", onCapturePointerMove, { capture: true });
-      canvas.addEventListener("pointerup", onCapturePointerUp, { capture: true });
-      canvas.addEventListener("pointercancel", onCapturePointerUp, { capture: true });
-      canvas.addEventListener("lostpointercapture", onLostPointerCapture);
-
-      this.gizmoCleanup = () => {
-        if (activePointerId !== null) {
-          try {
-            if (canvas.hasPointerCapture?.(activePointerId)) {
-              canvas.releasePointerCapture(activePointerId);
-            }
-          } catch {
-            // Không lỗi nếu browser đã giải phóng trước
-          }
-        }
-        canvas.removeEventListener("pointerdown", onCapturePointerDown, { capture: true });
-        canvas.removeEventListener("pointermove", onCapturePointerMove, { capture: true });
-        canvas.removeEventListener("pointerup", onCapturePointerUp, { capture: true });
-        canvas.removeEventListener("pointercancel", onCapturePointerUp, { capture: true });
-        canvas.removeEventListener("lostpointercapture", onLostPointerCapture);
-      };
+      const isolation = isolateGizmoPointer(gizmo, canvas);
+      this.gizmoCleanup = () => isolation.dispose();
     }
 
     this.redraw();
+  }
+
+  /** App PlayCanvas còn dùng được: chưa `destroy()` và PlayCanvas chưa huỷ app. Lớp phủ con kiểm trước khi chạm scene. */
+  isAlive(): boolean {
+    return this.alive;
+  }
+
+  /** App PlayCanvas của viewer; chỉ gọi khi `isAlive()`. */
+  application(): AppBase {
+    return this.app;
+  }
+
+  /** Camera đang render của viewer, hoặc null khi app đã huỷ. */
+  activeCamera(): CameraComponent | null {
+    if (!this.alive) return null;
+    return (this.app.root.findComponents("camera")[0] as CameraComponent | undefined) ?? null;
+  }
+
+  /** Entity gốc của một vật đang vẽ (đã mang pose hiện tại của vật); null nếu chưa có vật này. */
+  objectEntity(id: string): Entity | null {
+    return (this.alive ? this.objects.get(id)?.entity : undefined) ?? null;
+  }
+
+  /** Layer gizmo dùng chung, tạo khi cần. Mỗi gizmo thêm layer của nó vào camera nên không tạo layer riêng từng lớp. */
+  sharedGizmoLayer(): Layer {
+    this.gizmoLayer ??= Gizmo.createLayer(this.app);
+    return this.gizmoLayer;
+  }
+
+  /** Yêu cầu render ở frame kế tiếp (viewer render theo yêu cầu). */
+  requestFrame(): void {
+    this.redraw();
+  }
+
+  /** Nối lệnh chuyển camera của viewer (`ViewerControls.gotoPose`); `null` để gỡ. */
+  bindViewerGotoPose(goto: ((pose: DisplayCameraPose) => boolean) | null): void {
+    this.viewerGotoPose = goto;
+  }
+
+  /** Đưa camera viewer tới một pose (hệ hiển thị). False khi chưa nối hoặc viewer chưa sẵn sàng. */
+  gotoPose(pose: DisplayCameraPose): boolean {
+    return this.alive && (this.viewerGotoPose?.(pose) ?? false);
   }
 
   detachGizmo(): void {
