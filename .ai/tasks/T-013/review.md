@@ -17,3 +17,8 @@ T-009 chỉ còn một sửa nhỏ trong `extraction.py`.
 1. Khoá trong UI khi Draft, cùng tooltip `GEOMETRY_NOT_READY_REASON`: thêm box, thêm vật từ thư viện, nhân bản, đánh dấu/xoá/lấp bề mặt va chạm.
    Backend đã từ chối (T-012) nhưng để người dùng bấm rồi nhận lỗi 422 là UX kém. Test: Draft → các nút disabled; ready → như cũ.
 2. Bước 7 theo plan, sau khi `.ai/status.md` ghi T-009 `accepted`.
+
+## Cập nhật sau Round 2 (phần 1)
+- Khoá thêm box/thư viện/nhân bản/bề mặt va chạm khi Draft, huỷ công cụ đang bật khi khoá xuất hiện: **đạt** (75 test liên quan PASS).
+- Bước 7 chưa commit vì T-009 bị mở lại: đúng. Patch đã chép vào `.ai/tasks/T-013/step7.patch` (bản ở /tmp có thể bị dọn).
+  Khi T-009 accepted: `git apply .ai/tasks/T-013/step7.patch`, chạy test preset, commit, xoá file patch trong cùng commit, đặt implemented.

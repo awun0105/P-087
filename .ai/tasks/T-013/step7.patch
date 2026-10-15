@@ -1,0 +1,149 @@
+diff --git a/configs/product/processing_presets_v1.json b/configs/product/processing_presets_v1.json
+index 1c91fcef..734bad28 100644
+--- a/configs/product/processing_presets_v1.json
++++ b/configs/product/processing_presets_v1.json
+@@ -429,9 +429,13 @@
+       "key": "scene.geometry_method",
+       "group": "scene",
+       "label": "Hình học theo vật",
+-      "description": "ObjectGS cần runtime riêng; lỗi không tự chuyển sang collider cũ.",
++      "description": "Vỏ Gaussian: nhanh, luôn kín. ObjectGS: chi tiết hơn, cần GPU; vật không đạt chất lượng giữ collider từ vỏ.",
+       "kind": "choice",
+       "choices": [
++        {
++          "value": "shell",
++          "label": "Vỏ Gaussian (mặc định)"
++        },
+         {
+           "value": "legacy",
+           "label": "Legacy"
+@@ -442,6 +446,23 @@
+         }
+       ]
+     },
++    {
++      "key": "scene.geometry_review",
++      "group": "scene",
++      "label": "Duyệt tách vật trước khi tạo mesh",
++      "description": "Dừng để duyệt tách vật: scene vào Draft, người dùng chỉnh vùng rồi bấm Tạo mesh. Tạo mesh ngay: máy tự dựng mesh sau khi tách.",
++      "kind": "choice",
++      "choices": [
++        {
++          "value": "required",
++          "label": "Dừng để duyệt tách vật"
++        },
++        {
++          "value": "auto",
++          "label": "Tạo mesh ngay"
++        }
++      ]
++    },
+     {
+       "key": "scene.objectgs_iterations",
+       "group": "scene",
+@@ -501,7 +522,8 @@
+       "simulation.dynamic_friction": 0.4,
+       "simulation.restitution": 0,
+       "simulation.carve_margin_m": 0.05,
+-      "scene.geometry_method": "objectgs",
++      "scene.geometry_method": "shell",
++      "scene.geometry_review": "required",
+       "scene.refinement": "multiview_v1",
+       "scene.objectgs_iterations": 30000,
+       "scene.objectgs_background_voxel_m": 0.04
+@@ -542,7 +564,8 @@
+       "simulation.dynamic_friction": 0.4,
+       "simulation.restitution": 0,
+       "simulation.carve_margin_m": 0.05,
+-      "scene.geometry_method": "objectgs",
++      "scene.geometry_method": "shell",
++      "scene.geometry_review": "required",
+       "scene.refinement": "multiview_v1",
+       "scene.objectgs_iterations": 30000,
+       "scene.objectgs_background_voxel_m": 0.04
+@@ -583,7 +606,8 @@
+       "simulation.dynamic_friction": 0.4,
+       "simulation.restitution": 0,
+       "simulation.carve_margin_m": 0.05,
+-      "scene.geometry_method": "objectgs",
++      "scene.geometry_method": "shell",
++      "scene.geometry_review": "required",
+       "scene.refinement": "multiview_v1",
+       "scene.objectgs_iterations": 30000,
+       "scene.objectgs_background_voxel_m": 0.04
+@@ -624,7 +648,8 @@
+       "simulation.dynamic_friction": 0.4,
+       "simulation.restitution": 0,
+       "simulation.carve_margin_m": 0.05,
+-      "scene.geometry_method": "objectgs",
++      "scene.geometry_method": "shell",
++      "scene.geometry_review": "required",
+       "scene.refinement": "multiview_v1",
+       "scene.objectgs_iterations": 30000,
+       "scene.objectgs_background_voxel_m": 0.04
+@@ -665,7 +690,8 @@
+       "simulation.dynamic_friction": 0.4,
+       "simulation.restitution": 0,
+       "simulation.carve_margin_m": 0.05,
+-      "scene.geometry_method": "objectgs",
++      "scene.geometry_method": "shell",
++      "scene.geometry_review": "required",
+       "scene.refinement": "multiview_v1",
+       "scene.objectgs_iterations": 30000,
+       "scene.objectgs_background_voxel_m": 0.04
+@@ -706,7 +732,8 @@
+       "simulation.dynamic_friction": 0.4,
+       "simulation.restitution": 0,
+       "simulation.carve_margin_m": 0.05,
+-      "scene.geometry_method": "objectgs",
++      "scene.geometry_method": "shell",
++      "scene.geometry_review": "required",
+       "scene.refinement": "multiview_v1",
+       "scene.objectgs_iterations": 30000,
+       "scene.objectgs_background_voxel_m": 0.04
+@@ -747,7 +774,8 @@
+       "simulation.dynamic_friction": 0.4,
+       "simulation.restitution": 0,
+       "simulation.carve_margin_m": 0.05,
+-      "scene.geometry_method": "objectgs",
++      "scene.geometry_method": "shell",
++      "scene.geometry_review": "required",
+       "scene.refinement": "multiview_v1",
+       "scene.objectgs_iterations": 30000,
+       "scene.objectgs_background_voxel_m": 0.04
+@@ -788,7 +816,8 @@
+       "simulation.dynamic_friction": 0.4,
+       "simulation.restitution": 0,
+       "simulation.carve_margin_m": 0.05,
+-      "scene.geometry_method": "objectgs",
++      "scene.geometry_method": "shell",
++      "scene.geometry_review": "required",
+       "scene.refinement": "multiview_v1",
+       "scene.objectgs_iterations": 30000,
+       "scene.objectgs_background_voxel_m": 0.04
+diff --git a/tests/test_orchestration/test_processing_config.py b/tests/test_orchestration/test_processing_config.py
+index acdde99a..1e5f1dc6 100644
+--- a/tests/test_orchestration/test_processing_config.py
++++ b/tests/test_orchestration/test_processing_config.py
+@@ -545,12 +545,17 @@ def test_anonymize_is_recorded_only_when_chosen() -> None:
+     assert type(chosen).model_validate_json(config_bytes(chosen)).anonymize is True
+ 
+ 
+-def test_every_preset_seals_objectgs_geometry_and_multiview_refinement() -> None:
++def test_every_preset_seals_shell_geometry_review_and_multiview() -> None:
+     from src.services.orchestration.scene.objectify import SceneObjectifyConfig
+ 
+     presets, checksum = load_presets(PRESETS)
+     for name in presets.presets:
+         scene = build_job_config(presets, checksum, preset_values(presets, name), None).scene
+-        assert (scene["geometry_method"], scene["refinement"]) == ("objectgs", "multiview_v1"), name
+-    # Jobs sealed before these presets carry neither key and keep the legacy behaviour.
+-    assert (SceneObjectifyConfig().geometry_method, SceneObjectifyConfig().refinement) == ("legacy", "legacy")
++        assert (scene["geometry_method"], scene["geometry_review"], scene["refinement"]) == (
++            "shell",
++            "required",
++            "multiview_v1",
++        ), name
++    # Jobs sealed before these presets carry none of these keys and keep the legacy behaviour.
++    defaults = SceneObjectifyConfig()
++    assert (defaults.geometry_method, defaults.geometry_review, defaults.refinement) == ("legacy", "legacy", "legacy")
