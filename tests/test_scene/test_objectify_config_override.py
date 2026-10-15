@@ -23,6 +23,7 @@ class StopAfterProvidersError(RuntimeError):
             "coacd": {"threshold": 0.03, "max_convex_hull": 3, "preprocess_resolution": 20, "voxel_m": 0.02},
             "inpaint": {"max_new_gaussians": 100, "behind_object_m": 0.07},
         },
+        {"scene": {"geometry_review": "required"}},
     ],
 )
 def test_provider_requests_receive_overrides(
@@ -90,9 +91,14 @@ def test_provider_requests_receive_overrides(
         )
     groups = override or {}
     # The runner falls back to legacy, so the chosen refinement is always sent explicitly.
+    # geometry_review routes the job after extraction; the lift runner must never receive it.
     assert requests["lift"]["config"] == {
         "refinement": "legacy",
-        **{key: value for key, value in groups.get("scene", {}).items() if key != "max_objects"},
+        **{
+            key: value
+            for key, value in groups.get("scene", {}).items()
+            if key not in {"max_objects", "geometry_review"}
+        },
     }
     assert requests["convex"]["config"] == groups.get("coacd", {})
     assert requests["inpaint"]["config"] == groups.get("inpaint", {})
@@ -112,6 +118,8 @@ def test_provider_requests_receive_overrides(
         {"inpaint": {"max_new_gaussians": -1}},
         {"inpaint": {"behind_object_m": float("inf")}},
         {"scene": {"unknown": 1}},
+        {"scene": {"geometry_review": "later"}},
+        {"scene": {"geometry_method": "unknown"}},
     ],
 )
 def test_invalid_config_rejected_before_runtime(override: dict[str, object], tmp_path: Path) -> None:
@@ -129,11 +137,18 @@ def test_defaults_match_provider_fallbacks() -> None:
         box_margin_m=0.15,
         sam_batch=32,
         geometry_method="legacy",
+        geometry_review="legacy",
         objectgs_iterations=30000,
         objectgs_background_voxel_m=0.04,
     )
     assert config.coacd.model_dump() == dict(threshold=0.08, max_convex_hull=8, preprocess_resolution=30, voxel_m=0.04)
     assert config.inpaint.model_dump() == dict(max_new_gaussians=400_000, behind_object_m=0.05)
+
+
+def test_geometry_method_accepts_shell_and_rejects_unknown_values() -> None:
+    assert module.SceneObjectifyConfig(geometry_method="shell").geometry_method == "shell"
+    with pytest.raises(ValueError):
+        module.SceneObjectifyConfig(geometry_method="unknown")
 
 
 def test_seed_count_override_limits_instances(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

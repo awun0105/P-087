@@ -93,7 +93,8 @@ class SceneObjectifyConfig(ContractModel):
     max_area: FiniteFloat = Field(default=0.35, gt=0, le=1)
     box_margin_m: FiniteFloat = Field(default=0.15, ge=0)
     sam_batch: int = Field(default=32, ge=1, strict=True)
-    geometry_method: Literal["legacy", "objectgs"] = "legacy"
+    geometry_method: Literal["legacy", "shell", "objectgs"] = "legacy"
+    geometry_review: Literal["legacy", "required", "auto"] = "legacy"
     objectgs_iterations: int = Field(default=30000, ge=1, strict=True)
     objectgs_background_voxel_m: FiniteFloat = Field(default=0.04, gt=0)
 
@@ -429,6 +430,7 @@ def objectify(
                         exclude={
                             "max_objects",
                             "geometry_method",
+                            "geometry_review",
                             "objectgs_iterations",
                             "objectgs_background_voxel_m",
                         },
