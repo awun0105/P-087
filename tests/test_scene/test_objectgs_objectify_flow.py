@@ -4,6 +4,7 @@ This is NOT ObjectGS GPU E2E evidence. It protects artifact flow and rejects leg
 """
 
 import hashlib
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -127,6 +128,15 @@ def test_objectgs_surface_reaches_real_coacd_and_publishes_separate_background(
             checkpoint = workspace / "fixture-checkpoint.tar.gz"
             checkpoint.write_bytes(b"explicit fixture, not a real ObjectGS checkpoint")
             object_id = next(iter(request["source_poses"]))
+            from src.services.scene.surface_mesh import process_surface
+
+            _, quality, repair = process_surface(trimesh.creation.box(extents=[1, 2, 3]), voxel_size_m=0.01)
+            checksum = "sha256:" + hashlib.sha256(surface.read_bytes()).hexdigest()
+            for report in (quality, repair):
+                report.update(object_id=object_id, source_checksum=checksum, result_checksum=checksum)
+            quality_path, repair_path = workspace / "quality.json", workspace / "repair.json"
+            quality_path.write_text(json.dumps(quality))
+            repair_path.write_text(json.dumps(repair))
             return dict(
                 upstream_commit=module.OBJECTGS_COMMIT,
                 gsplat_commit="b" * 40,
@@ -154,6 +164,13 @@ def test_objectgs_surface_reaches_real_coacd_and_publishes_separate_background(
                         vertex_count=8,
                         triangle_count=12,
                         watertight=True,
+                        quality_passed=True,
+                        raw_path=str(surface),
+                        raw_checksum="sha256:" + hashlib.sha256(surface.read_bytes()).hexdigest(),
+                        quality_report_path=str(quality_path),
+                        quality_report_checksum="sha256:" + hashlib.sha256(quality_path.read_bytes()).hexdigest(),
+                        repair_report_path=str(repair_path),
+                        repair_report_checksum="sha256:" + hashlib.sha256(repair_path.read_bytes()).hexdigest(),
                     )
                 },
             )
@@ -168,13 +185,23 @@ def test_objectgs_surface_reaches_real_coacd_and_publishes_separate_background(
         raise AssertionError(name)
 
     monkeypatch.setattr(module, "_run", run)
-    monkeypatch.setattr(
-        module,
-        "run_prepared_objectgs",
-        lambda request, **kwargs: run(
+
+    def prepared(request, **kwargs):
+        receipt = run(
             Path(__import__("sys").executable), None, request.model_dump(mode="json"), tmp_path / "attempt", "objectgs"
-        ),
-    )
+        )
+        for object_id, item in receipt["objects"].items():
+            item["producer_provenance"] = {
+                key: receipt.get(key) for key in ("runtime", "export_config", "upstream_commit", "gsplat_commit")
+            }
+            item["producer_provenance"].update(
+                training_config_checksum=receipt["config_checksum"],
+                source_world_from_object=receipt["source_poses"][object_id],
+            )
+            item["evidence_refs"] = kwargs["surface_artifact_callback"](object_id, item)
+        return receipt
+
+    monkeypatch.setattr(module, "run_prepared_objectgs", prepared)
 
     def package(*a, **kw):
         path = tmp_path / "background.sog"

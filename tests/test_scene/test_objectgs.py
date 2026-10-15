@@ -131,6 +131,21 @@ def test_runner_contract_calls_train_then_each_numeric_label_never_minus_one(tmp
                 (checkpoint / name).write_bytes(b"fixture checkpoint, not a real ObjectGS model")
         else:
             label = command[command.index("--query_label_id") + 1]
+            support = Path(command[command.index("--surface-support") + 1])
+            np.savez(
+                support,
+                points=np.empty((0, 3)),
+                view_ids=np.empty(0, dtype=int),
+                camera_centers=np.empty((0, 3)),
+                metadata=json.dumps(
+                    dict(
+                        kind="objectgs_rendered_depth_estimate",
+                        coordinate_frame="world",
+                        distance_unit="m",
+                        voxel_size_m=0.01,
+                    )
+                ),
+            )
             path = model / f"train/id_{label}/mesh/fuse.ply"
             path.parent.mkdir(parents=True)
             path.write_bytes(trimesh.creation.box().export(file_type="ply"))
@@ -181,7 +196,8 @@ def test_shared_extension_cache_rejects_concurrent_process_and_releases_after_fa
         pass
 
 
-def test_prepared_stage_converts_world_mesh_to_rotated_object_local_once(tmp_path, monkeypatch):
+@pytest.mark.parametrize("open_surface", [False, True])
+def test_prepared_stage_converts_world_mesh_to_rotated_object_local_once(tmp_path, monkeypatch, open_surface):
     from scripts.scene import run_objectgs as cli
     from src.models.contracts.coordinates import Transform
     from src.services.scene.decomposition.gaussian_split import write_gaussian_ply
@@ -192,7 +208,9 @@ def test_prepared_stage_converts_world_mesh_to_rotated_object_local_once(tmp_pat
     object_id = next(iter(members.label_to_object_id.values()))
     dtype = [(name, "<f4") for name in ["x", "y", "z", "opacity", "scale_0", "rot_0", "f_dc_0", "f_dc_1", "f_dc_2"]]
     rows = np.zeros(4, dtype=dtype)
-    rows["x"] = [0, 1, 2, 3]
+    rows["x"] = [0, 1, 5, 3]
+    rows["y"] = [0, 0, 4.5, 5.5]
+    rows["z"] = [0, 0, 4.5, 7.5]
     ply = write_gaussian_ply(rows)
     source = tmp_path / "source.ply"
     source.write_bytes(ply)
@@ -243,17 +261,48 @@ def test_prepared_stage_converts_world_mesh_to_rotated_object_local_once(tmp_pat
         mesh.vertices = np.asarray(mesh.vertices) @ _rotation(pose.rotation_quaternion_xyzw).T + np.asarray(
             pose.translation_xyz
         )
+        if open_surface:
+            mesh.update_faces(np.arange(len(mesh.faces)) != 0)
         path = tmp_path / "world.ply"
         path.write_bytes(mesh.export(file_type="ply"))
         return {
             "model": str(model),
-            "objects": {object_id: {"path": str(path), "label": 1}},
+            "objects": {
+                object_id: {
+                    "path": str(path),
+                    "label": 1,
+                    "checksum": "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest(),
+                }
+            },
             "coordinate_frame": "world",
             "distance_unit": "m",
         }
 
     monkeypatch.setattr(objectgs, "run_objectgs", trained)
-    result = cli.run(request)
+    from src.services.orchestration.artifacts import ArtifactResolver, FilesystemArtifactStore
+    from src.services.orchestration.scene.surface_evidence import publish_surface_artifacts
+
+    resolver = ArtifactResolver(tmp_path / "artifacts")
+    store = FilesystemArtifactStore(resolver)
+    refs = {}
+
+    def publish_evidence(object_id, item):
+        refs.update(publish_surface_artifacts(members.source_visual_ref.job_id, object_id, item, store.publish))
+        return refs
+
+    if open_surface:
+        with pytest.raises(RuntimeError, match="open_boundary"):
+            cli.run(request, surface_artifact_callback=publish_evidence)
+        import shutil
+
+        shutil.rmtree(request.workspace)
+        from src.models.contracts.artifacts import ProductArtifactRef
+
+        quality = json.loads(resolver.require(ProductArtifactRef.model_validate(refs["quality_report"])).read_bytes())
+        assert not quality["passed"] and refs["surface"]["artifact_type"] == "ObjectSurfaceCandidateMesh"
+        return
+    result = cli.run(request, surface_artifact_callback=publish_evidence)
+    assert result["objects"][object_id]["quality_passed"] is True
     local = trimesh.load(result["objects"][object_id]["path"], force="mesh", process=False)
     np.testing.assert_allclose(local.bounds, [[-0.5, -1, -1.5], [0.5, 1, 1.5]], atol=1e-6)
     assert result["coordinate_frame"] == "object_local"

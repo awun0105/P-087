@@ -1,5 +1,7 @@
 """Pinned export hooks: full camera intrinsics and bounded rendered-depth support, NumPy only."""
 
+from __future__ import annotations
+
 import json
 from pathlib import Path
 
@@ -84,7 +86,7 @@ def install_export_hooks(path: Path) -> None:
     import open3d as o3d
     from utils import mesh_utils
 
-    def cameras(views):
+    def cameras(views: list[object]) -> list[object]:
         output = []
         for camera in views:
             intrinsic, extrinsic = camera_calibration(camera)
@@ -103,7 +105,13 @@ def install_export_hooks(path: Path) -> None:
 
     original = mesh_utils.GaussianExtractor.extract_mesh_bounded
 
-    def bounded(self, voxel_size=0.004, sdf_trunc=0.02, depth_trunc=3, mask_backgrond=True):
+    def bounded(
+        self: object,
+        voxel_size: float = 0.004,
+        sdf_trunc: float = 0.02,
+        depth_trunc: float = 3,
+        mask_backgrond: bool = True,
+    ) -> object:
         if not mask_backgrond:
             raise ValueError("object surface fusion must use categorical object masks")
         mesh = original(self, voxel_size=voxel_size, sdf_trunc=sdf_trunc, depth_trunc=depth_trunc, mask_backgrond=True)

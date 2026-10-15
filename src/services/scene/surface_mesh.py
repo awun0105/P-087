@@ -3,6 +3,8 @@
 No smoothing, decimation, largest-component selection, hull fallback or unconditional hole filling.
 """
 
+from __future__ import annotations
+
 import hashlib
 from pathlib import Path
 
@@ -125,6 +127,10 @@ def assess_surface(
     metrics = dict(vertices=len(mesh.vertices), triangles=len(mesh.faces), finite=finite)
     if not finite or not len(mesh.vertices) or not len(mesh.faces):
         return dict(passed=False, reasons=["empty_or_nonfinite_surface"], metrics=metrics)
+    degenerate = int((mesh.area_faces <= np.finfo(float).eps).sum())
+    metrics["degenerate_triangles"] = degenerate
+    if degenerate:
+        reasons.append("degenerate_triangles")
     edges, counts = _edges(mesh)
     loops, simple = _loops(edges)
     parts = mesh.split(only_watertight=False, repair=False)
@@ -143,7 +149,11 @@ def assess_surface(
         euler_characteristic=int(mesh.euler_number),
     )
     metrics["component_euler_characteristics"] = [int(part.euler_number) for part in parts]
-    metrics["component_genus"] = [(2 - int(part.euler_number)) / 2 for part in parts]
+    metrics["component_genus"] = [
+        (2 - int(part.euler_number)) / 2 if part.is_watertight and part.is_winding_consistent else None
+        for part in parts
+    ]
+    metrics["volume_m3"] = float(mesh.volume) if mesh.is_watertight and mesh.is_winding_consistent else None
     if any(part.is_watertight and (part.euler_number > 2 or part.euler_number % 2) for part in parts):
         reasons.append("invalid_closed_component_topology")
     if len(edges):
@@ -169,6 +179,7 @@ def assess_surface(
         metrics["source_bounds_deviation_m"] = deviation.tolist()
         if np.any(deviation > tolerance_m):
             reasons.append("source_bounds_or_metric_scale_mismatch")
+    metrics["intersection_scope"] = "nonadjacent_non_shared_vertex_triangles"
     if not reasons:
         crossing, complete = _intersections(mesh)
         metrics.update(nonadjacent_triangle_intersections=crossing, intersection_check_complete=complete)

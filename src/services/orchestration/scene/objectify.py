@@ -48,6 +48,7 @@ from src.services.orchestration.projects.registry import ProjectRegistry
 from src.services.orchestration.scene.diagnostics import capture_attempt
 from src.services.orchestration.scene.errors import SceneRevisionConflictError
 from src.services.orchestration.scene.floor_evidence import publish_floor_fit_evidence, scene_floor_fit_summary
+from src.services.orchestration.scene.surface_evidence import publish_surface_artifacts
 from src.services.process_control import ProcessCancelledError, ProcessTimeoutError, run_cancellable_process
 from src.services.reconstruction import camera_views, metric_visual_master, package_splat
 from src.services.scene.collision_ownership import bind_source_collision_ownership
@@ -531,6 +532,9 @@ def objectify(
             objectgs_receipt = run_prepared_objectgs(
                 prepared,
                 evidence_dir=workspace / "evidence",
+                surface_artifact_callback=lambda object_id, item: publish_surface_artifacts(
+                    job_id, object_id, item, publish
+                ),
                 cancel_event=cancel_event,
                 progress=lambda stage: logger.info("ObjectGS stage=%s job=%s", stage, job_id),
             )
@@ -544,6 +548,10 @@ def objectify(
             or objectgs_receipt.get("source_membership") != membership.model_dump(mode="json")
             or objectgs_receipt.get("source_poses") != source_poses
             or set(objectgs_receipt.get("objects", {})) != set(label_to_object_id.values())
+            or any(
+                item.get("quality_passed") is not True or not item.get("evidence_refs", {}).get("quality_report")
+                for item in objectgs_receipt.get("objects", {}).values()
+            )
         ):
             raise ObjectifyError("ObjectGS output frame/membership/source-pose receipt mismatch", retryable=False)
 
@@ -673,20 +681,19 @@ def objectify(
                 "export_config": objectgs_receipt["export_config"],
                 "runtime": objectgs_receipt["runtime"],
                 "source_world_from_object": source_poses[object_id],
+                "surface_evidence": info.get("evidence_refs", {}),
             }
             surface_payload = Path(info["path"]).read_bytes()
             if f"sha256:{hashlib.sha256(surface_payload).hexdigest()}" != info["checksum"]:
                 raise ObjectifyError("ObjectGS surface checksum mismatch", retryable=False)
-            surface_refs[object_id] = publish(
-                _reference(
-                    job_id,
-                    "objectgs/surfaces/{digest}.glb",
-                    "ObjectSurfaceMesh",
-                    StageId.SCENE_DECOMPOSE,
-                    surface_payload,
-                ).model_copy(update={"source_provenance": surface_provenance}),
-                surface_payload,
-            )
+            reference = ProductArtifactRef.model_validate(info["evidence_refs"]["surface"])
+            if (
+                reference.artifact_type != "ObjectSurfaceMesh"
+                or reference.job_id != job_id
+                or reference.artifact_checksum != info["checksum"]
+            ):
+                raise ObjectifyError("ObjectGS accepted surface evidence binding mismatch", retryable=False)
+            surface_refs[object_id] = reference
             manifest = ObjectSurfaceManifest(
                 object_id=object_id,
                 objectgs_label_id=info["label"],
@@ -703,7 +710,11 @@ def objectify(
                 ),
                 vertex_count=info["vertex_count"],
                 triangle_count=info["triangle_count"],
-                quality={"watertight": info["watertight"]},
+                quality={
+                    "watertight": info["watertight"],
+                    "passed": info.get("quality_passed", False),
+                    "report_ref": info.get("evidence_refs", {}).get("quality_report"),
+                },
                 provenance=surface_provenance,
             )
             manifest_payload = manifest.model_dump_json().encode()

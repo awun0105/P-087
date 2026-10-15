@@ -26,6 +26,7 @@ from src.services.process_control import ProcessCancelledError, run_cancellable_
 from src.services.scene.decomposition.gaussian_split import positions, read_gaussian_ply
 from src.services.scene.diagnostics import EvidenceRecorder
 from src.services.scene.editing.membership import decode_gaussian_membership_labels
+from src.services.scene.surface_mesh import assess_surface, clean_surface, load_support, load_surface, process_surface
 from src.services.simulation.colliders.carve import _rotation
 
 OBJECTGS_COMMIT = "0f6842b0fa80b9bfe151c31b70c306cbc5eab788"
@@ -317,6 +318,8 @@ with open(sys.argv[1], 'w') as f:
                 str(entry.with_name("objectgs_export_entry.py")),
                 "--upstream",
                 str(runtime.repository.resolve()),
+                "--surface-support",
+                str(workspace / f"depth-support-{label}.npz"),
                 "-m",
                 str(model),
                 "--query_label_id",
@@ -346,8 +349,13 @@ with open(sys.argv[1], 'w') as f:
         )
         if not len(mesh.faces) or not np.isfinite(mesh.vertices).all():
             raise RuntimeError(f"ObjectGS exported an empty/nonfinite surface for {object_id}")
+        support_path = workspace / f"depth-support-{label}.npz"
+        if not support_path.is_file():
+            raise RuntimeError("ObjectGS export did not preserve calibrated depth support")
         surfaces[object_id] = {
             "label": label,
+            "support_path": str(support_path),
+            "support_checksum": "sha256:" + hashlib.sha256(support_path.read_bytes()).hexdigest(),
             "path": str(path),
             "checksum": "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest(),
         }
@@ -392,6 +400,7 @@ def run_prepared_objectgs(
     cancel_event: Event | None = None,
     progress: Callable[[str], None] | None = None,
     evidence_dir: Path | None = None,
+    surface_artifact_callback: Callable[[str, dict], dict] | None = None,
 ) -> dict[str, object]:
     if Path(request.job_id).name != request.job_id or request.membership.source_visual_ref.job_id != request.job_id:
         raise ValueError("ObjectGS job ID and immutable membership source must agree")
@@ -418,6 +427,8 @@ def run_prepared_objectgs(
         cancel_event=cancel_event,
         **({"evidence_dir": evidence_dir} if evidence_dir is not None else {}),
     )
+    if receipt.get("coordinate_frame") != "world" or receipt.get("distance_unit") != "m":
+        raise ValueError("raw ObjectGS surface receipt must declare world metres before conversion")
     model = Path(receipt["model"])
     checkpoint = request.workspace / "objectgs-checkpoint.tar.gz"
     with tarfile.open(checkpoint, "w:gz") as archive:
@@ -431,22 +442,107 @@ def run_prepared_objectgs(
         archive.add(dataset, arcname=request.job_id)
     surface_dir = request.workspace / "surfaces"
     surface_dir.mkdir()
+    trace = EvidenceRecorder(evidence_dir, "surface")
+    failures = []
     for object_id, item in receipt["objects"].items():
-        mesh = trimesh.load(item["path"], force="mesh", process=False)
+        raw_source = Path(item["path"]).read_bytes()
+        if item.get("checksum") != "sha256:" + hashlib.sha256(raw_source).hexdigest():
+            raise ValueError("raw ObjectGS surface checksum mismatch")
+        mesh = load_surface(Path(item["path"]))
         pose = request.source_poses[object_id]
         mesh.vertices = (np.asarray(mesh.vertices) - np.asarray(pose.translation_xyz)) @ _rotation(
             pose.rotation_quaternion_xyzw
         )
+        raw_path = surface_dir / f"label-{item['label']}-raw.glb"
+        raw_payload = mesh.export(file_type="glb")
+        raw_path.write_bytes(raw_payload)
+        rotation = _rotation(pose.rotation_quaternion_xyzw)
+        support = (
+            load_support(
+                Path(item["support_path"]),
+                checksum=item["support_checksum"],
+                world_from_object_rotation=rotation,
+                object_translation=np.asarray(pose.translation_xyz),
+            )
+            if item.get("support_path")
+            else None
+        )
+        source_label = next(
+            int(label) for label, owner in request.membership.label_to_object_id.items() if owner == object_id
+        )
+        anchors = (positions(rows)[labels == source_label] - np.asarray(pose.translation_xyz)) @ rotation
+        expected_bounds = np.array([anchors.min(axis=0), anchors.max(axis=0)])
+        mesh, quality, repair = process_surface(
+            mesh, voxel_size_m=request.runtime.voxel_size_m, support=support, expected_bounds=expected_bounds
+        )
         path = surface_dir / f"label-{item['label']}.glb"
         payload = mesh.export(file_type="glb")
         path.write_bytes(payload)
+        serialized = assess_surface(
+            clean_surface(load_surface(path)),
+            expected_bounds=expected_bounds,
+            tolerance_m=5 * request.runtime.voxel_size_m,
+        )
+        quality["serialized"] = serialized
+        if not serialized["passed"]:
+            quality["passed"] = False
+            quality["reasons"] = sorted(set(quality["reasons"] + serialized["reasons"]))
+        quality.update(
+            object_id=object_id,
+            input_world_checksum="sha256:" + hashlib.sha256(raw_source).hexdigest(),
+            source_checksum="sha256:" + hashlib.sha256(raw_payload).hexdigest(),
+            result_checksum="sha256:" + hashlib.sha256(payload).hexdigest(),
+            source_membership_checksum=request.membership.labels_ref.artifact_checksum,
+            source_world_from_object=pose.model_dump(mode="json"),
+            support_checksum=item.get("support_checksum"),
+        )
+        repair.update(
+            object_id=object_id,
+            source_checksum=quality["source_checksum"],
+            result_checksum=quality["result_checksum"],
+            support_checksum=item.get("support_checksum"),
+        )
+        reports = {}
+        for kind, report in (("quality_report", quality), ("repair_report", repair)):
+            report_path = surface_dir / f"label-{item['label']}-{kind}.json"
+            report_payload = json.dumps(report, sort_keys=True, allow_nan=False).encode()
+            report_path.write_bytes(report_payload)
+            reports[kind + "_path"] = str(report_path)
+            reports[kind + "_checksum"] = "sha256:" + hashlib.sha256(report_payload).hexdigest()
         item.update(
             path=str(path),
-            checksum="sha256:" + hashlib.sha256(payload).hexdigest(),
+            checksum=quality["result_checksum"],
+            raw_path=str(raw_path),
+            raw_checksum=quality["source_checksum"],
             vertex_count=len(mesh.vertices),
             triangle_count=len(mesh.faces),
             watertight=bool(mesh.is_watertight),
+            quality_passed=quality["passed"],
+            **reports,
         )
+        item["producer_provenance"] = {
+            "upstream_commit": receipt.get("upstream_commit"),
+            "gsplat_commit": receipt.get("gsplat_commit"),
+            "glm_commit": receipt.get("glm_commit"),
+            "training_config_checksum": receipt.get("config_checksum"),
+            "export_config": receipt.get("export_config"),
+            "runtime": receipt.get("runtime"),
+            "source_world_from_object": pose.model_dump(mode="json"),
+        }
+        if surface_artifact_callback is not None:
+            item["evidence_refs"] = surface_artifact_callback(object_id, item)
+        trace.emit(
+            "surface_quality",
+            object_id=object_id,
+            passed=quality["passed"],
+            reasons=quality["reasons"],
+            inferred_faces=quality["inferred_faces"],
+            evidence_refs=item.get("evidence_refs", {}),
+        )
+        if not quality["passed"]:
+            failures.append(f"{object_id}: {', '.join(quality['reasons'])}")
+    if failures:
+        raise RuntimeError("ObjectGS surface quality gate failed: " + "; ".join(failures))
     receipt.update(
         coordinate_frame="object_local",
         source_membership=request.membership.model_dump(mode="json"),

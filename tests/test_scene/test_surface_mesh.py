@@ -128,3 +128,65 @@ def test_degenerate_surface_scale_mismatch_and_intersecting_shells_fail_closed()
     other.apply_translation([0.3, 0.2, 0.1])
     report = assess_surface(trimesh.util.concatenate([box, other]))
     assert not report["passed"] and "self_intersection" in report["reasons"]
+
+
+def test_glb_child_rigid_transform_is_applied_once_but_scale_layout_is_rejected(tmp_path):
+    from src.services.scene.surface_mesh import load_surface
+
+    scene = trimesh.Scene()
+    transform = trimesh.transformations.rotation_matrix(0.6, [0, 0, 1])
+    transform[:3, 3] = [2, 3, 4]
+    cube = trimesh.creation.box(extents=[1, 2, 3])
+    scene.add_geometry(cube, node_name="rotated-child", transform=transform)
+    path = tmp_path / "child.glb"
+    path.write_bytes(scene.export(file_type="glb"))
+    actual = load_surface(path)
+    expected = cube.copy()
+    expected.apply_transform(transform)
+    np.testing.assert_allclose(actual.bounds, expected.bounds, atol=1e-6)
+    scene = trimesh.Scene()
+    scene.add_geometry(cube, transform=np.diag([2, 1, 1, 1]))
+    path.write_bytes(scene.export(file_type="glb"))
+    with pytest.raises(ValueError, match="rigid"):
+        load_surface(path)
+
+
+def test_world_depth_support_checksum_and_object_transform_are_explicit(tmp_path):
+    import hashlib
+    import json
+
+    from src.services.scene.surface_mesh import load_support
+
+    path = tmp_path / "support.npz"
+    np.savez(
+        path,
+        points=np.array([[2.0, 3.0, 4.0]]),
+        view_ids=np.array([0]),
+        camera_centers=np.array([[2.0, 3.0, 5.0]]),
+        metadata=json.dumps(
+            dict(
+                kind="objectgs_rendered_depth_estimate", coordinate_frame="world", distance_unit="m", voxel_size_m=0.01
+            )
+        ),
+    )
+    checksum = "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+    rotation = np.array([[0, -1, 0], [1, 0, 0], [0, 0, 1]])
+    support = load_support(
+        path, checksum=checksum, world_from_object_rotation=rotation, object_translation=np.array([1, 2, 3])
+    )
+    np.testing.assert_allclose(support["points"], [[1, -1, 1]])
+    np.testing.assert_allclose(support["camera_centers"], [[1, -1, 2]])
+    assert support["metadata"]["coordinate_frame"] == "object_local"
+    with pytest.raises(ValueError, match="checksum"):
+        load_support(
+            path, checksum="sha256:" + "0" * 64, world_from_object_rotation=rotation, object_translation=np.zeros(3)
+        )
+
+
+def test_closed_through_hole_is_valid_topology_and_is_never_filled():
+    mesh = trimesh.creation.annulus(r_min=0.3, r_max=0.5, height=0.1, sections=16)
+    result, quality, repair = process_surface(mesh, voxel_size_m=0.01)
+    assert quality["passed"], quality
+    assert quality["after"]["metrics"]["component_genus"] == [1]
+    assert not repair["holes"] and not repair["inferred_face_indices"]
+    assert result.volume == pytest.approx(mesh.volume)

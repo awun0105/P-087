@@ -26,6 +26,7 @@ from skimage import measure
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scene"))
 from diagnostics import recorder  # noqa: E402
+from surface_mesh import assess_surface, clean_surface, load_surface  # noqa: E402
 
 _PLY_TYPES = {"float": "f4", "float32": "f4", "double": "f8", "uchar": "u1", "int": "i4", "uint": "u4"}
 
@@ -121,12 +122,15 @@ def surface_parts(item: dict, config: dict, diagnostics: dict | None = None) -> 
     payload = path.read_bytes()
     if item.get("surface_checksum") != f"sha256:{hashlib.sha256(payload).hexdigest()}":
         raise ValueError("surface mesh checksum mismatch")
-    mesh = trimesh.load(path, force="mesh", process=False)
+    mesh = load_surface(path)
     if not len(mesh.vertices) or not len(mesh.faces) or not np.isfinite(mesh.vertices).all():
         raise ValueError("surface mesh must contain finite vertices and triangles")
-    mesh.update_faces(mesh.nondegenerate_faces())
-    mesh.merge_vertices()
-    mesh.remove_unreferenced_vertices()
+    mesh = clean_surface(mesh)
+    quality = assess_surface(mesh)
+    if diagnostics is not None:
+        diagnostics["quality"] = quality
+    if not quality["passed"]:
+        raise ValueError("strict surface quality gate failed: " + ", ".join(quality["reasons"]))
     components = mesh.split(only_watertight=False, repair=False)
     if diagnostics is not None:
         diagnostics["surface_validation"] = {

@@ -157,3 +157,67 @@ def test_real_coacd_preserves_void_under_connected_concave_table(tmp_path):
     assert all(not collides(np.array([0, 0.05, z])) for z in [0.5, 1, 1.7])
     assert collides(np.array([-0.85, 0.05, 1])) and collides(np.array([0.85, 0.05, 1]))
     assert collides(np.array([0, 0.05, 2.15]))
+
+
+def test_depth_supported_small_repair_passes_real_strict_coacd(tmp_path):
+    from src.services.scene.surface_mesh import process_surface
+    from tests.test_scene.test_surface_mesh import missing_patch, support_for
+
+    source, triangle = missing_patch()
+    mesh, quality, repair = process_surface(source, voxel_size_m=0.01, support=support_for(triangle))
+    assert quality["passed"] and repair["inferred_face_indices"]
+    path = tmp_path / "repaired.glb"
+    payload = mesh.export(file_type="glb")
+    path.write_bytes(payload)
+    item = dict(
+        id="repaired",
+        surface_mesh=str(path),
+        surface_checksum="sha256:" + hashlib.sha256(payload).hexdigest(),
+        coordinate_frame="object_local",
+        distance_unit="m",
+        output_glb=str(tmp_path / "repaired-collider.glb"),
+    )
+    result = run(tmp_path, item)
+    assert result["parts"] > 0 and result["method"] == "coacd" and not result.get("error")
+    np.testing.assert_allclose(trimesh.load(item["output_glb"], force="mesh").bounds, mesh.bounds, atol=1e-6)
+
+
+def test_four_leg_table_cleanup_and_real_coacd_leave_under_table_void(tmp_path):
+    from scipy.spatial import ConvexHull
+
+    from src.services.scene.object_aware_geometry import build_background_collision
+    from src.services.scene.surface_mesh import process_surface
+
+    cells = np.array(
+        [
+            (x, y, z)
+            for x in range(8)
+            for y in range(8)
+            for z in range(11)
+            if z >= 9 or ((x < 2 or x >= 6) and (y < 2 or y >= 6))
+        ]
+    )
+    points = (cells + 0.5) * 0.1
+    surface = build_background_collision(points, np.zeros(len(points), dtype=np.int32), set(), voxel_m=0.1)
+    raw = trimesh.Trimesh(surface.vertices, surface.faces, process=False)
+    mesh, quality, repair = process_surface(raw, voxel_size_m=0.1)
+    assert quality["passed"], quality
+    assert not repair["inferred_face_indices"]
+    assert mesh.volume == pytest.approx(raw.volume)
+    path = tmp_path / "four-leg.glb"
+    payload = mesh.export(file_type="glb")
+    path.write_bytes(payload)
+    item = dict(
+        id="table",
+        surface_mesh=str(path),
+        surface_checksum="sha256:" + hashlib.sha256(payload).hexdigest(),
+        coordinate_frame="object_local",
+        distance_unit="m",
+        output_glb=str(tmp_path / "table-collider.glb"),
+    )
+    result = run(tmp_path, item, {"max_convex_hull": 8, "threshold": 0.03})
+    assert not result.get("error"), result
+    assert result["parts"] > 1
+    for part in trimesh.load(item["output_glb"], force="scene").geometry.values():
+        halfspaces = ConvexHull(part.vertices).equations
+        assert not np.all(halfspaces[:, :3] @ [0.4, 0.4, 0.4] + halfspaces[:, 3] <= 1e-7)
