@@ -26,6 +26,7 @@ from tests.test_scene.test_object_geometry_build import (  # noqa: F401  (pytest
     build,
     cpu_providers,
     draft_scene,
+    install_background_fill,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -367,3 +368,30 @@ def test_reviewed_shell_scene_builds_a_sealed_simulation_package(
     repeated = service.build_simulation_package(registry, job_id)
     assert repeated.package_ref == package.package_ref
     assert registry.scene.current(job_id).scene.scene_revision == package.scene_revision
+
+
+@pytest.mark.skipif(not RUNTIME.is_file(), reason="isolated CoACD/USD runtime data/scene_runtime is not installed")
+def test_background_fill_scene_passes_preflight_and_packages(
+    draft_scene: SimpleNamespace,  # noqa: F811 (pytest fixture chain)
+    cpu_providers: SimpleNamespace,  # noqa: F811 (pytest fixture chain)
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Inpaint adds rows, a candidate stays unconfirmed: the recorded count must satisfy SOURCE conservation."""
+    from src.models.contracts.validation import RuleResult
+    from src.services.orchestration.review import simulation_package as service
+    from src.services.scene.representation_integrity import representation_issues
+
+    install_background_fill(monkeypatch, cpu_providers, 3, real_convex=True)
+    build(draft_scene)
+    registry, job_id = draft_scene.registry, draft_scene.job_id
+    ready = registry.scene.current(job_id).scene
+    assert ready.provenance["inpainted_gaussians"] == 3
+    confirmed = apply_object_action(registry.scene, job_id, ready.objects[0].id, "confirm", ready.scene_revision)
+    scene = confirmed.revision.scene
+    assert representation_issues(scene, registry.runtime_resolver.require) == []
+    monkeypatch.setattr(service, "get_settings", lambda: draft_scene.settings)
+
+    package = service.build_simulation_package(registry, job_id)
+
+    assert package.preflight.blocking_result == RuleResult.PASS, package.preflight.model_dump(mode="json")
+    assert package.package_ref is not None and package.confirmed_objects == 1
