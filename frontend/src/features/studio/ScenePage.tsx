@@ -19,6 +19,7 @@ import { ObjectifyContext } from "@/features/studio/scene/objectifyContext";
 import { geometryReviewStep, useObjectifyState } from "@/features/studio/scene/useObjectify";
 import { progressSceneStatus } from "@/features/studio/sceneStatus";
 import { usePolling } from "@/features/studio/usePolling";
+import { useOperatorTime } from "@/features/studio/value/useOperatorTime";
 import { getJob, getPreview, getProject, jobArtifactContentUrl } from "@/lib/api/endpoints";
 import { cancelJob, getJobProgress, retryJob } from "@/lib/api/studio";
 import { cn } from "@/lib/cn";
@@ -28,6 +29,7 @@ import { useAuth } from "@/features/studio/AuthProvider";
 import { NextAction } from "@/features/studio/scene/NextAction";
 import { ErrorFeedback, notifySuccess } from "@/components/studio/feedback";
 import type { MetricDraft } from "@/features/studio/MetricConfirmView";
+import type { OperatorTimeSurface } from "@/lib/api/value";
 import type { JobProgress } from "@/lib/contracts/studio";
 
 interface RetrySync {
@@ -39,6 +41,14 @@ interface RetrySync {
 }
 
 const PROGRESS_STATUS_ORDER = { QUEUED: 0, RUNNING: 1, SUCCEEDED: 2, FAILED: 2, CANCELLED: 2 } as const;
+
+/** Bề mặt ghi trong §15.3: mỗi tab là một bề mặt riêng để thời gian của từng tab tách bạch. */
+const OPERATOR_SURFACE: Record<Tab, OperatorTimeSurface> = {
+  progress: "progress",
+  studio: "studio",
+  review: "other",
+  results: "evaluation",
+};
 
 /**
  * Mỗi tab là một chunk riêng: three.js (kết quả từng bước) và PlayCanvas (Studio) chỉ tải khi mở
@@ -278,6 +288,8 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
 
   const locked = tabs.find((item) => item.id === selected)?.locked;
   const current: Tab = locked ? "progress" : selected;
+  // Chỉ người có quyền sửa job mới được đo; người xem không sửa được thì không gửi gì.
+  useOperatorTime({ jobId, surface: OPERATOR_SURFACE[current], enabled: canMutateJob });
   function openTab(next: Tab, nextMode?: StudioMode) {
     const target = new URL(window.location.href);
     target.searchParams.set("tab", next);
