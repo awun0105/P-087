@@ -5,14 +5,22 @@ Toạ độ theo khung canonical của scene (mét, Z-up, sàn z = 0).
 """
 
 import math
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
 import numpy as np
 import trimesh
 from pydantic import BaseModel
+from scipy.spatial.transform import Rotation
 
+from src.models.contracts.scene import ColliderSpec, ColliderType, SceneObject
+from src.services.orchestration.projects.registry import ProjectRegistry
+from src.services.orchestration.scene.effective_collision import _job_simulation_config, effective_environment
+from src.services.orchestration.scene.errors import SceneError
 from src.services.orchestration.value.ground_truth import GapCheck, MeasuredDistance, RobotProfile
+from src.services.scene.representation_composition import resolve_representation
+from src.services.simulation.mesh_geometry import load_mesh_parts
 
 #: Bước quét độ cao của khe (quy tắc 3: z = h_min, h_min + 0.05, … ≤ h_max).
 HEIGHT_STEP_M = 0.05
@@ -145,4 +153,78 @@ def gap_width(world: CollisionWorld, gap: GapCheck, robot: RobotProfile) -> GapR
         agree=agree,
         kind=kind,
         heights_checked=len(heights),
+    )
+
+
+MeshParts = list[tuple[np.ndarray, np.ndarray]]
+
+
+def _collider_local_mesh(collider: ColliderSpec, load_parts: Callable[[ColliderSpec], MeshParts]) -> MeshParts:
+    """Lưới collider trong khung object-local: hộp theo kích thước, còn lại đọc GLB như Walk và USD."""
+    if collider.collider_type in {ColliderType.AABB, ColliderType.OBB}:
+        if collider.dimensions_xyz_m is None:
+            raise ValueError(f"collider {collider.collider_id} thiếu kích thước hộp")
+        box = trimesh.creation.box(extents=collider.dimensions_xyz_m)
+        return [(np.asarray(box.vertices, dtype=float), np.asarray(box.faces, dtype=np.int64))]
+    return load_parts(collider)
+
+
+def _collider_world_pose(item: SceneObject, collider: ColliderSpec) -> tuple[Rotation, np.ndarray]:
+    """Collider nằm trong object, object nằm trong canonical: t = t_obj + R_obj·t_local, R = R_obj·R_local."""
+    object_rotation = Rotation.from_quat(item.transform.rotation_quaternion_xyzw)
+    local = collider.local_transform
+    translation = np.asarray(item.transform.translation_xyz, dtype=float) + object_rotation.apply(
+        np.asarray(local.translation_xyz, dtype=float)
+    )
+    return object_rotation * Rotation.from_quat(local.rotation_quaternion_xyzw), translation
+
+
+def compose_collision_world(
+    objects: Sequence[SceneObject],
+    background_vertices: np.ndarray,
+    background_faces: np.ndarray,
+    load_parts: Callable[[ColliderSpec], MeshParts],
+) -> CollisionWorld:
+    """Gộp môi trường đã khoét với collider của mọi vật mà USD và Walk xuất như vật (cùng quy tắc representation)."""
+    vertex_blocks = [np.asarray(background_vertices, dtype=float)]
+    face_blocks = [np.asarray(background_faces, dtype=np.int64)]
+    owner_blocks = [np.full(len(face_blocks[0]), "", dtype=object)]
+    offset = len(vertex_blocks[0])
+    solid: set[str] = set()
+    for item in objects:
+        if not resolve_representation(item).export_as_object:
+            continue
+        if item.collider is None:
+            raise ValueError(f"vật {item.id} được xuất nhưng chưa có collider")
+        rotation, translation = _collider_world_pose(item, item.collider)
+        closed = True
+        for vertices, faces in _collider_local_mesh(item.collider, load_parts):
+            world_vertices = rotation.apply(np.asarray(vertices, dtype=float)) + translation
+            world_faces = np.asarray(faces, dtype=np.int64)
+            closed = closed and trimesh.Trimesh(world_vertices, world_faces, process=False).is_watertight
+            vertex_blocks.append(world_vertices)
+            face_blocks.append(world_faces + offset)
+            owner_blocks.append(np.full(len(world_faces), item.id, dtype=object))
+            offset += len(world_vertices)
+        if closed:
+            solid.add(item.id)
+    mesh = trimesh.Trimesh(np.vstack(vertex_blocks), np.vstack(face_blocks), process=False)
+    return CollisionWorld(mesh=mesh, face_owner=np.concatenate(owner_blocks), solid_owners=frozenset(solid))
+
+
+def collision_world(registry: ProjectRegistry, job_id: str, scene_revision: str) -> CollisionWorld:
+    """Collision tổng hợp của một revision đã publish (không nhất thiết là revision hiện tại).
+
+    Đọc, không ghi: không chạy phục hồi quyền sở hữu nguồn, nên revision cũ thiếu quyền sở hữu sẽ bị từ chối.
+    """
+    revision = registry.scene.revision(job_id, scene_revision)
+    if revision is None:
+        raise SceneError(f"revision {scene_revision} không thuộc job {job_id}")
+    margin = _job_simulation_config(registry, job_id)["carve_margin_m"]
+    background = effective_environment(registry, revision.scene, margin_m=margin)
+    return compose_collision_world(
+        revision.scene.objects,
+        background.vertices,
+        background.faces,
+        lambda collider: load_mesh_parts(registry.runtime_resolver.require(collider.geometry_ref)),
     )
