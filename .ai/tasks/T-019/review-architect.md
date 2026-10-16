@@ -1,6 +1,6 @@
 # Review T-019 (Architect)
 
-Verdict: CHANGES REQUESTED — chưa đóng được; phần đã làm đạt.
+Verdict: ACCEPTED (round 2; round 1 was CHANGES REQUESTED, see below)
 
 Đọc `report.md`, `review.md` (deep review của engineer), diff chưa commit của `object_geometry_build.py`, `region-overlay.ts`,
 `shell-glow.ts`; kiểm lại GR-01 trên source (`object_geometry_build.py:545` bỏ count; validator `representation_integrity.py:52-73`
