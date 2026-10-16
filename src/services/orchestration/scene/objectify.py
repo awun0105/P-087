@@ -463,6 +463,7 @@ def objectgs_runtime_for(settings: Settings, config: ObjectifyConfig) -> ObjectG
         cuda_home=settings.product_objectgs_cuda_home,
         cxx=settings.product_objectgs_cxx,
         glm_repository=settings.product_objectgs_glm_repository,
+        extension_cache_dir=settings.product_objectgs_extension_cache_dir,
     )
 
 

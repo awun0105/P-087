@@ -85,6 +85,8 @@ class Settings(BaseSettings):
     product_objectgs_cuda_home: Path | None = None
     product_objectgs_cxx: Path | None = None
     product_objectgs_glm_repository: Path | None = None
+    #: Cache biên dịch dùng chung của gsplat-object (dựng sẵn bởi setup_objectgs_runtime.sh); None = biên dịch trong workspace.
+    product_objectgs_extension_cache_dir: Path | None = None
     #: Che khuôn mặt/biển số trên frame trước khi dựng 3D (AUD-18). Cần `product_scene_runtime_python` và
     #: `product_egoblur_weights`; bật mà thiếu thì job lỗi ở bước tách frame, không chạy trên frame gốc.
     product_anonymize_input: bool = False
