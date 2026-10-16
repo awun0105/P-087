@@ -68,6 +68,13 @@ ghi vào trong repo. Ba file `api.env.example`, `worker.env.example`, `web.env.e
 6. **Studio trên Vercel.** Đặt `REAL2SIM_API_URL` từ `web.env`, build bằng `npm run build:editor && npm run build`.
 7. **Chạy thử một job** từ upload tới viewer.
 
+## Nâng cấp từ bản trước T-040
+
+- Nâng cấp từ bản trước T-040 khi còn job RUNNING: đưa job đó về FAILED retryable bằng tay trước khi bật worker mới.
+  Bản trước không có lease nên worker mới không tự phục hồi job đó.
+- Migration 22 và 23 chạy tự động khi API hoặc worker khởi động. Worker mới công bố runtime vào `r2s_worker_runtimes`
+  ngay nhịp heartbeat đầu tiên; API không cần khởi động lại để thấy runtime đó.
+
 ## Những chỗ dễ vấp
 
 - **Runtime gắn với phiên bản công cụ, không gắn với GPU.** Khoá ghép job với worker là checksum của runtime
