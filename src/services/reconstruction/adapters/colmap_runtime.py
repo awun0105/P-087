@@ -8,21 +8,22 @@ from pathlib import Path
 from typing import Any
 
 from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import SettingsConfigDict
 
 from src.models.contracts.manifests import ExecutionError, StageArtifact, StageId, StageStatus
 from src.models.contracts.retryability import classify_retryability
+from src.runtime_env import RuntimeSettings
 from src.services.reconstruction.adapters.log_excerpt import redacted_excerpt
 from src.services.reconstruction.rgb.pose.camera_pose import ColmapConfig
 
 
-class ColmapRuntimeSettings(BaseSettings):
+class ColmapRuntimeSettings(RuntimeSettings):
     """Composition root inject executable/container launcher; không lưu path vào artifact."""
 
     command: tuple[str, ...] = ("colmap",)
     runtime_identity: str = Field(min_length=1)
     timeout_seconds: float = Field(gt=0, default=1800, allow_inf_nan=False)
-    model_config = SettingsConfigDict(env_prefix="REC03_COLMAP_", extra="forbid")
+    model_config = SettingsConfigDict(env_prefix="R2S_COLMAP_", extra="forbid")
 
 
 class ColmapError(ValueError):

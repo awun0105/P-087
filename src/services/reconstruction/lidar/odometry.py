@@ -22,7 +22,7 @@ from typing import Literal, Self
 
 import numpy as np
 from pydantic import Field, FiniteFloat, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import SettingsConfigDict
 
 from src.models.contracts.artifacts import ArtifactDataClass, ArtifactRef, Checksum, ContractModel, Identifier
 from src.models.contracts.coordinates import Transform
@@ -42,6 +42,7 @@ from src.models.contracts.reconstruction import (
     EstimatedTrajectoryIngestBinding,
     EstimatedTrajectoryPose,
 )
+from src.runtime_env import RuntimeSettings
 from src.services.orchestration.artifacts.store import ArtifactResolver, FilesystemArtifactStore
 from src.services.reconstruction.inputs.timestamps import parse_timestamp_rows, timestamps_in_seconds
 from src.services.reconstruction.lidar.cloud_payload import load_xyz_points
@@ -167,14 +168,14 @@ class LidarOdometryWorkerRequest(ContractModel):
         return self
 
 
-class LidarOdometryRuntimeSettings(BaseSettings):
+class LidarOdometryRuntimeSettings(RuntimeSettings):
     """Isolated provider interpreter and process limits injected by deployment."""
 
     python: Path = Path("/opt/real2sim/lidar_runtime/bin/python")
     work_root: Path = Path("/tmp/real2sim-lidar-odometry")
     timeout_seconds: float = Field(default=3600, gt=0, allow_inf_nan=False)
     provider_version: str = _PINNED_PROVIDER_VERSION
-    model_config = SettingsConfigDict(env_prefix="REC17_LIDAR_ODOMETRY_", extra="forbid")
+    model_config = SettingsConfigDict(env_prefix="R2S_LIDAR_ODOMETRY_", extra="forbid")
 
 
 class LidarOdometryError(RuntimeError):

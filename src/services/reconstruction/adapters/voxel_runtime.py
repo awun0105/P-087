@@ -10,10 +10,12 @@ from threading import Event
 from typing import TextIO
 
 from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import SettingsConfigDict
+
+from src.runtime_env import RuntimeSettings
 
 
-class VoxelRuntimeSettings(BaseSettings):
+class VoxelRuntimeSettings(RuntimeSettings):
     """Runtime được deployment inject; không cài npm hoặc đổi driver ngầm."""
 
     cli: Path
@@ -21,7 +23,7 @@ class VoxelRuntimeSettings(BaseSettings):
     node_command: tuple[str, ...] = ("node",)
     timeout_seconds: float = Field(default=300, gt=0, allow_inf_nan=False)
     environment: dict[str, str] = Field(default_factory=dict)
-    model_config = SettingsConfigDict(env_prefix="REC05_VOXEL_", extra="forbid")
+    model_config = SettingsConfigDict(env_prefix="R2S_VOXEL_", extra="forbid")
 
 
 class GeometryError(ValueError):

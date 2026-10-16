@@ -11,15 +11,16 @@ from pathlib import Path
 from typing import TextIO
 
 from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import SettingsConfigDict
 
 from src.models.contracts.manifests import ExecutionError, StageArtifact, StageId, StageStatus
 from src.models.contracts.retryability import classify_retryability
+from src.runtime_env import RuntimeSettings
 from src.services.reconstruction.resume import CHECKPOINT_NAME
 from src.services.reconstruction.rgb.splat.visual import BrushConfig
 
 
-class BrushRuntimeSettings(BaseSettings):
+class BrushRuntimeSettings(RuntimeSettings):
     """Executable paths ở composition root, không serialize vào published metadata."""
 
     command: tuple[str, ...] = ("brush",)
@@ -32,7 +33,7 @@ class BrushRuntimeSettings(BaseSettings):
     #: Python của runtime có torch + gói `lpips` (thường là `data/scene_runtime`); None = không chấm LPIPS.
     lpips_python: Path | None = None
     hang_timeout_seconds: float = Field(default=180.0, ge=0)
-    model_config = SettingsConfigDict(env_prefix="REC04_BRUSH_", extra="forbid")
+    model_config = SettingsConfigDict(env_prefix="R2S_BRUSH_", extra="forbid")
 
 
 FATAL_LOG_PATTERNS: tuple[tuple[str, str, str], ...] = (

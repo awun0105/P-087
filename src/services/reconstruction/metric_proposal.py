@@ -20,11 +20,12 @@ from typing import Literal
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import SettingsConfigDict
 
 from src.models.contracts.artifacts import ArtifactDataClass, ProductArtifactRef
 from src.models.contracts.identity import canonical_json_bytes
 from src.models.contracts.manifests import StageId
+from src.runtime_env import RuntimeSettings
 from src.services.reconstruction.rgb.canonical.auto_scale import (
     align_scale,
     propose_floor,
@@ -46,7 +47,7 @@ _MEDIAN_STANDARD_ERROR = 1.2533
 _MIN_SEGMENT_M = 0.5
 
 
-class MogeSettings(BaseSettings):
+class MogeSettings(RuntimeSettings):
     """Runtime MoGe-2 của worker; để trống `python` hoặc `model` nghĩa là không bật đề xuất tự động."""
 
     python: Path | None = None
@@ -56,7 +57,7 @@ class MogeSettings(BaseSettings):
     #: Mỗi ảnh là một phiếu cho tỉ lệ; sai số của trung vị giảm theo căn số ảnh nên dùng nhiều ảnh.
     max_frames: int = Field(default=60, ge=3)
     max_points: int = Field(default=400, ge=20)
-    model_config = SettingsConfigDict(env_prefix="REC06_MOGE_", extra="ignore")
+    model_config = SettingsConfigDict(env_prefix="R2S_MOGE_", extra="ignore")
 
 
 class FloorProposal(BaseModel):
