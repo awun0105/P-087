@@ -270,8 +270,9 @@ on the volume. The temporary extraction is removed when the command exits.
 tools; it does not require nested Docker.  The worker host still needs a real
 NVIDIA runtime and Vulkan ICD.  Before accepting a worker, run its image
 preflight and record the actual COLMAP/Brush/scene-runtime identity.  The API's
-`PRODUCT_PROCESSING_CONFIG` and `PRODUCT_RUNTIME_MANIFEST` must be supplied as
-a matched pair from an accepted worker baseline.  A manifest copied from the
+`PRODUCT_PROCESSING_CONFIG` must match the accepted worker baseline. The API
+does not receive the worker manifest: with `PRODUCT_RUNTIME_FROM_WORKERS=true`
+it takes each new job's runtime from the workers that publish it.  A manifest copied from the
 laptop or fabricated from defaults does not prove that the rented worker can
 execute the pipeline.
 
@@ -290,13 +291,12 @@ The image entrypoint calls `scripts.gpu.make_runtime_manifest` from actual
 worker probes before preflight. The source state directory must already exist
 and contain no previous manifest. Keep the preflight output and use the
 repository-owned `ExecutionProfile.load` to verify the matched preset and
-canonical manifest checksum. Upload only the accepted worker manifest into the
-Railway volume at `/studio_local/runtime_manifest.json` using
-`railway volume files upload`; the API then sees
-`/app/data/studio_local/runtime_manifest.json`. Set both commented profile paths
-in `api.env.example` and redeploy the API. The API and worker must use the same
-preset contents and manifest checksum; this transfer publishes the worker's
-identity to its control API, rather than reusing a laptop manifest on a worker.
+canonical manifest checksum. Each worker publishes its software runtime
+(image and tool versions, without GPU or driver) into the shared database on
+every heartbeat, so the API needs no manifest upload and no restart when a pod
+is replaced. A manifest pinned by hand for a developer machine is set as
+`PRODUCT_RUNTIME_MANIFEST` instead of the worker mode. The API and worker must
+still use the same preset contents.
 
 Isaac candidate validation is a separate worker capability. Set
 `PRODUCT_ISAAC_VALIDATION_LAUNCHER` to the qualified Isaac Sim Python launcher
