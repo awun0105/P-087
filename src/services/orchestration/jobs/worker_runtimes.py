@@ -133,6 +133,16 @@ def select(
     return max(candidates, key=lambda item: (item.is_live(current), item.last_seen_at), default=None)
 
 
+def has_live_runtime(database: RuntimeDatabase, job_runtime_checksum: str, *, now: datetime | None = None) -> bool:
+    """Có worker đang sống chạy được job mang checksum này (phần mềm, hoặc đầy đủ với job tạo trước T-040)."""
+    current = now or datetime.now(UTC)
+    return any(
+        item.is_live(current)
+        and job_runtime_checksum in (item.software_runtime_checksum, item.runtime_manifest_checksum)
+        for item in _query(database, "", ())
+    )
+
+
 def find(database: RuntimeDatabase, software_checksum: str) -> WorkerRuntime | None:
     """Runtime theo checksum phần mềm, không lọc hạn; để biết job đang trỏ tới runtime nào."""
     return next(iter(_query(database, "WHERE software_runtime_checksum=?", (software_checksum,))), None)

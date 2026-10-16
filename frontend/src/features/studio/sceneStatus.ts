@@ -64,6 +64,8 @@ export function sceneSummaryStatus(scene: SceneSummary): SceneStatusView {
  */
 export function progressSceneStatus(progress: JobProgress, awaitingObjectChoice = false, geometry: GeometryStep | null = null): SceneStatusView {
   if (progress.waiting_for === "resources") return { label: "Đang chờ tài nguyên", tone: "ochre", active: true, group: "running" };
+  // T-040: chưa có GPU worker nào đang sống chạy đúng phiên bản công cụ của job; job tự chạy khi máy đó lên.
+  if (progress.waiting_for === "runtime") return { label: "Đang chờ GPU", tone: "ochre", active: true, group: "running" };
   // Frame đã che xong, pipeline dừng chờ người upload xem — không phải worker đang chạy hay đang xếp hàng.
   if (progress.waiting_for === "anonymization_review") return { label: "Cần xem bản đã che", tone: "ochre", active: false, group: "action" };
   if (awaitingObjectChoice && progress.status === "SUCCEEDED") return OBJECT_CHOICE_STATUS;

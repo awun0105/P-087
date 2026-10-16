@@ -66,8 +66,8 @@ def studio_pipeline(job: JobManifest) -> tuple[StageId, ...]:
 
 
 StageState = Literal["pending", "running", "waiting", "succeeded", "failed", "cancelled"]
-#: Lý do pipeline chờ: người xác nhận hoặc worker chưa đủ tài nguyên.
-WaitingFor = Literal["metric_confirmation", "anonymization_review", "resources"]
+#: Lý do pipeline chờ: người xác nhận, worker chưa đủ tài nguyên, hoặc chưa có GPU đúng runtime của job (T-040).
+WaitingFor = Literal["metric_confirmation", "anonymization_review", "runtime", "resources"]
 
 
 class StageProgress(BaseModel):
@@ -185,8 +185,12 @@ def job_progress(
     resource_wait: ResourceWait | None = None,
     queue: QueuePosition | None = None,
     heartbeat_at: datetime | None = None,
+    runtime_wait: bool = False,
 ) -> JobProgress:
-    """Chiếu JobManifest + journal thành tiến trình từng stage của attempt hiện tại."""
+    """Chiếu JobManifest + journal thành tiến trình từng stage của attempt hiện tại.
+
+    `runtime_wait`: không worker nào đang sống chạy được runtime của job (người gọi tính từ `r2s_worker_runtimes`).
+    """
     events = _current_attempt(attempts)
     pipeline = studio_pipeline(job)
     attempt_start = next((event.recorded_at for event in events if event.status == JobStatus.QUEUED), None)
@@ -240,6 +244,12 @@ def job_progress(
         and not reviewing
         and (job.status == JobStatus.QUEUED or awaiting_finalize(job) or awaiting_reviewed_preview(job))
         else None
+    )
+    runtime_pending = (
+        runtime_wait
+        and not waiting
+        and not reviewing
+        and (job.status == JobStatus.QUEUED or awaiting_finalize(job) or awaiting_reviewed_preview(job))
     )
     stages: list[StageProgress] = []
     for stage_id in pipeline:
@@ -298,7 +308,11 @@ def job_progress(
         waiting_for=(
             "metric_confirmation"
             if waiting
-            else ("anonymization_review" if reviewing else ("resources" if resources else None))
+            else (
+                "anonymization_review"
+                if reviewing
+                else ("runtime" if runtime_pending else ("resources" if resources else None))
+            )
         ),
         resource_wait=resources,
         queue=(

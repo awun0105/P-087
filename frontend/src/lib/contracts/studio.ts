@@ -230,7 +230,7 @@ export interface JobProgress {
   stages: StageProgress[];
   preview_ready: boolean;
   /** Pipeline đang chờ người dùng làm gì (vd xác nhận tỉ lệ mét sau preview). */
-  waiting_for?: "metric_confirmation" | "resources" | "anonymization_review" | null;
+  waiting_for?: "metric_confirmation" | "resources" | "anonymization_review" | "runtime" | null;
   resource_wait?: ResourceWaitView | null;
   /** Vị trí trong hàng đợi khi job đang chờ máy xử lý; null khi đang chạy, đã xong hoặc chờ người dùng. */
   queue?: QueuePositionView | null;
@@ -522,7 +522,7 @@ export function parseJobProgress(value: unknown): JobProgress {
       throw new Error("Stage trong tiến trình không hợp lệ");
     }
   }
-  if (value.waiting_for !== undefined && value.waiting_for !== null && value.waiting_for !== "metric_confirmation" && value.waiting_for !== "resources" && value.waiting_for !== "anonymization_review") {
+  if (value.waiting_for !== undefined && value.waiting_for !== null && value.waiting_for !== "metric_confirmation" && value.waiting_for !== "resources" && value.waiting_for !== "anonymization_review" && value.waiting_for !== "runtime") {
     throw new Error("Lý do chờ của job không hợp lệ");
   }
   if (value.resource_wait !== undefined && value.resource_wait !== null) {

@@ -35,6 +35,7 @@ from src.services.orchestration.jobs.progress import (
 from src.services.orchestration.jobs.queue import job_requester_actors, job_requesters, queue_position
 from src.services.orchestration.jobs.stage_views import StageViewList, stage_views
 from src.services.orchestration.jobs.thumbnails import scene_thumbnail
+from src.services.orchestration.jobs.worker_runtimes import has_live_runtime
 from src.services.orchestration.processing import build_job_config, evaluate, is_presets_file, preset_values
 from src.services.orchestration.processing.observed import load_usages, processing_seconds
 from src.services.orchestration.projects import (
@@ -414,6 +415,10 @@ def get_job_progress(job_id: str, user: UserRecord | None = Depends(require_cont
     heartbeat_at = reservation.heartbeat_at if reservation is not None else None
     # Vị trí hàng đợi chỉ tính cho job đang chờ worker (đọc journal của mọi job): job đang chạy không cần.
     position = queue_position(registry, job_id) if job.status == JobStatus.QUEUED or awaiting_finalize(job) else None
+    # T-040: không worker nào đang sống chạy được runtime của job thì UI báo "đang chờ GPU" thay vì im lặng.
+    runtime_wait = registry.persistence is not None and not has_live_runtime(
+        registry.persistence.database, job.runtime_manifest_checksum
+    )
     progress = job_progress(
         job,
         attempts,
@@ -421,6 +426,7 @@ def get_job_progress(job_id: str, user: UserRecord | None = Depends(require_cont
         observation,
         position,
         heartbeat_at=heartbeat_at,
+        runtime_wait=runtime_wait,
     )
     progress = filter_job_progress_errors(progress, user)
     allowed = owner_mutation_allowed(
