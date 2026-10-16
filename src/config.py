@@ -69,11 +69,13 @@ class Settings(BaseSettings):
     product_worker_root: Path = Path("./data/product_workers")
     #: Giữ scratch để chẩn đoán; mặc định chỉ dọn attempt đã publish và commit thành công.
     product_worker_keep_scratch: bool = False
-    product_preview_timeout_seconds: float = Field(default=21600, gt=0, allow_inf_nan=False)
+    #: Giới hạn bao ngoài của bước preview (COLMAP 14400 + Brush 21600 chạy trong một lượt; T-043 round 2).
+    product_preview_timeout_seconds: float = Field(default=36000, gt=0, allow_inf_nan=False)
     #: Thông số REC-05 (voxel/capsule) cho bước hoàn tất sau xác nhận tỉ lệ (owner chốt 2026-09-29).
     product_geometry_config: Path = Path("configs/product/geometry_v1.json")
     product_evaluation_reference: Path = Path("configs/product/evaluation_reference_v1.json")
-    product_finalize_timeout_seconds: float = Field(default=7200, gt=0, allow_inf_nan=False)
+    #: Giới hạn bao ngoài của bước hoàn tất: splat-process (Brush 21600) + 6 lần voxel (T-043 round 2).
+    product_finalize_timeout_seconds: float = Field(default=36000, gt=0, allow_inf_nan=False)
     #: GPU adapter cho splat-transform, theo từng máy (`--list-gpus`); None = dùng giá trị trong profile.
     product_geometry_gpu_index: int | None = Field(default=None, ge=0)
     #: Runtime SAM2 cho tách vật thể (ADR 0006); thiếu thì dùng fallback hình học.
