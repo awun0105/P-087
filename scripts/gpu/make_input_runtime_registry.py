@@ -115,7 +115,6 @@ def build_registry(env: Mapping[str, str]) -> dict[str, object]:
         )
         if not ok
     ]
-    view_missing = [] if splat_module and Path(splat_module).is_file() else ["splat_transform_missing"]
     if kiss_version is None:
         odometry_missing = ["odometry_runtime_missing"]
     elif kiss_version != _PINNED_ODOMETRY_VERSION:
@@ -158,6 +157,8 @@ def build_registry(env: Mapping[str, str]) -> dict[str, object]:
             f"colmap-{colmap[-12:]}+brush-{brush_version}+kiss-icp-{kiss_version}",
         )
     splat_version = splat_transform_version(splat_module)
+    # Cùng quy tắc với bản production: không đọc được phiên bản thì view không được khai QUALIFIED.
+    view_missing = [] if splat_version else ["splat_transform_missing"]
     for key in _VIEW_KEYS:
         add(
             key, view_missing, {"splat_transform": splat_version or ""}, f"splat-transform-{splat_version or 'unknown'}"
