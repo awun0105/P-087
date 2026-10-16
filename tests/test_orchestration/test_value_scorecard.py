@@ -599,3 +599,32 @@ def test_job_machine_reads_the_latest_attempt_snapshot_terminal_first(tmp_path) 
 
     # attempt 3 không có snapshot máy → lùi về attempt 2 (chỉ có partial).
     assert machine is not None and machine.gpu_name == "L4"
+
+
+def test_no_gap_measured_yet_gives_empty_gap_cells_not_zero() -> None:
+    no_gaps = P2(
+        gaps_checked=0,
+        gaps_agree=0,
+        missed_obstacles=0,
+        false_obstacles=0,
+        gap_results=[],
+        max_distance_error_cm=Figure(value=1.0, unit="cm", provenance="declared"),
+        distance_results=[],
+        key_obstacles_with_collider="1/1",
+    )
+    card = _card(p2=no_gaps)
+
+    rows = list(csv.reader(io.StringIO(csv_document([card]).removeprefix("﻿"))))
+    row = dict(zip(CSV_HEADER, rows[1], strict=True))
+    assert row["Khe khớp"] == "" and row["Bỏ sót / Giả"] == ""
+    markdown = scorecard_markdown(card)
+    assert "0/0" not in markdown
+    assert "chưa có khe kiểm nào được đo" in markdown
+
+
+def test_markdown_marks_l4_as_declared() -> None:
+    l4 = _card().model_copy(update={"p4": P4(level=4, reasons=[])})
+    line = next(item for item in scorecard_markdown(l4).splitlines() if item.startswith("| P4"))
+
+    assert line.rstrip().endswith("| khai báo |")
+    assert scorecard_markdown(_card()).count("| đo |") >= 1

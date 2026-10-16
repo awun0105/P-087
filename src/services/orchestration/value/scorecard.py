@@ -743,12 +743,17 @@ def _cell(figure: Figure) -> str:
     return "" if figure.value is None else _text(figure)
 
 
+def _no_gap_measured(card: ValueScorecard) -> bool:
+    """Chưa đo khe nào (chưa có ground truth, hoặc khe chưa gắn layout): không có số khe để ghi, kể cả 0/0."""
+    return bool(card.p2.unavailable_reason) or card.p2.gaps_checked == 0
+
+
 def _agree_text(card: ValueScorecard) -> str:
-    return "—" if card.p2.unavailable_reason else f"{card.p2.gaps_agree}/{card.p2.gaps_checked}"
+    return "—" if _no_gap_measured(card) else f"{card.p2.gaps_agree}/{card.p2.gaps_checked}"
 
 
 def _missed_text(card: ValueScorecard) -> str:
-    return "—" if card.p2.unavailable_reason else f"{card.p2.missed_obstacles} / {card.p2.false_obstacles}"
+    return "—" if _no_gap_measured(card) else f"{card.p2.missed_obstacles} / {card.p2.false_obstacles}"
 
 
 def _md(text: str) -> str:
@@ -761,9 +766,13 @@ def scorecard_markdown(card: ValueScorecard) -> str:
     ns = card.north_star
     p2 = card.p2
     p3 = card.p3
-    p2_value = (
-        f"{_agree_text(card)} · {_missed_text(card)}" if not p2.unavailable_reason else f"— ({p2.unavailable_reason})"
-    )
+    if p2.unavailable_reason:
+        p2_value = f"— ({p2.unavailable_reason})"
+    elif p2.gaps_checked == 0:
+        p2_value = "chưa có khe kiểm nào được đo"
+    else:
+        p2_value = f"{_agree_text(card)} · {_missed_text(card)}"
+    p2_source = "—" if _no_gap_measured(card) and p2.max_distance_error_cm.value is None else "đo, so với số thước"
     p3_consistent = "Đạt" if p3.consistent else "Không" if p3.consistent is False else "—"
     lines = [
         f"# Bảng metric giá trị · {_md(card.scene_name)}",
@@ -776,10 +785,11 @@ def scorecard_markdown(card: ValueScorecard) -> str:
         f"| Chính: phút công · phút máy · chi phí | {_text(ns.hands_on_minutes)} phút công · "
         f"{_text(ns.machine_minutes)} phút máy · {_text(ns.cost_usd, 2)} {ns.cost_usd.unit or ''} | "
         f"{_PROVENANCE_LABEL[ns.hands_on_minutes.provenance]} |",
-        f"| P2 khớp khe · bỏ sót / giả | {p2_value} | {'—' if p2.unavailable_reason else 'đo, so với số thước'} |",
+        f"| P2 khớp khe · bỏ sót / giả | {p2_value} | {p2_source} |",
         f"| P3 đổi → thử (phút) · nhất quán | {_text(p3.edit_to_retest_minutes)} · {p3_consistent} | "
         f"{_PROVENANCE_LABEL[p3.edit_to_retest_minutes.provenance]} |",
-        f"| P4 bậc sẵn sàng | L{card.p4.level}{' (khai báo tay)' if card.p4.level == 4 else ''} | đo |",
+        f"| P4 bậc sẵn sàng | L{card.p4.level}{' (khai báo tay)' if card.p4.level == 4 else ''} | "
+        f"{'khai báo' if card.p4.level == 4 else 'đo'} |",
         f"| Làm tay (mốc so sánh cho P1, phút) | {_text(card.manual_baseline_minutes)} | "
         f"{_PROVENANCE_LABEL[card.manual_baseline_minutes.provenance]} |",
         "",
@@ -837,8 +847,8 @@ def _csv_row(card: ValueScorecard) -> list[str]:
         _cell(ns.machine_minutes),
         _cell(ns.hands_on_minutes),
         "" if ns.interventions_total.value is None else str(ns.interventions_total.value),
-        "" if card.p2.unavailable_reason else f"{card.p2.gaps_agree}/{card.p2.gaps_checked}",
-        "" if card.p2.unavailable_reason else f"{card.p2.missed_obstacles} / {card.p2.false_obstacles}",
+        "" if _no_gap_measured(card) else f"{card.p2.gaps_agree}/{card.p2.gaps_checked}",
+        "" if _no_gap_measured(card) else f"{card.p2.missed_obstacles} / {card.p2.false_obstacles}",
         _cell(card.p2.max_distance_error_cm),
         _cell(card.p3.edit_to_retest_minutes),
         consistent,
