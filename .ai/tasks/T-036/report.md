@@ -135,6 +135,38 @@ tên cũ vẫn được nhận.
 1. Ba thư mục mang tên mới trên đĩa: **đã đạt rồi hoàn tác** (không còn ở trạng thái mới).
 2. Sáu lớp settings đọc `R2S_*`, tên cũ vẫn chạy kèm cảnh báo, tên mới thắng: **đạt** (test 25 pass).
 3. Test chặn tái phát xanh: **đạt**.
-4. `qualification_evidence_checksum` và manifest không đổi: manifest **đạt**; registry **không đạt** (2 capability view + checksum tổng).
+4. `qualification_evidence_checksum` và `runtime_version` của mọi capability khác không đổi; hai capability view đổi đúng một lần theo quyết định (a) của review; runtime manifest không đổi. (Sửa theo review vòng 2; acceptance gốc của plan không đổi.)
 5. Stack chạy lại với cấu hình task: **không đạt / chưa xác nhận** (stack của task đã dừng bởi tiến trình bên ngoài; stack đang chạy là của phiên khác).
 6. `input_runtime_qualification_v1.json`, Dockerfile, compose, deploy không bị sửa: **đạt**.
+
+## Round 2 (theo review.md vòng 2)
+
+### (a) Evidence của hai view băm phiên bản splat-transform — commit `781c28fd`
+- `scripts/gpu/make_input_runtime_registry.py`: thêm `splat_transform_version(module)` (đọc `version` từ `package.json` cạnh
+  module, cùng cách với bản production). Evidence của `gaussian_ply_view` và `gaussian_sog_view` băm
+  `{"splat_transform": <phiên bản>}`; `runtime_version` đổi từ `splat-transform-local` sang `splat-transform-<phiên bản>`.
+- `scripts/gpu/qualify_input_runtimes.py`: `_splat_version` gọi cùng hàm dùng chung (hành vi giữ nguyên).
+- Test mới trong `tests/test_reconstruction/test_input_runtime_registry_script.py`:
+  - `test_splat_view_evidence_ignores_the_module_path_when_the_version_is_the_same`: đổi đường dẫn module, cùng phiên bản →
+    evidence và `runtime_version` của hai view **không đổi**; các capability khác không đổi.
+  - `test_splat_view_evidence_follows_the_splat_transform_version`: đổi phiên bản → evidence đổi.
+- **Đỏ trên code cũ**: trước khi sửa, cả hai test fail (`2 failed, 5 passed`). Sau khi sửa: các test của registry, qualify,
+  gpu_plan đạt (49 passed trong lần chạy cùng nhóm).
+
+### Acceptance 4 trong báo cáo: đã sửa (plan không đổi)
+Xem dòng 4 ở mục Acceptance: checksum và `runtime_version` của mọi capability khác không đổi; hai view đổi đúng một lần.
+
+### Trạng thái hiện tại của máy (chưa làm lại bước 4)
+- Stack đang chạy ở 8010/3010 vẫn là của phiên khác; **chưa** làm lại bước 4 (chờ chủ dự án báo).
+- `Makefile.studio` trong working tree vẫn là bản tên cũ (hoàn tác trước đó), **chưa commit**. Theo quyết định 2, sẽ đưa về
+  HEAD (`git checkout -- Makefile.studio`) ngay trước khi làm lại bước 4. Hệ quả: test chặn tái phát
+  `test_no_legacy_runtime_name_is_left_outside_the_rename_table` **đỏ** cho đến khi Makefile được đưa về HEAD. Đây là kết quả
+  có chủ đích của trạng thái hoàn tác, không phải lỗi code; không commit Makefile tên cũ.
+- Registry dev trên đĩa chưa đổi; sẽ đổi đúng một lần ở bước 4.9 (chỉ hai view) theo quyết định (c).
+
+### Việc còn lại (chờ chủ dự án báo)
+- Làm lại bước 4 trọn vẹn (4.1 → 4.11) và ghi bảng kết quả mới.
+- 4.11: cần tài khoản Reviewer local để so mã HTTP của 3 job; nếu không có, chỉ kiểm được `/health`, `/api/v1/samples`,
+  registry và manifest, và ghi rõ như vậy.
+- Unit tên `real2sim-studio-demo-route-20261016` là của phiên khác: không dừng, chỉ chạy lại khi cổng đã trống.
+
