@@ -26,7 +26,7 @@ T-025 | Hiệu năng preview (GR-05) | accepted | —
 T-026 | Danh sách scene hiểu Draft | accepted | — (Architect tự làm)
 T-027 | Nhật ký sự kiện giá trị | accepted | —
 T-028 | Đo máy cho hàng đợi tách vật | accepted | —
-T-029 | Bộ đếm phút công người + sự kiện Walk | implemented | summarizer
+T-029 | Bộ đếm phút công người + sự kiện Walk | accepted | —
 T-030 | Ground truth của benchmark | accepted | —
 T-031 | Máy đo khe, sai số, nhất quán | accepted | —
 T-032 | Bảng metric + xuất JSON/CSV/MD | accepted | —
