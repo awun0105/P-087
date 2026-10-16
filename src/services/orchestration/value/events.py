@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict
 from src.models.contracts.artifacts import JsonObject
 from src.services.orchestration.jobs.database import RuntimeDatabase
 
-EventKind = Literal["scene_edit", "operator_time", "walk_session"]
+EventKind = Literal["scene_edit", "scene_request", "operator_time", "walk_session"]
 Origin = Literal["human", "system", "unknown"]
 
 #: Thao tác do người bấm trong Studio (API người dùng hoặc hành động chỉnh sửa trực tiếp).

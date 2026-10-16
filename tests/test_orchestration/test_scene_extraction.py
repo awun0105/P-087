@@ -167,6 +167,18 @@ def test_extraction_auto_publishes_draft_then_enqueues_geometry(
         # Retrying extraction after initial publication keeps the same queued operation.
         module.extract_scene(registry, job, bundle, settings, tmp_path / "retry")
         assert objectify_queue.state(registry, settings, job.job_id).operation_id == queued.operation_id
+        # Yêu cầu tự động là việc của hệ thống: nhật ký ghi origin=system, không tính là can thiệp của người.
+        from src.services.orchestration.jobs.database import RuntimeDatabase
+        from src.services.orchestration.value import list_events
+
+        requests = list_events(RuntimeDatabase(settings.database_url), job.job_id, {"scene_request"})
+        assert [(item.actor_id, item.payload["origin"], item.payload["mode"]) for item in requests] == [
+            ("system", "system", "geometry")
+        ]
+        # Retrying extraction after initial publication keeps the same queued operation.
+        module.extract_scene(registry, job, bundle, settings, tmp_path / "retry")
+        assert objectify_queue.state(registry, settings, job.job_id).operation_id == queued.operation_id
+        assert len(list_events(RuntimeDatabase(settings.database_url), job.job_id, {"scene_request"})) == 1
     else:
         assert queued.status == "idle"
     assert sealed_scene["geometry_review"] == review

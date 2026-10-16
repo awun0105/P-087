@@ -246,7 +246,13 @@ def extract_scene(
                 and queued.status in {"queued", "running"}
             ):
                 objectify_queue.request(
-                    registry, settings, job.job_id, revision.scene.scene_revision, "geometry", actor_id="system"
+                    registry,
+                    settings,
+                    job.job_id,
+                    revision.scene.scene_revision,
+                    "geometry",
+                    actor_id="system",
+                    origin="system",
                 )
         except (objectify_queue.ObjectifyRequestError, SceneError, ArtifactStoreError) as error:
             logger.warning("Could not queue automatic geometry build for job %s: %s", job.job_id, error)

@@ -1319,3 +1319,93 @@ def test_missing_sampler_still_publishes_and_records_nothing(world, monkeypatch,
     scene_objectify_queue.process_next(registry, settings)
     assert scene_objectify_queue.state(registry, settings, job.job_id).status == "done"
     assert _scene_usages(settings) == []
+
+
+def _scene_requests(settings: Settings, job_id: str) -> list:
+    from src.services.orchestration.jobs.database import RuntimeDatabase
+    from src.services.orchestration.value import list_events
+
+    return list_events(RuntimeDatabase(settings.database_url), job_id, {"scene_request"})
+
+
+def test_geometry_request_records_one_human_scene_request(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    registry, job, _, settings = world
+    base = _geometry_draft(world, monkeypatch, tmp_path)
+    settings = settings.model_copy(update={"product_sam2_checkpoint": None})
+
+    queued = scene_objectify_queue.request(
+        registry, settings, job.job_id, base.scene_revision, "geometry", actor_id="local"
+    )
+
+    (event,) = _scene_requests(settings, job.job_id)
+    assert event.actor_id == "local"
+    assert event.payload == {
+        "mode": "geometry",
+        "base_revision": base.scene_revision,
+        "operation_id": queued.operation_id,
+        "origin": "human",
+    }
+
+
+def test_boxes_request_records_one_human_scene_request(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    registry, job, bundle, settings = world
+    monkeypatch.setattr(scene_extraction, "objectify_with_retry", _always_fail)
+    extract_scene(registry, job, bundle, settings, tmp_path / "boxes")
+    current = registry.scene.current(job.job_id).scene
+
+    scene_objectify_queue.request(registry, settings, job.job_id, current.scene_revision, "boxes")
+
+    (event,) = _scene_requests(settings, job.job_id)
+    assert event.payload["mode"] == "boxes" and event.payload["origin"] == "human"
+
+
+def test_region_request_records_one_human_scene_request(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    registry, job, _, settings = world
+    base, command = _ready_region_request(world, monkeypatch, tmp_path)
+
+    scene_objectify_queue.request(
+        registry, settings, job.job_id, base.scene_revision, "region", region=("object-a", command), actor_id="reviewer"
+    )
+
+    (event,) = _scene_requests(settings, job.job_id)
+    assert event.actor_id == "reviewer"
+    assert event.payload["mode"] == "region"
+    assert event.payload["region_object_id"] == "object-a"
+    assert event.payload["origin"] == "human"
+
+
+def test_membership_request_records_one_human_scene_request(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    from src.models.contracts.object_membership import ObjectMembershipReassignCommand
+
+    registry, job, _, settings = world
+    base, _ = _ready_region_request(world, monkeypatch, tmp_path)
+    command = ObjectMembershipReassignCommand(
+        expected_scene_revision=base.scene_revision,
+        membership_checksum="sha256:" + "a" * 64,
+        source_visual_checksum="sha256:" + "b" * 64,
+        source_gaussian_indices=[0],
+        source_object_id="a",
+        target_object_id="b",
+    )
+    monkeypatch.setattr(scene_objectify_queue, "preview_correction", lambda *a: {})
+
+    scene_objectify_queue.request(
+        registry, settings, job.job_id, base.scene_revision, "membership", correction=command, actor_id="reviewer"
+    )
+
+    (event,) = _scene_requests(settings, job.job_id)
+    assert event.payload["mode"] == "membership" and event.payload["origin"] == "human"
+
+
+def test_rejected_request_records_no_scene_request(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    registry, job, _, settings = world
+    base = _geometry_draft(world, monkeypatch, tmp_path)
+    settings = settings.model_copy(update={"product_sam2_checkpoint": None})
+    scene_objectify_queue.request(registry, settings, job.job_id, base.scene_revision, "geometry")
+
+    with pytest.raises(SceneRevisionConflictError):
+        scene_objectify_queue.request(registry, settings, job.job_id, "rev-stale", "boxes")
+    with pytest.raises(ObjectifyRequestError, match="Đang có một yêu cầu"):
+        scene_objectify_queue.request(registry, settings, job.job_id, base.scene_revision, "geometry")
+
+    assert len(_scene_requests(settings, job.job_id)) == 1

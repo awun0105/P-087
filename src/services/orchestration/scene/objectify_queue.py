@@ -46,6 +46,7 @@ from src.services.orchestration.scene.membership_regeneration import preview_cor
 from src.services.orchestration.scene.object_geometry_build import ObjectGeometryBuildError, build_object_geometry
 from src.services.orchestration.scene.object_region import rebuild_region_ready, validate_region_rebuild
 from src.services.orchestration.scene.objectify import AWAITING_CHOICE, METHOD, ObjectifyError, reobjectify
+from src.services.orchestration.value.events import record_event
 from src.services.process_control import ProcessCancelledError
 from src.services.scene.geometry_state import object_geometry_state
 
@@ -334,6 +335,7 @@ def request(
     correction: ObjectMembershipReassignCommand | None = None,
     region: tuple[str, ObjectRegionCommand] | None = None,
     actor_id: str | None = None,
+    origin: Literal["human", "system"] = "human",
 ) -> ObjectifyState:
     """Accept a request only for the current scene and freeze its input/config identity."""
     job = registry.get_job(job_id)
@@ -386,6 +388,16 @@ def request(
         if previous is not None:
             record = record.model_copy(update={"lease_generation": previous.lease_generation})
         _write(tx, job_id, record)
+    # Ý định của người dùng được ghi sau khi yêu cầu đã nhận; từ chối ở trên thì không tới đây.
+    intent = {
+        "mode": mode,
+        "base_revision": expected_revision,
+        "operation_id": record.operation_id,
+        "origin": origin,
+    }
+    if record.region_object_id is not None:
+        intent["region_object_id"] = record.region_object_id
+    record_event(_database(settings), job_id, "scene_request", intent, actor_id=actor_id)
     return state(registry, settings, job_id)
 
 
