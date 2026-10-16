@@ -283,12 +283,15 @@ describe("ObjectReviewView", () => {
     const viewer = await screen.findByTestId("metric-scene");
     const stateTab = screen.getByRole("tab", { name: "Trạng thái scene" });
     const objectsTab = screen.getByRole("tab", { name: "Vật thể" });
-    expect(screen.getAllByRole("tab").map(tab => tab.textContent)).toEqual(["Trạng thái scene", "Vật thể"]);
+    expect(screen.getAllByRole("tab").map(tab => tab.textContent)).toEqual(["Trạng thái scene", "Vật thể", "Sàn & tường"]);
     expect(stateTab).toHaveAttribute("aria-selected", "true");
     fireEvent.mouseDown(objectsTab, { button: 0, ctrlKey: false });
     const object = await screen.findByRole("button", { name: "Chọn Vật thể 1" });
     fireEvent.click(object);
     expect(object).toHaveAttribute("aria-pressed", "true");
+    fireEvent.mouseDown(screen.getByRole("tab", {name: "Sàn & tường"}), { button: 0, ctrlKey: false });
+    expect(screen.getByRole("tab", {name: "Sàn & tường"})).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("metric-scene")).toBe(viewer);
     fireEvent.mouseDown(stateTab, { button: 0, ctrlKey: false });
     expect(screen.getByTestId("metric-scene")).toBe(viewer);
     fireEvent.mouseDown(objectsTab, { button: 0, ctrlKey: false });

@@ -377,6 +377,8 @@ export function ObjectReviewView({
   const [catalog, setCatalog] = useState<SceneCatalog | null>(null);
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [leftTab, setLeftTab] = useState("state");
+  const panelTab = !sceneStateControls && leftTab === "state" ? "objects" : leftTab;
+  const [surfaceToolsTarget, setSurfaceToolsTarget] = useState<HTMLDivElement | null>(null);
   const [rightCollapsed, setRightCollapsed] = useState(false);
   /** Vật đang chờ đặt bằng chuột: kích thước hộp xem trước + lệnh ghi khi bấm sàn. */
   const [placing, setPlacing] = useState<{ label: string; dimensions: [number, number, number]; commit: (point: [number, number, number]) => void } | null>(null);
@@ -840,6 +842,8 @@ export function ObjectReviewView({
               backgroundChecksum: (scene.environment.collider_ref ?? scene.environment.collision_source_ref ?? scene.environment.geometry_ref).artifact_checksum,
               selectedParts: typeof current?.collider?.parameters.parts === "number" ? current.collider.parameters.parts : null,
             }}
+            surfaceToolsTarget={surfaceToolsTarget}
+            surfaceToolsActive={panelTab === "surfaces" && !leftCollapsed}
             surfacePlanes={(scene.provenance.collision_surface_planes ?? []) as CollisionSurfacePlane[]}
             onMarkSurface={(kind, points) => run(revision => editCollisionSurface(jobId, {
               expected_scene_revision: revision, source_checksum: (scene.environment.collision_source_ref ?? scene.environment.geometry_ref).artifact_checksum,
@@ -986,17 +990,19 @@ export function ObjectReviewView({
                 </div>
               </div>
             </div>
-            <Tabs value={sceneStateControls ? leftTab : "objects"} onValueChange={setLeftTab} className="min-h-0 gap-0">
-              {sceneStateControls && <>
-                <TabsList aria-label="Nội dung panel scene" className="mx-3 my-2 w-auto shrink-0 border border-line-dark bg-viewport-deep/70">
-                  <TabsTrigger value="state" className="text-on-dark/70 data-active:bg-on-dark/15 data-active:text-on-dark">Trạng thái scene</TabsTrigger>
-                  <TabsTrigger value="objects" className="text-on-dark/70 data-active:bg-on-dark/15 data-active:text-on-dark">Vật thể</TabsTrigger>
+            <Tabs value={panelTab} onValueChange={setLeftTab} className="min-h-0 gap-0">
+                <TabsList aria-label="Nội dung panel scene" className="mx-3 my-2 h-auto w-auto shrink-0 flex-wrap border border-line-dark bg-viewport-deep/70">
+                  {sceneStateControls && <TabsTrigger value="state" className="min-w-0 px-2 text-xs text-on-dark/70 data-active:bg-on-dark/15 data-active:text-on-dark">Trạng thái scene</TabsTrigger>}
+                  <TabsTrigger value="objects" className="min-w-0 px-2 text-xs text-on-dark/70 data-active:bg-on-dark/15 data-active:text-on-dark">Vật thể</TabsTrigger>
+                  {scene.environment.visual_ref && <TabsTrigger value="surfaces" className="min-w-0 px-2 text-xs text-on-dark/70 data-active:bg-on-dark/15 data-active:text-on-dark">Sàn & tường</TabsTrigger>}
                 </TabsList>
-                <TabsContent value="state" forceMount hidden={leftTab !== "state"} className="m-0 overflow-y-auto px-3 py-3 data-[state=inactive]:hidden">
+              {sceneStateControls && <TabsContent value="state" forceMount hidden={leftTab !== "state"} className="m-0 overflow-y-auto px-3 py-3 data-[state=inactive]:hidden">
                   {sceneStateControls}
-                </TabsContent>
-              </>}
-              <TabsContent value="objects" forceMount hidden={Boolean(sceneStateControls) && leftTab !== "objects"} className="m-0 flex min-h-0 flex-col data-[state=inactive]:hidden">
+                </TabsContent>}
+              <TabsContent value="surfaces" forceMount hidden={panelTab !== "surfaces"} className="m-0 overflow-y-auto px-3 py-3 data-[state=inactive]:hidden">
+                <div ref={setSurfaceToolsTarget} />
+              </TabsContent>
+              <TabsContent value="objects" forceMount hidden={panelTab !== "objects"} className="m-0 flex min-h-0 flex-col data-[state=inactive]:hidden">
               <div className="space-y-2 border-b border-line-dark px-3 py-2.5">
               <p className="text-xs font-semibold text-on-dark">
                 {scene.objects.length} vật thể · {scene.objects.filter((object) => object.state === "CANDIDATE" && !isIgnored(object)).length} chờ xác nhận

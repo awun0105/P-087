@@ -1,5 +1,7 @@
 "use client";
 
+import { createPortal } from "react-dom";
+
 import type { AppBase, Entity } from "playcanvas";
 import {
   useCallback,
@@ -97,6 +99,8 @@ export function MetricSceneView({
   onMarkSurface,
   onRemoveSurface,
   onFillSurface,
+  surfaceToolsTarget,
+  surfaceToolsActive = true,
   collisionDiagnostics,
   lockedReason = null,
   regionEdit = null,
@@ -156,6 +160,9 @@ export function MetricSceneView({
   onMarkSurface?: (kind: "floor" | "wall", points: CollisionSurfacePlane["points"]) => void;
   onRemoveSurface?: (id: string) => void;
   onFillSurface?: (id: string) => void;
+  /** Vùng nội dung tab Sàn & tường do panel Studio cung cấp. */
+  surfaceToolsTarget?: HTMLElement | null;
+  surfaceToolsActive?: boolean;
   collisionDiagnostics?: { source: "Legacy" | "Object-aware"; backgroundChecksum: string; selectedParts: number | null };
   /** Lý do khoá thao tác cần hình học (scene Draft): khoá Đi bộ, Dịch/Xoay và không nạp lưới va chạm. null = không khoá. */
   lockedReason?: string | null;
@@ -185,12 +192,8 @@ export function MetricSceneView({
   const [overlay, setOverlay] = useState<SceneOverlay | null>(null);
   const [glow, setGlow] = useState<ShellGlowLayer | null>(null);
   const [surfaceTool, setSurfaceTool] = useState<"floor" | "wall" | null>(null);
-  // Draft: bỏ công cụ đánh dấu đang chọn ngay khi scene bị khoá (chỉnh state theo prop trong lúc render, không dùng effect).
-  const [lockedBefore, setLockedBefore] = useState(lockedReason);
-  if (lockedBefore !== lockedReason) {
-    setLockedBefore(lockedReason);
-    if (lockedReason) setSurfaceTool(null);
-  }
+  // Không giữ chế độ chọn tam giác khi tab công cụ đóng hoặc scene bị khoá.
+  if (surfaceTool && (lockedReason || !surfaceToolsActive)) setSurfaceTool(null);
   const [surfacePickError, setSurfacePickError] = useState<string | null>(null);
   const [layers, setLayers] = useState({ ...defaultLayers, lidar: false, triangles: false });
   const [, setLidarState] = useState<{ points?: number; error?: string } | null>(null);
@@ -614,6 +617,33 @@ export function MetricSceneView({
       onPointerMove={onPointerMove}
       onPointerLeave={onPointerLeave}
     >
+      {surfaceToolsTarget && createPortal(
+        <section aria-label="Công cụ sàn và tường" className="space-y-3 text-xs text-on-dark/90">
+          <p className="text-on-dark/60">Đánh dấu mặt sàn hoặc tường trên lưới va chạm, rồi lấp phần trống theo mặt phẳng đã chọn.</p>
+          <div className="flex flex-wrap gap-2">
+            {onMarkSurface && (["floor","wall"] as const).map(kind => (
+              <button key={kind} type="button" aria-pressed={surfaceTool === kind} disabled={Boolean(lockedReason)} title={lockedReason ?? undefined} className="rounded border border-line-dark px-2 py-1 hover:bg-on-dark/10 disabled:cursor-not-allowed disabled:opacity-40" onClick={() => {
+                setSurfaceTool(surfaceTool === kind ? null : kind);
+                setSurfacePickError(null);
+                onTool?.("none");
+                setLayers(previous => ({...previous,collision:true}));
+                controls.current?.setCameraMode("fly");
+              }}>{kind === "floor" ? "Đánh dấu sàn" : "Đánh dấu tường"}</button>
+            ))}
+            {surfacePlanes.map((plane,index) => <span key={plane.id} className="flex items-center gap-2">
+              <button type="button" onClick={() => onRemoveSurface?.(plane.id)} disabled={Boolean(lockedReason)} title={lockedReason ?? undefined} className="rounded border border-line-dark px-2 py-1 hover:bg-on-dark/10 disabled:cursor-not-allowed disabled:opacity-40" aria-label={`Xóa mặt phẳng ${plane.kind === "floor" ? "sàn" : "tường"} ${index+1}`}>
+                {plane.kind === "floor" ? "Sàn" : "Tường"} {index+1} ×
+              </button>
+              {!plane.fill_regions && <button type="button" onClick={() => onFillSurface?.(plane.id)} disabled={Boolean(lockedReason)} title={lockedReason ?? undefined} className="rounded border border-line-dark px-2 py-1 hover:bg-on-dark/10 disabled:cursor-not-allowed disabled:opacity-40" aria-label={`Lấp theo mặt phẳng ${plane.kind === "floor" ? "sàn" : "tường"} ${index+1}`}>Lấp theo mặt phẳng</button>}
+              {plane.fill_regions && <span>Đã lấp theo mặt phẳng</span>}
+            </span>)}
+          </div>
+          {(surfaceTool || surfacePickError) && <div role="status" className="pointer-events-auto rounded-md bg-viewport-deep/90 px-3 py-2 text-xs text-on-dark">
+            {surfacePickError ?? `Bấm một tam giác ${surfaceTool === "floor" ? "sàn" : "tường"} để lưu mặt phẳng dùng vá lỗ trong vùng vật thể.`}
+            <button type="button" className="ml-3" onClick={() => {setSurfaceTool(null);setSurfacePickError(null);}}>Hủy đánh dấu</button>
+          </div>}
+        </section>, surfaceToolsTarget,
+      )}
       {(walkBlocker || walkCollisionError) && <Notice tone="rust">Không thể dùng Walk: {walkBlocker ?? walkCollisionError}</Notice>}
       {overlay && regionObjectId && !objects.some((item) => item.id === regionObjectId) && (
         <Notice tone="ochre">Vật đang chỉnh vùng chưa có trên viewport, nên chưa thể kéo box.</Notice>
@@ -877,28 +907,13 @@ export function MetricSceneView({
         </div>
       )}
       <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 flex max-w-[calc(100%-1.5rem)] flex-col items-center gap-2 pointer-events-none">
-        <div className="pointer-events-auto flex flex-wrap gap-3 rounded-md border border-line-dark bg-viewport-deep/85 px-3 py-1.5 text-xs text-on-dark/90 backdrop-blur-md shadow-lg">
+        <div aria-label="Chọn layer hiển thị" className="pointer-events-auto flex flex-wrap gap-3 rounded-md border border-line-dark bg-viewport-deep/85 px-3 py-1.5 text-xs text-on-dark/90 backdrop-blur-md shadow-lg">
           {toggle("splat", "3DGS màu")}
           {toggle("collision", "Collision mesh", !collisionUrl && !colliderBoxes.length)}
           {toggle("triangles", "Cạnh tam giác mesh", !layers.collision)}
           {toggle("boxes", "Khung vật thể", !boxes.length)}
           {lidarUrl && toggle("lidar", "Đám mây LiDAR")}
-          {onMarkSurface && (["floor","wall"] as const).map(kind => (
-            <button key={kind} type="button" aria-pressed={surfaceTool === kind} disabled={Boolean(lockedReason)} title={lockedReason ?? undefined} className="disabled:cursor-not-allowed disabled:opacity-40" onClick={() => {
-              setSurfaceTool(surfaceTool === kind ? null : kind);
-              setSurfacePickError(null);
-              onTool?.("none");
-              setLayers(previous => ({...previous,collision:true}));
-              controls.current?.setCameraMode("fly");
-            }}>{kind === "floor" ? "Đánh dấu sàn" : "Đánh dấu tường"}</button>
-          ))}
-          {surfacePlanes.map((plane,index) => <span key={plane.id} className="flex items-center gap-2">
-            <button type="button" onClick={() => onRemoveSurface?.(plane.id)} disabled={Boolean(lockedReason)} title={lockedReason ?? undefined} className="disabled:cursor-not-allowed disabled:opacity-40" aria-label={`Xóa mặt phẳng ${plane.kind === "floor" ? "sàn" : "tường"} ${index+1}`}>
-              {plane.kind === "floor" ? "Sàn" : "Tường"} {index+1} ×
-            </button>
-            {!plane.fill_regions && <button type="button" onClick={() => onFillSurface?.(plane.id)} disabled={Boolean(lockedReason)} title={lockedReason ?? undefined} className="disabled:cursor-not-allowed disabled:opacity-40" aria-label={`Lấp theo mặt phẳng ${plane.kind === "floor" ? "sàn" : "tường"} ${index+1}`}>Lấp theo mặt phẳng</button>}
-            {plane.fill_regions && <span>Đã lấp theo mặt phẳng</span>}
-          </span>)}
+
         </div>
         {collisionPreview && <div className="rounded-md bg-viewport-deep/90 px-3 py-1 text-xs text-on-dark">Walk kiểm tra bố trí hiện tại, gồm cả vật chưa xác nhận. Tam giác đã đánh dấu có viền màu.</div>}
         {collisionDiagnostics && (layers.collision || walking) && <div aria-label="Thông tin collision" className="rounded-md bg-viewport-deep/90 px-3 py-1 text-xs text-on-dark">
@@ -907,10 +922,7 @@ export function MetricSceneView({
           <span className="block">Artifact nền: {collisionDiagnostics.backgroundChecksum}</span>
           {collisionState?.error && <span className="block">Collision chưa sẵn sàng: {collisionState.error}</span>}
         </div>}
-        {(surfaceTool || surfacePickError) && <div role="status" className="pointer-events-auto rounded-md bg-viewport-deep/90 px-3 py-2 text-xs text-on-dark">
-          {surfacePickError ?? `Bấm một tam giác ${surfaceTool === "floor" ? "sàn" : "tường"} để lưu mặt phẳng dùng vá lỗ trong vùng vật thể.`}
-          <button type="button" className="ml-3" onClick={() => {setSurfaceTool(null);setSurfacePickError(null);}}>Hủy đánh dấu</button>
-        </div>}
+
         {walking && physics.status.state !== "off" && (
           <div className="pointer-events-auto flex flex-wrap items-center gap-2 rounded-md border border-line-dark bg-viewport-deep/85 px-3 py-1.5 text-xs text-on-dark/90 backdrop-blur-md shadow-lg" role="status">
             {physics.status.state === "loading" && "Đang nạp collider vật thể…"}

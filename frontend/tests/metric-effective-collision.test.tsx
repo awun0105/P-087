@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { MetricSceneView } from "@/features/studio/MetricSceneView";
 import type { PhysicsObjectInput } from "@/features/viewer/usePhysicsPlay";
@@ -106,8 +106,11 @@ it("does not rebuild live object layers when environment load finishes or mesh d
 
 it("uses preview URLs and sends a picked canonical triangle to surface annotation and infill controls", () => {
   const onMarkSurface=vi.fn(), onRemoveSurface=vi.fn(),onFillSurface=vi.fn();
-  render(<MetricSceneView jobId="j" visual={visual} collision={collision} sceneRevision="rev-1" collisionPreview cameras={cameras} onMarkSurface={onMarkSurface} onRemoveSurface={onRemoveSurface} onFillSurface={onFillSurface} surfacePlanes={[{id:"plane-1",kind:"floor",source_checksum:"sha256:mesh",points:[[0,0,0],[1,0,0],[0,1,0]]}]} />);
+  const panel = render(<div data-testid="surface-tools" />).getByTestId("surface-tools");
+  render(<MetricSceneView surfaceToolsTarget={panel} jobId="j" visual={visual} collision={collision} sceneRevision="rev-1" collisionPreview cameras={cameras} onMarkSurface={onMarkSurface} onRemoveSurface={onRemoveSurface} onFillSurface={onFillSurface} surfacePlanes={[{id:"plane-1",kind:"floor",source_checksum:"sha256:mesh",points:[[0,0,0],[1,0,0],[0,1,0]]}]} />);
   act(()=>renderViewer.mock.lastCall![0].onApp({}, {setObjectCollision:vi.fn(),setCameraMode:vi.fn()}));
+  expect(within(screen.getByLabelText("Chọn layer hiển thị")).queryByRole("button", {name: "Đánh dấu sàn"})).toBeNull();
+  expect(within(panel).getByRole("button", {name: "Đánh dấu sàn"})).toBeInTheDocument();
   expect(renderViewer.mock.lastCall![0].collisionUrl).toContain("preview=true");
   expect(loadCollision.mock.lastCall![0]).toContain("preview=true");
   const points=[[0,0,0],[1,0,0],[0,1,0]];
@@ -179,7 +182,9 @@ describe("MetricSceneView khoá Draft (T-013)", () => {
 
   it("khoá Nhân bản và các nút mặt va chạm trong Draft; scene sẵn sàng vẫn bấm được", () => {
     const surfacePlanes = [{ id: "surface-1", kind: "floor", points: [[0, 0, 0], [1, 0, 0], [0, 1, 0]], fill_regions: false }] as CollisionSurfacePlane[];
+    const panel = render(<div data-testid="surface-tools" />).getByTestId("surface-tools");
     const props = {
+      surfaceToolsTarget: panel,
       jobId: "j",
       visual,
       cameras,
@@ -228,4 +233,15 @@ it("hides collision and selection boxes while Benchmark picks splat points, then
   expect(setCollision).toHaveBeenLastCalledWith(true, .3, false);
   expect(setShell).toHaveBeenCalledWith("A", "/shell.glb", "selected");
   expect(setBoxes).toHaveBeenLastCalledWith(boxes);
+});
+
+it("cancels triangle picking when the surface tools tab closes", () => {
+  const panel = render(<div data-testid="surface-tools" />).getByTestId("surface-tools");
+  const props = {jobId: "j", visual, cameras, surfaceToolsTarget: panel, onMarkSurface: vi.fn()};
+  const {rerender} = render(<MetricSceneView {...props} surfaceToolsActive />);
+  fireEvent.click(within(panel).getByRole("button", {name: "Đánh dấu sàn"}));
+  expect(within(panel).getByRole("button", {name: "Đánh dấu sàn"})).toHaveAttribute("aria-pressed", "true");
+  rerender(<MetricSceneView {...props} surfaceToolsActive={false} />);
+  expect(within(panel).getByRole("button", {name: "Đánh dấu sàn"})).toHaveAttribute("aria-pressed", "false");
+  expect(within(panel).queryByRole("button", {name: "Hủy đánh dấu"})).toBeNull();
 });
