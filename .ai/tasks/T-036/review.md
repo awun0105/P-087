@@ -64,3 +64,20 @@ Sửa nhỏ, gộp vào lần làm lại bước 4 (một commit, có test):
 Bước 4.11: DB local có tài khoản Reviewer nhưng mật khẩu là của chủ dự án; agent **không** hỏi hay dùng mật khẩu, không
 tạo tài khoản mới. Agent kiểm `/health`, `/api/v1/samples` (5 mẫu), registry, manifest, log không có cảnh báo tên cũ;
 chủ dự án tự đăng nhập và mở 3 scene + 5 scene mẫu trên trình duyệt, agent ghi kết quả chủ dự án báo vào report.
+
+## Round 3 — ACCEPTED
+
+Audit `ce64d52e` (dev registry: không đọc được phiên bản splat-transform → hai view `splat_transform_missing`, cùng quy tắc bản
+production; test đỏ trước khi sửa) và bước 4 làm lại. Kiểm độc lập:
+- Thư mục: `data/reconstruction_runtime`, `data/lidar_open3d_runtime`, `data/lidar_odometry_runtime`; `scene_runtime`,
+  `objectgs_runtime` giữ nguyên. Cây làm việc sạch (`Makefile.studio` khớp HEAD).
+- `runtime_env` + registry + qualify: 44 PASS.
+- Stack `r2s-stack` (cổng 8011/3011 theo `studio.env`): `/health` 200, web 307; journal 30 phút gần nhất không có Traceback hay
+  cảnh báo tên cũ.
+- DB `studio_local` ở schema 23; `r2s_worker_runtimes` mang **khoá mới** `(software_runtime_checksum, config_checksum,
+  seed_key)` (đã đọc DDL trong `sqlite_master`), 1 dòng do worker công bố; `r2s_job_leases` rỗng. Migration 22/23 đã chạy trước
+  lần dừng này (một lần khởi động lại ở giữa), nhưng chạy bản đã sửa khoá nên không cần migration bổ sung.
+- Engineer báo: manifest sinh lại trùng; registry dev chỉ khác hai view như quyết định (a)+(c); đăng nhập Reviewer 200; 3 job và
+  `/scene` 200 khi đăng nhập, 401 khi chưa; 5 mẫu đọc được.
+
+Còn lại (không chặn): chủ dự án tự mở 3 scene và 5 mẫu trên trình duyệt ở `http://localhost:3011`. Chưa chạy job thật; T-039 làm.
