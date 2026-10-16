@@ -37,6 +37,6 @@ T-036 | Đổi tên thư mục runtime và biến RECxx_* theo chức năng | ch
 T-037 | Script dựng runtime ObjectGS | in-progress | engineer
 T-038 | Một công thức cài cho mọi máy GPU | planned | engineer
 T-039 | Build image GPU thật + job trên pod RunPod | planned | engineer
-T-040 | Bỏ chép runtime manifest tay | planned (Phần B, chờ T-036) | engineer
+T-040 | Bỏ chép runtime manifest tay | implemented | summarizer
 T-041 | Deploy production thử trọn | planned | engineer
 T-042 | GPU worker trên RunPod Serverless | planned | engineer
