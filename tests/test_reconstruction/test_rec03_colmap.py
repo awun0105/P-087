@@ -3,7 +3,6 @@
 import hashlib
 import json
 import math
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -12,6 +11,8 @@ from src.models.contracts.artifacts import ProductArtifactRef
 from src.models.contracts.identity import canonical_content_checksum
 from src.services.orchestration.artifacts.errors import ArtifactChecksumError
 from src.services.orchestration.artifacts.store import ArtifactResolver, FilesystemArtifactStore
+from src.services.process_control import ProcessTimeoutError
+from src.services.reconstruction.adapters import colmap_runtime
 from src.services.reconstruction.adapters.colmap import ColmapAdapter, ColmapDependencies, ColmapRequest
 from src.services.reconstruction.adapters.colmap_model import read_sparse_model, select_sparse_model
 from src.services.reconstruction.adapters.colmap_runtime import (
@@ -337,14 +338,14 @@ def test_failure_does_not_publish_manifest(tmp_path: Path, mode: str) -> None:
 def test_real_process_boundary_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str) -> None:
     """Mock subprocess OS outcomes; prove adapter never swallows failure."""
 
-    def run(*args: object, **kwargs: object) -> subprocess.CompletedProcess:
+    def run(*args: object, **kwargs: object) -> int:
         if failure == "timeout":
-            raise subprocess.TimeoutExpired("colmap", 1)
+            raise ProcessTimeoutError("colmap")
         if failure == "missing":
             raise FileNotFoundError("private runtime path")
-        return subprocess.CompletedProcess(args, 7)
+        return 7
 
-    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(colmap_runtime, "_run_watched", run)
     process = ColmapProcess(ColmapRuntimeSettings(runtime_identity="fixture"))
     with pytest.raises(ColmapError) as error:
         process.run(["mapper"], tmp_path)
@@ -446,20 +447,20 @@ def test_colmap_process_exit_codes_and_oom(tmp_path: Path, monkeypatch: pytest.M
     process = ColmapProcess(ColmapRuntimeSettings(runtime_identity="fixture"))
     log_file = tmp_path / "process.log"
 
-    def run_first(*args: object, **kwargs: object) -> subprocess.CompletedProcess:
+    def run_first(*args: object, **kwargs: object) -> int:
         with log_file.open("a") as f:
             f.write("first command output\n")
-        return subprocess.CompletedProcess(args, 0)
+        return 0
 
-    monkeypatch.setattr(subprocess, "run", run_first)
+    monkeypatch.setattr(colmap_runtime, "_run_watched", run_first)
     process.run(["feature_extractor"], tmp_path)
 
-    def run_second(*args: object, **kwargs: object) -> subprocess.CompletedProcess:
+    def run_second(*args: object, **kwargs: object) -> int:
         with log_file.open("a") as f:
             f.write(f"second command failed in {tmp_path}/data\n")
-        return subprocess.CompletedProcess(args, 7)
+        return 7
 
-    monkeypatch.setattr(subprocess, "run", run_second)
+    monkeypatch.setattr(colmap_runtime, "_run_watched", run_second)
     with pytest.raises(ColmapError) as exc_info:
         process.run(["exhaustive_matcher"], tmp_path)
 
@@ -475,11 +476,7 @@ def test_colmap_process_exit_codes_and_oom(tmp_path: Path, monkeypatch: pytest.M
 
     # 2. Exit -9 and 137 -> COLMAP_OUT_OF_MEMORY
     for code in (-9, 137):
-        monkeypatch.setattr(
-            subprocess,
-            "run",
-            lambda *args, **kwargs: subprocess.CompletedProcess(args, code),
-        )
+        monkeypatch.setattr(colmap_runtime, "_run_watched", lambda *args, **kwargs: code)
         with pytest.raises(ColmapError) as oom_info:
             process.run(["mapper"], tmp_path)
         assert oom_info.value.code == "COLMAP_OUT_OF_MEMORY"
@@ -489,12 +486,12 @@ def test_colmap_process_exit_codes_and_oom(tmp_path: Path, monkeypatch: pytest.M
         assert classify_retryability("COLMAP_OUT_OF_MEMORY") is True
 
     # 3. std::bad_alloc with exit 1 -> COLMAP_OUT_OF_MEMORY
-    def run_bad_alloc(*args: object, **kwargs: object) -> subprocess.CompletedProcess:
+    def run_bad_alloc(*args: object, **kwargs: object) -> int:
         with log_file.open("a") as f:
             f.write("terminate called after throwing an instance of 'std::bad_alloc'\n")
-        return subprocess.CompletedProcess(args, 1)
+        return 1
 
-    monkeypatch.setattr(subprocess, "run", run_bad_alloc)
+    monkeypatch.setattr(colmap_runtime, "_run_watched", run_bad_alloc)
     with pytest.raises(ColmapError) as alloc_info:
         process.run(["mapper"], tmp_path)
     assert alloc_info.value.code == "COLMAP_OUT_OF_MEMORY"

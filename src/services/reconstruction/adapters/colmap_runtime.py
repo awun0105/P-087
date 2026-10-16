@@ -1,11 +1,10 @@
 """COLMAP CLI process boundary: capability, timeout, exit code và log evidence."""
 
 import json
-import subprocess
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 from pydantic import Field
 from pydantic_settings import SettingsConfigDict
@@ -13,6 +12,13 @@ from pydantic_settings import SettingsConfigDict
 from src.models.contracts.manifests import ExecutionError, StageArtifact, StageId, StageStatus
 from src.models.contracts.retryability import classify_retryability
 from src.runtime_env import RuntimeSettings
+from src.services.process_control import (
+    ProcessStalledError,
+    ProcessTimeoutError,
+    file_size_marker,
+    run_cancellable_process,
+    tree_marker,
+)
 from src.services.reconstruction.adapters.log_excerpt import redacted_excerpt
 from src.services.reconstruction.rgb.pose.camera_pose import ColmapConfig
 
@@ -23,6 +29,9 @@ class ColmapRuntimeSettings(RuntimeSettings):
     command: tuple[str, ...] = ("colmap",)
     runtime_identity: str = Field(min_length=1)
     timeout_seconds: float = Field(gt=0, default=1800, allow_inf_nan=False)
+    #: Không dấu hiệu tiến triển (log, database, sparse/) trong khoảng này thì coi như treo. Đo từ log COLMAP thật:
+    #: khoảng im lặng lớn nhất là 16,5 s (bundle adjustment toàn cục), nên 600 s cách xa nhiều lần. Xem report T-043.
+    stall_seconds: float = Field(gt=0, default=600, allow_inf_nan=False)
     model_config = SettingsConfigDict(env_prefix="R2S_COLMAP_", extra="forbid")
 
 
@@ -56,6 +65,27 @@ class ColmapError(ValueError):
         )
 
 
+def _run_watched(
+    command: list[str], *, workspace: Path, log: TextIO, settings: ColmapRuntimeSettings, label: str
+) -> int:
+    """Chạy COLMAP trong nhóm tiến trình riêng, canh tiến độ bằng log, database.db và thư mục kết quả."""
+    return run_cancellable_process(
+        command,
+        cwd=workspace,
+        timeout_seconds=settings.timeout_seconds,
+        output=log,
+        stall_seconds=settings.stall_seconds,
+        progress=[
+            file_size_marker(workspace / "process.log"),
+            file_size_marker(workspace / "database.db"),
+            tree_marker(workspace / "sparse", depth=2),
+            tree_marker(workspace / "training", depth=2),
+        ],
+        stall_code="PROCESS_STALLED",
+        label=label,
+    )
+
+
 def _log_since(log_path: Path, offset: int) -> str:
     """Phần log ghi sau `offset` (tính theo byte, như `st_size`); file không đọc được thì rỗng."""
     try:
@@ -81,16 +111,14 @@ class ColmapProcess:
             log.write(json.dumps({"command": ["colmap", *arguments]}) + "\n")
             log.flush()
             try:
-                result = subprocess.run(
+                returncode = _run_watched(
                     [*self.settings.command, *arguments],
-                    cwd=workspace,
-                    stdin=subprocess.DEVNULL,
-                    stdout=log,
-                    stderr=subprocess.STDOUT,
-                    check=False,
-                    timeout=self.settings.timeout_seconds,
+                    workspace=workspace,
+                    log=log,
+                    settings=self.settings,
+                    label=f"COLMAP {arguments[0]}",
                 )
-            except subprocess.TimeoutExpired as error:
+            except ProcessTimeoutError as error:
                 log.write("\nCOLMAP_TIMEOUT\n")
                 new_log = _log_since(log_path, log_offset)
                 excerpt = redacted_excerpt(new_log, workspace)
@@ -99,14 +127,23 @@ class ColmapProcess:
                     "COLMAP exceeded configured timeout",
                     details={"log_excerpt": excerpt},
                 ) from error
+            except ProcessStalledError as error:
+                log.write("\nPROCESS_STALLED\n")
+                new_log = _log_since(log_path, log_offset)
+                excerpt = redacted_excerpt(new_log, workspace)
+                raise ColmapError(
+                    "PROCESS_STALLED",
+                    f"{error} Tiến trình đã được dừng; thử lại thường chạy được. Nếu scene rất lớn, tăng R2S_COLMAP_STALL_SECONDS.",
+                    details={"log_excerpt": excerpt, "stall_seconds": self.settings.stall_seconds},
+                ) from error
             except OSError as error:
                 log.write("\nCOLMAP_UNAVAILABLE\n")
                 raise ColmapError("COLMAP_UNAVAILABLE", "Cannot start configured COLMAP runtime") from error
-            log.write(json.dumps({"returncode": result.returncode, "elapsed_seconds": time.monotonic() - start}) + "\n")
-        if result.returncode:
+            log.write(json.dumps({"returncode": returncode, "elapsed_seconds": time.monotonic() - start}) + "\n")
+        if returncode:
             new_log = _log_since(log_path, log_offset)
             excerpt = redacted_excerpt(new_log, workspace)
-            if result.returncode in {-9, 137} or "std::bad_alloc" in new_log:
+            if returncode in {-9, 137} or "std::bad_alloc" in new_log:
                 raise ColmapError(
                     "COLMAP_OUT_OF_MEMORY",
                     "COLMAP ran out of memory (OOM)",
@@ -114,7 +151,7 @@ class ColmapProcess:
                 )
             raise ColmapError(
                 "COLMAP_PROCESS_FAILED",
-                f"COLMAP {arguments[0]} failed (exit {result.returncode})",
+                f"COLMAP {arguments[0]} failed (exit {returncode})",
                 details={"log_excerpt": excerpt},
             )
         return log_path.read_text()
