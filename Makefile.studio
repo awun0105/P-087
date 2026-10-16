@@ -76,7 +76,7 @@ kill_port() {
 }
 endef
 
-.PHONY: help up down status env lidar-runtime objectgs-runtime registry data-pack data-verify data-unpack docker docker-down
+.PHONY: help up down status env lidar-runtime objectgs-runtime gpu-setup doctor registry data-pack data-verify data-unpack docker docker-down
 
 help:
 	@echo "Studio MVP — lệnh có sẵn:"
@@ -133,24 +133,25 @@ env:
 	EOF
 	fi
 
-## lidar-runtime: interpreter cô lập cho KISS-ICP (R5/R6). Cài đúng bản khoá có hash; có rồi thì bỏ qua.
-## Thất bại (ví dụ không có mạng) không chặn `up`: R5/R6 sẽ tự thành "unavailable" trong registry.
+## lidar-runtime: interpreter cô lập cho KISS-ICP (R5/R6), dựng qua scripts/gpu/install.sh (bản khoá có hash).
+## Đã có đúng phiên bản thì không cài lại. Thất bại (ví dụ không có mạng) không chặn `up`: R5/R6 tự thành "unavailable".
 lidar-runtime:
-	@if [ -x "$(LIDAR_PY)" ] && "$(LIDAR_PY)" -c 'import kiss_icp' 2>/dev/null; then
-	  echo "[lidar] đã có runtime KISS-ICP: $(LIDAR_PY)"; exit 0
-	fi
-	echo "[lidar] tạo runtime KISS-ICP cô lập tại $(ROOT)/data/lidar_odometry_runtime"
-	if python3 -m venv "$(ROOT)/data/lidar_odometry_runtime" \
-	   && "$(LIDAR_PY)" -m pip install --quiet --require-hashes -r "$(ODOM_LOCK)"; then
-	  echo "[lidar] xong."
-	else
+	@"$(ROOT)/scripts/gpu/install.sh" "$(ROOT)/data" --only lidar_odometry --no-doctor || \
 	  echo "[!] Không cài được KISS-ICP; các hướng LiDAR R5/R6 sẽ không khả dụng (video vẫn chạy)." >&2
-	fi
 
-## objectgs-runtime: runtime ObjectGS (tách vật bằng 3DGS có nhãn) tại data/objectgs_runtime, dựng từ commit ghim.
-## Cần mạng và GPU; máy đã cài đúng công thức thì script thoát trong vài giây. In sẵn biến PRODUCT_OBJECTGS_* để dán vào env.
+## objectgs-runtime: runtime ObjectGS (tách vật bằng 3DGS có nhãn) tại data/objectgs_runtime, qua scripts/gpu/install.sh.
+## Cần mạng và GPU khi cài; đã đúng công thức thì không cài lại.
 objectgs-runtime:
-	@$(ROOT)/scripts/gpu/setup_objectgs_runtime.sh "$(ROOT)/data/objectgs_runtime" $(if $(wildcard $(ROOT)/data/objectgs_runtime/wheels),--wheels "$(ROOT)/data/objectgs_runtime/wheels",)
+	@"$(ROOT)/scripts/gpu/install.sh" "$(ROOT)/data" --only objectgs --no-doctor $(if $(wildcard $(ROOT)/data/objectgs_runtime/wheels),--objectgs-wheels "$(ROOT)/data/objectgs_runtime/wheels",)
+
+## gpu-setup: dựng hoặc nhận ra toàn bộ runtime GPU ở data/ bằng một công thức (scripts/gpu/install.sh).
+## Máy đã có runtime thì nhận ra và không cài lại; ghi data/runtime.env rồi chạy doctor.
+gpu-setup:
+	@"$(ROOT)/scripts/gpu/install.sh" "$(ROOT)/data" --colmap=docker --system-node
+
+## doctor: kiểm runtime GPU ở data/ (nạp data/runtime.env rồi preflight).
+doctor:
+	@"$(ROOT)/scripts/gpu/doctor.sh" "$(ROOT)/data"
 
 ## registry: registry năng lực input DEV-LOCAL (lời khai, không phải kiểm định; production không dùng file này).
 ## Chỉ sinh khi chưa có để không đổi checksum giữa các lần `up` (đổi thì mọi recipe chờ chạy bị coi là cũ).

@@ -71,8 +71,6 @@ TMP_DIR="$GOC/.install-tmp"
 mkdir -p "$TMP_DIR"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
-check_system || echo "[hệ thống] cài thiếu gói bằng: sudo $0 $GOC --check-system --apt" >&2
-
 selected=()
 for component in "${ALL[@]}"; do
   if [ -n "$ONLY" ] && ! [[ ",$ONLY," == *",$component,"* ]]; then continue; fi
@@ -90,6 +88,7 @@ for component in "${selected[@]}"; do
     write_stamp "$component" "$recipe"
   else
     echo "[cài] $component"
+    check_system >/dev/null 2>&1 || echo "[hệ thống] thiếu gói apt: xem '$0 $GOC --check-system' (cài bằng --apt với quyền root)" >&2
     install_"$component"
     verify_"$component" || die "cài $component xong nhưng kiểm không đạt"
     write_stamp "$component" "$recipe"
