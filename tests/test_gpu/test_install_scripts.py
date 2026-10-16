@@ -92,7 +92,7 @@ def test_no_pinned_value_is_copied_outside_pins_file() -> None:
     for key, value in _pins().items():
         if len(value) < 6:
             continue
-        for path in COMPONENT_FILES:
+        for path in [*COMPONENT_FILES, REPO / "Dockerfile.gpu", REPO / "Makefile.studio"]:
             assert value not in path.read_text(encoding="utf-8"), f"{key} bị chép trong {path.name}"
 
 
@@ -293,7 +293,7 @@ def test_no_forced_cuda_arch_list_so_the_cache_matches_the_runner() -> None:
 
 def test_objectgs_install_verifies_through_the_shared_probe() -> None:
     text = (INSTALL_D / "objectgs.sh").read_text(encoding="utf-8")
-    assert "write_runtime_env" in text and "objectgs_runtime" in text
+    assert "write_runtime_env" in text and "objectgs_extension_loads" in text
     assert "gsplat_cuda.so" not in text, "file .so có mặt không đủ: cache phải khớp cấu hình lúc chạy"
 
 
@@ -352,3 +352,15 @@ def test_node_bin_dir_is_written_only_for_a_node_we_installed(tmp_path: Path) ->
     _stub_bin(tmp_path / "root/reconstruction_runtime/node/bin", "node", 'echo "v22.20.0"')
     assert _run(["bash", "-c", base + f'write_runtime_env "{out}" splat']).returncode == 0
     assert f"R2S_NODE_BIN_DIR={tmp_path / 'root/reconstruction_runtime/node/bin'}" in out.read_text(encoding="utf-8")
+
+
+def test_runtime_env_loader_fills_variables_left_empty_by_compose(tmp_path: Path) -> None:
+    """Compose để trống biến công cụ để runtime.env của image quyết định: rỗng phải được nạp, không coi là đã có."""
+    file = tmp_path / "runtime.env"
+    file.write_text('R2S_BRUSH_COMMAND=["/image/brush_app"]\n', encoding="utf-8")
+    env = dict(os.environ)
+    env["R2S_BRUSH_COMMAND"] = ""
+    script = f'REPO="{REPO}"; source "{INSTALL_D}/_lib.sh"; load_runtime_env "{file}"; printf "%s" "$R2S_BRUSH_COMMAND"'
+    result = _run(["bash", "-c", script], env=env)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == '["/image/brush_app"]'

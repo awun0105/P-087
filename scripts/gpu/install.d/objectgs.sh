@@ -16,14 +16,15 @@ objectgs_repos_ok() {
 
 # Nạp kernel gsplat đúng môi trường lúc chạy ObjectGS (cùng hàm với doctor: preflight.objectgs_runtime). Cache khớp thì
 # chỉ mất vài giây; cache trống hoặc biên dịch cho cấu hình khác thì đây là lúc biên dịch (vài phút).
-# Môi trường lấy từ chính write_runtime_env nên không có bảng biến thứ hai để lệch.
+# Môi trường lấy từ chính write_runtime_env nên không có bảng biến thứ hai để lệch. Lệnh chạy bằng Python của repo
+# (có pydantic); Python của ObjectGS chỉ là đích được probe, qua PRODUCT_OBJECTGS_RUNTIME_PYTHON.
 objectgs_probe() {
   local tmp status=0
   tmp="$(mktemp -d)"
   write_runtime_env "$tmp/runtime.env" objectgs
   (
     load_runtime_env "$tmp/runtime.env"
-    cd "$REPO" && "$OBJGS/python/bin/python" -c 'import sys; from scripts.kaggle.preflight import objectgs_runtime; ok, detail = objectgs_runtime(); print(detail); sys.exit(0 if ok else 1)'
+    cd "$REPO" && "$(py_bin)" -c 'import sys; from scripts.kaggle.preflight import objectgs_extension_loads; ok, detail = objectgs_extension_loads(); print(detail); sys.exit(0 if ok else 1)'
   ) || status=$?
   rm -f "$tmp/runtime.env" "$tmp/runtime.env.tmp"
   rmdir "$tmp"

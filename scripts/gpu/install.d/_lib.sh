@@ -54,7 +54,8 @@ write_stamp() {
   printf '%s' "$2" > "$(stamp_path "$1")"
 }
 
-# load_runtime_env FILE: đặt các biến CHƯA có trong môi trường. Không eval: giá trị đọc nguyên văn.
+# load_runtime_env FILE: đặt các biến CHƯA có (hoặc rỗng) trong môi trường. Không eval: giá trị đọc nguyên văn.
+# Biến rỗng coi như chưa có: compose để trống để runtime.env của image quyết định, không lấy đường dẫn từ máy host.
 load_runtime_env() {
   [ -f "$1" ] || return 0
   local line key value
@@ -63,7 +64,7 @@ load_runtime_env() {
     key="${line%%=*}"
     value="${line#*=}"
     [[ "$key" =~ ^[A-Z][A-Z0-9_]*$ ]] || die "tên biến lạ trong $1: $key"
-    if [ -z "${!key+x}" ]; then export "$key=$value"; fi
+    if [ -z "${!key:-}" ]; then export "$key=$value"; fi
   done < "$1"
 }
 

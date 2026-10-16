@@ -193,8 +193,20 @@ def objectgs_probe_env(environ: Mapping[str, str]) -> dict[str, str]:
     return env
 
 
+def objectgs_extension_loads() -> tuple[bool, str]:
+    """Kernel gsplat nạp được trong môi trường ObjectGS, không cần GPU (install.sh kiểm cả lúc build image).
+
+    Nạp lần đầu là lúc biên dịch: cache khớp thì vài giây, không khớp thì biên dịch lại (vài phút).
+    """
+    python = os.environ.get("PRODUCT_OBJECTGS_RUNTIME_PYTHON")
+    if not python or not Path(python).is_file():
+        return False, "thiếu PRODUCT_OBJECTGS_RUNTIME_PYTHON"
+    probe = "import torch;from gsplat.cuda._backend import _C;assert _C is not None;print(torch.__version__)"
+    return _run([python, "-c", probe], timeout=1800.0, env=objectgs_probe_env(os.environ))
+
+
 def objectgs_runtime() -> tuple[bool, str]:
-    """Runtime ObjectGS (tuỳ chọn): torch thấy GPU và kernel gsplat nạp từ cache biên dịch dùng chung."""
+    """Runtime ObjectGS (tuỳ chọn trên doctor): torch thấy GPU và kernel gsplat nạp từ cache biên dịch dùng chung."""
     python = os.environ.get("PRODUCT_OBJECTGS_RUNTIME_PYTHON")
     if not python or not Path(python).is_file():
         return False, "thiếu PRODUCT_OBJECTGS_RUNTIME_PYTHON"
