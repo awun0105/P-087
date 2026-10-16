@@ -210,4 +210,30 @@ describe("panel Benchmark", () => {
     await waitFor(() => expect(putBenchmarkTruth).toHaveBeenCalled());
     expect(vi.mocked(putBenchmarkTruth).mock.calls[0][2].key_obstacle_ids).toEqual(["chair"]);
   });
+
+  it("thêm khe ngay sau một đoạn: không lấy lại hai điểm cũ còn trên viewer, chờ hai điểm mới", async () => {
+    const stale = fakePicker([[1, 2, 3], [4, 6, 3]]); // điểm của lần chọn trước, viewer chưa kịp xoá
+    const view = await loaded({ picker: stale });
+    fireEvent.click(screen.getByRole("button", { name: "Thêm khe" }));
+    expect(stale.start).toHaveBeenCalledTimes(1);
+    expect(screen.queryByLabelText("Tên khe g1")).toBeNull();
+
+    view.rerender(element({ picker: fakePicker([]) })); // viewer đã xoá
+    expect(screen.queryByLabelText("Tên khe g1")).toBeNull();
+    view.rerender(element({ picker: fakePicker([[0, 0, 0], [0.8, 0, 0]]) }));
+    await screen.findByLabelText("Tên khe g1");
+  });
+
+  it("mốc làm tay sai bị báo và khoá Lưu; số hợp lệ được gửi nguyên", async () => {
+    await loaded();
+    fireEvent.change(screen.getByLabelText("Mốc làm tay (phút)"), { target: { value: "-5" } });
+    expect(screen.getByText(/Mốc làm tay phải là số phút/)).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Lưu" }) as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.change(screen.getByLabelText("Mốc làm tay (phút)"), { target: { value: "12.5" } });
+    vi.mocked(putBenchmarkTruth).mockResolvedValue({ ...LOADED, version: 4 });
+    fireEvent.click(screen.getByRole("button", { name: "Lưu" }));
+    await waitFor(() => expect(putBenchmarkTruth).toHaveBeenCalled());
+    expect(vi.mocked(putBenchmarkTruth).mock.calls[0][2].manual_baseline_minutes).toBe(12.5);
+  });
 });

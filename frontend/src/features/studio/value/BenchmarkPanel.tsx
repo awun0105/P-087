@@ -1,7 +1,7 @@
 "use client";
 
 import { Loader2, Plus, Save, X } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { Button, Notice } from "@/components/studio/primitives";
 import {
@@ -10,6 +10,7 @@ import {
   isDirty,
   missingObstacleIds,
   nextId,
+  parseMinutes,
   robotProblem,
   truthFromDraft,
   type BenchmarkDraft,
@@ -94,6 +95,9 @@ function draftProblems(draft: BenchmarkDraft): string[] {
     problems.push("Bố trí A và B phải là hai revision khác nhau");
   }
   if (draft.l4 && draft.l4.evidence.trim() === "") problems.push("L4: cần ghi bằng chứng");
+  if (draft.manualBaselineMinutes.trim() !== "" && parseMinutes(draft.manualBaselineMinutes) === null) {
+    problems.push("Mốc làm tay phải là số phút ≥ 0 (dùng dấu chấm cho phần thập phân)");
+  }
   return problems;
 }
 
@@ -109,6 +113,8 @@ export function BenchmarkPanel({ jobId, sceneRevision, objects, canEdit, picker 
   const [conflict, setConflict] = useState(false);
   const [pending, setPending] = useState<PickPurpose | null>(null);
   const [confirmClose, setConfirmClose] = useState(false);
+  // Bộ điểm của viewer lúc bắt đầu chọn. `picker.start()` xoá điểm cũ bất đồng bộ, nên chỉ nhận bộ điểm MỚI so với bộ này.
+  const pickBaseline = useRef<BenchmarkPickerApi["points"] | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -131,10 +137,9 @@ export function BenchmarkPanel({ jobId, sceneRevision, objects, canEdit, picker 
 
   // Chọn đủ hai điểm thì đưa vào đoạn đo hoặc khe, rồi tắt chế độ chọn. Viewer là hệ bên ngoài React nên đồng bộ bằng effect.
   useEffect(() => {
-    if (!pending || !picker || picker.points.length < 2) return;
+    if (!pending || !picker || picker.points.length < 2 || picker.points === pickBaseline.current) return;
     const [a, b] = picker.points;
     picker.stop();
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- Nhận cặp điểm từ viewer (hệ bên ngoài React) rồi kết thúc chế độ chọn
     setPending(null);
     const point = (value: readonly [number, number, number]): Vec3 => [value[0], value[1], value[2]];
     setDraft((current) => {
@@ -197,6 +202,7 @@ export function BenchmarkPanel({ jobId, sceneRevision, objects, canEdit, picker 
 
   const startPick = (purpose: PickPurpose) => {
     if (!picker) return;
+    pickBaseline.current = picker.points;
     setPending(purpose);
     picker.start();
   };
