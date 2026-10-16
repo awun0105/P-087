@@ -16,6 +16,7 @@ from pydantic_settings import SettingsConfigDict
 from src.models.contracts.manifests import ExecutionError, StageArtifact, StageId, StageStatus
 from src.models.contracts.retryability import classify_retryability
 from src.runtime_env import RuntimeSettings
+from src.services.process_control import ProgressWatchdog, file_size_marker
 from src.services.reconstruction.resume import CHECKPOINT_NAME
 from src.services.reconstruction.rgb.splat.visual import BrushConfig
 
@@ -123,7 +124,12 @@ class VisualProcess:
             ) as process:
                 deadline = time.monotonic() + self.settings.timeout_seconds
                 last_log_offset = 0
-                last_progress_time = time.monotonic()
+                # Treo = log brush-train không tăng trong hang_timeout (lớp canh tiến độ dùng chung, T-043).
+                watchdog = (
+                    ProgressWatchdog(hang_timeout, [file_size_marker(log_path)])
+                    if invocation.name == "brush-train" and hang_timeout > 0
+                    else None
+                )
                 try:
                     while process.poll() is None:
                         now = time.monotonic()
@@ -140,7 +146,6 @@ class VisualProcess:
                                         reader.seek(last_log_offset)
                                         new_text = reader.read()
                                         last_log_offset = reader.tell()
-                                    last_progress_time = now
                                     for pattern, err_code, human_desc in FATAL_LOG_PATTERNS:
                                         if pattern in new_text:
                                             self._kill_group(process)
@@ -149,8 +154,9 @@ class VisualProcess:
                                 except (OSError, UnicodeDecodeError):
                                     pass
 
-                        if invocation.name == "brush-train" and hang_timeout > 0:
-                            if now - last_progress_time > hang_timeout:
+                        if watchdog is not None:
+                            watchdog.poll()
+                            if watchdog.stalled():
                                 self._kill_group(process)
                                 log.write("\nVISUAL_HANG_TIMEOUT\n")
                                 raise VisualError(
