@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { lazy, Suspense, type ComponentType } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ScenePage } from "@/features/studio/ScenePage";
+import { OPERATOR_SURFACE, ScenePage } from "@/features/studio/ScenePage";
 import { PageTitleProvider } from "@/features/shell/Breadcrumbs";
 import { getJob, getPreview, listJobAttempts } from "@/lib/api/endpoints";
 import { getJobProgress, getJobScene, getSimulationPackage, getReviewState, retryJob } from "@/lib/api/studio";
@@ -77,5 +77,11 @@ describe("operator time on the scene page", () => {
     await screen.findByRole("region", { name: "Canvas stub" });
 
     expect(postOperatorTime).not.toHaveBeenCalled();
+  });
+});
+
+describe("operator time surfaces", () => {
+  it("files the review tab, where the evaluation card lives, under evaluation", () => {
+    expect(OPERATOR_SURFACE).toEqual({ progress: "progress", studio: "studio", review: "evaluation", results: "other" });
   });
 });

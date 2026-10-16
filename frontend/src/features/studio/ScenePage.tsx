@@ -44,11 +44,12 @@ interface RetrySync {
 const PROGRESS_STATUS_ORDER = { QUEUED: 0, RUNNING: 1, SUCCEEDED: 2, FAILED: 2, CANCELLED: 2 } as const;
 
 /** Bề mặt ghi trong §15.3: mỗi tab là một bề mặt riêng để thời gian của từng tab tách bạch. */
-const OPERATOR_SURFACE: Record<Tab, OperatorTimeSurface> = {
+export const OPERATOR_SURFACE: Record<Tab, OperatorTimeSurface> = {
   progress: "progress",
   studio: "studio",
-  review: "other",
-  results: "evaluation",
+  // Bảng đánh giá (EvaluationCard) nằm ở tab Kiểm tra & duyệt; tab Kết quả là tải gói, không phải đánh giá.
+  review: "evaluation",
+  results: "other",
 };
 
 /**

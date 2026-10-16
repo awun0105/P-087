@@ -20,7 +20,10 @@ export function useWalkSession({ walking, sceneRevision }: { walking: boolean; s
   useEffect(() => {
     if (!tracking.enabled || !walking || !sceneRevision) return;
     const startedMs = Date.now();
-    return () => {
+    let sent = false;
+    const finish = () => {
+      if (sent) return;
+      sent = true;
       const endedMs = Math.min(Date.now(), startedMs + MAX_SESSION_MS);
       if (endedMs <= startedMs) return;
       void postWalkSession(
@@ -33,6 +36,12 @@ export function useWalkSession({ walking, sceneRevision }: { walking: boolean; s
         },
         { keepalive: true },
       );
+    };
+    // Đóng tab không làm React unmount: cleanup của effect không chạy, nên phải gửi ở `pagehide` (keepalive).
+    window.addEventListener("pagehide", finish);
+    return () => {
+      window.removeEventListener("pagehide", finish);
+      finish();
     };
   }, [tracking.enabled, tracking.jobId, walking, sceneRevision]);
 }

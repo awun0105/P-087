@@ -79,6 +79,21 @@ describe("useWalkSession", () => {
     expect(sent()[0].outcome).toBe("completed");
   });
 
+  it("sends the open session when the tab is closed, which does not unmount React, and only once", () => {
+    const { rerender, unmount } = renderHook(
+      ({ walking }: { walking: boolean }) => useWalkSession({ walking, sceneRevision: "rev-002" }),
+      { initialProps: { walking: false }, wrapper: wrapper({ jobId: "job-1", enabled: true }) },
+    );
+    rerender({ walking: true });
+    vi.advanceTimersByTime(7000);
+    window.dispatchEvent(new Event("pagehide"));
+
+    expect(sent()).toHaveLength(1);
+    expect(sent()[0].outcome).toBe("completed");
+    unmount();
+    expect(sent()).toHaveLength(1);
+  });
+
   it("does nothing for a viewer who cannot mutate, without a revision, or when Walk never started", () => {
     const denied = renderHook(() => useWalkSession({ walking: true, sceneRevision: "rev-002" }), {
       wrapper: wrapper({ jobId: "job-1", enabled: false }),
