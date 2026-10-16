@@ -1,6 +1,6 @@
 # Report T-037
 
-Trạng thái: **in-progress, đang chờ chủ dự án** (bước 4 chưa chạy được vì thiếu đĩa). Bước 1, 2, 3 và 5 đã xong và commit.
+Trạng thái: **implemented** (xem mục Round 2 ở cuối).
 
 ## Done
 
@@ -117,3 +117,37 @@ Trạng thái giữ `in-progress | engineer`: task chưa xong, và việc còn l
 - **Dọn dẹp:** đã xoá `/home/lqaq/objectgs_runtime_build` (8,2 GB) và workspace smoke tạm trong scratchpad; không
   file env nào của stack trỏ vào thư mục build. Muốn dùng lại runtime thì chạy lại `setup_objectgs_runtime.sh`
   (bản dựng trước đã chứng minh cài và pip freeze khớp laptop).
+
+## Round 2 (sau yêu cầu của chủ dự án)
+
+Quyết định: không chạy smoke 30000 vòng. Acceptance 3 được ghi như sau:
+
+> Smoke chạy hết kiểm runtime, train, export trên runtime dựng lại = **PASS về thực thi**. Cổng chất lượng mesh trên
+> cube tổng hợp **không đạt**, giống runtime gốc (bằng chứng `data/pr05_objectgs_smoke_20261015/quality.json`, 8000 vòng,
+> `watertight: false`) → ngoài phạm vi T-037.
+
+Các sửa đã yêu cầu, mỗi sửa một commit có test:
+
+- **a) micromamba đối chiếu checksum chính thức** — `ecc6c7fb`. Nguồn: release `mamba-org/micromamba-releases` 2.0.5-0 trên GitHub
+  (không còn `micro.mamba.pm`). Tarball `micromamba-linux-64.tar.bz2` (6025445 byte, khớp GitHub API) có sha256
+  `bfc2e3a4…faef78`. Binary `bin/micromamba` bên trong có sha256 `cdf5a2e1…57eb`, khớp file `micromamba-linux-64.sha256` của
+  release; script kiểm binary sau khi giải nén. **Phát hiện:** file `micromamba-linux-64.tar.bz2.sha256` của release
+  chứa `cdf5…` (sha của binary, không phải của tarball) nên không dùng để kiểm tarball; ghi chú đã nằm trong comment script.
+  Bản ghim cũ `ff1a10b4…` từ `micro.mamba.pm` không khớp với asset GitHub nên đã bỏ.
+- **b) hash cho lock, cài với `--require-hashes`** — `40749a7e`. `requirements.lock.txt`: 126 gói ghim, mỗi gói một dòng
+  `--hash=sha256:…` của đúng file trong `data/objectgs_runtime/wheels` (sinh bằng `pip hash`). Script cài
+  `pip install --require-hashes -r …`. Test: định dạng lock, cờ cài, và hash khớp file wheel thật (chạy khi có thư mục wheel).
+  **Giới hạn:** hash chỉ đúng với bộ file offline trên laptop; cài online (không `--wheels`) sẽ bị từ chối nếu PyPI phục vụ
+  file khác, nên khuyến nghị dùng `--wheels`.
+- **c) từ chối thư mục đích có nội dung mà không có `.r2s-installed`** — `bb2402bd`. Script thoát khác 0 trước mọi bước tải,
+  in thông báo nói rõ cách xử lý, không xoá gì. Test: thư mục có `keep.txt` → thoát ≠ 0, `keep.txt` còn nguyên.
+  **Hệ quả:** `make objectgs-runtime` trỏ tới `data/objectgs_runtime` (đã có nội dung, không có dấu) sẽ bị từ chối
+  cho tới khi chủ dự án chọn thư mục khác hoặc tự dọn.
+
+**Dựng lại có `--require-hashes` (không smoke):** vào `/home/lqaq/objectgs_rehash_check` với `--wheels data/objectgs_runtime/wheels`.
+Kết quả **EXIT=0**: cài 126 gói có kiểm hash, biên dịch extension gsplat (`ok: gsplat extension`).
+`pip freeze` của bản này và của `data/objectgs_runtime` đều 130 dòng và **giống hệt nhau**; `pip check`: *No broken requirements
+found*. Đã xoá `/home/lqaq/objectgs_rehash_check` bằng đường dẫn đầy đủ (kiểm `df -h` trước: 15 GB trống).
+
+Test cuối: `tests/test_gpu/test_setup_objectgs_runtime.py` — **14 passed**; `bash -n` ok; ruff check/format ok.
+Các commit của T-037: `d63be3f4`, `0e6e7b1f`, `f2589a37`, `2997baca`, `1cb76776`, `dfd79f04`, `0ee557a0`, `ecc6c7fb`, `40749a7e`, `bb2402bd`.
