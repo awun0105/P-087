@@ -144,3 +144,54 @@ def test_publisher_skips_when_config_file_changed_since_startup(tmp_path: Path, 
     after = select(database, config_checksum=profile.config_checksum, seed=7)
     assert after is not None
     assert after.last_seen_at == before.last_seen_at
+
+
+def test_two_configs_sharing_one_software_runtime_keep_their_own_rows(runtime_database_url: str) -> None:
+    """Worker A (config X) và B (config Y) cùng image: heartbeat xen kẽ không được ghi đè dòng của nhau."""
+    database = RuntimeDatabase(runtime_database_url)
+    manifest = _manifest()
+    config_x = "sha256:" + "c" * 64
+    config_y = "sha256:" + "d" * 64
+    for step in range(3):
+        publish(database, _profile(manifest, config=config_x), manifest, now=_NOW + timedelta(seconds=step * 2))
+        publish(database, _profile(manifest, config=config_y), manifest, now=_NOW + timedelta(seconds=step * 2 + 1))
+        later = _NOW + timedelta(minutes=1)
+        chosen_x = select(database, config_checksum=config_x, seed=7, now=later)
+        chosen_y = select(database, config_checksum=config_y, seed=7, now=later)
+        assert chosen_x is not None and chosen_x.config_checksum == config_x
+        assert chosen_y is not None and chosen_y.config_checksum == config_y
+
+
+def test_seed_none_and_a_numbered_seed_are_separate_rows(runtime_database_url: str) -> None:
+    database = RuntimeDatabase(runtime_database_url)
+    manifest = _manifest()
+    publish(database, _profile(manifest, seed=None), manifest, now=_NOW)
+    publish(database, _profile(manifest, seed=7), manifest, now=_NOW + timedelta(seconds=1))
+
+    unseeded = select(database, config_checksum="sha256:" + "c" * 64, seed=None, now=_NOW)
+    seeded = select(database, config_checksum="sha256:" + "c" * 64, seed=7, now=_NOW)
+
+    assert unseeded is not None and unseeded.seed is None
+    assert seeded is not None and seeded.seed == 7
+
+
+def test_find_prefers_the_live_row_among_rows_with_the_same_software_checksum(runtime_database_url: str) -> None:
+    database = RuntimeDatabase(runtime_database_url)
+    manifest = _manifest()
+    publish(database, _profile(manifest, config="sha256:" + "d" * 64), manifest, now=_NOW - timedelta(hours=2))
+    publish(database, _profile(manifest, config="sha256:" + "c" * 64), manifest, now=_NOW)
+
+    found = find(database, software_runtime_checksum(manifest), now=_NOW)
+
+    assert found is not None
+    assert found.config_checksum == "sha256:" + "c" * 64
+    assert found.is_live(_NOW)
+
+
+def test_publish_rejects_a_negative_seed(runtime_database_url: str) -> None:
+    """-1 là mã của seed NULL trong khoá; seed thật không được trùng mã đó."""
+    database = RuntimeDatabase(runtime_database_url)
+    manifest = _manifest()
+
+    with pytest.raises(ValueError, match="seed"):
+        publish(database, _profile(manifest, seed=-1), manifest, now=_NOW)

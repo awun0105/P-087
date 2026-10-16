@@ -413,15 +413,17 @@ MIGRATIONS += (
         22,
         (
             """CREATE TABLE r2s_worker_runtimes (
-                software_runtime_checksum TEXT PRIMARY KEY,
-                runtime_manifest_checksum TEXT NOT NULL,
+                software_runtime_checksum TEXT NOT NULL,
                 config_checksum TEXT NOT NULL,
                 seed INTEGER,
+                seed_key INTEGER NOT NULL,
+                runtime_manifest_checksum TEXT NOT NULL,
                 gpu_name TEXT,
                 hardware TEXT NOT NULL,
                 manifest TEXT NOT NULL,
                 first_seen_at TEXT NOT NULL,
-                last_seen_at TEXT NOT NULL
+                last_seen_at TEXT NOT NULL,
+                PRIMARY KEY (software_runtime_checksum, config_checksum, seed_key)
             )""",
             "CREATE INDEX r2s_worker_runtimes_by_config ON r2s_worker_runtimes(config_checksum, last_seen_at)",
         ),

@@ -1,7 +1,8 @@
 """Runtime do worker công bố vào DB (T-040): API chọn runtime cho job mới từ đây.
 
-Khoá là checksum phần mềm (quyết định Q3): mọi máy cùng image ghi vào cùng một dòng. Phần cứng
-(GPU, VRAM, driver) của lần công bố gần nhất chỉ được lưu để ghi nhận, không tham gia khớp job.
+Khoá một dòng là (checksum phần mềm, config, seed): hai worker cùng image nhưng khác file cấu hình hoặc seed
+giữ hai dòng riêng, không ghi đè nhau. Phần cứng (GPU, VRAM, driver) của lần công bố gần nhất chỉ được lưu để
+ghi nhận, không tham gia khớp job.
 """
 
 import json
@@ -53,32 +54,43 @@ class WorkerRuntime:
         )
 
 
+#: Mã của seed NULL trong khoá (PRIMARY KEY không nhận NULL). Seed thật không được là số âm.
+_NO_SEED = -1
+
+
+def _seed_key(seed: int | None) -> int:
+    return _NO_SEED if seed is None else seed
+
+
 def publish(
     database: RuntimeDatabase, profile: ExecutionProfile, manifest: RuntimeManifest, *, now: datetime | None = None
 ) -> None:
-    """Upsert theo checksum phần mềm; manifest phải chính là manifest đã khoá trong profile."""
+    """Upsert theo (checksum phần mềm, config, seed); manifest phải chính là manifest đã khoá trong profile."""
     if (
         profile.software_runtime_checksum != software_runtime_checksum(manifest)
         or profile.runtime_manifest_checksum != manifest.runtime_manifest_checksum
     ):
         raise ValueError("RuntimeManifest không khớp profile đã khoá của worker")
+    if profile.seed is not None and profile.seed < 0:
+        raise ValueError("seed của worker phải không âm")
     observed = (now or datetime.now(UTC)).isoformat()
     hardware = {
         name: manifest.components[name].version for name in sorted(HARDWARE_COMPONENTS) if name in manifest.components
     }
     with database.transaction(write=True) as tx:
         tx.execute(
-            "INSERT INTO r2s_worker_runtimes(software_runtime_checksum, runtime_manifest_checksum, config_checksum, "
-            "seed, gpu_name, hardware, manifest, first_seen_at, last_seen_at) VALUES (?,?,?,?,?,?,?,?,?) "
-            "ON CONFLICT(software_runtime_checksum) DO UPDATE SET "
-            "runtime_manifest_checksum=excluded.runtime_manifest_checksum, config_checksum=excluded.config_checksum, "
-            "seed=excluded.seed, gpu_name=excluded.gpu_name, hardware=excluded.hardware, "
-            "manifest=excluded.manifest, last_seen_at=excluded.last_seen_at",
+            "INSERT INTO r2s_worker_runtimes(software_runtime_checksum, config_checksum, seed, seed_key, "
+            "runtime_manifest_checksum, gpu_name, hardware, manifest, first_seen_at, last_seen_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(software_runtime_checksum, config_checksum, seed_key) DO UPDATE SET "
+            "runtime_manifest_checksum=excluded.runtime_manifest_checksum, gpu_name=excluded.gpu_name, "
+            "hardware=excluded.hardware, manifest=excluded.manifest, last_seen_at=excluded.last_seen_at",
             (
                 profile.software_runtime_checksum,
-                manifest.runtime_manifest_checksum,
                 profile.config_checksum,
                 profile.seed,
+                _seed_key(profile.seed),
+                manifest.runtime_manifest_checksum,
                 hardware.get("gpu_model"),
                 json.dumps(hardware, sort_keys=True),
                 manifest.model_dump_json(),
@@ -129,8 +141,15 @@ def select(
 ) -> WorkerRuntime | None:
     """Runtime cho job mới: đang sống trước, rồi mới nhất. None khi chưa có worker nào công bố."""
     current = now or datetime.now(UTC)
-    candidates = [item for item in _query(database, "WHERE config_checksum=?", (config_checksum,)) if item.seed == seed]
+    candidates = _query(database, "WHERE config_checksum=? AND seed_key=?", (config_checksum, _seed_key(seed)))
     return max(candidates, key=lambda item: (item.is_live(current), item.last_seen_at), default=None)
+
+
+def find(database: RuntimeDatabase, software_checksum: str, *, now: datetime | None = None) -> WorkerRuntime | None:
+    """Dòng mới nhất (ưu tiên đang sống) của checksum phần mềm, không lọc hạn; None nếu chưa có ai công bố."""
+    current = now or datetime.now(UTC)
+    rows = _query(database, "WHERE software_runtime_checksum=?", (software_checksum,))
+    return max(rows, key=lambda item: (item.is_live(current), item.last_seen_at), default=None)
 
 
 def live_runtime_checksums(database: RuntimeDatabase, *, now: datetime | None = None) -> frozenset[str]:
@@ -152,8 +171,3 @@ def has_live_runtime(database: RuntimeDatabase, job_runtime_checksum: str, *, no
         and job_runtime_checksum in (item.software_runtime_checksum, item.runtime_manifest_checksum)
         for item in _query(database, "", ())
     )
-
-
-def find(database: RuntimeDatabase, software_checksum: str) -> WorkerRuntime | None:
-    """Runtime theo checksum phần mềm, không lọc hạn; để biết job đang trỏ tới runtime nào."""
-    return next(iter(_query(database, "WHERE software_runtime_checksum=?", (software_checksum,))), None)
