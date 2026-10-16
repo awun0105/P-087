@@ -54,8 +54,12 @@ class CollisionWorld:
     mesh: trimesh.Trimesh
     #: Id vật sở hữu từng tam giác; chuỗi rỗng là môi trường.
     face_owner: np.ndarray
-    #: Vật có mọi thành phần collider kín; chỉ các vật này mới có "bên trong" để kiểm điểm giữa khe.
+    #: Vật có mọi thành phần collider kín.
     solid_owners: frozenset[str]
+    #: Chỉ số mảnh collider của từng tam giác (−1 là môi trường). Collider CoACD gồm nhiều mảnh lồi có thể chồng nhau.
+    face_part: np.ndarray
+    #: Các mảnh kín: kiểm "điểm ở trong vật" theo từng mảnh, vì chẵn lẻ trên cả vật sai ở vùng hai mảnh chồng nhau.
+    solid_parts: frozenset[int]
 
 
 def distance_error(d: MeasuredDistance) -> DistanceResult:
@@ -102,10 +106,13 @@ def _first_hit(triangles: np.ndarray, origin: np.ndarray, direction: np.ndarray)
 
 
 def _inside_solid(world: CollisionWorld, origin: np.ndarray, direction: np.ndarray) -> bool:
-    """Điểm nằm trong một vật kín khi tia đi ra cắt số lẻ mặt của vật đó."""
+    """Điểm nằm trong vật khi tia đi ra cắt số lẻ mặt của **một mảnh** kín nào đó của vật.
+
+    Kiểm theo mảnh, không theo cả vật: điểm trong vùng chồng của hai mảnh lồi cắt 2 + 2 mặt, chẵn lẻ trên cả vật sẽ báo sai là ngoài.
+    """
     faces = world.mesh.triangles
-    for owner in world.solid_owners:
-        owned = faces[world.face_owner == owner]
+    for part in world.solid_parts:
+        owned = faces[world.face_part == part]
         if len(_ray_hits(owned, origin, direction)) % 2 == 1:
             return True
     return False
@@ -189,8 +196,11 @@ def compose_collision_world(
     vertex_blocks = [np.asarray(background_vertices, dtype=float)]
     face_blocks = [np.asarray(background_faces, dtype=np.int64)]
     owner_blocks = [np.full(len(face_blocks[0]), "", dtype=object)]
+    part_blocks = [np.full(len(face_blocks[0]), -1, dtype=np.int64)]
     offset = len(vertex_blocks[0])
     solid: set[str] = set()
+    solid_parts: set[int] = set()
+    part_index = 0
     for item in objects:
         if not resolve_representation(item).export_as_object:
             continue
@@ -201,15 +211,26 @@ def compose_collision_world(
         for vertices, faces in _collider_local_mesh(item.collider, load_parts):
             world_vertices = rotation.apply(np.asarray(vertices, dtype=float)) + translation
             world_faces = np.asarray(faces, dtype=np.int64)
-            closed = closed and trimesh.Trimesh(world_vertices, world_faces, process=False).is_watertight
+            part_closed = trimesh.Trimesh(world_vertices, world_faces, process=False).is_watertight
+            closed = closed and part_closed
+            if part_closed:
+                solid_parts.add(part_index)
             vertex_blocks.append(world_vertices)
             face_blocks.append(world_faces + offset)
             owner_blocks.append(np.full(len(world_faces), item.id, dtype=object))
+            part_blocks.append(np.full(len(world_faces), part_index, dtype=np.int64))
             offset += len(world_vertices)
+            part_index += 1
         if closed:
             solid.add(item.id)
     mesh = trimesh.Trimesh(np.vstack(vertex_blocks), np.vstack(face_blocks), process=False)
-    return CollisionWorld(mesh=mesh, face_owner=np.concatenate(owner_blocks), solid_owners=frozenset(solid))
+    return CollisionWorld(
+        mesh=mesh,
+        face_owner=np.concatenate(owner_blocks),
+        solid_owners=frozenset(solid),
+        face_part=np.concatenate(part_blocks),
+        solid_parts=frozenset(solid_parts),
+    )
 
 
 def collision_world(registry: ProjectRegistry, job_id: str, scene_revision: str) -> CollisionWorld:
@@ -281,7 +302,10 @@ def _triangles_touch_box(triangles: np.ndarray, lo: np.ndarray, hi: np.ndarray) 
 
 
 def _old_pose_cleared(world_a: CollisionWorld, world_b: CollisionWorld, object_id: str, robot: RobotProfile) -> bool:
-    """Vết cũ đã được khoét: không tam giác nào khác vật trong world_b giao hộp tại pose A (trong dải z của robot)."""
+    """Vết cũ đã được khoét: không tam giác **môi trường** nào của world_b giao hộp tại pose A (trong dải z của robot).
+
+    Chỉ xét môi trường: collider của vật khác (ghế dưới bàn, vật được dời tới chỗ cũ) có mặt ở đó là đúng, không phải vết sót.
+    """
     owned = world_a.face_owner == object_id
     if not owned.any():
         return False
@@ -294,8 +318,8 @@ def _old_pose_cleared(world_a: CollisionWorld, world_b: CollisionWorld, object_i
     hi[2] = min(hi[2], robot.height_max_m)
     if lo[2] >= hi[2]:
         return True  # vết cũ nằm ngoài dải cao của robot
-    others = world_b.mesh.triangles[world_b.face_owner != object_id]
-    return not _triangles_touch_box(others, lo, hi)
+    environment = world_b.mesh.triangles[world_b.face_owner == ""]
+    return not _triangles_touch_box(environment, lo, hi)
 
 
 def move_consistency(

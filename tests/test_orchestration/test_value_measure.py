@@ -38,17 +38,20 @@ _ROBOT = RobotProfile(width_m=0.6, safety_margin_m=0.05, height_min_m=0.05, heig
 
 def _world(*boxes: tuple[str, tuple[float, float, float], tuple[float, float, float]]) -> CollisionWorld:
     """Mỗi hộp là (owner, tâm, kích thước). owner rỗng là môi trường (không kín theo nghĩa vật); owner khác rỗng là vật kín."""
-    meshes, owners = [], []
-    for owner, center, extents in boxes:
+    meshes, owners, parts = [], [], []
+    for index, (owner, center, extents) in enumerate(boxes):
         box = trimesh.creation.box(extents=extents)
         box.apply_translation(center)
         meshes.append(box)
         owners.extend([owner] * len(box.faces))
+        parts.extend([index if owner else -1] * len(box.faces))
     merged = trimesh.util.concatenate(meshes)
     return CollisionWorld(
         mesh=merged,
         face_owner=np.array(owners, dtype=object),
         solid_owners=frozenset(owner for owner, _, _ in boxes if owner),
+        face_part=np.array(parts, dtype=np.int64),
+        solid_parts=frozenset(index for index, (owner, _, _) in enumerate(boxes) if owner),
     )
 
 
@@ -430,3 +433,42 @@ def test_object_too_small_to_shrink_cannot_be_verified_and_fails(move_scenes: tu
     results = move_consistency(world_a, _move_world(carved=True), before, after, _ROBOT)
 
     assert results[0].old_cleared is False
+
+
+def test_midpoint_inside_the_overlap_of_two_convex_parts_of_one_object_gives_zero_width() -> None:
+    """CoACD cho nhiều mảnh lồi chồng nhau; điểm trong vùng chồng cắt 2 + 2 mặt nên chẵn lẻ trên cả vật báo sai là ngoài."""
+    first = ("table", (-0.05, 0.0, 0.5), (0.3, 0.3, 1.0))
+    second = ("table", (0.05, 0.0, 0.5), (0.3, 0.3, 1.0))  # chồng với mảnh đầu ở x ∈ [−0,10; 0,10]
+    world = _world(_LEFT_WALL, _RIGHT_WALL, first, second)
+
+    result = gap_width(world, _gap(real_passable=False), _ROBOT)
+
+    assert result.sim_width_m == 0.0
+    assert result.kind == "ok"
+
+
+def test_composed_parts_are_solid_one_by_one() -> None:
+    def two_parts(_: ColliderSpec) -> list[tuple[np.ndarray, np.ndarray]]:
+        closed = _tetra(_)[0]
+        return [closed, _open_triangle(_)[0]]
+
+    world = compose_collision_world(
+        [_object("a", collider_type=ColliderType.CONVEX_DECOMPOSITION, dimensions=None)],
+        _FLOOR_VERTICES,
+        _FLOOR_FACES,
+        two_parts,
+    )
+
+    assert world.solid_parts == frozenset({0})  # mảnh kín vẫn kiểm được "ở trong", mảnh hở thì không
+    assert world.solid_owners == frozenset()  # vật không kín trọn vẹn
+
+
+def test_another_object_occupying_the_old_footprint_is_not_a_leftover(move_scenes: tuple[SceneIR, SceneIR]) -> None:
+    """Ghế để dưới chỗ cũ của bàn (hoặc vật khác được dời tới) là collider hợp lệ, không phải vết môi trường còn sót."""
+    before, after = move_scenes
+    chair = _object("chair", translation=_FOOTPRINT, dimensions=(0.1, 0.1, 0.1))  # nằm trong vết cũ
+    world_b = _move_world(carved=True, extra=[chair])
+
+    results = move_consistency(_world_a(carved=True), world_b, before, after, _ROBOT)
+
+    assert results == [MoveResult(object_id="a", old_cleared=True, new_present=True, passed=True)]
