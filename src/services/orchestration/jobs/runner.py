@@ -102,6 +102,13 @@ from src.services.orchestration.jobs.workspace import attempt_lease, cleanup_att
 from src.services.orchestration.processing.capability import latest as latest_capability
 from src.services.orchestration.processing.config import load_job_config
 from src.services.orchestration.processing.expected_duration import Estimate, deadline_seconds, expected_seconds
+from src.services.orchestration.processing.gpu_budget import (
+    GPU_TOOLS,
+    GpuBudgetExceededError,
+    running_message,
+    spent_gpu_hours,
+    start_message,
+)
 from src.services.orchestration.processing.observed import load_usages, pipeline_usages
 from src.services.orchestration.processing.telemetry import (
     Outcome,
@@ -234,6 +241,18 @@ def _expected_limit(attempt: _Attempt, name: str, fixed_timeout: float) -> tuple
     return deadline_seconds(estimate, fixed_timeout), estimate
 
 
+def _gpu_budget_at_start(attempt: _Attempt, name: str, estimate: Estimate | None) -> tuple[float, float] | None:
+    """(giờ GPU đã dùng, trần) khi job có trần và công cụ dùng GPU; chưa đủ ước thì chỉ kiểm phần đã dùng."""
+    cap = attempt.settings.product_job_gpu_hours_max
+    if cap is None or name not in GPU_TOOLS or attempt.registry.persistence is None:
+        return None
+    spent = spent_gpu_hours(load_usages(attempt.registry.persistence.database), attempt.job.job_id)
+    planned = estimate.seconds / 3600 if estimate is not None else 0.0
+    if spent + planned > cap:
+        raise GpuBudgetExceededError(start_message(spent, planned, cap, name))
+    return spent, cap
+
+
 def _write_expectation(path: Path, fixed_timeout: float, deadline: float, estimate: Estimate | None) -> None:
     """Ghi hạn đã dùng và ước lượng vào workspace: lượt sau đọc lại được vì sao hạn là bao nhiêu."""
     record = {
@@ -265,6 +284,7 @@ def _run_tool(
     sampler = _resource_sampler(attempt, name)
     deadline_limit, estimate = _expected_limit(attempt, name, timeout)
     _write_expectation(attempt.workspace / f"{name}.expected.json", timeout, deadline_limit, estimate)
+    gpu_budget = _gpu_budget_at_start(attempt, name, estimate)
     outcome: Outcome = "failed"
     exit_code: int | None = None
     try:
@@ -290,6 +310,10 @@ def _run_tool(
                         raise PreviewCancelledError("Job revision đã thay đổi trong khi worker chạy")
                     if lease_lost(attempt.job.job_id):
                         raise PreviewCancelledError("Mất lease job; máy khác đã nhận việc, dừng tiến trình con")
+                    if gpu_budget is not None:
+                        spent_now = gpu_budget[0] + (time.monotonic() - started) / 3600
+                        if spent_now > gpu_budget[1]:
+                            raise GpuBudgetExceededError(running_message(spent_now, gpu_budget[1], name))
                     if time.monotonic() >= deadline:
                         if estimate is None:
                             raise TimeoutError(f"{name} worker quá thời gian cấu hình")
@@ -438,7 +462,7 @@ def _record_runner_failure(attempt: _Attempt, error: BaseException) -> None:
             _record_benchmark(attempt)
         return
     details = {"exception_type": type(error).__name__}
-    if isinstance(error, ExpectedDurationError):
+    if isinstance(error, ExpectedDurationError | GpuBudgetExceededError):
         code, message = error.code, str(error)
     else:
         code, message = "PREVIEW_RUNNER_FAILED", "Worker dừng trước checkpoint hợp lệ; kiểm log attempt và runtime"
