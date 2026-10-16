@@ -1716,7 +1716,7 @@ class ProjectRegistry:
             status=JobStatus.QUEUED,
             input_manifest_checksum=project.input_manifest_checksum,
             config_checksum=config_checksum or profile.config_checksum,
-            runtime_manifest_checksum=profile.runtime_manifest_checksum,
+            runtime_manifest_checksum=profile.job_runtime_checksum,
             seed=profile.seed,
             started_at=datetime.now(UTC),
             completed_at=None,

@@ -1560,7 +1560,7 @@ def run_reviewed_preview_job(job_id: str, *, expected_checksum: str | None = Non
     execution = registry.execution_profile
     if profile_path is None or execution is None:
         raise ValueError("Worker cần execution profile đã cấu hình")
-    if job.runtime_manifest_checksum != execution.runtime_manifest_checksum or job.seed != execution.seed:
+    if not execution.accepts_runtime(job.runtime_manifest_checksum) or job.seed != execution.seed:
         raise RuntimeStateConflictError("Job cần worker có execution profile tương ứng")
     profile = resolve_job_processing(
         job, execution, profile_path, registry.runtime_resolver, settings.product_target_frame_count
