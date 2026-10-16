@@ -1,6 +1,6 @@
 # Review T-028
 
-Verdict: CHANGES REQUESTED (quyết định cho Q1 + mở rộng phạm vi lọc)
+Verdict: ACCEPTED (round 2)
 
 Engineer phát hiện đúng: `scorecard._system_metrics` (dòng 810) không lọc tool, nên `scene.*` làm đổi thẻ RAM/VRAM và làm
 `_config_metric` hiện "Chưa đo". Plan của Architect giả định sai. Kiểm thêm mọi nơi gọi `load_usages` thì còn hai chỗ nữa:
@@ -28,3 +28,18 @@ Engineer phát hiện đúng: `scorecard._system_metrics` (dòng 810) không l�
 - Giữ `_persist_usage` làm wrapper mỏng trong runner: chấp nhận.
 - `tests/test_api/test_value_routes.py` lệch format thuộc T-030: không sửa trong T-028.
 - Plan T-028 cũ ghi "không sửa scorecard.py": quyết định này thay thế điều đó.
+
+## Round 2 — ACCEPTED (audit sâu)
+
+Đọc toàn bộ diff source của `47f05aa0`, `cc5116e1`, `7ef5123d`, `1f70a1d4`, `e745d56d`. Chạy lại observed_budget, evaluation,
+resource_admission, resource_telemetry, scene_objectify_queue: 175 PASS.
+
+Kiểm thêm, không tìm thấy lỗi:
+- `gpu_name` của `scene.*`: `ResourceSampler` tự điền khi lấy mẫu GPU (`telemetry.py:183`), nên T-032 tính được giờ GPU.
+- `workspace.mkdir` sớm trong `_scene_sampler`: mọi hàm dựng đều `mkdir(exist_ok=True)` → không đổi hành vi.
+- Lấy mẫu cây tiến trình của worker: `worker_cli` chạy các hàng đợi tuần tự trong một vòng lặp (dòng ~378), nên đỉnh RAM/VRAM của
+  `scene.*` không lẫn việc khác cùng tiến trình.
+- `observed_for_config` (deps) lọc theo `PHASE_TOOLS` → `scene.*` không lọt; `observed_budget` cũng vậy.
+- Lỗi trước khi tạo sampler (chờ tài nguyên) → không ghi bản ghi rỗng; ngoại lệ ngoài dự kiến → `interrupted`, không cộng vào phút máy.
+
+Ba test (c) là test bảo vệ tính chất có sẵn (không đỏ khi bỏ bộ lọc mới): chấp nhận, engineer đã ghi rõ.
