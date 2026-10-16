@@ -150,3 +150,79 @@ Pre-flight (GUIDE.md Rule 13):
 Chuyển T-044 sang `implemented | summarizer`. Chủ dự án kiểm giao diện bằng mắt và chạy lại/xuất lại scene mẫu bằng pipeline mới theo kế hoạch riêng. Task này không tạo bằng chứng về một lần chạy pipeline/GPU mới.
 
 Đã xóa `/tmp/t044-engineer-KoRNTem5` bằng chính đường dẫn đầy đủ, gồm bundle, SQLite snapshot, script và JSON đo thời gian. Đã xóa `/tmp/t044-codegraph.txt` và `/home/lqaq/PROJECT/AI20K/P-087/frontend/tests/t044-local-parser.test.ts` bằng đường dẫn đầy đủ. Nội dung kết quả đã được ghi trong báo cáo này; không dọn thư mục tạm của phiên khác.
+
+## Round 2 — Sửa bộ đệm theo review
+
+Đã xử lý mục Required changes trong `.ai/tasks/T-044/review.md`. Quyết định cache ở mục 5 của báo cáo vòng đầu được thay bằng cách dưới đây; phần còn lại là bằng chứng lịch sử của vòng đầu.
+
+### Thay đổi
+
+- Bỏ `lru_cache` khỏi `_read`: mỗi lần gọi hàm này đều kiểm checksum qua resolver và chỉ giữ tài liệu JSON trong thời gian xử lý, vẫn giới hạn 4 MiB.
+- `_scene_summary(resolver, uri, checksum)` cache tối đa 256 tuple `_SceneSummary`. Chỉ giữ số vật tái dựng, trạng thái tách vật, các reference collision dưới dạng tuple, trạng thái hình học, tuple lựa chọn bề mặt, số collider và revision. Không giữ danh sách vật, collider, provenance đầy đủ hoặc dict scene.
+- `_metric_summary` và `_collision_summary` cũng cache tối đa 256 tuple rút gọn theo resolver, URI và checksum; tỉ lệ có thêm job ID để giữ kiểm tra receipt thuộc đúng job. Các dict trả cho exporter được dựng lại từ tuple, không được giữ trong cache.
+- `_redaction_summary` giữ tối đa 64 tuple, khóa theo registry + job ID + checksum của stage bản che. Hàm đọc job qua registry và đối chiếu checksum trước khi dùng loader đã có. Thay đổi trạng thái job không tạo thêm khóa chứa toàn bộ JobManifest.
+- Không đổi câu chữ hoặc logic trong hai Suggestions không bắt buộc. Không đổi contract/persisted data, pipeline, hay giao diện.
+
+File sửa: `src/services/orchestration/jobs/stage_results.py`, `tests/test_orchestration/test_progress_notes.py`, `.ai/status.md`, báo cáo này.
+
+### Test đỏ → xanh
+
+Trước khi sửa source, chạy:
+
+```bash
+.venv/bin/python -m pytest tests/test_orchestration/test_progress_notes.py -q -k 'cache or caching'
+```
+
+**3 failed, 12 deselected in 4.17s** trên mã cũ:
+
+1. `_read` trả dict cache cũ sau khi file thay đổi, không phát hiện checksum sai.
+2. Sau 300 revision giả, chưa có `_scene_summary` để kiểm giới hạn và nội dung cache.
+3. `stage_notes` còn gọi `job.model_dump_json()` làm khóa redaction cache.
+
+Fixture hồi quy dùng scene 400 vật, mỗi vật kèm 2.000 ký tự không dùng để mô phỏng JSON lớn, gọi `stage_notes` qua 300 revision/checksum. Sau sửa, xác nhận cache scene tối đa 256 mục, summary là tuple chỉ chứa scalar/tuple, không giữ dict/list scene; revision cuối đúng `rev-299`, note và số ObjectGS/collider đúng. Test redaction xác nhận thay đổi checksum job không làm đọc lại cùng bản che, còn checksum stage mới thì đọc lại. Test tỉ lệ/collision xác nhận cache chứa tuple nhỏ, cache hit với checksum cũ và cache miss khi checksum thay đổi, kể cả receipt có dữ liệu dư lớn.
+
+```bash
+.venv/bin/python -m pytest tests/test_orchestration/test_progress_notes.py tests/test_orchestration/test_sample_export.py -q
+```
+
+**55 passed in 3.22s.** Giữ nguyên kết quả note/facts/export của các ca cũ.
+
+```bash
+.venv/bin/python -m pytest tests/test_orchestration/test_sample_export.py tests/test_api/test_sample_routes.py \
+  tests/test_orchestration -q -k 'progress or sample'
+.venv/bin/python scripts/check_contract_mirror.py
+.venv/bin/ruff check src/services/orchestration/jobs/stage_results.py tests/test_orchestration/test_progress_notes.py
+.venv/bin/ruff format --check src/services/orchestration/jobs/stage_results.py tests/test_orchestration/test_progress_notes.py
+```
+
+**110 passed, 1112 deselected in 12.51s; mirror PASS — 5 enum, 9 model; ruff sạch, 2 file đã đúng format.** Không chạy full suite. Không sửa TypeScript nên không chạy lại frontend/typecheck.
+
+### Đo lại `/progress`
+
+Dùng `sqlite3.backup` từ database local mở chỉ đọc sang `/tmp/t044-round2-liBgMETa/runtime.db`; cả trước và sau sửa dùng cùng snapshot và artifact hiện có. Gọi HTTP nội bộ bằng FastAPI TestClient/ASGI trên mã trước/sau sửa, override auth chỉ trong app test, không mở server và không thay cấu hình stack. Mỗi job bỏ lượt đầu cache lạnh và một lượt khởi động tiếp theo, lấy median 10 lượt. Mỗi lần đo chạy trong process riêng.
+
+| Job | Trước sửa cache (ms) | Sau sửa cache (ms) | Chênh lệch (ms) |
+| --- | ---: | ---: | ---: |
+| job-b8f744da2286 | 10.244 | 14.870 | +4.626 |
+| job-a14981f78f85 | 9.739 | 9.616 | -0.123 |
+| job-f3393ecbfbd6 | 9.512 | 9.691 | +0.179 |
+
+Chênh lệch lớn nhất +4.626 ms, dưới ngưỡng tăng 50 ms của plan. Dao động local không chứng minh cải thiện tốc độ. Đây là phép đo HTTP nội bộ trên snapshot, không phải latency endpoint đang phục vụ của `r2s-stack`, và không chứng minh đã sửa tình trạng trình duyệt không phản hồi khi xem giai đoạn.
+
+### Gate và bàn giao Round 2
+
+- codegraph: đọc `_read`, `scene_results`, `recorded_results`, `_redaction_summary`, `stage_notes`, `get_job_progress`, loader anonymization và các caller/exporter.
+- impact: chỉ enrichment note/facts của progress và xuất mẫu; public response/contract giữ nguyên. Không có caller ngoài `recorded_results` dùng `scene_results`.
+- understand: dùng CodeGraph lần theo receipt/head/checksum và exporter. Không có tool understand-anything trong phiên.
+- minimal-code: dùng `lru_cache` chuẩn Python và một `NamedTuple` cho scene summary; tái dùng resolver, loader, cách dựng note/facts và request geometry hiện có.
+- checks: 110 pytest passed, mirror/ruff/format sạch; không chạy frontend vì không đổi TypeScript.
+- DevTools: không áp dụng cho thay đổi service không đổi giao diện; kiểm giao diện bằng mắt vẫn do chủ dự án thực hiện.
+- Commit source + test: `5ebc1703` — `Cache compact progress summaries instead of parsed scene documents`.
+
+Không khởi động lại `r2s-stack`, không chạy pipeline, không xuất hay ghi vào `data/demo/library`; không push/merge/tạo branch. Chỉ stage đúng path; giữ nguyên các thay đổi ngoài phạm vi.
+
+`graphify update .` hoàn tất, exit 0: 27.458 nodes, 85.703 edges, 868 communities. Chỉ cập nhật AST; không chạy labeling LLM. Graph output được ignore, không force-add.
+
+Đã xóa toàn bộ thư mục tạm riêng `/tmp/t044-round2-liBgMETa` bằng đường dẫn đầy đủ, gồm snapshot, script đo/sửa và kết quả đo/test đỏ. Các con số và lỗi hồi quy đã ghi ở Round 2. Không dọn thư mục tạm của phiên khác.
+
+Required changes đã hoàn tất. Đặt T-044 thành `implemented | summarizer` để bàn giao review tiếp.
