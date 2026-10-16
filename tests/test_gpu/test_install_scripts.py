@@ -251,3 +251,47 @@ def test_colmap_binary_install_refuses_a_bundle_with_the_wrong_checksum(tmp_path
     assert result.returncode != 0
     assert "sai sha256" in result.stdout + result.stderr
     assert not (root / "colmap/bin").exists()
+
+
+def test_objectgs_probe_environment_matches_the_runner(tmp_path: Path) -> None:
+    """Probe (doctor và verify của install) dùng đúng biến biên dịch như lúc chạy ObjectGS, để cache dùng được."""
+    from scripts.kaggle import preflight
+
+    python = tmp_path / "objgs/python/bin/python"
+    python.parent.mkdir(parents=True)
+    python.write_text("", encoding="utf-8")
+    env = preflight.objectgs_probe_env(
+        {
+            "PATH": "/usr/bin",
+            "PRODUCT_OBJECTGS_RUNTIME_PYTHON": str(python),
+            "PRODUCT_OBJECTGS_GSPLAT_REPOSITORY": "/g",
+            "PRODUCT_OBJECTGS_EXTENSION_CACHE_DIR": "/cache",
+            "PRODUCT_OBJECTGS_CUDA_HOME": "/cuda",
+            "PRODUCT_OBJECTGS_CXX": "/cuda/bin/g++",
+            "PRODUCT_OBJECTGS_GLM_REPOSITORY": "/glm",
+        }
+    )
+    assert env["CPLUS_INCLUDE_PATH"] == os.pathsep.join([str(tmp_path / "objgs/python/include"), "/glm"])
+    assert env["PATH"] == os.pathsep.join(["/cuda/bin", "/usr/bin"])
+    assert env["CUDA_HOME"] == "/cuda"
+    assert env["CXX"] == env["CC"] == "/cuda/bin/g++"
+    assert env["PYTHONPATH"] == "/g" and env["TORCH_EXTENSIONS_DIR"] == "/cache" and env["MAX_JOBS"] == "2"
+    assert "TORCH_CUDA_ARCH_LIST" not in env
+
+
+def test_objectgs_runner_sets_the_variables_the_probe_mirrors() -> None:
+    runner = (REPO / "src/services/scene/objectgs.py").read_text(encoding="utf-8")
+    for key in ["CPLUS_INCLUDE_PATH", "TORCH_EXTENSIONS_DIR", "MAX_JOBS", "CUDA_HOME", "CXX", "CC"]:
+        assert f'"{key}"' in runner or f"{key}=" in runner, key
+    assert "TORCH_CUDA_ARCH_LIST" not in runner
+
+
+def test_no_forced_cuda_arch_list_so_the_cache_matches_the_runner() -> None:
+    for path in [INSTALL_D / "objectgs.sh", GPU / "setup_objectgs_runtime.sh", REPO / "scripts/kaggle/preflight.py"]:
+        assert not re.search(r"TORCH_CUDA_ARCH_LIST\s*=", path.read_text(encoding="utf-8")), path.name
+
+
+def test_objectgs_install_verifies_through_the_shared_probe() -> None:
+    text = (INSTALL_D / "objectgs.sh").read_text(encoding="utf-8")
+    assert "write_runtime_env" in text and "objectgs_runtime" in text
+    assert "gsplat_cuda.so" not in text, "file .so có mặt không đủ: cache phải khớp cấu hình lúc chạy"

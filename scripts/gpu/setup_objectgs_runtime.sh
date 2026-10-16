@@ -155,6 +155,7 @@ else
   checkout "$GLM_REPO" "$DEST/glm" "$GLM_COMMIT"
 
   # Dựng sẵn extension gsplat: import _backend là lúc JIT biên dịch, với đúng biến như objectgs.py.
+  # Không đặt TORCH_CUDA_ARCH_LIST: lúc chạy thật torch tự dò kiến trúc GPU, đặt khác sẽ làm cache không dùng được.
   mkdir -p "$DEST/torch_extensions"
   echo "[biên dịch] gsplat-object (lần đầu mất vài phút)…"
   PYTHONPATH="$DEST/gsplat-object" \
@@ -164,7 +165,6 @@ else
   CXX="$CXX_BIN" CC="$CXX_BIN" \
   CPLUS_INCLUDE_PATH="$DEST/python/include:$DEST/glm" \
   MAX_JOBS="${MAX_JOBS:-2}" \
-  TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST:-7.5;8.0;8.6;8.9}" \
   "$PY" -c "import gsplat.cuda._backend as backend; assert backend._C is not None, 'extension không biên dịch được'; print('ok: gsplat extension')"
 
   rm -rf "$TMP"

@@ -12,7 +12,7 @@ import os
 import shutil
 import subprocess
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from src.runtime_env import runtime_env
@@ -167,24 +167,43 @@ def scene_runtime() -> tuple[bool, str]:
     return _run([python, "-c", probe], timeout=1800.0)
 
 
+def objectgs_probe_env(environ: Mapping[str, str]) -> dict[str, str]:
+    """Môi trường đúng như src/services/scene/objectgs.py đặt khi chạy ObjectGS.
+
+    Probe và lúc chạy thật phải dùng chung môi trường: gsplat so cấu hình biên dịch (đường dẫn trình biên dịch,
+    include, cờ CUDA) với build.ninja trong cache, lệch một biến là nó biên dịch lại từ đầu.
+    """
+    env = dict(environ)
+    python = Path(environ["PRODUCT_OBJECTGS_RUNTIME_PYTHON"])
+    includes = [str(python.absolute().parent.parent / "include")]
+    env["MAX_JOBS"] = "2"
+    if gsplat := environ.get("PRODUCT_OBJECTGS_GSPLAT_REPOSITORY"):
+        env["PYTHONPATH"] = gsplat
+    if cache := environ.get("PRODUCT_OBJECTGS_EXTENSION_CACHE_DIR"):
+        env["TORCH_EXTENSIONS_DIR"] = cache
+    if cuda := environ.get("PRODUCT_OBJECTGS_CUDA_HOME"):
+        env["CUDA_HOME"] = cuda
+        env["PATH"] = os.pathsep.join([str(Path(cuda) / "bin"), environ.get("PATH", "")])
+    if cxx := environ.get("PRODUCT_OBJECTGS_CXX"):
+        env["CXX"] = cxx
+        env["CC"] = cxx
+    if glm := environ.get("PRODUCT_OBJECTGS_GLM_REPOSITORY"):
+        includes.append(glm)
+    env["CPLUS_INCLUDE_PATH"] = os.pathsep.join(includes)
+    return env
+
+
 def objectgs_runtime() -> tuple[bool, str]:
     """Runtime ObjectGS (tuỳ chọn): torch thấy GPU và kernel gsplat nạp từ cache biên dịch dùng chung."""
     python = os.environ.get("PRODUCT_OBJECTGS_RUNTIME_PYTHON")
     if not python or not Path(python).is_file():
         return False, "thiếu PRODUCT_OBJECTGS_RUNTIME_PYTHON"
-    env = dict(os.environ)
-    gsplat = os.environ.get("PRODUCT_OBJECTGS_GSPLAT_REPOSITORY")
-    if gsplat:
-        env["PYTHONPATH"] = gsplat
-    cache = os.environ.get("PRODUCT_OBJECTGS_EXTENSION_CACHE_DIR")
-    if cache:
-        env["TORCH_EXTENSIONS_DIR"] = cache
     probe = (
         "import torch;from gsplat.cuda._backend import _C;"
         "assert torch.cuda.is_available() and _C is not None;"
         "print(torch.__version__, torch.cuda.get_device_name(0))"
     )
-    return _run([python, "-c", probe], timeout=1800.0, env=env)
+    return _run([python, "-c", probe], timeout=1800.0, env=objectgs_probe_env(os.environ))
 
 
 #: (tên, hàm kiểm, bắt buộc, hậu quả khi thiếu)
