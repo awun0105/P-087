@@ -340,10 +340,12 @@ def test_sample_optional_object_geometry_is_validated(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("source", ["user_measured", "ai_estimated", "lidar_trajectory"])
 @pytest.mark.parametrize("objectgs", [False, True])
+@pytest.mark.parametrize("request_status", ["done", "failed", "stale"])
 def test_sample_exports_recorded_metric_collision_objects_and_geometry(
-    tmp_path: Path, source: str, objectgs: bool
+    tmp_path: Path, source: str, objectgs: bool, request_status: str
 ) -> None:
     import json
+    from contextlib import contextmanager
     from datetime import UTC, datetime
 
     from src.models.contracts.artifacts import ArtifactDataClass, ProductArtifactRef
@@ -409,7 +411,7 @@ def test_sample_exports_recorded_metric_collision_objects_and_geometry(
         "scene.json",
         {
             "scene_revision": "rev-002",
-            "provenance": {"object_geometry": "ready"},
+            "provenance": {"object_geometry": "awaiting_review" if request_status == "failed" else "ready"},
             "environment": {},
             "objects": [
                 {
@@ -423,6 +425,20 @@ def test_sample_exports_recorded_metric_collision_objects_and_geometry(
     )
     registry.runtime_resolver.require_uri = lambda uri, checksum: refs[uri]
     registry.scene.head_repository = SimpleNamespace(get=lambda job_id: SimpleNamespace(scene_reference=scene))
+
+    @contextmanager
+    def transaction():  # noqa: ANN202
+        payload = {
+            "mode": "geometry",
+            "status": request_status if request_status != "stale" else "done",
+            "result_revision": "rev-001" if request_status == "stale" else "rev-002",
+            "base_revision": "rev-002",
+            "started_at": "2026-10-17T00:00:00Z",
+            "finished_at": "2026-10-17T00:00:12Z",
+        }
+        yield SimpleNamespace(execute=lambda *_: SimpleNamespace(fetchone=lambda: (json.dumps(payload),)))
+
+    registry.persistence = SimpleNamespace(database=SimpleNamespace(transaction=transaction))
     job = registry.get_job(JOB_ID)
     records = [
         StageArtifact(
@@ -457,7 +473,8 @@ def test_sample_exports_recorded_metric_collision_objects_and_geometry(
     assert demo.object_geometry.objectgs_count == int(objectgs)
     assert demo.object_geometry.shell_count == int(not objectgs)
     assert demo.object_geometry.collider_count == 1
-    assert demo.object_geometry.duration_seconds is None
+    assert demo.object_geometry.duration_seconds == (12 if request_status == "done" else None)
+    assert demo.object_geometry.state == ("failed" if request_status == "failed" else "succeeded")
 
 
 def test_sample_prepare_timings_are_grouped_instead_of_fake_zero(tmp_path: Path) -> None:
