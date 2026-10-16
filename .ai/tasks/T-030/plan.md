@@ -5,11 +5,14 @@ Lưu mọi số đo thước và khai báo của một scene benchmark trong **m
 
 ## Context
 §15.2, §15.3. Toạ độ điểm theo khung canonical của scene (mét, Z-up, sàn z = 0), cùng khung với SceneIR.
+Số migration **cố định là 21** (chủ dự án chốt). Hiện `LATEST_SCHEMA_VERSION` = 20 (T-027 đã dùng 20 trong `jobs/database.py`).
+Không task nào khác được lấy 21; nếu cần migration khác trước T-030 thì phải đánh số từ 22 và báo lại.
 
 ## Files
 - Tạo: `src/services/orchestration/value/ground_truth.py`
 - Sửa: `src/services/orchestration/jobs/database.py` (migration 21: `r2s_benchmark_truth(job_id TEXT PK, version INTEGER NOT NULL,
   payload TEXT NOT NULL)`)
+- Sửa: `tests/test_orchestration/test_runtime_migrations.py` — hai assert `LATEST_SCHEMA_VERSION == 20` (dòng ~206, ~242) thành 21
 - Sửa: `src/api/studio/value.py`
 - Test: `tests/test_orchestration/test_benchmark_truth.py`, `tests/test_api/test_value_routes.py`, `tests/test_api/test_role_matrix.py`
 
@@ -57,7 +60,8 @@ vật có trong scene hiện tại; id trong `distances`/`gaps` không trùng. Q
 
 ## Tests required
 ```
-.venv/bin/python -m pytest tests/test_orchestration/test_benchmark_truth.py tests/test_api/test_value_routes.py tests/test_api/test_role_matrix.py -q
+.venv/bin/python -m pytest tests/test_orchestration/test_benchmark_truth.py tests/test_api/test_value_routes.py tests/test_api/test_role_matrix.py \
+  tests/test_orchestration/test_runtime_migrations.py -q
 .venv/bin/ruff check src tests && .venv/bin/ruff format --check src tests && .venv/bin/python scripts/check_contract_mirror.py
 ```
 
