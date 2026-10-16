@@ -281,6 +281,7 @@ describe("ObjectReviewView", () => {
     routeFetch({ "/scene": [reply({ scene: scene("rev-001", "CANDIDATE") })] });
     render(<ObjectReviewView jobId="job-a" sceneStateControls={<p>Thao tác trạng thái</p>} />);
     const viewer = await screen.findByTestId("metric-scene");
+    expect(screen.getByRole("heading", {name: "Quản lý scene"})).toBeInTheDocument();
     const stateTab = screen.getByRole("tab", { name: "Trạng thái scene" });
     const objectsTab = screen.getByRole("tab", { name: "Vật thể" });
     expect(screen.getAllByRole("tab").map(tab => tab.textContent)).toEqual(["Trạng thái scene", "Vật thể", "Sàn & tường"]);
@@ -964,9 +965,9 @@ describe("ObjectReviewView", () => {
     expect(await screen.findByText("1 vật thể · 1 chờ xác nhận")).toBeInTheDocument();
 
     // Thu gọn panel trái
-    fireEvent.click(screen.getByRole("button", { name: "Thu gọn danh sách vật thể" }));
+    fireEvent.click(screen.getByRole("button", { name: "Thu gọn panel quản lý scene" }));
     expect(screen.queryByText("1 vật thể · 1 chờ xác nhận")).toBeNull();
-    const openLeft = screen.getByRole("button", { name: "Mở danh sách vật thể" });
+    const openLeft = screen.getByRole("button", { name: "Mở panel quản lý scene" });
     expect(openLeft).toBeInTheDocument();
 
     // Xổ xuống panel trái

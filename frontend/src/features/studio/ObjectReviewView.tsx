@@ -949,11 +949,11 @@ export function ObjectReviewView({
             type="button"
             onClick={() => setLeftCollapsed(false)}
             className="flex items-center gap-2 rounded-lg border border-line-dark bg-viewport-deep/85 px-3 py-2 text-xs font-medium text-on-dark shadow-xl backdrop-blur-md hover:bg-viewport-deep transition-all"
-            title="Xổ xuống danh sách vật thể trong scene"
-            aria-label="Mở danh sách vật thể"
+            title="Mở panel quản lý scene"
+            aria-label="Mở panel quản lý scene"
           >
             <Boxes className="size-4 text-ember-strong" aria-hidden />
-            <span>Vật thể trong scene</span>
+            <span>Quản lý scene</span>
             <span className="rounded bg-on-dark/15 px-1.5 py-0.5 font-mono text-[11px] text-on-dark/90">
               {scene.objects.length}
             </span>
@@ -963,7 +963,7 @@ export function ObjectReviewView({
           <>
             <div className="space-y-2 border-b border-line-dark px-3 py-2.5 bg-viewport-deep/50">
               <div className="flex items-center justify-between gap-2">
-                <h2 className="label-tech text-on-dark/70">Vật thể trong scene</h2>
+                <h2 className="label-tech text-on-dark/70">Quản lý scene</h2>
                 <div className="flex items-center gap-1">
                   {previous && (
                     <Button
@@ -982,8 +982,8 @@ export function ObjectReviewView({
                     type="button"
                     onClick={() => setLeftCollapsed(true)}
                     className="rounded p-1 text-on-dark/70 hover:text-on-dark hover:bg-on-dark/10 transition-colors"
-                    title="Thu gọn danh sách vật thể"
-                    aria-label="Thu gọn danh sách vật thể"
+                    title="Thu gọn panel quản lý scene"
+                    aria-label="Thu gọn panel quản lý scene"
                   >
                     <ChevronUp className="size-4" aria-hidden />
                   </button>
