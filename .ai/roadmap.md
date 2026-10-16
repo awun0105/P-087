@@ -68,3 +68,9 @@ Xong 2026-10-16: T-027 → T-035 accepted. Full backend 3.688 pass / 0 fail / 28
 | T-033 | Panel Benchmark trong Studio | Nhập ground truth: chọn điểm, khe, vật cản chính, gắn layout, mốc làm tay | T-030 | L |
 | T-034 | Thẻ Giá trị + trang /benchmark | Hiển thị 5 metric, bảng nhiều scene, nút xuất | T-032 | M |
 | T-035 | Regression + hướng dẫn đo | Full suite, cập nhật Playbook và handoff | tất cả | S |
+
+## Sprint 7: Dọn hạ tầng
+
+| ID | Tiêu đề | Mục tiêu | Cần | Cỡ |
+| --- | --- | --- | --- | --- |
+| T-036 | Đổi tên thư mục runtime và biến `RECxx_*` | `data/*_runtime` và biến `R2S_*` theo chức năng; tên biến cũ vẫn nhận kèm cảnh báo | – | M |
