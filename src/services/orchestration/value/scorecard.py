@@ -20,9 +20,11 @@ from src.models.contracts.scene import SceneIR
 from src.models.contracts.validation import RuleResult, ValidationReport
 from src.models.contracts.validation_run import ValidationRunStatus
 from src.services.orchestration.artifacts import ArtifactStoreError
+from src.services.orchestration.benchmark import BENCHMARK_KIND, PipelineRuntimeBenchmark
 from src.services.orchestration.jobs.database import RuntimeDatabase
+from src.services.orchestration.processing.models import MachineCapability
 from src.services.orchestration.processing.observed import (
-    is_scene_operation,
+    billed_usages,
     load_usages,
     processing_seconds,
     usage_vram,
@@ -77,7 +79,8 @@ class NorthStar(BaseModel):
     hands_on_before_ready_minutes: Figure
     hands_on_after_ready_minutes: Figure
     machine_minutes: Figure
-    #: gpu_name đo được; vram_gb / cpu_count / ram_gb để None vì worker không lưu theo job; peak_* là đỉnh của job.
+    #: gpu_name của lượt đo gần nhất; vram_gb / cpu_count / ram_gb từ snapshot máy trong benchmark của job (None nếu job
+    #: chưa có snapshot); peak_* là đỉnh của job, gồm cả `scene.*`.
     hardware: dict[str, str | float | None]
     gpu_hours: Figure
     cost_usd: Figure
@@ -158,37 +161,22 @@ def machine_minutes(usages: Iterable[ResourceUsage], job_id: str) -> Figure:
     return measured(round(total / 60.0, 1), "phút")
 
 
-def _billed(usages: Iterable[ResourceUsage]) -> list[ResourceUsage]:
-    """Lượt được tính tiền: đúng tập lượt của `processing_seconds`, để giờ GPU khớp với phút máy."""
-    latest: dict[str, ResourceUsage] = {}
-    chosen: list[ResourceUsage] = []
-    for usage in usages:
-        if usage.outcome != "completed":
-            continue
-        if is_scene_operation(usage):
-            chosen.append(usage)
-            continue
-        if usage.tool not in latest or usage.completed_at > latest[usage.tool].completed_at:
-            latest[usage.tool] = usage
-    return chosen + list(latest.values())
-
-
 def hardware_and_cost(
-    usages: Sequence[ResourceUsage], rate_usd_per_hour: float | None
+    usages: Sequence[ResourceUsage], rate_usd_per_hour: float | None, machine: MachineCapability | None = None
 ) -> tuple[dict[str, str | float | None], Figure, Figure]:
     completed = [usage for usage in usages if usage.outcome == "completed"]
     named = sorted((usage for usage in completed if usage.gpu_name), key=lambda usage: usage.completed_at)
     vram = [value for value in (usage_vram(usage) for usage in completed) if value is not None]
     ram = [usage.peak_ram_gb for usage in completed if usage.peak_ram_gb is not None]
     hardware: dict[str, str | float | None] = {
-        "gpu_name": named[-1].gpu_name if named else None,
-        "vram_gb": None,
-        "cpu_count": None,
-        "ram_gb": None,
+        "gpu_name": named[-1].gpu_name if named else (machine.gpu_name if machine is not None else None),
+        "vram_gb": machine.vram_total_gb if machine is not None else None,
+        "cpu_count": machine.cpu_count if machine is not None else None,
+        "ram_gb": machine.ram_total_gb if machine is not None else None,
         "peak_vram_gb": round(max(vram), 2) if vram else None,
         "peak_ram_gb": round(max(ram), 2) if ram else None,
     }
-    gpu_billed = [usage for usage in _billed(completed) if usage.gpu_name]
+    gpu_billed = [usage for usage in billed_usages(completed) if usage.gpu_name]
     if not gpu_billed:
         missing = "không có lượt chạy GPU"
         return hardware, unavailable(missing, "giờ"), unavailable(missing, "USD")
@@ -265,9 +253,10 @@ def north_star_block(
     ready_at: datetime | None,
     currently_ready: bool | None,
     rate_usd_per_hour: float | None,
+    machine: MachineCapability | None = None,
 ) -> NorthStar:
     total, before, after = hands_on(events, ready_at, currently_ready)
-    hardware, gpu_hours, cost = hardware_and_cost(usages, rate_usd_per_hour)
+    hardware, gpu_hours, cost = hardware_and_cost(usages, rate_usd_per_hour, machine)
     counts, total_interventions = interventions(events)
     return NorthStar(
         hands_on_minutes=total,
@@ -445,6 +434,22 @@ def _p2_block(
         return unavailable_p2(f"không đo được khe: {error}")
 
 
+def first_human_change_after(events: Sequence[ValueEvent], moment: datetime) -> datetime | None:
+    """Lúc người dùng bắt đầu đổi bố trí sau `moment`: thao tác sửa scene **hoặc** yêu cầu qua hàng đợi của người.
+
+    Đổi bố trí trên scene Ready có thể chỉ đi qua hàng đợi (chỉnh vùng, Brush/Lasso), revision kết quả do worker publish
+    là `system`, nên phải tính cả `scene_request` có origin human.
+    """
+    for event in events:
+        if (
+            event.kind in {"scene_edit", "scene_request"}
+            and event.payload.get("origin") == "human"
+            and event.at > moment
+        ):
+            return event.at
+    return None
+
+
 def _p3_block(
     registry: ProjectRegistry,
     job_id: str,
@@ -463,10 +468,7 @@ def _p3_block(
     truth = stored.truth
 
     def first_human_edit_after(moment: datetime) -> datetime | None:
-        for event in events:
-            if event.kind == "scene_edit" and event.payload.get("origin") == "human" and event.at > moment:
-                return event.at
-        return None
+        return first_human_change_after(events, moment)
 
     def walk_completed_after(scene_revision: str, moment: datetime) -> datetime | None:
         for event in events:
@@ -611,6 +613,27 @@ def _p4_block(
     return level_from_checks(checks)
 
 
+def _job_machine(registry: ProjectRegistry, job_id: str) -> MachineCapability | None:
+    """Snapshot cấu hình worker trong benchmark runtime của attempt mới nhất có snapshot (terminal trước, partial sau)."""
+    try:
+        attempts = registry.list_job_attempts(job_id)
+    except (ValueError, OSError):
+        return None
+    for attempt in sorted({item.attempt for item in attempts}, reverse=True):
+        for phase in ("terminal", "partial"):
+            uri = f"artifact://jobs/{job_id}/benchmark/{BENCHMARK_KIND}/attempt-{attempt}-{phase}.json"
+            try:
+                path = registry.runtime_resolver.locate(uri)
+                if path is None:
+                    continue
+                snapshot = PipelineRuntimeBenchmark.model_validate_json(path.read_bytes())
+            except _READ_ERRORS:
+                continue
+            if snapshot.machine is not None:
+                return snapshot.machine
+    return None
+
+
 def build_scorecard(registry: ProjectRegistry, settings: Settings, job_id: str) -> ValueScorecard:
     """Bảng metric của một job. Đọc dữ liệu, không ghi gì."""
     job = registry.get_job(job_id)
@@ -628,6 +651,7 @@ def build_scorecard(registry: ProjectRegistry, settings: Settings, job_id: str) 
         ready_at=_ready_at(registry, job_id, events),
         currently_ready=None if scene is None else object_geometry_state(scene) == "ready",
         rate_usd_per_hour=settings.benchmark_gpu_hourly_usd,
+        machine=_job_machine(registry, job_id),
     )
     p2 = _p2_block(registry, job_id, stored, worlds, scene)
     p3 = _p3_block(registry, job_id, stored, events, worlds)
@@ -727,6 +751,11 @@ def _missed_text(card: ValueScorecard) -> str:
     return "—" if card.p2.unavailable_reason else f"{card.p2.missed_obstacles} / {card.p2.false_obstacles}"
 
 
+def _md(text: str) -> str:
+    """Chuỗi do người nhập (tên scene) trong ô bảng Markdown: không được làm vỡ bảng."""
+    return text.replace("\\", "\\\\").replace("|", "\\|").replace("\r", " ").replace("\n", " ")
+
+
 def scorecard_markdown(card: ValueScorecard) -> str:
     """Bảng 5 dòng ở đầu (Chính · P2 · P3 · P4 · Làm tay); chi tiết khe và vật dời ở dưới."""
     ns = card.north_star
@@ -737,7 +766,7 @@ def scorecard_markdown(card: ValueScorecard) -> str:
     )
     p3_consistent = "Đạt" if p3.consistent else "Không" if p3.consistent is False else "—"
     lines = [
-        f"# Bảng metric giá trị · {card.scene_name}",
+        f"# Bảng metric giá trị · {_md(card.scene_name)}",
         "",
         f"Job `{card.job_id}` · revision `{card.scene_revision or '—'}` · nguồn dữ liệu: "
         f"{DATA_SOURCE_LABELS.get(card.data_source, '—')}",
@@ -844,7 +873,7 @@ def benchmark_markdown(rows: Sequence[ValueScorecard], summary: BenchmarkSummary
     ]
     for card in rows:
         lines.append(
-            f"| {card.scene_name} | {_text(card.north_star.machine_minutes)} | {_text(card.north_star.hands_on_minutes)} | "
+            f"| {_md(card.scene_name)} | {_text(card.north_star.machine_minutes)} | {_text(card.north_star.hands_on_minutes)} | "
             f"{_agree_text(card)} | {_missed_text(card)} | L{card.p4.level} |"
         )
     return "\n".join(lines) + "\n"

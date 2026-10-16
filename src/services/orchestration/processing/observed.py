@@ -83,30 +83,37 @@ def pipeline_usages(usages: Iterable[ResourceUsage]) -> list[ResourceUsage]:
     return [usage for usage in usages if not is_scene_operation(usage)]
 
 
-def processing_seconds(usages: Iterable[ResourceUsage]) -> dict[str, float]:
-    """Thời gian máy đã xử lý của từng job: tổng thời lượng các bước đã chạy xong.
+def billed_usages(usages: Iterable[ResourceUsage]) -> list[ResourceUsage]:
+    """Các lượt được tính vào thời gian máy (và giờ GPU) của job. Hai quy tắc theo tool:
 
-    Không gồm lúc nằm trong hàng đợi và lúc chờ người dùng thao tác (vd. xác nhận tỉ lệ mét), vì đó không phải thời
-    gian hệ thống làm việc. Hai quy tắc theo tool:
-    - Tool của pipeline (không bắt đầu bằng `scene.`): mỗi (job, tool) chỉ tính lượt chạy xong gần nhất, nên chạy lại
-      một bước pipeline không bị cộng dồn.
-    - Tool `scene.*` (hàng đợi tách vật): cộng dồn mọi lượt chạy xong, vì mỗi lần Tạo mesh hay dựng lại vùng là một việc
-      thật.
-    Chỉ lượt `completed` được tính. Job chưa có bước nào được đo (dựng trước khi có số đo) không có trong kết quả.
+    - Tool của pipeline (không bắt đầu bằng `scene.`): mỗi (job, tool) chỉ lượt chạy xong gần nhất, nên chạy lại một bước
+      pipeline không bị cộng dồn.
+    - Tool `scene.*` (hàng đợi tách vật): mọi lượt chạy xong, vì mỗi lần Tạo mesh hay dựng lại vùng là một việc thật.
+    Chỉ lượt `completed`. Đây là nguồn duy nhất của quy tắc: `processing_seconds` và bảng giá trị cùng đọc từ đây.
     """
     latest: dict[tuple[str, str], ResourceUsage] = {}
-    totals: dict[str, float] = {}
+    billed: list[ResourceUsage] = []
     for usage in usages:
         if usage.outcome != "completed":
             continue
         if is_scene_operation(usage):
-            totals[usage.job_id] = totals.get(usage.job_id, 0.0) + usage.duration_seconds
+            billed.append(usage)
             continue
         key = (usage.job_id, usage.tool)
         if key not in latest or usage.completed_at > latest[key].completed_at:
             latest[key] = usage
-    for (job_id, _), usage in latest.items():
-        totals[job_id] = totals.get(job_id, 0.0) + usage.duration_seconds
+    return billed + list(latest.values())
+
+
+def processing_seconds(usages: Iterable[ResourceUsage]) -> dict[str, float]:
+    """Thời gian máy đã xử lý của từng job: tổng thời lượng các lượt của `billed_usages`.
+
+    Không gồm lúc nằm trong hàng đợi và lúc chờ người dùng thao tác (vd. xác nhận tỉ lệ mét), vì đó không phải thời
+    gian hệ thống làm việc. Job chưa có bước nào được đo (dựng trước khi có số đo) không có trong kết quả.
+    """
+    totals: dict[str, float] = {}
+    for usage in billed_usages(usages):
+        totals[usage.job_id] = totals.get(usage.job_id, 0.0) + usage.duration_seconds
     return totals
 
 

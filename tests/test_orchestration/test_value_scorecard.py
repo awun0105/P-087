@@ -34,6 +34,7 @@ from src.services.orchestration.value.scorecard import (
     compute_p3,
     csv_document,
     declared,
+    first_human_change_after,
     hands_on,
     hardware_and_cost,
     interventions,
@@ -189,11 +190,39 @@ def test_cpu_only_job_has_no_gpu_hours_or_cost() -> None:
     assert gpu_hours.provenance == "unavailable" and cost.provenance == "unavailable"
 
 
-def test_worker_hardware_that_is_not_stored_per_job_stays_null() -> None:
+def test_hardware_without_a_machine_snapshot_stays_null_but_peaks_are_measured() -> None:
     hardware, _, _ = hardware_and_cost([_usage("preview", seconds=60)], rate_usd_per_hour=None)
 
     assert hardware["vram_gb"] is None and hardware["cpu_count"] is None and hardware["ram_gb"] is None
     assert hardware["peak_vram_gb"] == 10.0 and hardware["peak_ram_gb"] == 8.0
+
+
+def test_hardware_comes_from_the_job_benchmark_machine_snapshot() -> None:
+    from src.services.orchestration.processing.models import MachineCapability
+
+    machine = MachineCapability(
+        worker_id="w1",
+        measured_at=_T0,
+        gpu_name="RTX 4090",
+        vram_total_gb=24.0,
+        cpu_count=16,
+        ram_total_gb=64.0,
+        disk_free_gb=100.0,
+    )
+    hardware, _, _ = hardware_and_cost([_usage("preview", seconds=60, gpu=None)], None, machine)
+
+    assert hardware["gpu_name"] == "RTX 4090"  # không có lượt GPU nào: lấy tên GPU của snapshot
+    assert (hardware["vram_gb"], hardware["cpu_count"], hardware["ram_gb"]) == (24.0, 16, 64.0)
+
+
+def test_layout_change_through_the_queue_starts_the_retest_clock() -> None:
+    """Đổi bố trí trên Ready bằng chỉnh vùng chỉ có scene_request của người; revision kết quả là system."""
+    request = _event("scene_request", _T0 + timedelta(minutes=2), mode="region", origin="human")
+    system_edit = _event("scene_edit", _T0 + timedelta(minutes=5), operation="object_geometry_build", origin="system")
+    auto = _event("scene_request", _T0 + timedelta(minutes=1), mode="geometry", origin="system")
+
+    assert first_human_change_after([auto, request, system_edit], _T0) == _T0 + timedelta(minutes=2)
+    assert first_human_change_after([auto, system_edit], _T0) is None
 
 
 def test_north_star_block_puts_the_pieces_together() -> None:
@@ -510,3 +539,63 @@ def test_summary_counts_p2_only_for_scenes_with_measured_gaps() -> None:
     summary = benchmark_summary([_card(p2=measured_p2), _card()])
 
     assert (summary.gaps_agree_total, summary.gaps_total, summary.missed_total) == (1, 2, 1)
+
+
+def test_markdown_escapes_pipes_and_newlines_in_the_scene_name() -> None:
+    from src.services.orchestration.value.scorecard import _md
+
+    assert _md("Kho | A\nlối 2") == "Kho \\| A lối 2"
+
+
+def test_job_machine_reads_the_latest_attempt_snapshot_terminal_first(tmp_path) -> None:  # noqa: ANN001
+    from types import SimpleNamespace
+
+    from src.services.orchestration.benchmark import PipelineRuntimeBenchmark
+    from src.services.orchestration.processing.models import MachineCapability
+    from src.services.orchestration.value.scorecard import _job_machine
+
+    def snapshot(attempt: int, gpu: str | None) -> bytes:
+        machine = (
+            MachineCapability(
+                worker_id="w", measured_at=_T0, gpu_name=gpu, cpu_count=8, ram_total_gb=32.0, disk_free_gb=1.0
+            )
+            if gpu
+            else None
+        )
+        return (
+            PipelineRuntimeBenchmark(
+                job_id=_JOB,
+                project_id="p",
+                attempt=attempt,
+                recorded_at=_T0,
+                status="SUCCEEDED",
+                stages=[],
+                config_checksum="c",
+                machine=machine,
+            )
+            .model_dump_json()
+            .encode()
+        )
+
+    files = {
+        f"artifact://jobs/{_JOB}/benchmark/pipeline_runtime/attempt-1-terminal.json": snapshot(1, "T4"),
+        f"artifact://jobs/{_JOB}/benchmark/pipeline_runtime/attempt-2-partial.json": snapshot(2, "L4"),
+        f"artifact://jobs/{_JOB}/benchmark/pipeline_runtime/attempt-3-terminal.json": snapshot(3, None),
+    }
+
+    def locate(uri: str):  # noqa: ANN202
+        if uri not in files:
+            return None
+        path = tmp_path / uri.rsplit("/", 1)[-1]
+        path.write_bytes(files[uri])
+        return path
+
+    registry = SimpleNamespace(
+        list_job_attempts=lambda job_id: [SimpleNamespace(attempt=n) for n in (1, 2, 3)],
+        runtime_resolver=SimpleNamespace(locate=locate),
+    )
+
+    machine = _job_machine(registry, _JOB)  # type: ignore[arg-type]
+
+    # attempt 3 không có snapshot máy → lùi về attempt 2 (chỉ có partial).
+    assert machine is not None and machine.gpu_name == "L4"
