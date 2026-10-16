@@ -1746,7 +1746,7 @@ class ProjectRegistry:
 
     def get_preview(self, job_id: str) -> ReconstructionPreview:
         """Raw 3DGS preview trước SceneIR; không ngụ ý metric đã confirmed."""
-        return load_job_preview(self.get_job(job_id), self.runtime_resolver)
+        return load_job_preview(self.get_job(job_id), self.runtime_resolver, reuse_verified_dependencies=True)
 
     def list_job_artifacts(self, job_id: str) -> tuple[list[ProductArtifactRef], int]:
         """Ref artifact được phép hiện ra product, kèm số ref bị loại.

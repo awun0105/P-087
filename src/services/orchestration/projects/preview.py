@@ -6,7 +6,9 @@ from src.models.contracts.preview import ReconstructionPreview
 from src.services.orchestration.artifacts import ArtifactChecksumError, ArtifactNotFoundError, ArtifactResolver
 
 
-def load_job_preview(job: JobManifest, resolver: ArtifactResolver) -> ReconstructionPreview:
+def load_job_preview(
+    job: JobManifest, resolver: ArtifactResolver, *, reuse_verified_dependencies: bool = False
+) -> ReconstructionPreview:
     """Chọn publication mới nhất trong journal; checksum lỗi không fallback bản cũ."""
     stages = [
         stage
@@ -36,5 +38,8 @@ def load_job_preview(job: JobManifest, resolver: ArtifactResolver) -> Reconstruc
     ):
         raise ArtifactChecksumError("Preview không thuộc job/input/attempt đã publish")
     for dependency in (preview.source_visual_ref, preview.camera_pose_ref, preview.delivery_ref):
-        resolver.require(dependency)
+        if reuse_verified_dependencies:
+            resolver.require_unchanged(dependency)
+        else:
+            resolver.require(dependency)
     return preview
