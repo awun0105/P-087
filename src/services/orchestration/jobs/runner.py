@@ -88,6 +88,7 @@ from src.services.orchestration.jobs.dispatch import (
     require_profile,
     resolve_job_processing,
 )
+from src.services.orchestration.jobs.lease import lease_lost
 from src.services.orchestration.jobs.log_context import configure_worker_logging, job_log_context
 from src.services.orchestration.jobs.models import PreparedInputReceipt, TransitionRequest
 from src.services.orchestration.jobs.progress import (
@@ -232,6 +233,8 @@ def _run_tool(
                     current = attempt.registry.get_job(attempt.job.job_id)
                     if current.job_manifest_checksum != attempt.job.job_manifest_checksum:
                         raise PreviewCancelledError("Job revision đã thay đổi trong khi worker chạy")
+                    if lease_lost(attempt.job.job_id):
+                        raise PreviewCancelledError("Mất lease job; máy khác đã nhận việc, dừng tiến trình con")
                     if time.monotonic() >= deadline:
                         raise TimeoutError(f"{name} worker quá thời gian cấu hình")
                     _sample_resources(sampler, process.pid)

@@ -37,6 +37,7 @@ from src.services.orchestration.inputs.runs import (
     InputAssemblyRunResult,
 )
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError, RuntimeTransaction
+from src.services.orchestration.jobs.lease import fence
 from src.services.orchestration.jobs.models import JobAttemptRecord
 from src.services.orchestration.projects.errors import JobNotFoundError, ProjectNotFoundError
 from src.services.orchestration.projects.models import ProjectRecord
@@ -224,6 +225,8 @@ class ProjectPersistence:
         quota_result: GuestQuotaIntentResult | None = None
         try:
             with self.database.transaction(write=True) as tx:
+                # T-040 Q2: attempt đang giữ lease của job này chỉ ghi được khi lease còn của chính nó.
+                fence(tx, manifest.job_id)
                 if expected_scene_revision is not None:
                     from src.services.orchestration.scene.heads import _parse_head_row
 

@@ -8,6 +8,7 @@ import argparse
 import logging
 import signal
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 from threading import Event, Thread
 from typing import Protocol
@@ -18,6 +19,7 @@ from src.models.contracts.retryability import classify_retryability
 from src.services.orchestration.jobs.admission import ResourceAdmission
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
 from src.services.orchestration.jobs.dispatch import load_prepared_profile, prepared_frame_reference, require_profile
+from src.services.orchestration.jobs.lease import expired_job_ids, leased, release_expired
 from src.services.orchestration.jobs.log_context import configure_worker_logging, job_log_context
 from src.services.orchestration.jobs.models import TransitionRequest
 from src.services.orchestration.jobs.profile import ExecutionProfile
@@ -39,6 +41,7 @@ from src.services.orchestration.jobs.workspace import attempt_in_use, job_attemp
 from src.services.orchestration.processing import is_presets_file, load_presets
 from src.services.orchestration.processing.capability import probe as probe_capability
 from src.services.orchestration.processing.capability import record as record_capability
+from src.services.orchestration.processing.capability import worker_identity
 from src.services.orchestration.projects.errors import PrivacyGateBlockedError
 from src.services.orchestration.projects.privacy import require_project_dispatch
 from src.services.orchestration.projects.registry import ProjectRegistry, get_project_registry
@@ -257,7 +260,12 @@ def _dispatch(
                     if admission is not None and not admission(candidate, "finalize"):
                         continue
                     try:
-                        finalize_runner(job_id, expected_checksum=candidate.job_manifest_checksum)
+                        if not _leased_call(
+                            registry,
+                            job_id,
+                            lambda: finalize_runner(job_id, expected_checksum=candidate.job_manifest_checksum),
+                        ):
+                            continue
                     except RuntimeStateConflictError:
                         raise
                     except Exception as error:
@@ -271,7 +279,12 @@ def _dispatch(
                     require_project_dispatch(registry.get_project(candidate.project_id))
                     if admission is not None and not admission(candidate):
                         continue
-                    reviewed_runner(job_id, expected_checksum=candidate.job_manifest_checksum)
+                    if not _leased_call(
+                        registry,
+                        job_id,
+                        lambda: reviewed_runner(job_id, expected_checksum=candidate.job_manifest_checksum),
+                    ):
+                        continue
                     return True
                 if _rebind_orphaned_job(registry, candidate, profile):
                     return True  # Lượt sau dispatch job này trên runtime mới.
@@ -283,13 +296,21 @@ def _dispatch(
                 if frames is not None:
                     if admission is not None and not admission(job):
                         continue
-                    runner(job_id, frames.artifact_uri, expected_checksum=job.job_manifest_checksum)
+                    if not _leased_call(
+                        registry,
+                        job_id,
+                        lambda: runner(job_id, frames.artifact_uri, expected_checksum=job.job_manifest_checksum),
+                    ):
+                        continue
                     return True
                 if project.input_manifest_ref is None:
                     continue  # Chưa có input để chuẩn bị (ví dụ project dataset chưa publish frames).
                 if admission is not None and not admission(job):
                     continue
-                video_runner(job_id, expected_checksum=job.job_manifest_checksum)
+                if not _leased_call(
+                    registry, job_id, lambda: video_runner(job_id, expected_checksum=job.job_manifest_checksum)
+                ):
+                    continue
                 return True
         except (RuntimeStateConflictError, PrivacyGateBlockedError):
             continue  # Job không eligible hoặc runner khác đã claim; không auto retry.
@@ -300,6 +321,50 @@ def _dispatch(
                     _record_dispatch_failure(registry, job, error)
                     return True
     return False
+
+
+def _leased_call(registry: ProjectRegistry, job_id: str, call: Callable[[], object]) -> bool:
+    """Chạy một runner trong lease của job (T-040 Q2); False khi worker khác đang giữ job."""
+    if registry.persistence is None:
+        raise ValueError("Lease cần durable registry")
+    with leased(registry.persistence.database, job_id, worker_identity()[0]) as held:
+        if held is None:
+            return False
+        call()
+    return True
+
+
+def recover_expired_leases(registry: ProjectRegistry, *, now: datetime | None = None) -> int:
+    """T-040 Q2: job RUNNING mà worker giữ lease đã mất → FAILED retryable. Máy nào cũng làm được, không cần workspace."""
+    if registry.persistence is None:
+        return 0
+    database = registry.persistence.database
+    recovered = 0
+    for job_id in expired_job_ids(database, now=now):
+        try:
+            job = registry.get_job(job_id)
+            if job.status == JobStatus.RUNNING:
+                details = {"job_id": job_id, "stage": job.current_stage}
+                error = ExecutionError(
+                    stage_id=job.current_stage,
+                    error_code="INTERRUPTED_SHUTDOWN",
+                    human_message="Worker chạy job đã mất (quá thời gian gia hạn). Bấm thử lại để chạy tiếp.",
+                    retryable=classify_retryability("INTERRUPTED_SHUTDOWN", details),
+                    details=details,
+                )
+                registry.transition_job(
+                    job_id,
+                    TransitionRequest(target_status=JobStatus.FAILED, error=error),
+                    expected_checksum=job.job_manifest_checksum,
+                )
+                recovered += 1
+                logger.info("Job %s: lease hết hạn, đưa về FAILED (retryable=True)", job_id)
+            release_expired(database, job_id, now=now)
+        except RuntimeStateConflictError:
+            continue  # Máy khác đã xử lý trước (CAS); lượt sau đọc lại.
+        except Exception as error:  # noqa: BLE001 - một job lỗi không được chặn các job hết hạn khác
+            logger.warning("Không xử lý được lease hết hạn job %s: %s", job_id, type(error).__name__)
+    return recovered
 
 
 def _runtime_matches(profile: ExecutionProfile, job: JobManifest) -> bool:
@@ -410,9 +475,11 @@ def main(argv: list[str] | None = None) -> int:
     pause = Event()
     try:
         recover_interrupted_jobs(registry, settings)
+        recover_expired_leases(registry)
         recover_interrupted(settings)
         import_service.recover_legacy_packaging()
         while True:
+            recover_expired_leases(registry)
             # Job trong hàng đợi đi trước; rảnh mới nhận yêu cầu chạy lại tách theo vật (cùng dùng GPU).
             handled = (
                 dispatch_next(registry, admission=admission)

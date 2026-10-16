@@ -427,6 +427,20 @@ MIGRATIONS += (
         ),
     ),
 )
+MIGRATIONS += (
+    (
+        23,
+        (
+            """CREATE TABLE r2s_job_leases (
+                job_id TEXT PRIMARY KEY,
+                lease_token TEXT NOT NULL,
+                worker_id TEXT NOT NULL,
+                lease_expires_at TEXT NOT NULL
+            )""",
+            "CREATE INDEX r2s_job_leases_by_expiry ON r2s_job_leases(lease_expires_at)",
+        ),
+    ),
+)
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
 #: DB đã kiểm/chạy migration trong tiến trình này. API tạo RuntimeDatabase mỗi request;
