@@ -62,3 +62,71 @@ Full backend một lần (task chạm mọi runner), không có GPU thật:
 - Chưa chạy trên GPU thật: ngưỡng treo và ước lượng đã kiểm bằng log thật và tiến trình giả trong test; kiểm thử thật cần một lượt chạy scene thật trên máy GPU.
 - Khuyến nghị cho chủ dự án: nếu muốn dừng sớm hơn trên máy thuê, đặt `PRODUCT_JOB_GPU_HOURS_MAX` theo ngân sách mỗi scene. Mặc định tắt nên không ảnh hưởng hành vi hiện tại.
 - `graphify update .` đã chạy trước bước sửa `getattr`; cần chạy lại sau khi có thay đổi cuối.
+
+## Round 2 — xử lý review (CHANGES REQUESTED)
+
+Review `.ai/tasks/T-043/review.md`, mục Required changes 1: giới hạn bao ngoài của bước preview nhỏ hơn tổng giới hạn bên trong.
+
+### Test đỏ trên code cũ
+
+Thêm ba test vào `tests/test_reconstruction/test_tool_time_limits.py`, chạy trước khi sửa giá trị:
+
+```bash
+.venv/bin/python -m pytest tests/test_reconstruction/test_tool_time_limits.py -q -p no:cacheprovider
+```
+
+**3 failed, 2 passed** trước khi sửa:
+
+- `test_preview_outer_limit_covers_colmap_then_brush_in_one_tool_run`: preview 21600 < COLMAP 14400 + Brush 21600.
+- `test_finalize_outer_limit_covers_brush_splat_and_voxel_calls`: finalize 7200 < Brush 21600 + 6 × voxel 300 = 23400. Lỗi này review chưa nêu, nhưng cùng loại lỗi.
+- `test_image_entrypoint_and_example_env_match_the_preview_outer_limit`: entrypoint và file mẫu còn 21600.
+
+### Sửa
+
+| Chỗ | Trước | Sau |
+|---|---|---|
+| `src/config.py` `product_preview_timeout_seconds` | 21600 | 36000 |
+| `src/config.py` `product_finalize_timeout_seconds` | 7200 | 36000 |
+| `scripts/gpu/docker_entrypoint.sh` `PRODUCT_PREVIEW_TIMEOUT_SECONDS` | 21600 | 36000 |
+| `scripts/gpu/studio.env.example` | 21600 | 36000 |
+| `.env.example` (gốc repo) | 21600 | 36000 |
+
+Không có khóa PREVIEW hay FINALIZE trong `deploy/studio/*.env.example`, nên không cần sinh lại file mẫu. `scripts/gpu/studio.env` (laptop) không được sửa.
+
+### Kiểm finalize theo yêu cầu review
+
+Finalize chạy trong một lượt `_run_tool`, gồm:
+
+- **splat-process qua Brush**, tối đa 21600 s, một lần (`src/services/reconstruction/rgb/canonical/canonical_visual.py:103`, `adapters/splat.py:38`).
+- **voxel**, 6 lần gọi trong `adapters/voxel.py:165–199` (qualify, inspect, cluster, inspect-cluster, occupancy, collision). Mỗi lần tối đa `VoxelRuntimeSettings.timeout_seconds`.
+
+Tổng tối đa:
+
+- Mặc định trong code: 21600 + 6 × 300 = **23400 s**.
+- File mẫu với `R2S_VOXEL_TIMEOUT_SECONDS=1800`: 21600 + 6 × 1800 = **32400 s**.
+
+Giới hạn 36000 s bao được cả hai trường hợp.
+
+Chưa đếm: `SplatTransformSimilarityAdapter` trong `adapters/voxel.py` cũng gọi voxel process, nhưng không nằm trong 6 lần đã đếm. Nếu nó gọi thêm, khoảng dư còn 36000 − 32400 = 3600 s, đủ cho hai lần ở 1800 s. Mình chưa đếm chính xác số lần gọi này.
+
+### Kiểm thử
+
+Test giới hạn sau khi sửa: **5 passed**.
+
+```bash
+.venv/bin/python -m pytest tests/test_reconstruction tests/test_orchestration tests/test_process_stall.py tests/integration -q -p no:cacheprovider
+```
+
+**2344 passed, 28 skipped in 297.75s, exit 0.** Chạy trên code sau khi sửa, không khởi động lại `r2s-stack`, không cần GPU.
+
+```bash
+.venv/bin/ruff check tests/test_reconstruction/test_tool_time_limits.py src/config.py
+.venv/bin/ruff format --check tests/test_reconstruction/test_tool_time_limits.py src/config.py
+```
+
+**All checks passed; 2 files already formatted.**
+
+### Ghi chú
+
+- `review.md` không sửa. `status.md` không đổi trong round này; trạng thái `changes-requested` do người review đặt.
+- Mục "Ghi chú cho T-045" của review (ngưỡng COLMAP 600 s và `scripts/gpu/studio.env` vẫn 3600 s) là việc của chủ dự án và T-045, không thuộc round này.
