@@ -164,8 +164,7 @@ class ProjectRecord(BaseModel):
     input_manifest_checksum: Checksum
     source_rights_attestation: JsonObject
     privacy_report: PrivacyValidationReport
-    #: `self_attested` chỉ gán cho project tạo từ upload khi deployment bật chế độ
-    #: MVP (Settings.product_privacy_mode); project cũ/fixture giữ cổng QA.
+    #: `self_attested` dành cho upload hoặc dataset batch có lời khai nguồn; project mặc định/fixture giữ cổng QA.
     privacy_mode: Literal["qa_verified", "self_attested"] = "qa_verified"
     #: InputManifest đã publish (bytes checksum) để worker chuẩn bị input video.
     input_manifest_ref: ProductArtifactRef | None = None

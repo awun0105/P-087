@@ -96,6 +96,23 @@ async def test_upload_streams_video_and_lists_it(client: AsyncClient, studio: Si
 
 
 @pytest.mark.asyncio
+async def test_dataset_replay_video_is_served_separately_from_image_manifest(
+    client: AsyncClient, studio: SimpleNamespace
+) -> None:
+    images = (studio.root / "000.jpg", studio.root / "001.png")
+    for image in images:
+        image.write_bytes(image.name.encode())
+    video = studio.root / "display.mp4"
+    video.write_bytes(b"replay-only")
+    project = studio.registry.create_project_from_dataset_images(
+        name="replay test", dataset_owner="test dataset", images=images, display_video=video
+    )
+    response = await client.get(f"/api/v1/projects/{project.project_id}/display-video")
+    assert response.status_code == 200 and response.content == b"replay-only"
+    assert response.headers["content-type"].startswith("video/mp4")
+
+
+@pytest.mark.asyncio
 async def test_abandoned_upload_cleanup_removes_bytes_and_assembly_rows(
     client: AsyncClient, studio: SimpleNamespace
 ) -> None:

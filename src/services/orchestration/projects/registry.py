@@ -50,6 +50,7 @@ from src.models.contracts.manifests import (
     PrivacyResult,
     PrivacyValidationReport,
     RuntimeManifest,
+    SourceType,
     StageArtifact,
     StageId,
     StageStatus,
@@ -295,6 +296,119 @@ class ProjectRegistry:
             input_manifest_checksum=request.input_manifest_checksum,
             source_rights_attestation=attestation,
             privacy_report=self._preliminary_privacy_report(request.input_manifest_checksum),
+            created_by=created_by,
+        )
+        if self.persistence is not None:
+            self.persistence.save_project(record)
+        else:
+            self._projects[project_id] = record
+            self._project_jobs[project_id] = []
+        return record
+
+    def create_project_from_dataset_images(
+        self,
+        *,
+        name: str,
+        dataset_owner: str,
+        images: tuple[Path, ...],
+        display_video: Path,
+        created_by: Actor | None = None,
+    ) -> ProjectRecord:
+        """Publish original dataset images as pipeline input and an MP4 ref for display only."""
+        if len(images) < 2 or any(path.suffix.lower() not in {".png", ".jpg", ".jpeg"} for path in images):
+            raise ValueError("dataset input requires at least two PNG/JPG/JPEG images")
+        if not display_video.is_file() or display_video.suffix.lower() != ".mp4":
+            raise ValueError("display video must be an existing MP4")
+        project_id = f"project-{uuid4().hex[:12]}"
+        attestation: JsonObject = {
+            "attested": True,
+            "data_origin": "public_or_synthetic",
+            "declared_owner": dataset_owner,
+            "declared_purpose": "kiểm thử nội bộ",
+            "rights_to_use_confirmed": True,
+            "anonymization_confirmed": True,
+            "retention_acknowledged": True,
+        }
+        files: list[InputFile] = []
+        inventory: list[dict[str, str | int]] = []
+        for index, image in enumerate(images):
+            if not image.is_file():
+                raise ValueError(f"dataset image is missing: {image.name}")
+            payload = image.read_bytes()
+            checksum = sha256_bytes(payload)
+            media_type = "image/png" if image.suffix.lower() == ".png" else "image/jpeg"
+            uri = f"artifact://jobs/{project_id}/input/frames/{image.name}"
+            reference = ProductArtifactRef(
+                artifact_type="RGBFrame",
+                schema_version="1.0",
+                artifact_uri=uri,
+                artifact_checksum=checksum,
+                data_class=ArtifactDataClass.PRODUCT_INPUT,
+                producer_stage=StageId.INPUT_VALIDATE,
+                job_id=project_id,
+            )
+            FilesystemArtifactStore(self.runtime_resolver).publish(reference, payload)
+            files.append(
+                InputFile(
+                    original_name=image.name,
+                    media_type=media_type,
+                    size_bytes=len(payload),
+                    checksum=checksum,
+                    artifact_uri=uri,
+                    data_class=ArtifactDataClass.PRODUCT_INPUT,
+                )
+            )
+            inventory.append({"frame_id": index, "name": image.name, "checksum": checksum})
+        video_payload = display_video.read_bytes()
+        video_checksum = sha256_bytes(video_payload)
+        display_video_ref = ProductArtifactRef(
+            artifact_type="DisplayVideo",
+            schema_version="1.0",
+            artifact_uri=f"artifact://jobs/{project_id}/display/scene.mp4",
+            artifact_checksum=video_checksum,
+            data_class=ArtifactDataClass.PRODUCT_INPUT,
+            producer_stage=StageId.INPUT_VALIDATE,
+            job_id=project_id,
+        )
+        FilesystemArtifactStore(self.runtime_resolver).publish(display_video_ref, video_payload)
+        dataset_checksum = canonical_content_checksum(
+            {"frames": inventory, "dataset_manifest_checksum": "sha256:" + "0" * 64},
+            "dataset_manifest_checksum",
+        )
+        draft = InputManifest(
+            schema_version="1.0",
+            source_type=SourceType.DATASET,
+            received_at=datetime.now(UTC),
+            files=files,
+            input_configuration=InputConfiguration(rgb_present=True, registered_lidar_present=False),
+            source_rights_attestation=attestation,
+            dataset_manifest_checksum=dataset_checksum,
+            preparation_provenance={"input_mode": "image_refs", "display_video_only": True},
+            input_manifest_checksum="sha256:" + "0" * 64,
+        )
+        manifest = with_canonical_checksum(draft, "input_manifest_checksum")
+        body = manifest.model_dump_json(indent=2).encode("utf-8") + b"\n"
+        manifest_ref = ProductArtifactRef(
+            artifact_type="InputManifest",
+            schema_version="1.0",
+            artifact_uri=f"artifact://jobs/{project_id}/input/input_manifest.json",
+            artifact_checksum=sha256_bytes(body),
+            data_class=ArtifactDataClass.PRODUCT_INPUT,
+            producer_stage=StageId.INPUT_VALIDATE,
+            job_id=project_id,
+        )
+        FilesystemArtifactStore(self.runtime_resolver).publish(manifest_ref, body)
+        record = ProjectRecord(
+            project_id=project_id,
+            name=name,
+            source_type=SourceType.DATASET,
+            input_manifest_checksum=manifest.input_manifest_checksum,
+            source_rights_attestation=attestation,
+            privacy_report=self._preliminary_privacy_report(manifest.input_manifest_checksum),
+            privacy_mode="self_attested",
+            input_manifest_ref=manifest_ref,
+            display_video_ref=display_video_ref,
+            created_at=datetime.now(UTC),
             created_by=created_by,
         )
         if self.persistence is not None:
