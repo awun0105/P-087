@@ -35,7 +35,7 @@ T-034 | Thẻ Giá trị + trang /benchmark | accepted | —
 T-035 | Regression + hướng dẫn đo | accepted | —
 T-036 | Đổi tên thư mục runtime và biến RECxx_* theo chức năng | accepted | —
 T-037 | Script dựng runtime ObjectGS | accepted | —
-T-038 | Một công thức cài cho mọi máy GPU | in-progress | engineer
+T-038 | Một công thức cài cho mọi máy GPU | implemented | summarizer
 T-039 | Build image GPU thật + job trên pod RunPod | planned | engineer
 T-040 | Bỏ chép runtime manifest tay | accepted | —
 T-041 | Deploy production thử trọn | planned | engineer
