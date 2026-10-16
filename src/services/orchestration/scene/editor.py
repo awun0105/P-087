@@ -47,6 +47,7 @@ from src.services.orchestration.scene.models import (
     TransformEdit,
     VisualBinding,
 )
+from src.services.orchestration.value.events import operation_origin, record_event
 from src.services.scene.geometry_state import require_geometry_ready
 
 _REVISION_PATTERN = re.compile(r"^(?P<prefix>.*?)(?P<number>\d+)$")
@@ -305,6 +306,7 @@ class SceneEditor:
                 supersedes=scene.scene_revision,
                 record_operation=False,
             )
+            self._record_scene_edit(job_id, "transform_edit", revision, scene.scene_revision)
         else:
             revision = self._publish(job_id, updated, supersedes=scene.scene_revision)
         self._revisions[job_id] = revision
@@ -415,6 +417,7 @@ class SceneEditor:
                 record_operation=True,
                 commit_guard=commit_guard,
             )
+            self._record_scene_edit(job_id, operation, revision, current.scene_revision)
         else:
             if commit_guard is not None:
                 raise SceneEditRejectedError("Fenced scene operations require a database-backed scene head")
@@ -635,6 +638,21 @@ class SceneEditor:
             if isinstance(error, RuntimeStateConflictError):
                 raise SceneRevisionConflictError(str(error)) from error
             raise
+
+    def _record_scene_edit(self, job_id: str, operation: str, revision: SceneRevision, previous_revision: str) -> None:
+        """Ghi `scene_edit` sau khi publish thành công; chỉ có khi scene đi qua DB head (có persistence)."""
+        assert self.head_repository is not None
+        record_event(
+            self.head_repository.database,
+            job_id,
+            "scene_edit",
+            {
+                "operation": operation,
+                "origin": operation_origin(operation),
+                "scene_revision": revision.scene.scene_revision,
+                "previous_revision": previous_revision,
+            },
+        )
 
     def _publish(self, job_id: str, scene: SceneIR, supersedes: str | None) -> SceneRevision:
         """Ghi revision thành artifact bất biến và trả ref đã verify.

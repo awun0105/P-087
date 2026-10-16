@@ -7,7 +7,10 @@ from pathlib import Path
 
 import pytest
 
+from src.services.orchestration.artifacts import ArtifactResolver
 from src.services.orchestration.jobs.database import RuntimeDatabase
+from src.services.orchestration.scene import SceneEditCommand, SceneEditor, SceneRevisionConflictError, TransformEdit
+from src.services.orchestration.scene.heads import SceneHeadRepository
 from src.services.orchestration.value import list_events, record_event
 from src.services.orchestration.value.events import HUMAN_OPERATIONS, SYSTEM_OPERATIONS, operation_origin
 
@@ -112,3 +115,69 @@ def test_unknown_operation_is_reported_as_unknown_not_guessed() -> None:
     assert operation_origin("move") == "unknown"
     assert operation_origin("objectify") == "system"
     assert operation_origin("confirm") == "human"
+
+
+_FIXTURE_ROOT = Path(__file__).resolve().parents[2] / "fixtures"
+_SCENE_JOB = "job-fixture-001"
+
+
+@pytest.fixture
+def scene_editor(tmp_path: Path) -> tuple[SceneEditor, RuntimeDatabase]:
+    database = RuntimeDatabase(f"sqlite:///{tmp_path / 'runtime.db'}")
+    resolver = ArtifactResolver(tmp_path / "artifacts")
+    editor = SceneEditor(_FIXTURE_ROOT, resolver, SceneHeadRepository(database))
+    editor.publish_initial(_SCENE_JOB, editor._fixture_scene())
+    return editor, database
+
+
+def _scene_edit_events(database: RuntimeDatabase) -> list:
+    return list_events(database, _SCENE_JOB, {"scene_edit"})
+
+
+def test_publish_records_one_scene_edit_with_the_operation_origin(scene_editor) -> None:  # noqa: ANN001
+    editor, database = scene_editor
+    assert _scene_edit_events(database) == []  # revision đầu từ bundle không phải thao tác chỉnh sửa
+
+    root = editor.current(_SCENE_JOB).scene
+    editor.apply(
+        _SCENE_JOB,
+        SceneEditCommand(
+            expected_scene_revision=root.scene_revision,
+            edits=[TransformEdit(object_id="object-rack-001", translation_xyz=(1.0, 1.0, 0.0))],
+        ),
+    )
+    editor.publish_next(_SCENE_JOB, "rev-002", root.model_copy(update={"objects": []}), "objectify")
+
+    first, second = _scene_edit_events(database)
+    assert first.payload == {
+        "operation": "transform_edit",
+        "origin": "human",
+        "scene_revision": "rev-002",
+        "previous_revision": "rev-001",
+    }
+    assert second.payload["origin"] == "system"
+    assert second.payload["operation"] == "objectify"
+    assert second.payload["scene_revision"] == "rev-003"
+    assert second.payload["previous_revision"] == "rev-002"
+
+
+def test_stale_publish_is_rejected_and_records_nothing(scene_editor) -> None:  # noqa: ANN001
+    editor, database = scene_editor
+    root = editor.current(_SCENE_JOB).scene
+
+    with pytest.raises(SceneRevisionConflictError):
+        editor.publish_next(_SCENE_JOB, "rev-000", root.model_copy(update={"objects": []}), "label")
+
+    assert _scene_edit_events(database) == []
+
+
+def test_failed_event_write_does_not_fail_a_committed_publish(scene_editor) -> None:  # noqa: ANN001
+    editor, database = scene_editor
+    with database.transaction(write=True) as tx:
+        tx.execute("DROP TABLE r2s_value_events")
+    root = editor.current(_SCENE_JOB).scene
+
+    result = editor.publish_next(_SCENE_JOB, "rev-001", root.model_copy(update={"objects": []}), "label")
+
+    assert result.revision.scene.scene_revision == "rev-002"
+    assert editor.current(_SCENE_JOB).scene.scene_revision == "rev-002"
