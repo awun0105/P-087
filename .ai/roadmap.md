@@ -54,6 +54,9 @@
 
 ## Sprint 6: Hệ thống ghi và xuất metric giá trị (architecture §15)
 
+Xong 2026-10-16: T-027 → T-035 accepted. Full backend 3.688 pass / 0 fail / 28 skip; frontend 936 pass. Handoff:
+`docs/plans/active/2026-10-16-value-metrics/HANDOFF.md`. Việc tiếp theo: chạy một scene thật có đo thước (chủ dự án).
+
 | ID | Tiêu đề | Mục tiêu | Cần | Cỡ |
 | --- | --- | --- | --- | --- |
 | T-027 | Nhật ký sự kiện giá trị | Bảng `r2s_value_events`, ghi `scene_edit` từ `publish_next`, API nhận `operator_time` / `walk_session` | – | M |
