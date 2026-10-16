@@ -27,6 +27,9 @@ REQUIRED_PINS = [
     "MICROMAMBA_URL",
     "MICROMAMBA_SHA",
     "MICROMAMBA_BIN_SHA",
+    "COLMAP_BINARY_SHA",
+    "COLMAP_LICENSE_SHA",
+    "ONNXRUNTIME_LICENSE_SHA",
 ]
 
 
@@ -206,3 +209,45 @@ def test_unknown_colmap_mode_is_refused(tmp_path: Path) -> None:
 def test_check_system_reports_packages_without_needing_root(tmp_path: Path) -> None:
     result = _run(["bash", str(GPU / "install.sh"), str(tmp_path / "data"), "--check-system"])
     assert "[hệ thống]" in result.stdout + result.stderr
+
+
+def test_colmap_binary_bundle_already_extracted_is_recognised_without_download(tmp_path: Path) -> None:
+    root = tmp_path / "data"
+    wrapper = root / "colmap/bin/colmap-run"
+    body = (
+        'if [ "$1" = help ]; then echo "COLMAP 4.3.0.dev0 (Commit Unknown)"; else echo "  --prior_position_std_x"; fi'
+    )
+    _stub_bin(wrapper.parent, wrapper.name, body)
+    env, curl_log = _env_with_failing_curl(tmp_path)
+
+    result = _run(
+        ["bash", str(GPU / "install.sh"), str(root), "--only", "colmap", "--colmap=binary", "--no-doctor"], env=env
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "[nhận ra] colmap" in result.stdout
+    assert not curl_log.exists()
+    assert f'R2S_COLMAP_COMMAND=["{wrapper}"]' in (root / "runtime.env").read_text(encoding="utf-8")
+
+
+def test_colmap_binary_install_refuses_a_bundle_with_the_wrong_checksum(tmp_path: Path) -> None:
+    root = tmp_path / "data"
+    wrong = tmp_path / "wrong-bundle.tar.zst"
+    wrong.write_bytes(b"not the pinned bundle")
+    result = _run(
+        [
+            "bash",
+            str(GPU / "install.sh"),
+            str(root),
+            "--only",
+            "colmap",
+            "--colmap=binary",
+            "--colmap-from-file",
+            str(wrong),
+            "--no-doctor",
+        ]
+    )
+
+    assert result.returncode != 0
+    assert "sai sha256" in result.stdout + result.stderr
+    assert not (root / "colmap/bin").exists()

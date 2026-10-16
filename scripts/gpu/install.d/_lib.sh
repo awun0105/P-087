@@ -19,6 +19,9 @@ pin() {
 
 sha_of() { sha256sum "$1" | cut -d' ' -f1; }
 
+# py_bin: Python của repo (.venv) nếu có, không thì python3 hệ thống.
+py_bin() { if [ -x "$REPO/.venv/bin/python" ]; then printf '%s' "$REPO/.venv/bin/python"; else command -v python3; fi; }
+
 # fetch URL ĐÍCH SHA256: tải nếu thiếu hoặc sai checksum; dừng nếu checksum vẫn sai. Đây là nơi duy nhất gọi curl.
 fetch() {
   if [ ! -f "$2" ] || [ "$(sha_of "$2")" != "$3" ]; then

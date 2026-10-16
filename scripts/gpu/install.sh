@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Dựng hoặc nhận ra toàn bộ runtime GPU ở một thư mục gốc, bằng một công thức cho mọi máy (laptop, pod, image).
 #
-#   scripts/gpu/install.sh <gốc> [--only a,b] [--skip a,b] [--colmap=docker|binary] [--objectgs-wheels <dir>]
+#   scripts/gpu/install.sh <gốc> [--only a,b] [--skip a,b] [--colmap=docker|binary] [--colmap-from-file <tar.zst>]
+#                          [--objectgs-wheels <dir>]
 #                          [--skip-gpu-check] [--system-node] [--apt] [--check-system] [--no-doctor]
 #
 # Thành phần: colmap, brush, splat, lidar_odometry, scene, objectgs. Với mỗi thành phần: đã có và đúng phiên bản thì
@@ -17,6 +18,7 @@ ONLY=""
 SKIP=""
 COLMAP_MODE="docker"
 OBJECTGS_WHEELS=""
+COLMAP_FROM_FILE=""
 SKIP_GPU_CHECK=0
 SYSTEM_NODE=0
 USE_APT=0
@@ -29,6 +31,7 @@ while [ $# -gt 0 ]; do
     --skip) SKIP="${2:?--skip cần danh sách}"; shift 2 ;;
     --colmap=*) COLMAP_MODE="${1#--colmap=}"; shift ;;
     --objectgs-wheels) OBJECTGS_WHEELS="${2:?--objectgs-wheels cần thư mục}"; shift 2 ;;
+    --colmap-from-file) COLMAP_FROM_FILE="${2:?--colmap-from-file cần đường dẫn gói}"; shift 2 ;;
     --skip-gpu-check) SKIP_GPU_CHECK=1; shift ;;
     --system-node) SYSTEM_NODE=1; shift ;;
     --apt) USE_APT=1; shift ;;
