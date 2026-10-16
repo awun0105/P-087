@@ -2,12 +2,14 @@
 
 import hashlib
 import math
+from pathlib import Path
 from typing import Annotated, Literal
 
 from pydantic import Field, model_validator
 
 from src.models.contracts.artifacts import Checksum, ContractModel, ProductArtifactRef
 from src.models.contracts.identity import canonical_content_checksum, canonical_json_bytes
+from src.services.reconstruction.rgb.frames.frame_set import frame_image_name
 
 Finite = Annotated[float, Field(allow_inf_nan=False)]
 Vector3 = tuple[Finite, Finite, Finite]
@@ -84,7 +86,7 @@ class CameraPose(ContractModel):
     def _valid_rotation(self) -> "CameraPose":
         if not math.isclose(sum(x * x for x in self.rotation_xyzw), 1.0, abs_tol=1e-6):
             raise ValueError("camera quaternion must have unit norm")
-        if self.image_name != f"{self.frame_id:06d}.png":
+        if self.image_name != frame_image_name(self.frame_id, Path(self.image_name)):
             raise ValueError("camera image name differs from normalized frame identity")
         return self
 

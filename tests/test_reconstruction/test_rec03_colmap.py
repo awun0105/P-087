@@ -152,6 +152,25 @@ def adapter(
     )
 
 
+def test_model_image_format_must_match_staged_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Accepting JPEG must not allow a sparse model to name absent images for PNG inputs."""
+    service, request, _ = adapter(tmp_path)
+    original = service.deps.process.run
+
+    def mismatched_names(arguments: list[str], workspace: Path) -> str:
+        result = original(arguments, workspace)
+        if arguments[0] == "model_converter":
+            path = workspace / arguments[arguments.index("--output_path") + 1] / "images.txt"
+            path.write_text(path.read_text().replace(".png", ".jpg"))
+        return result
+
+    monkeypatch.setattr(service.deps.process, "run", mismatched_names)
+    with pytest.raises(ColmapError) as error:
+        service.execute(request)
+    assert error.value.code == "COLMAP_ARTIFACT_INVALID"
+    assert not list((tmp_path / "store").rglob("camera_poses.json"))
+
+
 def test_largest_model_and_numeric_tie_break(tmp_path: Path) -> None:
     """Model 2/10 cùng size; chọn 2, không model 0 hoặc filesystem ordering."""
     models = []

@@ -8,6 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from PIL import Image
 
 from src.models.contracts.artifacts import ArtifactDataClass, ProductArtifactRef
 from src.models.contracts.identity import canonical_content_checksum
@@ -17,6 +18,8 @@ from src.models.contracts.video_preparation import (
     ServerVideoPreparationVerification,
 )
 from src.services.orchestration.artifacts.store import ArtifactResolver, FilesystemArtifactStore
+from src.services.reconstruction.adapters.brush_input import BrushInputAdapter
+from src.services.reconstruction.adapters.colmap import ColmapAdapter, ColmapDependencies, ColmapRequest
 from src.services.reconstruction.adapters.colmap_input import ColmapInputAdapter
 from src.services.reconstruction.adapters.torwic_frame_source import TorwicFrameSource, TorwicFrameSourceConfig
 from src.services.reconstruction.rgb.frames.frame_extraction import (
@@ -28,6 +31,10 @@ from src.services.reconstruction.rgb.frames.frame_extraction import (
     RGBFrameExtractor,
 )
 from src.services.reconstruction.rgb.frames.frame_set import FrameSetResolver, NormalizedRGBFrameSet
+from src.services.reconstruction.rgb.frames.manifest_frames import RGBManifestFrameAdapter, RGBManifestFrameSelection
+from src.services.reconstruction.rgb.pose.camera_pose import CameraPose
+from src.services.reconstruction.rgb.pose.pose_publication import CameraPoseResolver
+from src.services.reconstruction.rgb.preflight.ffmpeg_probe import FFmpegRGBProbe
 from src.services.reconstruction.rgb.preflight.privacy import (
     PrivacyDispatchProof,
     PrivacyInspectionEvidence,
@@ -35,11 +42,15 @@ from src.services.reconstruction.rgb.preflight.privacy import (
     PrivacyReviewRequest,
     RGBPrivacyGate,
 )
+from src.services.reconstruction.rgb.preflight.quality import RGBQualityValidator
 from src.services.reconstruction.rgb.preflight.quality_models import (
     RGBFrameQuality,
     RGBMotionDiagnostics,
+    RGBQualityProfile,
     RGBQualityReport,
 )
+from tests.test_reconstruction.test_rec03_colmap import FixtureProcess
+from tests.test_reconstruction.test_rec03_colmap import config as colmap_config
 
 ROOT = Path(__file__).parents[2]
 
@@ -215,6 +226,101 @@ def test_image_refs_keep_source_frames_and_exclude_blur(tmp_path: Path) -> None:
     (colmap_input.image_dir / "000010.png").write_bytes(b"workspace changed")
     assert paths[0].read_bytes() == b"png-0"
     assert len(tuple((tmp_path / "artifacts").rglob("*.png"))) == 0
+
+
+@pytest.mark.parametrize(
+    "suffixes",
+    [(".png", ".png", ".png"), (".jpg", ".jpg", ".jpg"), (".jpeg", ".JPEG", ".jpg"), (".png", ".JPG", ".PNG")],
+    ids=["png", "jpg", "jpeg-aliases", "mixed"],
+)
+def test_image_formats_keep_source_bytes_through_quality_colmap_and_brush(
+    tmp_path: Path, suffixes: tuple[str, ...]
+) -> None:
+    """Real image decoding and fixture COLMAP preserve format, order and checksums through Brush input."""
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=640x480:rate=10",
+            "-frames:v",
+            "3",
+            "-threads",
+            "1",
+            str(tmp_path / "source-%06d.png"),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    paths = tuple(tmp_path / f"input-{index}{suffix}" for index, suffix in enumerate(suffixes))
+    for source, destination in zip(sorted(tmp_path.glob("source-*.png")), paths, strict=True):
+        with Image.open(source) as image:
+            image.save(destination)
+    original_bytes = {path: path.read_bytes() for path in paths}
+    payload = _manifest(paths, "image/png").model_dump(mode="json")
+    for file, path in zip(payload["files"], paths, strict=True):
+        file["media_type"] = "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
+    payload["input_manifest_checksum"] = canonical_content_checksum(payload, "input_manifest_checksum")
+    manifest = InputManifest.model_validate(payload)
+    mapping = {file.artifact_uri: path for file, path in zip(manifest.files, paths, strict=True)}
+    profile = json.loads((ROOT / "configs/product/upload_quality_v2.json").read_text())
+    profile["blur_exclude_gt"] = None
+    profile["profile_checksum"] = canonical_content_checksum(profile, "profile_checksum")
+    selection = RGBManifestFrameSelection(
+        manifest, (0, 1, 2), "sha256:" + "c" * 64, RGBQualityProfile.model_validate(profile)
+    )
+    quality = RGBQualityValidator(FFmpegRGBProbe()).validate(
+        RGBManifestFrameAdapter(mapping.__getitem__).build_request(selection)
+    )
+    assert quality.effective_reconstruction_frame_ids == [0, 1, 2]
+    assert "MOTION_PROBE_FAILED" not in quality.motion.warnings
+    gate, proof = _privacy(manifest, 3)
+    extractor, resolver = _service(tmp_path, manifest, paths, gate)
+    extracted = extractor.execute(
+        FrameExtractionRequest(
+            manifest, quality, proof, _config("image_refs"), "image-formats", {0: "0", 1: "1", 2: "2"}
+        )
+    )
+    frames = FrameSetResolver(lambda ref: mapping[ref.artifact_uri], resolver.require)
+
+    class FormatAwareColmap(FixtureProcess):
+        """Fixture output uses the image names actually staged for COLMAP."""
+
+        def run(self, arguments: list[str], workspace: Path) -> str:
+            result = super().run(arguments, workspace)
+            if arguments[0] == "model_converter":
+                model = workspace / arguments[arguments.index("--output_path") + 1] / "images.txt"
+                text = model.read_text()
+                for index, suffix in enumerate(suffixes):
+                    text = text.replace(f"{index:06d}.png", f"{index:06d}{suffix.lower()}")
+                model.write_text(text)
+            return result
+
+    colmap = ColmapAdapter(
+        ColmapDependencies(frames, FormatAwareColmap(), FilesystemArtifactStore(resolver), resolver.require)
+    )
+    poses_ref = colmap.execute(
+        ColmapRequest(extracted.reference, colmap_config(), tmp_path / "colmap", "image-formats")
+    ).reference
+    brush = BrushInputAdapter(CameraPoseResolver(resolver.require, frames))
+    brush.prepare(poses_ref, tmp_path / "brush")
+    expected_names = {f"{index:06d}{suffix.lower()}" for index, suffix in enumerate(suffixes)}
+    for directory in (tmp_path / "colmap/images", tmp_path / "brush/training/images"):
+        assert {path.name for path in directory.iterdir()} == expected_names
+        for index, source in enumerate(paths):
+            assert (directory / f"{index:06d}{source.suffix.lower()}").read_bytes() == original_bytes[source]
+    assert all(path.read_bytes() == original_bytes[path] for path in paths)
+
+
+@pytest.mark.parametrize("name", ["000002.jpg", "../000001.jpg", "000001.webp", "000001.jpeg/extra"])
+def test_camera_pose_rejects_foreign_identity_or_unsupported_image_name(name: str) -> None:
+    with pytest.raises(ValueError, match="image name"):
+        CameraPose(
+            frame_id=1, image_id=1, camera_id=1, image_name=name, translation=(0, 0, 0), rotation_xyzw=(0, 0, 0, 1)
+        )
 
 
 def test_privacy_and_timestamp_errors_publish_nothing(tmp_path: Path) -> None:

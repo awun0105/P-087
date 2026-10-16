@@ -46,12 +46,10 @@ Yêu cầu của chủ dự án:
   dự án kiểm giấy phép; không công khai bản mẫu.
 
 ## Phần A — Code: nạp bộ ảnh làm đầu vào và gắn video chỉ để xem (mỗi ý một commit có test; test mới đỏ trên code cũ khi ý đó sửa code có sẵn)
-1. **Ảnh JPG đổi sang PNG khi nạp (quyết định Architect 2026-10-17, thay cho cách giữ nguyên JPEG).** Engineer đã thử giữ
-   nguyên JPEG: phải sửa ít nhất 8 file sản phẩm, gồm quy định tên ảnh `.png` ở bước tính camera — vượt ngưỡng, đã hoàn tác. Vì
-   vậy: **không sửa pipeline**. Lệnh nạp ở ý 2 giải mã từng JPG và ghi PNG **không mất dữ liệu** (cùng kích thước, cùng điểm ảnh
-   sau giải mã, không resize, không đổi hệ màu; giữ nguyên hướng ảnh theo EXIF nếu có và ghi rõ trong report), đặt tên theo thứ
-   tự. Ghi vào provenance của project: tên và checksum JPG gốc cho từng frame. Test: ảnh PNG sinh ra có cùng kích thước và cùng
-   giá trị điểm ảnh với JPG sau giải mã (so bằng numpy), và pipeline hiện có nhận bộ PNG đó không cần sửa.
+1. **Pipeline nhận trực tiếp JPG/JPEG và PNG (chỉ dẫn mới của chủ dự án 2026-10-17).** Thay thế quyết định đổi JPG sang PNG
+   khi nạp: mở rộng pipeline qua quality, frame extraction, COLMAP và Brush để nhận cả hai định dạng. Giữ nguyên byte ảnh
+   nguồn và phần mở rộng đúng khi chép sang workspace COLMAP/Brush. Cho phép sửa quá 6 file sản phẩm theo chỉ dẫn này.
+   Test đỏ trên code cũ, rồi xanh: JPEG/PNG đi qua quality → frame extraction → COLMAP → Brush, đúng tên và checksum.
 2. **Lệnh nạp một bộ ảnh**: `scripts/datasets/import_image_scene.py --images <thư mục> --name <tên> --video <mp4>` tạo project +
    job theo đúng đường `SourceType.DATASET` hiện có (đọc `scripts/torwic/` để dùng lại, không viết đường mới song song). Ảnh sắp
    theo tên file. Lệnh **từ chối** nếu thư mục có `sparse/` hoặc `poses_bounds.npy` được truyền vào làm đầu vào; chỉ đọc thư

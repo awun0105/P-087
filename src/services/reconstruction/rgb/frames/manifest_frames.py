@@ -32,12 +32,12 @@ class RGBManifestFrameAdapter:
         verify_content_checksum(manifest, "input_manifest_checksum")
         if not manifest.input_configuration.rgb_present:
             raise RGBValidationError("RGB_MODALITY_MISSING", "InputManifest has no RGB modality", "Supply RGB input")
-        image_files = [item for item in manifest.files if item.media_type == "image/png"]
+        image_files = [item for item in manifest.files if item.media_type in {"image/png", "image/jpeg"}]
         if len(image_files) != len(selection.frame_ids) or not image_files:
             raise RGBValidationError(
                 "RGB_MANIFEST_SELECTION_MISMATCH",
                 "RGB frame selection differs from InputManifest",
-                "Bind one PNG input file to each selected reconstruction ID",
+                "Bind one PNG or JPEG input file to each selected reconstruction ID",
             )
         frames = tuple(
             RGBFrameAsset(frame_id, self.resolve(item.artifact_uri), item.checksum, size_bytes=item.size_bytes)

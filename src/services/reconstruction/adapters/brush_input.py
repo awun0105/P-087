@@ -8,7 +8,7 @@ from pathlib import Path
 from src.models.contracts.artifacts import ProductArtifactRef
 from src.services.reconstruction.adapters.colmap_model import read_sparse_model
 from src.services.reconstruction.adapters.colmap_runtime import ColmapProcess
-from src.services.reconstruction.rgb.frames.frame_set import _sha256
+from src.services.reconstruction.rgb.frames.frame_set import _sha256, frame_image_name
 from src.services.reconstruction.rgb.pose.camera_pose import CameraPoseArtifact
 from src.services.reconstruction.rgb.pose.pose_publication import CameraPoseResolver
 from src.services.reconstruction.rgb.preflight.ffmpeg_probe import FFmpegRGBProbe
@@ -41,10 +41,13 @@ class BrushInputAdapter:
             raise ValueError("COLMAP payload differs from camera pose manifest")
         image_dir = source / "images"
         image_dir.mkdir()
-        registered = {pose.frame_id for pose in artifact.poses}
+        registered = {pose.frame_id: pose.image_name for pose in artifact.poses}
         for frame_id, path, _ in rows:
             if frame_id in registered:
-                shutil.copyfile(path, image_dir / f"{frame_id:06d}.png")
+                name = frame_image_name(frame_id, path)
+                if name != registered[frame_id]:
+                    raise ValueError("camera image name differs from source frame format")
+                shutil.copyfile(path, image_dir / name)
         distorted = any(c.model not in {"PINHOLE", "SIMPLE_PINHOLE"} for c in artifact.cameras)
         version = self._undistort(workspace) if distorted else "not_required"
         if not distorted:

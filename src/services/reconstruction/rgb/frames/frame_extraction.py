@@ -345,7 +345,7 @@ class RGBFrameExtractor:
         )
 
     def _image_frames(self, request: FrameExtractionRequest) -> list[NormalizedRGBFrame]:
-        files = [file for file in request.manifest.files if file.media_type == "image/png"]
+        files = [file for file in request.manifest.files if file.media_type in {"image/png", "image/jpeg"}]
         if len(files) != len(request.quality.frames) or request.timestamps is None:
             raise FrameExtractionError(
                 "FRAME_INPUT_MISMATCH", "Image inventory/timestamps are incomplete", "Supply ordered source timestamps"

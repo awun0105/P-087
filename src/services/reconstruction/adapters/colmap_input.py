@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from src.models.contracts.artifacts import ProductArtifactRef
-from src.services.reconstruction.rgb.frames.frame_set import FrameSetResolver
+from src.services.reconstruction.rgb.frames.frame_set import FrameSetResolver, frame_image_name
 
 
 @dataclass(frozen=True)
@@ -25,7 +25,7 @@ class ColmapInputAdapter:
         self.frame_sets = frame_sets
 
     def prepare(self, reference: ProductArtifactRef, workspace: Path) -> ColmapImageInput:
-        """Không sửa source PNG, không nhận private folder làm input contract."""
+        """Giữ byte và định dạng ảnh nguồn, không nhận private folder làm input contract."""
         frame_set = self.frame_sets.load(reference)
         rows = self.frame_sets.materialize(frame_set)
         image_dir = workspace / "images"
@@ -34,7 +34,7 @@ class ColmapInputAdapter:
         image_dir.mkdir(parents=True)
         try:
             for frame_id, source, _ in rows:
-                destination = image_dir / f"{frame_id:06d}.png"
+                destination = image_dir / frame_image_name(frame_id, source)
                 shutil.copyfile(source, destination)
         except (OSError, ValueError):
             shutil.rmtree(image_dir)

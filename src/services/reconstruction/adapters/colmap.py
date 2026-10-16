@@ -272,7 +272,10 @@ class ColmapAdapter:
                 ],
                 workspace,
             )
-            models.append(read_sparse_model(output, frame_ids))
+            model = read_sparse_model(output, frame_ids)
+            if any(not (workspace / "images" / pose.image_name).is_file() for pose in model.poses):
+                raise ValueError("COLMAP model image name differs from staged source format")
+            models.append(model)
         return models
 
     def _payload(self, request: ColmapRequest, images: ColmapImageInput, best: ParsedSparseModel) -> dict:

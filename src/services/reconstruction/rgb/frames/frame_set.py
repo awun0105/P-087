@@ -100,6 +100,14 @@ class FrameSetResolver:
         return tuple(rows)
 
 
+def frame_image_name(frame_id: int, source: Path) -> str:
+    """Canonical frame identity keeps the source image format without re-encoding."""
+    suffix = source.suffix.lower()
+    if suffix not in {".png", ".jpg", ".jpeg"}:
+        raise ValueError("unsupported RGB frame image name")
+    return f"{frame_id:06d}{suffix}"
+
+
 def _sha256(path: Path) -> str:
     """Hash source bytes without loading a large frame into memory."""
     with path.open("rb") as stream:
