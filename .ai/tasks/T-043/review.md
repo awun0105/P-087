@@ -1,6 +1,6 @@
 # Review T-043
 
-Verdict: CHANGES REQUESTED (1 sửa nhỏ)
+Verdict (vòng 1): CHANGES REQUESTED (1 sửa) · Vòng 2: ACCEPTED
 
 Audit: 12 commit `73fcfb46` → `5d974325`. Đọc giới hạn mới ở `colmap_runtime.py`, `brush_runtime.py`, `src/config.py`,
 `runner._expected_limit` / `_run_tool`, file mẫu env. Chạy `test_process_stall.py`, `test_expected_duration.py`,
@@ -29,3 +29,11 @@ finalize (voxel, MoGe nếu có) và ghi kết quả vào report.
   của COLMAP trong T-045 và báo nếu vượt 300 s.
 - Laptop vẫn đặt COLMAP/Brush 3600 s trong `scripts/gpu/studio.env` (file riêng của máy, task không sửa). Chủ dự án nên bỏ hai
   dòng đó (để mặc định mới) trước khi chạy T-045 Phần B.
+
+## Round 2 — ACCEPTED
+
+Audit `f735369c`: `product_preview_timeout_seconds` và `product_finalize_timeout_seconds` mặc định 36000 s (`src/config.py:73,78`),
+đồng bộ `docker_entrypoint.sh`, `scripts/gpu/studio.env.example`, `.env.example`. Engineer tự phát hiện thêm finalize (7200 s <
+Brush 21600 + 6 lần voxel) và sửa cùng loại, chấp nhận. `tests/test_reconstruction/test_tool_time_limits.py`: 5 PASS (đỏ trên code
+cũ theo report). Điểm chưa đếm chính xác số lần gọi voxel của `SplatTransformSimilarityAdapter` đã ghi trong report; còn dư
+3600 s, không chặn.

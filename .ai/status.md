@@ -41,5 +41,5 @@ T-040 | Bỏ chép runtime manifest tay | accepted | —
 T-041 | Deploy production thử trọn | planned | engineer
 T-042 | GPU worker trên RunPod Serverless | planned | engineer
 T-044 | Trang tiến trình nói đúng, đủ cho scene thật và scene mẫu | accepted | —
-T-043 | Dừng công cụ theo tiến độ và khối lượng scene | changes-requested | engineer
+T-043 | Dừng công cụ theo tiến độ và khối lượng scene | accepted | —
 T-045 | Chạy 9 scene Deep Blending + Mip-NeRF 360 từ ảnh, kèm video xem lại | planned | engineer
