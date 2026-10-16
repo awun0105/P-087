@@ -95,6 +95,9 @@ ghi vào trong repo. Ba file `api.env.example`, `worker.env.example`, `web.env.e
   đồng ý giấy phép khi tải): chạy `python -m scripts.gpu.egoblur_weights upload --from <thư mục>` một lần để đưa
   hai file lên R2, sau đó pod nào có biến trên cũng tự tải và kiểm sha256 lúc khởi động. Đổi pod không cần
   chép tay.
+- **Giới hạn thời gian công cụ** (T-043): công cụ treo bị dừng theo tiến độ log (`R2S_<CÔNG CỤ>_STALL_SECONDS`),
+  scene đã có số đo thì có hạn tự tính, còn giới hạn cứng chỉ là lưới cuối (COLMAP 14400 s, Brush 21600 s). Trần giờ GPU
+  mỗi scene đặt bằng `PRODUCT_JOB_GPU_HOURS_MAX`, mặc định tắt. Chi tiết trong `scripts/gpu/README.md`.
 - **Worker đo RAM và CPU theo giới hạn của container** (AUD-26.S4). Chưa kiểm trên pod thật.
 - **Image GPU chưa từng được build trọn vẹn.** Image dựng bằng `scripts/gpu/install.sh` (cùng công thức với laptop, ghi `/opt/real2sim/runtime.env`), nhưng T-038 chưa build image: lần build thật là T-039 và chạy `preflight` trong container.
 

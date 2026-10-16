@@ -81,6 +81,23 @@ VRAM/RAM/đĩa. Worker tự đo máy (GPU, VRAM, CPU, RAM, ổ trống) mỗi 5 
 số đo đó để đề xuất "tối đa cho máy này" và tô đỏ thông số có thể gây crash.
 Thông số người dùng chọn được lưu thành `config/processing.json` của job.
 
+### Giới hạn thời gian của công cụ (T-043)
+
+Mỗi lượt chạy có ba lớp, theo thứ tự tác dụng:
+
+1. **Canh treo theo tiến độ** (chính): COLMAP, Brush, voxel/splat, MoGe, LiDAR odometry và ObjectGS dừng khi log không tăng
+   trong cửa sổ `R2S_<CÔNG CỤ>_STALL_SECONDS` (COLMAP 600 s, voxel 120 s, MoGe và LiDAR 300 s, ObjectGS
+   `PRODUCT_OBJECTGS_STALL_SECONDS` 1800 s; Brush giữ `R2S_BRUSH_HANG_TIMEOUT_SECONDS` 180 s). Lỗi là `PROCESS_STALLED`
+   (hoặc `VISUAL_HANG_TIMEOUT` của Brush), có thể thử lại.
+2. **Hạn tự tính theo số đo** (job-level: prepare, preview, finalize): khi có đủ ba lượt đo cùng GPU, hạn =
+   `max(10 phút, 3 × ước)`, không vượt lớp 3. Ước ghi ở `<tool>.expected.json` trong workspace của lượt chạy. Vượt hạn là
+   `EXPECTED_DURATION_EXCEEDED`, có thể thử lại.
+3. **Giới hạn cứng** (lưới cuối): `R2S_COLMAP_TIMEOUT_SECONDS` 14400, `R2S_BRUSH_TIMEOUT_SECONDS` 21600 (mặc định trong
+   code). Không dùng để phát hiện treo.
+
+Trần giờ GPU mỗi scene là tuỳ chọn: `PRODUCT_JOB_GPU_HOURS_MAX` (không đặt = không giới hạn). Vượt là
+`GPU_BUDGET_EXCEEDED`, không tự thử lại.
+
 ## 4. Chạy stack
 
 ```bash

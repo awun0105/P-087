@@ -27,7 +27,8 @@ class BrushRuntimeSettings(RuntimeSettings):
     command: tuple[str, ...] = ("brush",)
     expected_version: str = Field(min_length=1)
     runtime_identity: str = Field(min_length=1)
-    timeout_seconds: float = Field(default=1800, gt=0, allow_inf_nan=False)
+    #: Giới hạn cứng (lưới cuối, T-043 bước 6); treo và hạn tự tính chạy trước nó.
+    timeout_seconds: float = Field(default=21600, gt=0, allow_inf_nan=False)
     environment: dict[str, str] = Field(default_factory=dict)
     #: Khoảng cách mong muốn (số bước) giữa hai checkpoint khi có kho resume; 0 = không checkpoint.
     checkpoint_every: int = Field(default=2500, ge=0)

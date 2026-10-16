@@ -28,7 +28,8 @@ class ColmapRuntimeSettings(RuntimeSettings):
 
     command: tuple[str, ...] = ("colmap",)
     runtime_identity: str = Field(min_length=1)
-    timeout_seconds: float = Field(gt=0, default=1800, allow_inf_nan=False)
+    #: Giới hạn cứng mỗi lệnh COLMAP (lưới cuối, T-043 bước 6). Canh treo và hạn tự tính chạy trước nó.
+    timeout_seconds: float = Field(gt=0, default=14400, allow_inf_nan=False)
     #: Không dấu hiệu tiến triển (log, database, sparse/) trong khoảng này thì coi như treo. Đo từ log COLMAP thật:
     #: khoảng im lặng lớn nhất là 16,5 s (bundle adjustment toàn cục), nên 600 s cách xa nhiều lần. Xem report T-043.
     stall_seconds: float = Field(gt=0, default=600, allow_inf_nan=False)
