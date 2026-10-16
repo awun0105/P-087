@@ -1282,6 +1282,32 @@ def test_sampler_failures_never_change_the_region_result(world, monkeypatch, tmp
     assert state.status == "done" and state.result_revision is not None
 
 
+def test_geometry_build_records_one_scene_geometry_usage(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    registry, job, _, settings = world
+    base = _geometry_draft(world, monkeypatch, tmp_path)
+    monkeypatch.setattr(scene_objectify_queue, "box_candidates_require_gpu", lambda _: False)
+
+    def operation(
+        registry_arg, settings_arg, job_id, *, expected_revision, workspace, commit_guard, cancel_event, progress
+    ):  # noqa: ANN001, ANN202
+        time.sleep(0.05)  # bảo đảm duration_seconds > 0 với sampler thật
+        ready = base.model_copy(update={"provenance": {**base.provenance, "object_geometry": "ready"}})
+        return registry.scene.publish_next(
+            job_id, expected_revision, ready, "geometry", commit_guard=commit_guard
+        ).revision.scene.scene_revision
+
+    monkeypatch.setattr(scene_objectify_queue, "build_object_geometry", operation, raising=False)
+    accepted = scene_objectify_queue.request(
+        registry, settings, job.job_id, base.scene_revision, "geometry", actor_id="fixture-user"
+    )
+    assert scene_objectify_queue.process_next(registry, settings) is True
+    usages = _scene_usages(settings)
+    assert [(u.tool, u.outcome, u.attempt_id) for u in usages] == [
+        ("scene.geometry", "completed", accepted.operation_id)
+    ]
+    assert usages[0].duration_seconds > 0
+
+
 def test_missing_sampler_still_publishes_and_records_nothing(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
     registry, job, _, settings = world
     base, command = _ready_region_request(world, monkeypatch, tmp_path)
