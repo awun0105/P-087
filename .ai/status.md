@@ -33,7 +33,7 @@ T-032 | Bảng metric + xuất JSON/CSV/MD | accepted | —
 T-033 | Panel Benchmark trong Studio | accepted | —
 T-034 | Thẻ Giá trị + trang /benchmark | accepted | —
 T-035 | Regression + hướng dẫn đo | accepted | —
-T-036 | Đổi tên thư mục runtime và biến RECxx_* theo chức năng | changes-requested | cần Architect
+T-036 | Đổi tên thư mục runtime và biến RECxx_* theo chức năng | changes-requested | engineer
 T-037 | Script dựng runtime ObjectGS | in-progress | engineer
 T-038 | Một công thức cài cho mọi máy GPU | planned | engineer
 T-039 | Build image GPU thật + job trên pod RunPod | planned | engineer
