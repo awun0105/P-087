@@ -81,3 +81,57 @@ Không sửa `ScenePage.tsx`.
 ## Câu hỏi cho Architect
 
 Không có câu hỏi chặn. Có một quyết định nên được xác nhận: deviation 4 (409 chỉ tải lại bản đã lưu, giữ nhập liệu).
+
+## Round 2
+
+Đã làm theo `review.md`, mục "Required changes" (3 mục), và xử lý ghi chú về nút/quyền.
+
+### 1. Khe/đoạn lần hai lấy lại hai điểm cũ — đã sửa, có test đỏ/xanh
+
+- `BenchmarkPanel.tsx`: thêm `pickBaseline` (ref) lưu `picker.points` tại lúc `startPick`. Effect nhận điểm chỉ khi
+  `picker.points` khác bộ đó. Bỏ dòng `eslint-disable-next-line react-hooks/set-state-in-effect` vì eslint báo
+  "Unused eslint-disable directive" (đúng hướng dẫn review).
+- Test mới: "thêm khe ngay sau một đoạn: không lấy lại hai điểm cũ còn trên viewer, chờ hai điểm mới".
+- Kiểm chứng: bỏ điều kiện so sánh bộ điểm thì test này **đỏ** (`× … không lấy lại hai điểm cũ`); khôi phục thì xanh.
+
+### 2. Quyền sửa lấy từ nguồn của máy chủ — đã sửa
+
+- Nguồn: `ScenePage` đã tính `canMutateJob = resourceCapabilityAllowed(me, progress.capabilities.can_mutate)` và truyền
+  `canMutate` xuống `StudioTab` (đã có sẵn). `StudioTab` chỉ render `ObjectReviewView` khi `sceneReady`, nên prop được
+  truyền thêm vào đây: `<ObjectReviewView canMutateJob={canMutate} …/>`. Không sửa `ScenePage.tsx`.
+- `ObjectReviewView`: prop mới `canMutateJob?: boolean` (mặc định `false`); `benchmarkEditable = canMutateJob`.
+  Bỏ `useOptionalAuth`/`canEdit` khỏi `ObjectReviewView`; gỡ `useOptionalAuth` khỏi `AuthProvider.tsx` vì không còn nơi gọi.
+- Lựa chọn về nút (review cho chọn một): nút **"Benchmark" hiện với mọi scene**; panel nhận `canEdit = canMutateJob`, nên
+  người không có quyền sửa job mở được panel ở chế độ chỉ đọc (ô khoá, không có nút Lưu hoạt động). Ghi chú: `StudioTab`
+  vẫn chặn cả tab khi `canMutate` false, nên trên đường đi thực tế người không có quyền hiện không tới được panel; test
+  kiểm chế độ chỉ đọc ở mức `ObjectReviewView`.
+- Test mới trong `tests/object-review.test.tsx` (describe "ObjectReviewView Benchmark theo quyền sửa job (T-033)"):
+  - `canMutateJob={false}`: ô "Bề rộng (m)" bị khoá, nút Lưu bị khoá, có thông báo "chỉ có quyền xem".
+  - `canMutateJob` (true): ô sửa được, đổi giá trị thì Lưu bật.
+
+### 3. Mốc làm tay nhập sai bị bỏ im lặng — đã sửa, có test
+
+- `draftProblems` thêm kiểm tra: `manualBaselineMinutes` không rỗng mà `parseMinutes` trả null → báo
+  "Mốc làm tay phải là số phút ≥ 0 (dùng dấu chấm cho phần thập phân)", nút Lưu bị khoá.
+- Test mới: nhập "-5" → hiện lỗi, Lưu khoá; nhập "12.5" → PUT gửi `manual_baseline_minutes: 12.5`.
+
+### Kết quả kiểm (lệnh thật)
+
+- `vitest run tests/benchmark-panel.test.tsx tests/object-review.test.tsx`: **76 passed, 0 failed** (benchmark-panel 13,
+  object-review 63).
+- `vitest run tests/studio-ownership.test.tsx tests/ux-scene-flow.test.tsx tests/operator-time-scene.test.tsx`:
+  **25 passed, 0 failed** (các file dùng `StudioTab`/`ObjectReviewView` trên đường đi này).
+- `npx tsc --noEmit`: **exit 0**.
+- `eslint` trên `value/`, `ObjectReviewView.tsx`, `StudioTab.tsx`, `AuthProvider.tsx` và hai file test: **exit 0**.
+
+### Commit (Round 2)
+
+- `02ce031d` Ignore stale picked points when adding a second benchmark item (mục 1 và 3, kèm test)
+- `10880451` Take benchmark edit permission from the job's mutate capability (mục 2, kèm test)
+
+### Chưa làm (không chặn, từ phần Suggestions)
+
+- Chưa tắt lớp phủ collider/vỏ/box trong lúc chọn điểm Benchmark (`Picker` đang trên cả `app.scene`).
+- Chưa đổi nhãn "Bỏ chọn {id}" thành "vật đã xoá ({id})".
+- Ghi chú: `frontend/src/lib/api/value.ts` đang có thay đổi chưa commit không do tôi (có `ValueCard.tsx` mới của
+  người khác); tôi không đụng vào.
