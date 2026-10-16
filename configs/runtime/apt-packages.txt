@@ -31,3 +31,4 @@ libomp5-18
 libsqlite3-0
 libssl3t64
 zstd
+python3-venv

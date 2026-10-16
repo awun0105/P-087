@@ -30,13 +30,17 @@ LAUNCHER
       chmod +x "$COLMAP_LAUNCHER"
       ;;
     binary)
-      command -v zstd >/dev/null || die "cần zstd để giải nén gói COLMAP (apt: zstd)"
-      local bundle="$TMP_DIR/colmap-bundle.tar.zst"
-      local from=()
-      [ -n "${COLMAP_FROM_FILE:-}" ] && from=(--from-file "$COLMAP_FROM_FILE")
-      "$(py_bin)" -m scripts.gpu.colmap_binary fetch --out "$bundle" "${from[@]}"
-      mkdir -p "$GOC/colmap" "$(dirname "$COLMAP_BINARY_WRAPPER")"
-      zstd -dc "$bundle" | tar -x -C "$GOC/colmap" --strip-components=1
+      # Đã có sẵn cây COLMAP đã giải nén (image COPY vào <gốc>/colmap) thì chỉ tạo wrapper; không thì tải và giải nén.
+      if [ ! -x "$GOC/colmap/bin/colmap" ]; then
+        command -v zstd >/dev/null || die "cần zstd để giải nén gói COLMAP (apt: zstd)"
+        local bundle="$TMP_DIR/colmap-bundle.tar.zst"
+        local from=()
+        [ -n "${COLMAP_FROM_FILE:-}" ] && from=(--from-file "$COLMAP_FROM_FILE")
+        "$(py_bin)" -m scripts.gpu.colmap_binary fetch --out "$bundle" "${from[@]}"
+        mkdir -p "$GOC/colmap"
+        zstd -dc "$bundle" | tar -x -C "$GOC/colmap" --strip-components=1
+      fi
+      mkdir -p "$(dirname "$COLMAP_BINARY_WRAPPER")"
       cat > "$COLMAP_BINARY_WRAPPER" <<WRAPPER
 #!/bin/sh
 LD_LIBRARY_PATH="$GOC/colmap/lib\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}" exec "$GOC/colmap/bin/colmap" "\$@"

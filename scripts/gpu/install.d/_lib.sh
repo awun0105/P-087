@@ -67,10 +67,11 @@ load_runtime_env() {
   done < "$1"
 }
 
-# Danh sách biến mà runtime.env được phép có. Không có DATABASE_URL, khoá, hay đường dẫn dữ liệu.
-RUNTIME_ENV_ALLOWED="R2S_COLMAP_COMMAND R2S_COLMAP_RUNTIME_IDENTITY R2S_COLMAP_TIMEOUT_SECONDS
-R2S_BRUSH_COMMAND R2S_BRUSH_EXPECTED_VERSION R2S_BRUSH_ENVIRONMENT R2S_BRUSH_RUNTIME_IDENTITY R2S_BRUSH_TIMEOUT_SECONDS
-R2S_BRUSH_LPIPS_PYTHON R2S_SPLAT_DEVICE R2S_SPLAT_MODULE_PATH R2S_VOXEL_CLI R2S_VOXEL_MODULE_PATH R2S_VOXEL_TIMEOUT_SECONDS
+# Danh sách biến mà runtime.env được phép có: đường dẫn và định danh runtime, không có secret, DATABASE_URL, hay dữ liệu.
+# Timeout là chính sách vận hành (scripts/gpu/studio.env.example), không đặt ở đây.
+RUNTIME_ENV_ALLOWED="R2S_COLMAP_COMMAND R2S_COLMAP_RUNTIME_IDENTITY
+R2S_BRUSH_COMMAND R2S_BRUSH_EXPECTED_VERSION R2S_BRUSH_ENVIRONMENT R2S_BRUSH_RUNTIME_IDENTITY
+R2S_BRUSH_LPIPS_PYTHON R2S_SPLAT_DEVICE R2S_SPLAT_MODULE_PATH R2S_VOXEL_CLI R2S_VOXEL_MODULE_PATH R2S_NODE_BIN_DIR
 R2S_MOGE_PYTHON R2S_MOGE_MODEL R2S_LIDAR_ODOMETRY_PYTHON
 PRODUCT_SCENE_RUNTIME_PYTHON PRODUCT_SAM2_CHECKPOINT PRODUCT_LAMA_CHECKPOINT
 PRODUCT_OBJECTGS_RUNTIME_PYTHON PRODUCT_OBJECTGS_REPOSITORY PRODUCT_OBJECTGS_GSPLAT_REPOSITORY PRODUCT_OBJECTGS_CUDA_HOME
@@ -88,21 +89,20 @@ write_runtime_env() {
     if [ "$COLMAP_MODE" = binary ]; then put R2S_COLMAP_COMMAND "[\"$COLMAP_BINARY_WRAPPER\"]"
     else put R2S_COLMAP_COMMAND "[\"sh\",\"$COLMAP_LAUNCHER\"]"; fi
     put R2S_COLMAP_RUNTIME_IDENTITY "colmap-image-$(pin COLMAP_IMAGE | sed 's/.*@//')"
-    put R2S_COLMAP_TIMEOUT_SECONDS 7200
   fi
   if has brush "$@"; then
     put R2S_BRUSH_COMMAND "[\"$BRUSH_BIN\"]"
     put R2S_BRUSH_EXPECTED_VERSION "$(pin BRUSH_VERSION)"
     put R2S_BRUSH_ENVIRONMENT '{"RUST_LOG":"info,wgpu_core=warn","VK_ICD_FILENAMES":"/usr/share/vulkan/icd.d/nvidia_icd.json"}'
     put R2S_BRUSH_RUNTIME_IDENTITY "brush-v$(pin BRUSH_VERSION)-linux-archive-sha256:$(pin BRUSH_SHA)"
-    put R2S_BRUSH_TIMEOUT_SECONDS 14400
   fi
   if has splat "$@"; then
     put R2S_SPLAT_DEVICE gpu
     put R2S_SPLAT_MODULE_PATH "$SPLAT_MODULE"
     put R2S_VOXEL_CLI "$VOXEL_CLI"
     put R2S_VOXEL_MODULE_PATH "$SPLAT_MODULE"
-    put R2S_VOXEL_TIMEOUT_SECONDS 1800
+    # Node do ta cài (không phải --system-node): app gọi `node` từ PATH nên container cần thư mục bin của nó.
+    if [ -x "$NODE_BIN" ]; then put R2S_NODE_BIN_DIR "$(dirname "$NODE_BIN")"; fi
   fi
   if has lidar_odometry "$@"; then
     put R2S_LIDAR_ODOMETRY_PYTHON "$LIDAR/bin/python"
@@ -125,6 +125,12 @@ write_runtime_env() {
     put PRODUCT_OBJECTGS_CXX "$OBJGS/cuda/bin/x86_64-conda-linux-gnu-g++"
     put PRODUCT_OBJECTGS_GLM_REPOSITORY "$OBJGS/glm"
     put PRODUCT_OBJECTGS_EXTENSION_CACHE_DIR "$OBJGS/torch_extensions"
+  fi
+  # Lần chạy chỉ có một phần thành phần (--only) không được xoá dòng của thành phần khác đã ghi trước đó.
+  if [ -f "$out" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      grep -q "^${line%%=*}=" "$tmp" || printf '%s\n' "$line" >> "$tmp"
+    done < "$out"
   fi
   mv "$tmp" "$out"
 }
