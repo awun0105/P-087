@@ -1,13 +1,13 @@
-"""Sự kiện giá trị do trình duyệt gửi: phút công người và phiên Walk (architecture §15.3).
+"""Sự kiện giá trị do trình duyệt gửi (architecture §15.3) và ground truth benchmark (§15.2).
 
-Route không trả dữ liệu; mọi lô bị từ chối 422 trước khi ghi. `actor_id` luôn lấy từ người đăng nhập.
+Route ghi sự kiện không trả dữ liệu; mọi lô bị từ chối 422 trước khi ghi. `actor_id` luôn lấy từ người đăng nhập.
 """
 
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import AwareDatetime, BaseModel, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 from src.api.auth import require_contributor
 from src.api.ownership import authorize_job_mutation
@@ -15,7 +15,15 @@ from src.api.studio import deps
 from src.services.orchestration.auth import UserRecord
 from src.services.orchestration.jobs.database import RuntimeDatabase
 from src.services.orchestration.projects import JobNotFoundError
+from src.services.orchestration.scene.errors import SceneError
 from src.services.orchestration.value.events import list_events, record_event
+from src.services.orchestration.value.ground_truth import (
+    BenchmarkTruth,
+    StoredTruth,
+    TruthVersionConflictError,
+    read_truth,
+    write_truth,
+)
 
 router = APIRouter()
 _ERRORS = {404: {"description": "Job không tồn tại"}, 422: {"description": "Lô sự kiện vi phạm luật ghi nhận"}}
@@ -54,13 +62,16 @@ def _check_clock(started_at: datetime, ended_at: datetime) -> timedelta:
     return ended_at - started_at
 
 
-def _authorize(user: UserRecord | None, job_id: str) -> None:
-    registry = deps.registry()
+def _job_exists(job_id: str) -> None:
     try:
-        registry.get_job(job_id)
+        deps.registry().get_job(job_id)
     except JobNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
-    authorize_job_mutation(user, registry, job_id, operation="ghi thời gian thao tác của")
+
+
+def _authorize(user: UserRecord | None, job_id: str, *, operation: str = "ghi thời gian thao tác của") -> None:
+    _job_exists(job_id)
+    authorize_job_mutation(user, deps.registry(), job_id, operation=operation)
 
 
 def _database() -> RuntimeDatabase:
@@ -140,3 +151,70 @@ def record_walk_session(
         },
         actor_id=user.user_id if user is not None else None,
     )
+
+
+class BenchmarkTruthResponse(BaseModel):
+    version: int
+    truth: BenchmarkTruth
+    updated_at: datetime | None
+
+
+class BenchmarkTruthWrite(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_version: int = Field(ge=0)
+    truth: BenchmarkTruth
+
+
+def _truth_response(stored: StoredTruth) -> BenchmarkTruthResponse:
+    return BenchmarkTruthResponse(version=stored.version, truth=stored.truth, updated_at=stored.updated_at)
+
+
+def _reference_problems(job_id: str, truth: BenchmarkTruth) -> list[str]:
+    """Revision của layout và vật cản chính phải có thật trong job; trả danh sách lỗi tiếng Việt."""
+    if not truth.layouts and not truth.key_obstacle_ids:
+        return []
+    registry = deps.registry()
+    problems: list[str] = []
+    try:
+        for key in sorted(truth.layouts):
+            revision = truth.layouts[key].scene_revision
+            if registry.scene.revision(job_id, revision) is None:
+                problems.append(f"layout {key}: revision {revision} không phải revision của job này")
+        if truth.key_obstacle_ids:
+            objects = {item.id for item in registry.scene.current(job_id).scene.objects}
+            missing = [item for item in truth.key_obstacle_ids if item not in objects]
+            if missing:
+                problems.append("vật cản chính không có trong scene hiện tại: " + ", ".join(missing))
+    except SceneError:
+        problems.append("job chưa có scene đọc được nên chưa đối chiếu được revision và vật cản chính")
+    return problems
+
+
+@router.get("/jobs/{job_id}/benchmark-truth", response_model=BenchmarkTruthResponse, responses=_ERRORS)
+def read_benchmark_truth(job_id: str, user: UserRecord | None = Depends(require_contributor)) -> BenchmarkTruthResponse:
+    """Ground truth của job; job chưa có tài liệu thì version 0 và giá trị mặc định, không 404."""
+    _job_exists(job_id)
+    return _truth_response(read_truth(_database(), job_id))
+
+
+@router.put(
+    "/jobs/{job_id}/benchmark-truth",
+    response_model=BenchmarkTruthResponse,
+    responses={**_ERRORS, 409: {"description": "Tài liệu đã đổi so với expected_version"}},
+)
+def write_benchmark_truth(
+    job_id: str,
+    body: BenchmarkTruthWrite,
+    user: UserRecord | None = Depends(require_contributor),
+) -> BenchmarkTruthResponse:
+    """Ghi ground truth với kiểm version (CAS): lệch version thì 409, sai tham chiếu thì 422."""
+    _authorize(user, job_id, operation="sửa ground truth benchmark của")
+    problems = _reference_problems(job_id, body.truth)
+    if problems:
+        raise _reject("; ".join(problems))
+    try:
+        stored = write_truth(_database(), job_id, body.expected_version, body.truth)
+    except TruthVersionConflictError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+    return _truth_response(stored)

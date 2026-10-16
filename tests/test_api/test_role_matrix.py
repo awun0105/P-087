@@ -46,6 +46,8 @@ REVIEWER = {
 AUTHENTICATED = {
     ("POST", "/jobs/{job_id}/value-events/operator-time"),
     ("POST", "/jobs/{job_id}/value-events/walk-session"),
+    ("GET", "/jobs/{job_id}/benchmark-truth"),
+    ("PUT", "/jobs/{job_id}/benchmark-truth"),
     ("GET", "/imports"),
     ("POST", "/imports"),
     ("DELETE", "/imports/{import_id}"),

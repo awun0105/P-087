@@ -253,3 +253,106 @@ async def test_failed_event_write_still_returns_no_content(
     response = await client.post(_OPERATOR.format(job_id=world.job_id), json=_batch(120, 60))
 
     assert response.status_code == 204
+
+
+_TRUTH = "/api/v1/jobs/{job_id}/benchmark-truth"
+_SCENE_JOB = "job-fixture-001"  # job seed có SceneIR thật, dùng để kiểm revision và vật cản
+
+
+def _truth_body(expected_version: int, **truth: object) -> dict:
+    body = {"include_in_benchmark": True, "notes": "bản thử"}
+    body.update(truth)
+    return {"expected_version": expected_version, "truth": body}
+
+
+@pytest.mark.asyncio
+async def test_missing_truth_reads_as_version_zero_not_404(
+    client: AsyncClient, world: SimpleNamespace, as_user
+) -> None:  # noqa: ANN001
+    as_user(_user("guest", "user-owner"))
+
+    response = await client.get(_TRUTH.format(job_id=world.job_id))
+
+    assert response.status_code == 200
+    assert response.json()["version"] == 0
+    assert response.json()["updated_at"] is None
+    assert response.json()["truth"]["include_in_benchmark"] is False
+
+
+@pytest.mark.asyncio
+async def test_truth_write_is_cas_and_read_back_matches(client: AsyncClient, world: SimpleNamespace, as_user) -> None:  # noqa: ANN001
+    as_user(_user("guest", "user-owner"))
+    url = _TRUTH.format(job_id=world.job_id)
+
+    written = await client.put(url, json=_truth_body(0, notes="lần đầu"))
+    stale = await client.put(url, json=_truth_body(0, notes="ghi muộn"))
+    read = await client.get(url)
+
+    assert written.status_code == 200 and written.json()["version"] == 1
+    assert stale.status_code == 409
+    assert read.json()["version"] == 1
+    assert read.json()["truth"]["notes"] == "lần đầu"
+    assert read.json()["updated_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_unknown_revision_and_missing_obstacle_are_422_with_the_wrong_item(
+    client: AsyncClient, world: SimpleNamespace, as_user
+) -> None:  # noqa: ANN001
+    # Job có scene thật là job-fixture-001 (seed, không có chủ sở hữu): gọi không đăng nhập như workspace cục bộ.
+    as_user(None)
+    url = _TRUTH.format(job_id=_SCENE_JOB)
+
+    bad_layout = await client.put(
+        url,
+        json=_truth_body(
+            0,
+            layouts={"A": {"scene_revision": "rev-khong-co", "tagged_at": "2026-10-16T08:00:00+00:00"}},
+        ),
+    )
+    bad_obstacle = await client.put(url, json=_truth_body(0, key_obstacle_ids=["vat-khong-co"]))
+
+    assert bad_layout.status_code == 422
+    assert "layout A" in bad_layout.json()["detail"] and "rev-khong-co" in bad_layout.json()["detail"]
+    assert bad_obstacle.status_code == 422
+    assert "vat-khong-co" in bad_obstacle.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_existing_revision_and_object_pass_the_reference_check(
+    client: AsyncClient, world: SimpleNamespace, as_user
+) -> None:  # noqa: ANN001
+    as_user(None)
+    scene = world.registry.scene.current(_SCENE_JOB).scene
+    obstacle = scene.objects[0].id
+    layout = {"scene_revision": scene.scene_revision, "tagged_at": "2026-10-16T08:00:00+00:00"}
+
+    response = await client.put(
+        _TRUTH.format(job_id=_SCENE_JOB),
+        json=_truth_body(0, layouts={"A": layout}, key_obstacle_ids=[obstacle]),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["truth"]["key_obstacle_ids"] == [obstacle]
+
+
+@pytest.mark.asyncio
+async def test_foreign_guest_can_read_but_not_write_the_truth(
+    client: AsyncClient, world: SimpleNamespace, as_user
+) -> None:  # noqa: ANN001
+    as_user(_user("guest", "user-other"))
+    url = _TRUTH.format(job_id=world.job_id)
+
+    read = await client.get(url)
+    write = await client.put(url, json=_truth_body(0))
+
+    assert read.status_code == 200
+    assert write.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_truth_routes_return_404_for_an_unknown_job(client: AsyncClient, world: SimpleNamespace, as_user) -> None:  # noqa: ANN001
+    as_user(_user("guest", "user-owner"))
+
+    assert (await client.get(_TRUTH.format(job_id="job-missing"))).status_code == 404
+    assert (await client.put(_TRUTH.format(job_id="job-missing"), json=_truth_body(0))).status_code == 404
