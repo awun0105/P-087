@@ -61,3 +61,43 @@ Lưu ý: lệnh trong plan ghi `<test đánh giá hiện có>`; tôi chạy `eva
 - Chưa kiểm bằng mắt bố cục thẻ và trang (việc của chủ dự án, theo quy ước).
 - `ValueCard` và `ReviewTab` tải dữ liệu khi mở tab; `EvaluationCard` vẫn được mount khi thẻ thu gọn (vẫn tải dữ liệu như trước).
 - `/benchmark` tải toàn bộ benchmark mỗi lần mở; hiệu năng phụ thuộc API T-032 (đã ghi trong report T-032).
+
+## Round 2
+
+Sửa theo `review.md`, mục "Required changes" 1: không hiện "khe khớp 0/0 · bỏ sót 0 · giả 0" khi chưa đo khe nào.
+Ca gặp: có ground truth nhưng chưa có khe, hoặc khe chưa gắn layout (`compute_p2` bỏ qua khe đó).
+
+**Backend (`value/scorecard.py`, do T-032 viết):**
+- Thêm `_no_gap_measured(card)` = có `unavailable_reason` hoặc `gaps_checked == 0`. `_agree_text`, `_missed_text` và hai ô khe
+  của CSV (`_csv_row`) dùng điều kiện này: ra `"—"` / `""`, không ra `0/0`.
+- Dòng P2 của Markdown: chưa đo khe nào ghi "chưa có khe kiểm nào được đo"; nhãn nguồn là "—" khi cũng chưa có sai số kích thước.
+- Dòng P4 của Markdown: cột Nguồn ghi "khai báo" khi L4, "đo" khi L0–L3 (trước đây luôn "đo").
+
+**Frontend:**
+- `ValueCard.tsx`: `p2Label` trả "chưa có" khi chưa đo khe và chưa có sai số; thêm `p2GapText` (trả `null` khi chưa đo khe).
+  `P2Cell` hiện "chưa có khe kiểm nào được đo" kèm gợi ý "Thêm khe và gắn layout trong panel Benchmark của scene."
+  Dòng sai số kích thước không đổi.
+- `BenchmarkTable.tsx`: hai ô khe hiện "chưa có" khi `noGaps`; tiêu đề ô là lý do thật (unavailable) hoặc "chưa có khe kiểm nào được đo".
+
+**Test (đỏ trên code trước khi sửa, xanh sau khi sửa):**
+- `tests/test_orchestration/test_value_scorecard.py`: `test_no_gap_measured_yet_gives_empty_gap_cells_not_zero`,
+  `test_markdown_marks_l4_as_declared`.
+- `frontend/tests/value-card.test.tsx`: "chưa đo khe nào thì không hiện 0/0 và bỏ sót 0" (kèm kiểm `p2Label`, `p2GapText`).
+- `frontend/tests/benchmark-page.test.tsx`: "scene chưa đo khe nào hiện 'chưa có' ở hai ô khe, không hiện 0/0".
+
+**Kết quả thật:**
+```
+.venv/bin/python -m pytest tests/test_orchestration/test_value_scorecard.py -q          → 34 passed
+cd frontend && ./node_modules/.bin/vitest run tests/value-card.test.tsx tests/benchmark-page.test.tsx tests/evaluation-card.test.tsx
+                                                                                        → 22 passed
+npm run typecheck                                                                       → không lỗi
+eslint (4 file frontend đã sửa)                                                         → 0 error
+ruff check + ruff format --check (scorecard.py, test_value_scorecard.py)                → đạt
+```
+
+**Commit Round 2:**
+- `b0925b96` Leave gap cells empty until a gap is measured and label L4 as declared in Markdown (backend và test)
+- `84a5acff` Show no gap counts on the value card and benchmark table until a gap is measured (frontend và test)
+
+**Chưa làm (không bắt buộc trong review):** các gợi ý "Suggestions" (link tải khi lỗi 4xx/5xx, bỏ "trên GPU chưa rõ" khi
+thiếu số, tự tải lại thẻ sau Walk). Ghi chú cho T-035 (mở thẳng panel Benchmark) giữ nguyên.
