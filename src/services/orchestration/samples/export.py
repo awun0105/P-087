@@ -22,7 +22,7 @@ from src.services.orchestration.artifacts import ArtifactStoreError, sha256_file
 from src.services.orchestration.jobs.dispatch import prepared_frame_reference
 from src.services.orchestration.jobs.models import JobAttemptRecord
 from src.services.orchestration.jobs.progress import MVP_PIPELINE, sanitized_frame_stage
-from src.services.orchestration.samples.bundle import DemoLibrary, DemoUnavailableError
+from src.services.orchestration.samples.bundle import UNPUBLISHED_MARKER, DemoLibrary, DemoUnavailableError
 from src.services.orchestration.samples.models import (
     DemoFact,
     DemoFile,
@@ -420,6 +420,9 @@ def publish_job_bundle(
         slug = slugify(title) or "scene"
         demo_id = f"{slug[:60]}-{job_id.removeprefix('job-')[:8]}"
         target = library_root / demo_id
+        if (target / UNPUBLISHED_MARKER).exists():
+            demo_id = f"{demo_id}-{uuid4().hex[:8]}"
+            target = library_root / demo_id
         if target.exists():
             raise SampleExportError(f"Thư viện đã có mẫu {demo_id}")
         temp = library_root / f".tmp-{demo_id}-{uuid4().hex[:8]}"

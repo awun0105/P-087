@@ -4,9 +4,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ImportSetupStep } from "@/features/studio/ImportSetupStep";
 import { NewSceneFlow } from "@/features/studio/NewSceneFlow";
 import { UploadDropzone } from "@/features/studio/UploadDropzone";
-import { createImport, listSamples, listUploads, uploadVideo } from "@/lib/api/studio";
+import { createImport, listSamples, listUploads, uploadVideo, removeSample } from "@/lib/api/studio";
 import type { Me } from "@/lib/api/auth";
-import type { UploadRecord } from "@/lib/contracts/studio";
+import type { UploadRecord, SampleSummary } from "@/lib/contracts/studio";
 
 const navigation = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
 const authState = vi.hoisted(() => ({ me: { auth_required: false, user: null } as Me, refresh: vi.fn() }));
@@ -14,7 +14,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => navigation, useSearchParams
 vi.mock("@/features/studio/AuthProvider", () => ({ useAuth: () => authState }));
 vi.mock("@/lib/api/studio", async (original) => ({
   ...(await original<typeof import("@/lib/api/studio")>()),
-  listUploads: vi.fn(), listSamples: vi.fn(), createImport: vi.fn(), uploadVideo: vi.fn(),
+  listUploads: vi.fn(), listSamples: vi.fn(), createImport: vi.fn(), uploadVideo: vi.fn(), removeSample: vi.fn(),
 }));
 
 const video: UploadRecord = { upload_id: "video-1", original_name: "warehouse.mp4", media_type: "video/mp4", size_bytes: 100, checksum: "sha256:test", artifact_uri: "artifact://test/video", received_at: "2026-10-01T00:00:00Z", project_ids: [], input_kind: "rgb_video" };
@@ -123,5 +123,36 @@ describe("upload 3DGS", () => {
     const input = screen.getByLabelText(/Kéo file 3DGS/) as HTMLInputElement;
     fireEvent.change(input, { target: { files: [new File(["x"], "scene.ply", { type: "application/x-ply" })] } });
     await waitFor(() => expect(onUploaded).toHaveBeenCalledWith(gaussian));
+  });
+});
+
+
+describe("bỏ dự án khỏi thư viện demo", () => {
+  const sample: SampleSummary = { sample_id: "demo-1", title: "Kho A", description: "", origin: "pipeline_job", source: { dataset: "Studio", sequence: "Kho", note: "" }, cover: null, video: null, frame_count: null, total_seconds: null, has_processing: false, machine: {} };
+
+  it("Reviewer bỏ mẫu sau xác nhận; lỗi giữ thẻ và cho thử lại", async () => {
+    authState.me = { auth_required: true, user: { user_id: "reviewer", display_name: "Reviewer", role: "reviewer", email: "reviewer@example.test", active: true, daily_job_quota: 10 } };
+    vi.mocked(listSamples).mockResolvedValue({ ok: true, data: { samples: [sample] } });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    vi.mocked(removeSample).mockRejectedValueOnce(new Error("Máy chủ chưa ghi được")).mockResolvedValueOnce(undefined);
+    render(<NewSceneFlow source="sample" />);
+    const remove = await screen.findByRole("button", { name: "Bỏ Kho A khỏi demo" });
+    fireEvent.click(remove);
+    expect(removeSample).not.toHaveBeenCalled();
+    confirm.mockReturnValue(true);
+    fireEvent.click(remove);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Máy chủ chưa ghi được");
+    expect(screen.getByRole("button", { name: "Bỏ Kho A khỏi demo" })).toBeEnabled();
+    fireEvent.click(remove);
+    expect(await screen.findByText("Chưa có video mẫu")).toBeInTheDocument();
+    expect(removeSample).toHaveBeenLastCalledWith("demo-1");
+    confirm.mockRestore();
+  });
+
+  it("người xem không có thao tác bỏ mẫu", async () => {
+    vi.mocked(listSamples).mockResolvedValue({ ok: true, data: { samples: [sample] } });
+    render(<NewSceneFlow source="sample" />);
+    await screen.findByText("Kho A");
+    expect(screen.queryByRole("button", { name: "Bỏ Kho A khỏi demo" })).not.toBeInTheDocument();
   });
 });

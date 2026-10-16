@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DemoControls } from "@/features/studio/scene/DemoControls";
-import { clearDemo, getDemoState, markDemo, publishDemo, resetDemo, restoreRoot } from "@/lib/api/studio";
+import { clearDemo, getDemoState, markDemo, publishDemo, resetDemo, restoreRoot, removeSample } from "@/lib/api/studio";
 import type { DemoState } from "@/lib/contracts/studio";
 
 const auth: { me: { auth_required: boolean; user: { user_id: string; display_name: string; role: string } | null } } = {
@@ -11,7 +11,7 @@ const auth: { me: { auth_required: boolean; user: { user_id: string; display_nam
 };
 vi.mock("@/features/studio/AuthProvider", () => ({ useAuth: () => auth }));
 vi.mock("@/lib/api/studio", () => ({
-  getDemoState: vi.fn(), markDemo: vi.fn(), clearDemo: vi.fn(), resetDemo: vi.fn(), restoreRoot: vi.fn(), publishDemo: vi.fn(),
+  getDemoState: vi.fn(), markDemo: vi.fn(), clearDemo: vi.fn(), resetDemo: vi.fn(), restoreRoot: vi.fn(), publishDemo: vi.fn(), removeSample: vi.fn(),
 }));
 
 const baseline = { job_id: "job-a", scene_revision: "rev-001", marked_at: "2026-10-03T00:00:00Z" };
@@ -195,4 +195,20 @@ describe("DemoControls: Đặt làm bản demo = xuất vào thư viện mẫu",
     expect(await within(dialog).findByRole("alert")).toHaveTextContent("đã có trong thư viện mẫu");
     await waitFor(() => expect(getDemoState).toHaveBeenCalledTimes(2));
   });
+});
+
+
+it("Reviewer gỡ mẫu công khai mà không bỏ trạng thái đã lưu của dự án", async () => {
+  auth.me = { auth_required: true, user: { user_id: "u1", display_name: "Reviewer", role: "reviewer" } };
+  vi.mocked(getDemoState).mockResolvedValue(demo("rev-003", false, true, "room-sample"));
+  vi.mocked(removeSample).mockRejectedValueOnce(new Error("Chưa gỡ được")).mockResolvedValueOnce(undefined);
+  render(<DemoControls jobId="job-a" revision="rev-003" sceneReady onRestored={vi.fn()} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Bỏ khỏi demo" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Chưa gỡ được");
+  expect(screen.getByRole("link", { name: "Đã có trong thư viện mẫu" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Bỏ khỏi demo" }));
+  await screen.findByRole("button", { name: "Đặt làm bản demo" });
+  expect(removeSample).toHaveBeenCalledWith("room-sample");
+  expect(clearDemo).not.toHaveBeenCalled();
+  expect(screen.getByText("Có trạng thái đã lưu")).toBeInTheDocument();
 });

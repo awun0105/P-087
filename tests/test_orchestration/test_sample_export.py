@@ -302,3 +302,16 @@ def test_the_raw_video_is_not_published_when_the_job_masked_faces_and_plates(tmp
     monkeypatch.setattr(export_module, "sanitized_frame_stage", lambda job: None)
     with pytest.raises(AssertionError, match="video gốc"):
         export_job_bundle(registry, JOB_ID, tmp_path / "plain", demo_id="y", title="Gốc", description="", source=SOURCE)
+
+
+def test_removed_job_can_be_published_again_without_overwriting_the_old_bundle(tmp_path: Path) -> None:
+    registry, _ = _registry(tmp_path)
+    root = tmp_path / "library"
+    first = publish_job_bundle(registry, JOB_ID, root, title="Kho", description="", source=SOURCE)
+    original = (root / first.demo_id / "manifest.json").read_bytes()
+    DemoLibrary(root).unpublish(first.demo_id)
+    assert published_sample_id(root, JOB_ID) is None
+    second = publish_job_bundle(registry, JOB_ID, root, title="Kho", description="Mới", source=SOURCE)
+    assert second.demo_id != first.demo_id
+    assert published_sample_id(root, JOB_ID) == second.demo_id
+    assert (root / first.demo_id / "manifest.json").read_bytes() == original

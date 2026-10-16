@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, ArrowRight, CheckCircle2, Clapperboard, Clock, FastForward, Info, Play } from "lucide-react";
+import { ArrowLeft, ArrowRight, CheckCircle2, Clapperboard, Clock, FastForward, Info, Play, X } from "lucide-react";
 import { useState } from "react";
 
 import { Badge, Button, Card, Notice } from "@/components/studio/primitives";
@@ -27,10 +27,14 @@ export function SamplePicker({
   samples,
   selected,
   onPick,
+  onRemove,
+  removing = false,
 }: {
   samples: SampleSummary[];
   selected?: string | null;
   onPick: (sampleId: string) => void;
+  onRemove?: (sample: SampleSummary) => void;
+  removing?: boolean;
 }) {
   if (samples.length === 0) return null;
   return (
@@ -84,6 +88,12 @@ export function SamplePicker({
                   </p>
                 </div>
               </button>
+              {onRemove && (
+                <Button variant="ghost" size="sm" className="mt-2" disabled={removing}
+                  aria-label={`Bỏ ${sample.title} khỏi demo`} onClick={() => onRemove(sample)}>
+                  <X aria-hidden />Bỏ khỏi demo
+                </Button>
+              )}
             </li>
           );
         })}

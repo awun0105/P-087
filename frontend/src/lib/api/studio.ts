@@ -80,6 +80,11 @@ export async function publishDemo(
   }));
 }
 
+/** Reviewer gỡ mẫu khỏi thư viện công khai, giữ nguyên dự án và artifact. */
+export async function removeSample(sampleId: string): Promise<void> {
+  await apiFetch(`/api/v1/samples/${encodeURIComponent(sampleId)}`, { method: "DELETE" });
+}
+
 /** Reviewer bỏ đánh dấu bản demo; nội dung scene giữ nguyên. */
 export async function clearDemo(jobId: string): Promise<DemoState> {
   return parseDemoState(await apiFetch<unknown>(`/api/v1/jobs/${encodeURIComponent(jobId)}/demo/baseline`, { method: "DELETE" }));

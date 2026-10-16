@@ -30,6 +30,7 @@ PUBLIC = {
 
 #: Chỉ Reviewer: quản lý thành viên, audit, mốc demo, phát hành, xoá hẳn thùng rác.
 REVIEWER = {
+    ("DELETE", "/samples/{sample_id}"),
     ("GET", "/auth/audit"),
     ("POST", "/auth/invites"),
     ("GET", "/auth/users"),

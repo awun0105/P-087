@@ -9,7 +9,7 @@ import { Badge, Button, buttonVariants } from "@/components/studio/primitives";
 import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
 import { useAuth } from "@/features/studio/AuthProvider";
 import { canDecideReview, canEdit, isReviewer } from "@/lib/api/auth";
-import { clearDemo, getDemoState, markDemo, publishDemo, resetDemo, restoreRoot } from "@/lib/api/studio";
+import { clearDemo, getDemoState, markDemo, publishDemo, resetDemo, restoreRoot, removeSample } from "@/lib/api/studio";
 import type { DemoState } from "@/lib/contracts/studio";
 import { errorMessage } from "@/lib/ui-error";
 
@@ -141,10 +141,19 @@ export function DemoControls({
         </div>
       )}
       {scope !== "state" && (publishedId ? (
-        <Link href={`/new/try-demo?sample=${encodeURIComponent(publishedId)}`} className={buttonVariants({ size: "sm", variant: "secondary" })}>
-          <Clapperboard aria-hidden />
-          Đã có trong thư viện mẫu
-        </Link>
+        <>
+          <Link href={`/new/try-demo?sample=${encodeURIComponent(publishedId)}`} className={buttonVariants({ size: "sm", variant: "secondary" })}>
+            <Clapperboard aria-hidden />
+            Đã có trong thư viện mẫu
+          </Link>
+          {canPublish && <Button size="sm" variant="ghost" disabled={busy} onClick={() => {
+            if (!window.confirm("Bỏ dự án khỏi demo? Dự án và dữ liệu scene vẫn được giữ lại.")) return;
+            void run(async () => {
+              await removeSample(publishedId);
+              return { ...state, published_sample_id: null };
+            }, "Đã bỏ khỏi demo.");
+          }}>Bỏ khỏi demo</Button>}
+        </>
       ) : canPublish ? (
         <Button size="sm" variant="ghost" disabled={busy} onClick={() => setPublishing(true)}
           title="Xuất scene này vào thư viện mẫu để mọi người xem ở Thử mẫu.">
