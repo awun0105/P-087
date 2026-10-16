@@ -3,7 +3,7 @@
 import { Square } from "lucide-react";
 import { Button, Notice, ProgressBar } from "@/components/studio/primitives";
 import { HelpDetails } from "@/components/studio/feedback";
-import { PipelineTimeline, type StageAction, type StageView, type TimelineStageView } from "@/features/studio/PipelineTimeline";
+import { PipelineTimeline, type StageAction, type TimelineStageView } from "@/features/studio/PipelineTimeline";
 import { runtimeWaitText } from "@/features/studio/sceneStatus";
 import { isJobStale, stageSeconds, useNow, type SceneInfo } from "@/features/studio/scene/state";
 import { GEOMETRY_REVIEW_STAGE, GEOMETRY_REVIEW_STAGE_ID, stagesFor, type TimelineStageMeta } from "@/features/studio/stages";
@@ -49,16 +49,16 @@ export function ProgressTab({ jobId, progress, info, busy, canCancel, canAccept 
   const objectStageDone = progress?.stages.some((stage) => stage.stage_id === "ST-OBJECT-EXTRACT" && stage.state === "succeeded") ?? false;
   const objectify = useObjectify({ jobId, enabled: objectStageDone, onRevision: () => onChanged?.() });
   const objectOverride = objectStageDone ? objectifyStageOverride(objectify.state) : null;
-  const views: StageView[] = progress?.stages.map((stage) => stage.stage_id === "ST-OBJECT-EXTRACT" && objectOverride
-    ? { stage_id: stage.stage_id, state: objectOverride.state, error: objectOverride.error, fraction: null, seconds: null }
+  const views: TimelineStageView[] = progress?.stages.map((stage) => stage.stage_id === "ST-OBJECT-EXTRACT" && objectOverride
+    ? { stage_id: stage.stage_id, state: objectOverride.state, error: objectOverride.error, fraction: null, seconds: null, note: stage.note }
     : {
-      stage_id: stage.stage_id, state: stage.state, error: stage.error, fraction: null,
+      stage_id: stage.stage_id, state: stage.state, error: stage.error, fraction: null, note: stage.note,
       seconds: stage.stage_id === "ST-METRIC-CANONICALIZE" ? null : stageSeconds(stage.started_at, stage.completed_at, stage.state === "running" ? now : null),
     }) ?? [];
   // Hàng ảo "Duyệt vật & Tạo mesh" (T-021): chỉ khi scene có khoá object_geometry và tách vật đã xong.
   const geometry = objectStageDone ? geometryReviewStep(objectify.state) : null;
   const timelineViews: TimelineStageView[] = geometry
-    ? [...views, { stage_id: GEOMETRY_REVIEW_STAGE_ID, state: geometry.state, seconds: null, fraction: null, note: geometryNote(geometry) }]
+    ? [...views, { stage_id: GEOMETRY_REVIEW_STAGE_ID, state: geometry.state, seconds: null, fraction: null, note: [geometryNote(geometry), objectify.state?.geometry_note].filter(Boolean).join(" · ") || null }]
     : views;
   const apiStageList: readonly TimelineStageMeta[] = progress ? stagesFor(progress.stages.map((stage) => stage.stage_id)) : [];
   const objectIndex = apiStageList.findIndex((meta) => meta.id === "ST-OBJECT-EXTRACT");

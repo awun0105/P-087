@@ -236,3 +236,18 @@ describe("thông báo tạo mesh theo vật (T-013)", () => {
     expect(screen.queryByRole("button", { name: "Thử lại" })).toBeNull();
   });
 });
+
+describe("dòng kết quả thật trong tab Tiến trình", () => {
+  it("truyền note máy chủ vào hàng bước và giữ tương thích khi thiếu note", async () => {
+    vi.mocked(getObjectifyState).mockResolvedValue(objectify());
+    const progress: JobProgress = {...done, stages: done.stages.map((stage) => ({...stage, note: stage.stage_id === "ST-RGB-GEOMETRY" ? "Lưới từ LiDAR" : undefined}))};
+    render(<ProgressTab jobId="job-1" progress={progress} info={null} busy={false} canCancel={false} onCancel={vi.fn()} />);
+    expect(screen.getByText("Lưới từ LiDAR")).toBeInTheDocument();
+    await waitFor(() => expect(getObjectifyState).toHaveBeenCalled());
+  });
+  it("hiện số vật dùng ObjectGS và cách cũ ở hàng Duyệt vật", async () => {
+    vi.mocked(getObjectifyState).mockResolvedValue(objectify({object_geometry: "ready", geometry_note: "2 vật dùng bề mặt ObjectGS; 3 vật dùng cách cũ (vỏ Gaussian)"}));
+    renderTab();
+    expect(await screen.findByText("2 vật dùng bề mặt ObjectGS; 3 vật dùng cách cũ (vỏ Gaussian)")).toBeInTheDocument();
+  });
+});
