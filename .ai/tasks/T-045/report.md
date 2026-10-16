@@ -102,3 +102,13 @@ Ruff chạy trên đúng 9 file sản phẩm và 2 file test Python liệt kê �
 - minimal-code: dùng lại resolver, checksum, FFmpeg và parser; một helper tên ảnh dùng chung cho COLMAP, camera pose và Brush.
 - checks: 153 passed, 5 skipped; ruff check/format sạch; contract mirror PASS; graphify update thành công. TypeScript/eslint/vitest n/a — không sửa frontend.
 - DevTools: n/a — sửa service không có UI.
+
+## Phần B — kết quả theo scene
+
+| Scene | Job | Input / frame | Thời gian | COLMAP | Đối tượng / scale / collider | Gói mẫu |
+| --- | --- | --- | --- | --- | --- | --- |
+| drjohnson | `job-1c66b8f936bb` | 263 ảnh JPG; MP4 ghép được đưa vào InputManifest cùng ảnh | input validate 16.14 s; frame refs 0.62 s; camera-pose 528.01 s | Dừng với `RECONSTRUCTION_PREVIEW_FAILED`; đọc lại 8 model COLMAP trong workspace, model tốt nhất đăng ký 76/263 (28.9%), dưới preset `min_registered_ratio=0.5`. Khoảng im lặng dài nhất quan sát được: 10 s. | N/A — chưa có camera pose; scale và collider chưa tới bước | Chưa xuất; scene ghi **cần Architect** do độ phủ đăng ký của COLMAP không đạt ngưỡng preset |
+
+Đo tài nguyên job drjohnson: 466 mẫu GPU, đỉnh GPU dùng 0.0059 GB; không có mẫu VRAM riêng (`vram_sample_count=0`); đỉnh scratch 0.45 GB, RAM 0.114 GB. COLMAP chạy CPU theo cấu hình runtime. Không dùng artefact COLMAP/poses của dataset; sparse model nêu trên do pipeline vừa tạo. Project/job được tạo sau khi sửa lỗi import `actor_of`; các test importer (9) xanh, commit `3024ae3d Fix dataset scene importer actor import`.
+
+Scene còn lại chưa chạy. Không đưa job kế tiếp vào worker trước khi job drjohnson dừng; sau khi ghi nhận scene này, sẽ xử lý tuần tự theo danh sách plan.
