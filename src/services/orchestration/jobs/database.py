@@ -390,6 +390,16 @@ MIGRATIONS += (
         ),
     ),
 )
+MIGRATIONS += (
+    (
+        20,
+        (
+            "CREATE TABLE r2s_value_events (event_id TEXT PRIMARY KEY, job_id TEXT NOT NULL, at TEXT NOT NULL, "
+            "kind TEXT NOT NULL, actor_id TEXT, payload TEXT NOT NULL)",
+            "CREATE INDEX r2s_value_events_by_job ON r2s_value_events(job_id, at)",
+        ),
+    ),
+)
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
 #: DB đã kiểm/chạy migration trong tiến trình này. API tạo RuntimeDatabase mỗi request;
