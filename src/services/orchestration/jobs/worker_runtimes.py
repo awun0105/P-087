@@ -133,6 +133,17 @@ def select(
     return max(candidates, key=lambda item: (item.is_live(current), item.last_seen_at), default=None)
 
 
+def live_runtime_checksums(database: RuntimeDatabase, *, now: datetime | None = None) -> frozenset[str]:
+    """Mọi checksum (phần mềm và đầy đủ) của runtime đang có worker sống; để autoscaler biết việc nào GPU chạy được."""
+    current = now or datetime.now(UTC)
+    return frozenset(
+        checksum
+        for item in _query(database, "", ())
+        if item.is_live(current)
+        for checksum in (item.software_runtime_checksum, item.runtime_manifest_checksum)
+    )
+
+
 def has_live_runtime(database: RuntimeDatabase, job_runtime_checksum: str, *, now: datetime | None = None) -> bool:
     """Có worker đang sống chạy được job mang checksum này (phần mềm, hoặc đầy đủ với job tạo trước T-040)."""
     current = now or datetime.now(UTC)
