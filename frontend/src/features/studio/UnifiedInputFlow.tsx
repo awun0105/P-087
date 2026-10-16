@@ -46,6 +46,7 @@ import { errorMessage } from "@/lib/ui-error";
 import { formatBytes } from "@/lib/format";
 import { ProcessingSettings, scenarioLabel } from "@/features/studio/ProcessingSettings";
 import { useProcessingForm } from "@/features/studio/useProcessingForm";
+import { CaptureGuide } from "@/features/studio/CaptureGuide";
 import { FlowStepper } from "@/features/studio/FlowStepper";
 
 const INPUT_STEPS = [
@@ -1134,7 +1135,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
 
   return (
     <main className="mx-auto max-w-5xl px-4 pt-10 pb-20 sm:px-6">
-      <PageHeader title="Tạo scene từ video" description="Thả video, LiDAR, calibration, quỹ đạo, thời điểm frame, PLY/SOG hoặc ZIP vào cùng một khung. Hệ thống đọc nội dung rồi tự chọn cách xử lý phù hợp." />
+      <PageHeader action={<CaptureGuide />} title="Tạo scene từ video" description="Thả video, LiDAR, calibration, quỹ đạo, thời điểm frame, PLY/SOG hoặc ZIP vào cùng một khung. Hệ thống đọc nội dung rồi tự chọn cách xử lý phù hợp." />
       <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-ink-muted">Tải lên và phân tích chưa tạo job hay trừ quota.</p>
         <a className="text-sm font-medium text-ember-strong hover:underline" href="/new/try-demo">Xem scene mẫu đã xử lý</a>

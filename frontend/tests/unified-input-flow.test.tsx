@@ -295,6 +295,27 @@ describe("unified input flow", () => {
     mocks.importGaussian.mockResolvedValue({ imported_scene: { import_id: "import-1" }, intent_checksum: `sha256:${"6".repeat(64)}` });
   });
 
+  it("opens the capture guide from the new-scene page and closes it without creating an upload", async () => {
+    render(<UnifiedInputFlow />);
+    const trigger = screen.getByRole("button", { name: "Hướng dẫn quay/chụp" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.click(trigger);
+    const guide = screen.getByRole("dialog", { name: "Hướng dẫn quay/chụp" });
+    for (const name of ["Thông số máy quay", "Cách quay", "Đo bằng thước"]) {
+      expect(within(guide).getByRole("heading", { name })).toBeInTheDocument();
+    }
+    expect(within(guide).getByRole("table")).toBeInTheDocument();
+    expect(within(guide).queryByText(/Layout B|video_indoor_walkthrough/)).not.toBeInTheDocument();
+    fireEvent.click(within(guide).getByRole("button", { name: "Đóng hướng dẫn" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await waitFor(() => expect(trigger).toHaveFocus());
+    expect(mocks.create).not.toHaveBeenCalled();
+    expect(mocks.uploadAssembly).not.toHaveBeenCalled();
+    fireEvent.click(trigger);
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
   it("shows processing settings for an automatically selected video and sends the chosen preset", async () => {
     mocks.resolve.mockReset().mockResolvedValue({ report: report("ready", [videoCandidate("r1-auto", "file-upload-1", "ready")], "r1-auto") });
     const { container } = render(<UnifiedInputFlow />);
