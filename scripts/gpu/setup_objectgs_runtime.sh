@@ -77,6 +77,12 @@ if [ "$PRINT_PLAN" = 1 ]; then
   exit 0
 fi
 
+# Thư mục đích đã có nội dung mà không có dấu của script này: không cài đè lên, dừng trước mọi bước tải.
+if [ -d "$DEST" ] && [ -n "$(ls -A "$DEST" 2>/dev/null)" ] && [ ! -f "$DEST/.r2s-installed" ]; then
+  die "thư mục đích $DEST đã có nội dung nhưng không có .r2s-installed (không phải lần dựng của script này). \
+Chọn một thư mục rỗng khác, hoặc xoá nội dung cũ bằng tay rồi chạy lại. Script không tự xoá gì."
+fi
+
 need git; need curl; need tar; need sha256sum
 if [ "$SKIP_GPU_CHECK" = 0 ]; then
   command -v nvidia-smi >/dev/null || die "không thấy nvidia-smi; dùng --skip-gpu-check để dựng không cần GPU"

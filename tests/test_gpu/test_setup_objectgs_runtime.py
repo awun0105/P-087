@@ -149,6 +149,20 @@ def test_extension_is_prebuilt_into_the_shared_cache_with_objectgs_environment()
     assert "PRODUCT_OBJECTGS_EXTENSION_CACHE_DIR=$DEST/torch_extensions" in SCRIPT_TEXT
 
 
+def test_install_refuses_a_non_empty_folder_without_the_install_stamp(tmp_path: Path) -> None:
+    """Thư mục có nội dung mà không có .r2s-installed: dừng ngay với thông báo rõ, không tải, không đụng nội dung cũ."""
+    dest = tmp_path / "existing"
+    dest.mkdir()
+    (dest / "keep.txt").write_text("của người khác", encoding="utf-8")
+    result = subprocess.run(
+        ["bash", str(SCRIPT), str(dest), "--skip-gpu-check"], capture_output=True, text=True, check=False
+    )
+    assert result.returncode != 0
+    assert ".r2s-installed" in result.stderr and "Script không tự xoá gì" in result.stderr
+    assert sorted(path.name for path in dest.iterdir()) == ["keep.txt"]
+    assert (dest / "keep.txt").read_text(encoding="utf-8") == "của người khác"
+
+
 def test_objectgs_preflight_is_optional_and_reports_missing_runtime(monkeypatch) -> None:
     """Mục ObjectGS trong preflight là tuỳ chọn: thiếu runtime thì báo thiếu, không đặt cờ bắt buộc."""
     from scripts.kaggle import preflight
