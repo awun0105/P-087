@@ -25,7 +25,7 @@ import time
 import zipfile
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import Event
@@ -101,6 +101,7 @@ from src.services.orchestration.jobs.progress import (
 from src.services.orchestration.jobs.workspace import attempt_lease, cleanup_attempt_workspace, cleanup_finished_job
 from src.services.orchestration.processing.capability import latest as latest_capability
 from src.services.orchestration.processing.config import load_job_config
+from src.services.orchestration.processing.expected_duration import Estimate, deadline_seconds, expected_seconds
 from src.services.orchestration.processing.observed import load_usages, pipeline_usages
 from src.services.orchestration.processing.telemetry import (
     Outcome,
@@ -202,6 +203,56 @@ class _StageProgress:
                 )
 
 
+class ExpectedDurationError(TimeoutError):
+    """Công cụ vượt hạn tự tính theo số đo của chính máy này (T-043), không phải giới hạn cố định."""
+
+    code = "EXPECTED_DURATION_EXCEEDED"
+
+
+def _expected_limit(attempt: _Attempt, name: str, fixed_timeout: float) -> tuple[float, Estimate | None]:
+    """Hạn của một lượt công cụ: theo số đo khi có đủ; không thì giữ giới hạn cố định như trước."""
+    registry = attempt.registry
+    if registry.persistence is None:
+        return fixed_timeout, None
+    try:
+        capability = latest_capability(registry.persistence.database)
+        params = job_drivers(registry, attempt.settings, attempt.job)
+        if capability is None or params is None:
+            return fixed_timeout, None
+        estimate = expected_seconds(
+            name,
+            params,
+            capability.gpu_name,
+            attempt.job.runtime_manifest_checksum,
+            load_usages(registry.persistence.database),
+        )
+    except Exception as error:  # noqa: BLE001 - ước lượng chỉ là phụ; lỗi đọc số đo không được làm hỏng lượt chạy
+        logger.warning("Không tính được hạn theo số đo tool=%s cause=%s", name, type(error).__name__)
+        return fixed_timeout, None
+    if estimate is None:
+        return fixed_timeout, None
+    return deadline_seconds(estimate, fixed_timeout), estimate
+
+
+def _write_expectation(path: Path, fixed_timeout: float, deadline: float, estimate: Estimate | None) -> None:
+    """Ghi hạn đã dùng và ước lượng vào workspace: lượt sau đọc lại được vì sao hạn là bao nhiêu."""
+    record = {
+        "fixed_limit_seconds": fixed_timeout,
+        "deadline_seconds": deadline,
+        "estimate": asdict(estimate) if estimate is not None else None,
+    }
+    path.write_text(json.dumps(record, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+
+
+def _expected_message(name: str, estimate: Estimate, elapsed: float) -> str:
+    minutes = max(1, round(elapsed / 60))
+    times = round(elapsed / estimate.seconds, 1)
+    return (
+        f"{name} chạy quá {minutes} phút, gấp {times} lần thời gian thường thấy trên {estimate.gpu_name} "
+        "cho scene cỡ này; đã dừng."
+    )
+
+
 def _run_tool(
     attempt: _Attempt,
     name: str,
@@ -212,6 +263,8 @@ def _run_tool(
     """Chạy một REC CLI trong process group riêng, hủy khi job revision đổi (cancel)."""
     stdout_path = attempt.workspace / f"{name}.stdout.json"
     sampler = _resource_sampler(attempt, name)
+    deadline_limit, estimate = _expected_limit(attempt, name, timeout)
+    _write_expectation(attempt.workspace / f"{name}.expected.json", timeout, deadline_limit, estimate)
     outcome: Outcome = "failed"
     exit_code: int | None = None
     try:
@@ -219,7 +272,8 @@ def _run_tool(
             process = subprocess.Popen(
                 command, stdout=output, stderr=errors, stdin=subprocess.DEVNULL, start_new_session=True
             )
-            deadline = time.monotonic() + timeout
+            started = time.monotonic()
+            deadline = started + deadline_limit
             last_heartbeat = 0.0
             pause = Event()
             try:
@@ -237,7 +291,9 @@ def _run_tool(
                     if lease_lost(attempt.job.job_id):
                         raise PreviewCancelledError("Mất lease job; máy khác đã nhận việc, dừng tiến trình con")
                     if time.monotonic() >= deadline:
-                        raise TimeoutError(f"{name} worker quá thời gian cấu hình")
+                        if estimate is None:
+                            raise TimeoutError(f"{name} worker quá thời gian cấu hình")
+                        raise ExpectedDurationError(_expected_message(name, estimate, time.monotonic() - started))
                     _sample_resources(sampler, process.pid)
                     pause.wait(1)
             finally:
@@ -382,6 +438,10 @@ def _record_runner_failure(attempt: _Attempt, error: BaseException) -> None:
             _record_benchmark(attempt)
         return
     details = {"exception_type": type(error).__name__}
+    if isinstance(error, ExpectedDurationError):
+        code, message = error.code, str(error)
+    else:
+        code, message = "PREVIEW_RUNNER_FAILED", "Worker dừng trước checkpoint hợp lệ; kiểm log attempt và runtime"
     try:
         attempt.job = attempt.registry.transition_job(
             attempt.job.job_id,
@@ -389,9 +449,9 @@ def _record_runner_failure(attempt: _Attempt, error: BaseException) -> None:
                 target_status=JobStatus.FAILED,
                 error=ExecutionError(
                     stage_id=current.current_stage,
-                    error_code="PREVIEW_RUNNER_FAILED",
-                    human_message="Worker dừng trước checkpoint hợp lệ; kiểm log attempt và runtime",
-                    retryable=classify_retryability("PREVIEW_RUNNER_FAILED", details),
+                    error_code=code,
+                    human_message=message,
+                    retryable=classify_retryability(code, details),
                     details=details,
                 ),
             ),
