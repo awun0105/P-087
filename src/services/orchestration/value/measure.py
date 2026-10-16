@@ -14,7 +14,7 @@ import trimesh
 from pydantic import BaseModel
 from scipy.spatial.transform import Rotation
 
-from src.models.contracts.scene import ColliderSpec, ColliderType, SceneObject
+from src.models.contracts.scene import ColliderSpec, ColliderType, SceneIR, SceneObject
 from src.services.orchestration.projects.registry import ProjectRegistry
 from src.services.orchestration.scene.effective_collision import _job_simulation_config, effective_environment
 from src.services.orchestration.scene.errors import SceneError
@@ -228,3 +228,98 @@ def collision_world(registry: ProjectRegistry, job_id: str, scene_revision: str)
         background.faces,
         lambda collider: load_mesh_parts(registry.runtime_resolver.require(collider.geometry_ref)),
     )
+
+
+#: Vật được coi là đã dời khi dịch quá 1 cm hoặc quay quá 1° (quy tắc 4).
+MOVE_TRANSLATION_M = 0.01
+MOVE_ROTATION_DEG = 1.0
+#: Hộp kiểm vết cũ thu vào 2 cm mỗi mặt để không tính nhầm mặt tiếp xúc của chính vật.
+CLEARANCE_M = 0.02
+
+
+class MoveResult(BaseModel):
+    object_id: str
+    old_cleared: bool
+    new_present: bool
+    passed: bool
+
+
+def _moved(before: SceneObject, after: SceneObject) -> bool:
+    shift = float(np.linalg.norm(np.subtract(after.transform.translation_xyz, before.transform.translation_xyz)))
+    dot = abs(float(np.dot(before.transform.rotation_quaternion_xyzw, after.transform.rotation_quaternion_xyzw)))
+    angle = math.degrees(2.0 * math.acos(min(1.0, dot)))
+    return shift > MOVE_TRANSLATION_M or angle > MOVE_ROTATION_DEG
+
+
+def _triangles_touch_box(triangles: np.ndarray, lo: np.ndarray, hi: np.ndarray) -> bool:
+    """Giao nhau tam giác–hộp trục song song (Akenine-Möller, vector hoá): tách bằng 3 trục hộp, pháp tuyến, 9 trục chéo."""
+    if len(triangles) == 0:
+        return False
+    center = (lo + hi) / 2.0
+    half = (hi - lo) / 2.0
+    tris = triangles - center
+    keep = np.all((tris.min(axis=1) <= half) & (tris.max(axis=1) >= -half), axis=1)
+    tris = tris[keep]
+    if not len(tris):
+        return False
+    v0, v1, v2 = tris[:, 0], tris[:, 1], tris[:, 2]
+    normal = np.cross(v1 - v0, v2 - v0)
+    keep = np.abs(np.einsum("ij,ij->i", normal, v0)) <= np.abs(normal) @ half
+    v0, v1, v2 = v0[keep], v1[keep], v2[keep]
+    for edge in (v1 - v0, v2 - v1, v0 - v2):
+        for axis in np.eye(3):
+            axis_normal = np.cross(axis, edge)
+            p0 = np.einsum("ij,ij->i", axis_normal, v0)
+            p1 = np.einsum("ij,ij->i", axis_normal, v1)
+            p2 = np.einsum("ij,ij->i", axis_normal, v2)
+            radius = np.abs(axis_normal) @ half
+            separated = (np.maximum(np.maximum(p0, p1), p2) < -radius) | (np.minimum(np.minimum(p0, p1), p2) > radius)
+            v0, v1, v2 = v0[~separated], v1[~separated], v2[~separated]
+            if not len(v0):
+                return False
+    return len(v0) > 0
+
+
+def _old_pose_cleared(world_a: CollisionWorld, world_b: CollisionWorld, object_id: str, robot: RobotProfile) -> bool:
+    """Vết cũ đã được khoét: không tam giác nào khác vật trong world_b giao hộp tại pose A (trong dải z của robot)."""
+    owned = world_a.face_owner == object_id
+    if not owned.any():
+        return False
+    points = world_a.mesh.vertices[np.unique(world_a.mesh.faces[owned])]
+    lo = points.min(axis=0) + CLEARANCE_M
+    hi = points.max(axis=0) - CLEARANCE_M
+    if np.any(lo >= hi):
+        return False  # vật quá nhỏ để thu hộp: không kiểm được, coi như chưa khoét
+    lo[2] = max(lo[2], robot.height_min_m)
+    hi[2] = min(hi[2], robot.height_max_m)
+    if lo[2] >= hi[2]:
+        return True  # vết cũ nằm ngoài dải cao của robot
+    others = world_b.mesh.triangles[world_b.face_owner != object_id]
+    return not _triangles_touch_box(others, lo, hi)
+
+
+def move_consistency(
+    world_a: CollisionWorld,
+    world_b: CollisionWorld,
+    scene_a: SceneIR,
+    scene_b: SceneIR,
+    robot: RobotProfile,
+) -> list[MoveResult]:
+    """Kiểm nhất quán cho từng vật đã dời giữa bố trí A và B: vết cũ được khoét và collider mới có mặt."""
+    before = {item.id: item for item in scene_a.objects}
+    after = {item.id: item for item in scene_b.objects}
+    results: list[MoveResult] = []
+    for object_id in sorted(before.keys() & after.keys()):
+        if not _moved(before[object_id], after[object_id]):
+            continue
+        old_cleared = _old_pose_cleared(world_a, world_b, object_id, robot)
+        new_present = bool(np.any(world_b.face_owner == object_id))
+        results.append(
+            MoveResult(
+                object_id=object_id,
+                old_cleared=old_cleared,
+                new_present=new_present,
+                passed=old_cleared and new_present,
+            )
+        )
+    return results

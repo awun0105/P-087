@@ -9,17 +9,27 @@ import trimesh
 
 from src.models.contracts.artifacts import ProductArtifactRef
 from src.models.contracts.coordinates import Transform
-from src.models.contracts.scene import ColliderSpec, ColliderType, SceneObject, SceneObjectOrigin, SceneObjectState
+from src.models.contracts.scene import (
+    ColliderSpec,
+    ColliderType,
+    SceneIR,
+    SceneObject,
+    SceneObjectOrigin,
+    SceneObjectState,
+)
 from src.services.orchestration.jobs.database import RuntimeDatabase
 from src.services.orchestration.projects import ProjectRegistry
 from src.services.orchestration.scene.errors import SceneError
+from src.services.orchestration.value import measure as measure_module
 from src.services.orchestration.value.ground_truth import GapCheck, MeasuredDistance, RobotProfile
 from src.services.orchestration.value.measure import (
     CollisionWorld,
+    MoveResult,
     collision_world,
     compose_collision_world,
     distance_error,
     gap_width,
+    move_consistency,
 )
 from src.services.scene.representation_composition import resolve_representation, scene_representations
 
@@ -310,3 +320,113 @@ def test_collision_world_refuses_a_revision_that_is_not_published_for_the_job(
 ) -> None:
     with pytest.raises(SceneError, match="không thuộc job"):
         collision_world(fixture_registry, "job-fixture-001", "rev-khong-co")
+
+
+_FOOTPRINT = (0.0, 0.0, 0.5)  # tâm vật A; hộp 0,4 m nằm trong dải z 0,3–0,7 của robot
+_MOVED = (1.0, 0.0, 0.5)  # bố trí B: dời sang phải 1 m
+
+
+def _slab(carved: bool) -> tuple[np.ndarray, np.ndarray]:
+    """Mặt phẳng môi trường tại z = 0,5 (trong dải robot). Khi khoét, bỏ dải giữa hai bên vết cũ của vật."""
+    if not carved:
+        vertices = np.array([[-5, -5, 0.5], [5, -5, 0.5], [5, 5, 0.5], [-5, 5, 0.5]], dtype=float)
+        return vertices, np.array([[0, 1, 2], [0, 2, 3]])
+    left = np.array([[-5, -5, 0.5], [-0.3, -5, 0.5], [-0.3, 5, 0.5], [-5, 5, 0.5]], dtype=float)
+    right = np.array([[0.3, -5, 0.5], [5, -5, 0.5], [5, 5, 0.5], [0.3, 5, 0.5]], dtype=float)
+    return np.vstack([left, right]), np.array([[0, 1, 2], [0, 2, 3], [4, 5, 6], [4, 6, 7]])
+
+
+def _pose_scene(fixture_scene: SceneIR, objects: list[SceneObject]) -> SceneIR:
+    return fixture_scene.model_copy(update={"objects": objects})
+
+
+def _move_world(
+    carved: bool, moved_object_present: bool = True, extra: list[SceneObject] | None = None
+) -> CollisionWorld:
+    vertices, faces = _slab(carved)
+    objects = [_object("a", translation=_MOVED)] if moved_object_present else []
+    return compose_collision_world([*objects, *(extra or [])], vertices, faces, _tetra)
+
+
+@pytest.fixture
+def move_scenes(fixture_registry: ProjectRegistry) -> tuple[SceneIR, SceneIR]:
+    base = fixture_registry.scene.current("job-fixture-001").scene
+    before = _pose_scene(base, [_object("a", translation=_FOOTPRINT)])
+    after = _pose_scene(base, [_object("a", translation=_MOVED)])
+    return before, after
+
+
+def _world_a(carved: bool) -> CollisionWorld:
+    vertices, faces = _slab(carved)
+    return compose_collision_world([_object("a", translation=_FOOTPRINT)], vertices, faces, _tetra)
+
+
+def test_triangle_box_overlap_is_exact_at_the_box_faces() -> None:
+    lo, hi = np.array([-0.1, -0.1, 0.0]), np.array([0.1, 0.1, 0.2])
+    inside = np.array([[[0.0, 0.0, 0.1], [0.05, 0.0, 0.1], [0.0, 0.05, 0.1]]])
+    crossing = np.array([[[-1.0, 0.0, 0.1], [1.0, 0.0, 0.1], [0.0, 1.0, 0.1]]])
+    beside = np.array([[[0.11, 0.0, 0.1], [0.5, 0.0, 0.1], [0.5, 0.5, 0.1]]])
+    above = np.array([[[0.0, 0.0, 0.21], [0.05, 0.0, 0.21], [0.0, 0.05, 0.21]]])
+
+    assert measure_module._triangles_touch_box(inside, lo, hi) is True
+    assert measure_module._triangles_touch_box(crossing, lo, hi) is True
+    assert measure_module._triangles_touch_box(beside, lo, hi) is False
+    assert measure_module._triangles_touch_box(above, lo, hi) is False
+
+
+def test_moved_object_whose_old_footprint_was_carved_passes(move_scenes: tuple[SceneIR, SceneIR]) -> None:
+    before, after = move_scenes
+    results = move_consistency(_world_a(carved=True), _move_world(carved=True), before, after, _ROBOT)
+
+    assert results == [MoveResult(object_id="a", old_cleared=True, new_present=True, passed=True)]
+
+
+def test_moved_object_whose_old_footprint_was_not_carved_fails(move_scenes: tuple[SceneIR, SceneIR]) -> None:
+    before, after = move_scenes
+    results = move_consistency(_world_a(carved=False), _move_world(carved=False), before, after, _ROBOT)
+
+    assert results == [MoveResult(object_id="a", old_cleared=False, new_present=True, passed=False)]
+
+
+def test_moved_object_missing_its_new_collider_fails(move_scenes: tuple[SceneIR, SceneIR]) -> None:
+    before, after = move_scenes
+    world_b = _move_world(carved=True, moved_object_present=False)
+
+    results = move_consistency(_world_a(carved=True), world_b, before, after, _ROBOT)
+
+    assert results == [MoveResult(object_id="a", old_cleared=True, new_present=False, passed=False)]
+
+
+def test_unmoved_object_produces_no_result(move_scenes: tuple[SceneIR, SceneIR]) -> None:
+    before, _ = move_scenes
+    small_shift = _pose_scene(before, [_object("a", translation=(0.005, 0.0, 0.5))])
+
+    assert move_consistency(_world_a(carved=True), _move_world(carved=True), before, small_shift, _ROBOT) == []
+
+
+def test_rotation_beyond_one_degree_counts_as_a_move(move_scenes: tuple[SceneIR, SceneIR]) -> None:
+    before, _ = move_scenes
+    two_degrees = math.radians(2.0)
+    turned = _pose_scene(
+        before,
+        [
+            _object(
+                "a", translation=_FOOTPRINT, rotation=(0.0, 0.0, math.sin(two_degrees / 2), math.cos(two_degrees / 2))
+            )
+        ],
+    )
+
+    results = move_consistency(_world_a(carved=True), _move_world(carved=True), before, turned, _ROBOT)
+
+    assert [item.object_id for item in results] == ["a"]
+
+
+def test_object_too_small_to_shrink_cannot_be_verified_and_fails(move_scenes: tuple[SceneIR, SceneIR]) -> None:
+    tiny_before = _object("a", translation=_FOOTPRINT, dimensions=(0.03, 0.03, 0.03))
+    before = _pose_scene(move_scenes[0], [tiny_before])
+    after = _pose_scene(move_scenes[0], [_object("a", translation=_MOVED, dimensions=(0.03, 0.03, 0.03))])
+    world_a = compose_collision_world([tiny_before], *_slab(carved=True), _tetra)
+
+    results = move_consistency(world_a, _move_world(carved=True), before, after, _ROBOT)
+
+    assert results[0].old_cleared is False
