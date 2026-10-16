@@ -6,7 +6,7 @@ import { errorMessage } from "@/lib/ui-error";
 
 import dynamic from "next/dynamic";
 import { ArrowLeft, Box, Package, Pencil, ShieldCheck, Workflow } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Badge } from "@/components/studio/primitives";
 import { usePageTitle } from "@/features/shell/Breadcrumbs";
@@ -19,6 +19,7 @@ import { ObjectifyContext } from "@/features/studio/scene/objectifyContext";
 import { geometryReviewStep, useObjectifyState } from "@/features/studio/scene/useObjectify";
 import { progressSceneStatus } from "@/features/studio/sceneStatus";
 import { usePolling } from "@/features/studio/usePolling";
+import { ValueTrackingContext } from "@/features/studio/value/tracking-context";
 import { useOperatorTime } from "@/features/studio/value/useOperatorTime";
 import { getJob, getPreview, getProject, jobArtifactContentUrl } from "@/lib/api/endpoints";
 import { cancelJob, getJobProgress, retryJob } from "@/lib/api/studio";
@@ -290,6 +291,11 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
   const current: Tab = locked ? "progress" : selected;
   // Chỉ người có quyền sửa job mới được đo; người xem không sửa được thì không gửi gì.
   useOperatorTime({ jobId, surface: OPERATOR_SURFACE[current], enabled: canMutateJob });
+  // Phiên Walk chỉ ghi khi đang ở tab Studio: tab Studio vẫn được giữ mount khi người dùng sang tab khác.
+  const walkTracking = useMemo(
+    () => ({ jobId, enabled: canMutateJob && current === "studio" }),
+    [jobId, canMutateJob, current],
+  );
   function openTab(next: Tab, nextMode?: StudioMode) {
     const target = new URL(window.location.href);
     target.searchParams.set("tab", next);
@@ -305,6 +311,7 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
 
   return (
     <ObjectifyContext.Provider value={objectify}>
+    <ValueTrackingContext.Provider value={walkTracking}>
     <main aria-label={current === "studio" ? "Studio toàn màn hình" : undefined} className={cn("flex flex-col", current === "studio" ? "fixed inset-0 z-40 h-dvh bg-paper" : "h-[calc(100dvh-3rem)]")}>
       <div className="relative z-20 flex flex-wrap items-center gap-2 border-b border-line bg-paper-raised px-4 py-3 sm:px-6">
         {current === "studio" && <button type="button" aria-label="Thoát Studio, về Tiến trình" title="Về Tiến trình" onClick={() => openTab("progress")}
@@ -419,6 +426,7 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
         />}
       </div>
     </main>
+    </ValueTrackingContext.Provider>
     </ObjectifyContext.Provider>
   );
 }

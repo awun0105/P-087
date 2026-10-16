@@ -41,6 +41,7 @@ import { jobArtifactContentUrl, jobLidarOverlayUrl, jobWalkCollisionUrl } from "
 import type { CollisionQuery } from "@playcanvas/supersplat-viewer/viewer";
 import { rotateVector, multiplyQuaternions } from "@/features/viewer/layers";
 import type { CollisionSurfacePlane, RegionPreview } from "@/lib/api/studio";
+import { useWalkSession } from "@/features/studio/value/useWalkSession";
 import { themeColor } from "@/lib/theme";
 import { cn } from "@/lib/cn";
 
@@ -342,6 +343,7 @@ export function MetricSceneView({
 
   // Góc nhìn thứ ba chỉ có nghĩa khi đang đi bộ; lưới va chạm (nạp xong mới có) giữ camera không lùi xuyên tường.
   const walking = runtime.cameraMode === "walk";
+  useWalkSession({ walking, sceneRevision });
   useEffect(() => {
     // Trích đỉnh của lưới va chạm một lần mỗi khi lưới nạp xong, không lặp lại mỗi lần bật/tắt.
     rig?.setCollision(overlay?.collisionPositions() ?? null);
