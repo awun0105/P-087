@@ -1,5 +1,5 @@
-/** Kiểm tra chọn đúng artifact và nhãn đơn vị; không chạy GPU trong jsdom. */
-import { render, screen } from "@testing-library/react";
+/** Kiểm tra chọn đúng artifact và ẩn thông tin dư thừa; không chạy GPU trong jsdom. */
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { StageViewer } from "@/features/studio/StageViewer";
@@ -18,11 +18,29 @@ const gaussian: StageView = { stage_id: "ST-VISUAL-RECON", kind: "gaussian", tit
 beforeEach(() => { vi.clearAllMocks(); vi.mocked(getStageViews).mockResolvedValue([cameras, gaussian]); });
 
 describe("stage viewer selection", () => {
-  it("lọc đúng stage và tab đang hiển thị có aria-selected", async () => {
+  it("lọc đúng stage và ẩn thanh chọn khi chỉ có một kết quả", async () => {
     render(<StageViewer jobId="job-a" stageId="ST-CAMERA-POSE" />);
     expect(await screen.findByRole("img", { name: "Quỹ đạo camera nhìn từ trên xuống" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Camera" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.queryByRole("tablist")).toBeNull();
+    expect(screen.queryByText("SfM")).toBeNull();
     expect(screen.queryByRole("tab", { name: "Gaussian gốc" })).toBeNull();
+  });
+
+  it("giữ thanh chọn khi có nhiều kết quả và chuyển được lớp xem", async () => {
+    render(<StageViewer jobId="job-a" />);
+    expect(await screen.findByRole("tab", { name: "Gaussian gốc" })).toHaveAttribute("aria-selected", "true");
+    fireEvent.click(screen.getByRole("tab", { name: "Camera" }));
+    expect(screen.getByRole("tab", { name: "Camera" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("img", { name: "Quỹ đạo camera nhìn từ trên xuống" })).toBeInTheDocument();
+  });
+
+  it("bỏ tiêu đề và mô tả collision thừa, giữ vùng xem", async () => {
+    vi.mocked(getStageViews).mockResolvedValue([{ ...gaussian, stage_id: "ST-RGB-GEOMETRY", kind: "mesh", title: "Collision mesh (REC-05)", note: "Mesh va chạm thô cho Isaac; sàn là mặt phẳng z = 0 do Isaac tạo, không nằm trong mesh.", unit: "meter" }]);
+    render(<StageViewer jobId="job-a" stageId="ST-RGB-GEOMETRY" />);
+    expect(await screen.findByRole("tabpanel")).toBeInTheDocument();
+    expect(screen.queryByText("Collision mesh (REC-05)")).toBeNull();
+    expect(screen.queryByText(/Mesh va chạm thô cho Isaac/)).toBeNull();
+    expect(screen.queryByText(/Đơn vị: mét/)).toBeNull();
   });
 
   it("thiếu view cho stage không mount kết quả bước khác", async () => {
@@ -35,7 +53,7 @@ describe("stage viewer selection", () => {
   it("6 chưa có derivative hiển thị cảnh báo và giữ đơn vị SfM", async () => {
     render(<StageViewer jobId="job-a" stageId="ST-METRIC-CANONICALIZE" fallbackStageId="ST-VISUAL-RECON" />);
     expect(await screen.findByText(/Đang xem lại Gaussian gốc, đơn vị SfM/)).toBeInTheDocument();
-    expect(screen.getByText(/Đơn vị: tùy ý \(SfM\)/)).toBeInTheDocument();
+    expect(screen.queryByText(/Đơn vị: tùy ý \(SfM\)/)).toBeNull();
     expect(screen.queryByText(/Đơn vị: mét\./)).toBeNull();
   });
 
@@ -43,7 +61,8 @@ describe("stage viewer selection", () => {
     vi.mocked(getStageViews).mockResolvedValue([cameras, gaussian, { ...gaussian, stage_id: "ST-METRIC-CANONICALIZE", title: "Hệ mét", unit: "meter", note: "Canonical" }]);
     render(<StageViewer jobId="job-a" stageId="ST-METRIC-CANONICALIZE" fallbackStageId="ST-VISUAL-RECON" />);
     expect(await screen.findByText("Metric renderer")).toBeInTheDocument();
-    expect(screen.getByText(/Đơn vị: mét\./)).toBeInTheDocument();
+    expect(screen.queryByText("Canonical")).toBeNull();
+    expect(screen.queryByText(/Đơn vị: mét\./)).toBeNull();
     expect(screen.queryByText(/Đang xem lại Gaussian gốc/)).toBeNull();
   });
 });
