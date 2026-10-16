@@ -55,7 +55,7 @@
 
 ## Thay đổi đáng chú ý trên laptop (không khởi động lại stack)
 - `data/objectgs_runtime/torch_extensions`: cache gsplat được biên dịch lại cho sm_75 (`Quadro T2000`).
-  Đây là lần biên dịch thật (log `gpu-setup-3.log` và `gpu-setup-final.log` trong scratchpad của phiên).
+  Đây là lần biên dịch thật (log `gpu-setup-final.log` trong scratchpad của phiên; các log trung gian đã xoá).
 - `data/runtime.env`: xoá rồi sinh lại (`[ghi] … (6 thành phần)`). Không còn khoá timeout.
 - `scripts/gpu/studio.env` **không được sửa**. Chênh lệch để bạn quyết định (xem "Việc còn dở").
 
