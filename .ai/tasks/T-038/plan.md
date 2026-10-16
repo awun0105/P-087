@@ -98,6 +98,11 @@ COPY . .
   cũ `lidar-runtime`, `objectgs-runtime` gọi `install.sh --only`), `docs/RUNPOD_GUIDE.md` (viết lại mục cài),
   `scripts/gpu/README.md`, `deploy/studio/OVERVIEW.md`, test đóng gói liên quan.
 
+### Từ review T-037 (bắt buộc)
+Lock pip của ObjectGS chỉ có hash của file trên laptop; cài online (lúc build image) sẽ bị `--require-hashes` từ chối nếu pip
+chọn wheel khác trên PyPI. Bổ sung hash của mọi file pip có thể chọn cho cp38/manylinux x86_64 (xem `.ai/tasks/T-037/review.md`),
+thêm hash cho torch/torch-scatter, và chứng minh bằng một lần cài **không** `--wheels` (trong container build hoặc thư mục tạm).
+
 ## Steps
 1. `pins.env` + `apt-packages.txt` + `install.d/*.sh` + `install.sh` + `doctor.sh`. Test tĩnh: `bash -n` mọi script;
    mọi `curl` có kiểm sha256; không còn số phiên bản nào chép tay ngoài `pins.env` (quét `Dockerfile.gpu`, `install.d`,
