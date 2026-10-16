@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create one DATASET project/job from original images and a replay-only MP4."""
+"""Create one DATASET project/job from a composed MP4 and its original pre-extracted images."""
 
 import argparse
 import os
@@ -49,13 +49,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--images", required=True, type=Path)
     parser.add_argument("--name", required=True)
     parser.add_argument("--dataset-owner", required=True)
-    parser.add_argument("--video", required=True, type=Path, help="output MP4 path used only for playback")
+    parser.add_argument(
+        "--video", required=True, type=Path, help="output MP4 path submitted with the pre-extracted images"
+    )
     args = parser.parse_args(argv)
     try:
         from src.api.auth import auth_service
+        from src.services.orchestration.auth.models import actor_of
         from src.services.orchestration.processing import build_job_config, load_presets, preset_values
         from src.services.orchestration.projects.dataset_video import compose_display_video
-        from src.services.orchestration.projects.models import JobCreateInput, actor_of
+        from src.services.orchestration.projects.models import JobCreateInput
         from src.services.orchestration.projects.registry import get_project_registry
 
         images = ordered_images(args.images)
