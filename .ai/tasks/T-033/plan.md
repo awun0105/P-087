@@ -21,7 +21,8 @@ Panel bên phải, cùng kiểu với panel Chỉnh vùng. Các khối:
 3. **Khe kiểm**: "Thêm khe" → bấm hai điểm trên sàn hai bên khe → chọn layout A/B, "Ngoài đời robot qua được?" Có/Không, bề rộng
    thật (tuỳ chọn).
 4. **Vật cản chính**: checklist các vật của scene.
-5. **Bố trí**: "Gắn revision hiện tại là A" / "là B" (hiện revision đã gắn và thời điểm).
+5. **Bố trí**: "Gắn revision hiện tại là A" / "là B" (hiện revision đã gắn và thời điểm). `tagged_at` do máy chủ đặt
+   (client gửi giá trị bất kỳ, hiển thị giá trị máy chủ trả về); A và B phải khác revision (máy chủ trả 422).
 6. **Khác**: nguồn dữ liệu, đưa vào benchmark, mốc làm tay (phút), khai báo L4 (ba ô + bằng chứng), ghi chú.
 Lưu: nút "Lưu" gửi PUT với `expected_version`; 409 → thông báo "Người khác vừa sửa; tải lại" kèm nút, không mất nhập liệu đang có.
 Trạng thái: đang tải, lỗi, chưa có quyền (chỉ xem).
