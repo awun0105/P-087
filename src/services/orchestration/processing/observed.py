@@ -72,17 +72,24 @@ def processing_seconds(usages: Iterable[ResourceUsage]) -> dict[str, float]:
     """Thời gian máy đã xử lý của từng job: tổng thời lượng các bước đã chạy xong.
 
     Không gồm lúc nằm trong hàng đợi và lúc chờ người dùng thao tác (vd. xác nhận tỉ lệ mét), vì đó không phải thời
-    gian hệ thống làm việc. Mỗi bước chỉ tính lượt chạy xong gần nhất, nên chạy lại một bước không bị cộng dồn. Job
-    chưa có bước nào được đo (dựng trước khi có số đo) không có trong kết quả.
+    gian hệ thống làm việc. Hai quy tắc theo tool:
+    - Tool của pipeline (không bắt đầu bằng `scene.`): mỗi (job, tool) chỉ tính lượt chạy xong gần nhất, nên chạy lại
+      một bước pipeline không bị cộng dồn.
+    - Tool `scene.*` (hàng đợi tách vật): cộng dồn mọi lượt chạy xong, vì mỗi lần Tạo mesh hay dựng lại vùng là một việc
+      thật.
+    Chỉ lượt `completed` được tính. Job chưa có bước nào được đo (dựng trước khi có số đo) không có trong kết quả.
     """
     latest: dict[tuple[str, str], ResourceUsage] = {}
+    totals: dict[str, float] = {}
     for usage in usages:
         if usage.outcome != "completed":
+            continue
+        if usage.tool.startswith("scene."):
+            totals[usage.job_id] = totals.get(usage.job_id, 0.0) + usage.duration_seconds
             continue
         key = (usage.job_id, usage.tool)
         if key not in latest or usage.completed_at > latest[key].completed_at:
             latest[key] = usage
-    totals: dict[str, float] = {}
     for (job_id, _), usage in latest.items():
         totals[job_id] = totals.get(job_id, 0.0) + usage.duration_seconds
     return totals

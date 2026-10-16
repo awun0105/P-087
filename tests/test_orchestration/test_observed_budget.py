@@ -183,6 +183,31 @@ def test_processing_seconds_counts_machine_time_only() -> None:
     assert processing_seconds(usages) == {"job-a": 60.0 + 300.0 + 90.0, "job-b": 10.0}
 
 
+def test_scene_steps_add_up_across_runs_while_pipeline_tools_keep_the_latest() -> None:
+    """Mỗi lượt `scene.*` hoàn tất là một việc thật nên cộng hết; tool pipeline vẫn chỉ lấy lượt mới nhất."""
+    from datetime import timedelta
+
+    from src.services.orchestration.processing.observed import processing_seconds
+
+    usages = [
+        _usage("scene.region", None, None, duration_seconds=20.0, params=None, attempt_id="r1"),
+        _usage("scene.region", None, None, duration_seconds=30.0, params=None, attempt_id="r2"),
+        _usage("scene.geometry", None, None, duration_seconds=40.0, params=None, attempt_id="g1"),
+        _usage("scene.geometry", None, None, duration_seconds=5.0, params=None, outcome="cancelled", exit_code=None),
+        _usage("scene.geometry", None, None, duration_seconds=7.0, params=None, outcome="failed", exit_code=1),
+        _usage("preview", 1.0, 1.0, duration_seconds=100.0, completed_at=NOW - timedelta(hours=1)),
+        _usage("preview", 1.0, 1.0, duration_seconds=10.0),
+    ]
+    assert processing_seconds(usages) == {"job-a": 20.0 + 30.0 + 40.0 + 10.0}
+
+
+def test_scene_records_do_not_change_the_observed_budget() -> None:
+    """Bản ghi `scene.*` không có `params`, nên không vào ngân sách VRAM/RAM của pipeline."""
+    preview = _usage("preview", 2.0, 4.0)
+    scene = _usage("scene.geometry", 8.0, 16.0, params=None)
+    assert _budget([preview, scene]) == _budget([preview])
+
+
 def test_observed_for_config_returns_none_when_a_required_tool_is_unmeasured() -> None:
     from src.services.orchestration.processing.observed import observed_for_config
 
