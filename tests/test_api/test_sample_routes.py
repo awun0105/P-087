@@ -148,7 +148,7 @@ def test_stage_durations_follow_completed_chain() -> None:
         JobAttemptRecord(attempt=1, status=JobStatus.RUNNING, current_stage=StageId.INPUT_VALIDATE, recorded_at=t0),
     ]
     durations = [stage.duration_seconds for stage in stage_durations(job, attempts)]
-    assert durations == [10.0, 1.0, 29.0, 300.0, None, None, None, None]
+    assert durations == [40.0, None, None, 300.0, None, None, None, None]
     assert [stage.state for stage in stage_durations(job, attempts)] == ["succeeded"] * 4 + ["pending"] * 4
 
 

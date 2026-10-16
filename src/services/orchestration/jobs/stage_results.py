@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+from datetime import datetime
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any
 
@@ -129,6 +130,24 @@ def recorded_results(registry: ProjectRegistry, job: JobManifest) -> dict[str, A
                 "shell_count": chosen.count("gaussian_shell") if any(chosen) else None,
                 "collider_count": sum(item.get("collider") is not None for item in objects),
             }
+            if registry.persistence is not None:
+                with registry.persistence.database.transaction() as tx:
+                    row = tx.execute("SELECT payload FROM r2s_scene_requests WHERE job_id=?", (job.job_id,)).fetchone()
+                if row is not None:
+                    request = json.loads(row[0])
+                    if (
+                        request.get("mode") == "geometry"
+                        and request.get("status") == "done"
+                        and request.get("result_revision") == scene["scene_revision"]
+                        and request.get("started_at")
+                        and request.get("finished_at")
+                    ):
+                        elapsed = (
+                            datetime.fromisoformat(request["finished_at"])
+                            - datetime.fromisoformat(request["started_at"])
+                        ).total_seconds()
+                        if elapsed > 0:
+                            result["object_geometry"]["duration_seconds"] = elapsed
     return result
 
 

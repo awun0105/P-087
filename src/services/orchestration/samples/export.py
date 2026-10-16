@@ -125,11 +125,25 @@ def stage_durations(job: JobManifest, attempts: Sequence[JobAttemptRecord]) -> l
             DemoStage(
                 stage_id=stage_id,
                 state=state,
-                duration_seconds=duration if duration is not None and duration >= 0 else None,
+                duration_seconds=duration if duration is not None and duration > 0 else None,
                 summary="Mẫu này chưa ghi kết quả của bước này." if state == "pending" else "",
             )
         )
         cursor = end  # Gap thiếu evidence không được gán thời gian của nhiều bước vào stage sau.
+    prepare_ids = MVP_PIPELINE[:3]
+    prepare = [records.get(stage_id) for stage_id in prepare_ids]
+    if any(record is not None and record.started_at is None for record in prepare):
+        # Prepare publish ba receipt cùng lúc: chỉ có thể đo thời gian chung.
+        for stage in stages[:3]:
+            stage.duration_seconds = None
+        ends = [record.completed_at for record in prepare if record is not None and record.completed_at is not None]
+        if running and running[0].current_stage in prepare_ids and len(ends) == 3:
+            elapsed = (max(ends) - running[0].recorded_at).total_seconds()
+            if elapsed > 0:
+                stages[0].duration_seconds = elapsed
+                stages[
+                    0
+                ].summary = "Thời gian chuẩn bị gộp chung 3 bước: kiểm tra video, quyền riêng tư và tách khung hình."
     return stages
 
 

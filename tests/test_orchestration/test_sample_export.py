@@ -56,6 +56,7 @@ def _registry(tmp_path: Path, *, preview_ok: bool = True, raw_video: bool = Fals
     return SimpleNamespace(
         get_job=real.get_job,
         scene=real.scene,
+        persistence=None,
         get_preview=get_preview,
         runtime_resolver=_Resolver(splat),
         get_project=lambda project_id: SimpleNamespace(input_manifest_ref="RAW_VIDEO_MANIFEST" if raw_video else None),
@@ -448,3 +449,35 @@ def test_sample_exports_recorded_metric_collision_objects_and_geometry(
     assert demo.object_geometry.shell_count == int(not objectgs)
     assert demo.object_geometry.collider_count == 1
     assert demo.object_geometry.duration_seconds is None
+
+
+def test_sample_prepare_timings_are_grouped_instead_of_fake_zero(tmp_path: Path) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from src.models.contracts.manifests import JobStatus, StageArtifact, StageStatus
+    from src.services.orchestration.samples.export import stage_durations
+
+    registry, _ = _registry(tmp_path)
+    job = registry.get_job(JOB_ID)
+    start = datetime(2026, 10, 17, tzinfo=UTC)
+    records = [
+        StageArtifact(
+            stage_id=stage_id,
+            status=StageStatus.SUCCEEDED,
+            artifact_type="Evidence",
+            artifact_uri=f"artifact://jobs/{JOB_ID}/{stage_id.value}",
+            artifact_checksum="sha256:" + "a" * 64,
+            data_class="derived",
+            completed_at=start + timedelta(seconds=12),
+        )
+        for stage_id in [StageId.INPUT_VALIDATE, StageId.PRIVACY_GATE, StageId.FRAME_EXTRACT]
+    ]
+    event = SimpleNamespace(
+        attempt=1, status=JobStatus.RUNNING, current_stage=StageId.INPUT_VALIDATE, recorded_at=start
+    )
+    stages = stage_durations(job.model_copy(update={"stage_artifacts": records}), [event])
+    assert [stage.duration_seconds for stage in stages[:3]] == [12, None, None]
+    assert "gộp chung 3 bước" in stages[0].summary
+    assert all(stage.duration_seconds != 0 for stage in stages)
+    stages = stage_durations(job.model_copy(update={"stage_artifacts": records}), [])
+    assert all(stage.duration_seconds is None for stage in stages[:3])

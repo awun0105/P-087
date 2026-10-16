@@ -44,7 +44,7 @@ export function replayState(
     cursor += length;
     const realSeconds = record.duration_seconds;
     if (elapsedMs >= start + length) {
-      return { stage_id: meta.id, state: "succeeded", seconds: realSeconds, fraction: 1 };
+      return { stage_id: meta.id, state: "succeeded", seconds: realSeconds, fraction: 1, note: [record.summary, realSeconds === null ? "Thời gian: chưa đo" : null].filter(Boolean).join(" · ") || null };
     }
     if (elapsedMs >= start) {
       return { stage_id: meta.id, state: "running", seconds: null, fraction: (elapsedMs - start) / length };

@@ -120,3 +120,15 @@ describe("kết quả duyệt vật của mẫu", () => {
     }
   });
 });
+
+it("thời gian không đo được hiển thị chưa đo trên timeline", async () => {
+  const { demoReplayStages, demoStageList } = await import("@/features/studio/demoStages");
+  const { replayPlan, replayState } = await import("@/features/studio/useDemoReplay");
+  const { PipelineTimeline } = await import("@/features/studio/PipelineTimeline");
+  const demo = manifest([stage("ST-INPUT-VALIDATE", {duration_seconds: 12, summary: "gộp chung 3 bước"}), stage("ST-FRAME-EXTRACT", {duration_seconds: null})]);
+  const rows = demoReplayStages(demo), list = demoStageList(demo);
+  render(<PipelineTimeline stages={replayState(rows, replayPlan(rows, list), 999999, list)} stageList={list} />);
+  expect(screen.getByText("gộp chung 3 bước")).toBeInTheDocument();
+  expect(screen.getByText("Thời gian: chưa đo")).toBeInTheDocument();
+  expect(screen.queryByText("0 giây")).toBeNull();
+});
