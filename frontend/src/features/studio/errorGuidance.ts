@@ -100,6 +100,30 @@ export function guidanceFor(error: ExecutionError | null | undefined): ErrorGuid
         fix: 'Giảm "Số bước huấn luyện 3DGS" hoặc thử lại.',
       };
 
+    case "PROCESS_STALLED":
+      return {
+        cause: "Một bước xử lý không ghi tiến triển trong thời gian cho phép nên đã bị dừng, có thể do treo.",
+        fix: "Thử lại. Nếu scene rất lớn và lặp lại, báo quản trị viên tăng thời gian chờ treo của công cụ đó.",
+      };
+
+    case "LIDAR_ODOMETRY_STALLED":
+      return {
+        cause: "Bước ước lượng quỹ đạo LiDAR không tiến triển trong thời gian cho phép nên đã bị dừng.",
+        fix: "Thử lại. Nếu lặp lại, báo quản trị viên kiểm tra máy xử lý và dữ liệu LiDAR.",
+      };
+
+    case "EXPECTED_DURATION_EXCEEDED":
+      return {
+        cause: "Lượt chạy này lâu hơn hẳn thời gian thường thấy trên GPU này cho scene cỡ này, nên đã dừng.",
+        fix: "Thử lại khi máy xử lý rảnh. Nếu lặp lại, kiểm tra GPU hoặc giảm \"Số khung hình tối đa\".",
+      };
+
+    case "GPU_BUDGET_EXCEEDED":
+      return {
+        cause: "Scene này đã dùng hết số giờ GPU tối đa đặt cho mỗi scene nên không chạy thêm.",
+        fix: "Nếu scene này cần thêm giờ GPU, người vận hành nâng PRODUCT_JOB_GPU_HOURS_MAX rồi tạo lượt chạy mới.",
+      };
+
     default:
       return null;
   }
