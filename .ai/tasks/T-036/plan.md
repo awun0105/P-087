@@ -33,7 +33,7 @@ Thư mục runtime trong `data/` và biến môi trường cấu hình runtime m
 | `data/lidar_runtime` | `data/lidar_odometry_runtime` | venv Python + KISS-ICP (luồng LiDAR thô R5/R6) |
 
 Giữ nguyên: `data/scene_runtime` (tên đã đúng chức năng), `data/objectgs_runtime` (conda, xem mục 3 ở trên).
-Không đổi đường dẫn **trong container** (`/opt/real2sim/...`): đó là phần đóng gói của teammate.
+Không đổi đường dẫn **trong container** (`/opt/real2sim/...`): T-038 làm.
 
 ### B. Đổi tiền tố biến môi trường (6 lớp settings, đổi cả tiền tố nên mọi trường đi theo)
 
@@ -51,8 +51,8 @@ Ví dụ: `REC03_COLMAP_COMMAND` → `R2S_COLMAP_COMMAND`, `REC04_BRUSH_LPIPS_PY
 
 ### Ngoài phạm vi (không đụng)
 - `Dockerfile`, `Dockerfile.gpu`, `docker-compose*.yml`, `deploy/**`, `scripts/gpu/docker_entrypoint.sh`,
-  `tests/test_packaging/test_compose_config.py`: phần đóng gói của teammate. Chúng vẫn chạy nhờ tên cũ được nhận.
-  Ghi danh sách dòng cần đổi vào report để chuyển cho teammate.
+  `tests/test_packaging/test_compose_config.py`: T-038 đổi các file này cùng lúc với việc chuyển image sang
+  `install.sh`. Ở T-036 chúng vẫn chạy nhờ tên cũ được nhận. Ghi danh sách dòng cần đổi vào report để T-038 dùng.
 - Biến chỉ dùng cho smoke/test: `REC03_SMOKE_*`, `REC04_SMOKE_*`, `REC04_PREVIEW_*`, `REC07_SMOKE_*`,
   `REC04_TEST_SPLAT_MODULE`, `REC05_TEST_*`, `REC07_DEBUG`. Chúng đi cùng file smoke mang tên task.
 - `configs/product/input_runtime_qualification_v1.json` (bằng chứng đã đóng băng).
@@ -274,7 +274,7 @@ bằng một bảng ánh xạ trong `src/runtime_env.py` (ví dụ `requirement_
 
 ### Bước 5. Report
 `report.md` gồm: kết quả từng lệnh kiểm ở bước 4 (số thật), diff tên dòng của `studio.env` (chỉ tên biến, không giá trị),
-danh sách dòng trong Dockerfile/compose/deploy còn dùng tên cũ để chuyển cho teammate, và cách hoàn tác.
+danh sách dòng trong Dockerfile/compose/deploy còn dùng tên cũ (cho T-038), và cách hoàn tác.
 
 ## Hoàn tác (ghi vào report, chỉ dùng khi bước 4 thất bại)
 Dừng stack; `mv` ngược 3 thư mục; chạy lại vòng sửa shebang theo chiều ngược; `cp -p` bản sao lưu về
