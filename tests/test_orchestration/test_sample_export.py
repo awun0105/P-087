@@ -28,6 +28,9 @@ class _Resolver:
     def __init__(self, splat: Path) -> None:
         self.splat = splat
 
+    def require_uri(self, uri: str, checksum: str) -> Path:
+        raise ArtifactStoreError("không có artifact này")
+
     def require(self, reference: object) -> Path:
         if reference == "DELIVERY":
             return self.splat
@@ -52,6 +55,7 @@ def _registry(tmp_path: Path, *, preview_ok: bool = True, raw_video: bool = Fals
 
     return SimpleNamespace(
         get_job=real.get_job,
+        scene=real.scene,
         get_preview=get_preview,
         runtime_resolver=_Resolver(splat),
         get_project=lambda project_id: SimpleNamespace(input_manifest_ref="RAW_VIDEO_MANIFEST" if raw_video else None),
@@ -331,3 +335,116 @@ def test_sample_optional_object_geometry_is_validated(tmp_path: Path) -> None:
     assert DemoManifest.model_validate_json(demo.model_dump_json()).object_geometry.collider_count == 5
     with pytest.raises(ValidationError):
         DemoObjectGeometry(state="succeeded", objectgs_count=-1)
+
+
+@pytest.mark.parametrize("source", ["user_measured", "ai_estimated", "lidar_trajectory"])
+@pytest.mark.parametrize("objectgs", [False, True])
+def test_sample_exports_recorded_metric_collision_objects_and_geometry(
+    tmp_path: Path, source: str, objectgs: bool
+) -> None:
+    import json
+    from datetime import UTC, datetime
+
+    from src.models.contracts.artifacts import ArtifactDataClass, ProductArtifactRef
+    from src.models.contracts.manifests import StageArtifact, StageStatus
+
+    registry, _ = _registry(tmp_path)
+    refs = {}
+
+    def publish(name, payload):  # noqa: ANN001, ANN202
+        path = tmp_path / name
+        path.write_text(json.dumps(payload))
+        ref = ProductArtifactRef(
+            artifact_type="Evidence",
+            schema_version="1.0",
+            artifact_uri=f"artifact://jobs/{JOB_ID}/{name}",
+            artifact_checksum=sha256_file(path),
+            data_class=ArtifactDataClass.DERIVED,
+            producer_stage=StageId.METRIC_CANONICALIZE,
+            job_id=JOB_ID,
+        )
+        refs[ref.artifact_uri] = path
+        return ref
+
+    declaration = publish(
+        "declaration.json",
+        {
+            "job_id": JOB_ID,
+            "input": {"distance_source": source, "check_a": [0, 0, 0], "check_b": [1, 0, 0], "check_distance_m": 2},
+            "estimate": {
+                "method": "lidar_trajectory_alignment"
+                if source == "lidar_trajectory"
+                else "moge2_sparse_depth_scale_only"
+            },
+        },
+    )
+    confirmation = publish(
+        "confirmation.json",
+        {
+            "preview": {
+                "transform": {"scale_m_per_sfm_unit": 2},
+                "request": {"anchor": {"measurement_ref": declaration.model_dump(mode="json")}},
+            }
+        },
+    )
+    geometry_ref = {
+        "artifact_type": "LidarCollisionCandidate" if source == "lidar_trajectory" else "GeometryArtifact",
+        "artifact_checksum": "sha256:" + "1" * 64,
+    }
+    bundle = publish(
+        "bundle.json",
+        {
+            "canonical_geometry_ref": geometry_ref,
+            "rgb_geometry_ref": None if source == "lidar_trajectory" else geometry_ref,
+        },
+    )
+    scene = publish(
+        "scene.json",
+        {
+            "scene_revision": "rev-002",
+            "provenance": {"object_geometry": "ready"},
+            "environment": {},
+            "objects": [
+                {
+                    "collider": {},
+                    "provenance": {"surface_selection": {"chosen": "objectgs" if objectgs else "gaussian_shell"}},
+                }
+            ],
+        },
+    )
+    registry.runtime_resolver.require_uri = lambda uri, checksum: refs[uri]
+    registry.scene.head_repository = SimpleNamespace(get=lambda job_id: SimpleNamespace(scene_reference=scene))
+    job = registry.get_job(JOB_ID)
+    records = [
+        StageArtifact(
+            stage_id=stage_id,
+            status=StageStatus.SUCCEEDED,
+            artifact_type=kind,
+            artifact_uri=ref.artifact_uri,
+            artifact_checksum=ref.artifact_checksum,
+            data_class=ArtifactDataClass.DERIVED,
+            completed_at=datetime.now(UTC),
+        )
+        for stage_id, kind, ref in [
+            (StageId.METRIC_CANONICALIZE, "RGBMetricConfirmation", confirmation),
+            (StageId.METRIC_CANONICALIZE, "ReconstructionBundle", bundle),
+            (StageId.RGB_GEOMETRY, "GeometryArtifact", bundle),
+            (StageId.OBJECT_EXTRACT, "SceneIR", scene),
+        ]
+    ]
+    registry.get_job = lambda job_id: job.model_copy(update={"stage_artifacts": records})
+    demo = export_job_bundle(
+        registry, JOB_ID, tmp_path / "export", demo_id="x", title="x", description="", source=SOURCE
+    )
+    facts = {
+        stage.stage_id: {fact.label: fact.value for asset in stage.assets for fact in asset.facts}
+        for stage in demo.stages
+    }
+    assert facts[StageId.METRIC_CANONICALIZE]["Tỉ lệ"] == "2 m/đơn vị"
+    assert facts[StageId.METRIC_CANONICALIZE]["Sai số C–D"] == "0 m"
+    assert facts[StageId.RGB_GEOMETRY]["Nguồn lưới va chạm"] == ("LiDAR" if source == "lidar_trajectory" else "ảnh")
+    assert facts[StageId.OBJECT_EXTRACT]["Số vật ứng viên"] == "1"
+    assert demo.object_geometry.objectgs_count == int(objectgs)
+    assert demo.object_geometry.shell_count == int(not objectgs)
+    assert demo.object_geometry.collider_count == 1
+    assert demo.object_geometry.duration_seconds is None

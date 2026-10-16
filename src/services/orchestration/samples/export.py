@@ -22,11 +22,13 @@ from src.services.orchestration.artifacts import ArtifactStoreError, sha256_file
 from src.services.orchestration.jobs.dispatch import prepared_frame_reference
 from src.services.orchestration.jobs.models import JobAttemptRecord
 from src.services.orchestration.jobs.progress import MVP_PIPELINE, sanitized_frame_stage
+from src.services.orchestration.jobs.stage_results import recorded_results, result_facts
 from src.services.orchestration.samples.bundle import UNPUBLISHED_MARKER, DemoLibrary, DemoUnavailableError
 from src.services.orchestration.samples.models import (
     DemoFact,
     DemoFile,
     DemoManifest,
+    DemoObjectGeometry,
     DemoSource,
     DemoStage,
     DemoStageAsset,
@@ -277,8 +279,32 @@ def _export_job_bundle(
         except Exception:  # noqa: BLE001 - camera chỉ là lớp phụ; thiếu thì bundle vẫn dùng được
             cameras = []
     stages = stage_durations(job, registry.list_job_attempts(job.job_id))
-    if stage_assets:
-        _attach_assets(out, stages, stage_assets)
+    results = recorded_results(registry, job)
+    automatic = {
+        stage_id: [StageAssetSpec(kind="facts", facts=tuple(facts))]
+        for stage_id, facts in result_facts(results).items()
+    }
+    # Ảnh xem trước chỉ lấy từ artifact đã publish của job, không render ảnh mới.
+    for stage in job.stage_artifacts:
+        if stage.status != StageStatus.SUCCEEDED or not stage.artifact_uri:
+            continue
+        if stage.stage_id not in automatic or Path(stage.artifact_uri).suffix.lower() not in _ASSET_SUFFIXES["image"]:
+            continue
+        automatic[stage.stage_id].append(
+            StageAssetSpec(kind="image", path=resolver.require_uri(stage.artifact_uri, stage.artifact_checksum))
+        )
+    combined = {
+        stage_id: [*automatic.get(stage_id, []), *(stage_assets or {}).get(stage_id, [])]
+        for stage_id in automatic.keys() | (stage_assets or {}).keys()
+    }
+    if combined:
+        _attach_assets(out, stages, combined)
+    if results.get("object_extraction") == "objectify_failed_awaiting_choice":
+        for stage in stages:
+            if stage.stage_id == StageId.OBJECT_EXTRACT:
+                stage.state = "failed"
+                stage.summary = "Tách theo vật chưa thành công; scene chưa có vật ứng viên."
+    geometry = results.get("object_geometry")
     demo = DemoManifest(
         processing=_job_processing(resolver, job),
         machine=_machine(),
@@ -297,6 +323,7 @@ def _export_job_bundle(
             "visual_producer_version": preview.producer_version,
         },
         stages=stages,
+        object_geometry=DemoObjectGeometry.model_validate(geometry) if geometry else None,
         video=video,
         frames=frame_files,
         frame_count=frame_count,
