@@ -2,8 +2,14 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest";
 import { MetricSceneView } from "@/features/studio/MetricSceneView";
 import type { PhysicsObjectInput } from "@/features/viewer/usePhysicsPlay";
+import { EMPTY_INSPECTION } from "@/features/viewer/inspection-history";
 import type { CollisionSurfacePlane } from "@/lib/api/studio";
 
+const setShell = vi.hoisted(() => vi.fn(async () => undefined));
+const clearShell = vi.hoisted(() => vi.fn());
+vi.mock("@/features/viewer/shell-glow", () => ({ ShellGlowLayer: class {
+  destroy = vi.fn(); setShell = setShell; clear = clearShell;
+} }));
 const renderViewer = vi.hoisted(() => vi.fn());
 const gizmo = vi.hoisted(() => vi.fn());
 const setBoxes = vi.hoisted(() => vi.fn());
@@ -12,7 +18,7 @@ const setCollision = vi.hoisted(() => vi.fn());
 const loadCollision = vi.hoisted(() => vi.fn<(url: string, opacity: number) => Promise<number>>(async () => 0));
 const pickCollisionTriangle = vi.hoisted(() => vi.fn());
 vi.mock("@/features/viewer/scene-overlay", () => ({ SceneOverlay: class {
-  attachGizmo = gizmo;
+  objectEntity = () => ({}); attachGizmo = gizmo;
   destroy = vi.fn(); detachGizmo = vi.fn(); setObjects = vi.fn(); setBoxes = setBoxes; setColliders = setColliders; setSurfaceMarkers = vi.fn();
   setSplatVisible = vi.fn(); setCollision = setCollision; collisionPositions = () => null; bindViewerGotoPose = vi.fn();
   loadCollision = loadCollision; pickCollisionTriangle = pickCollisionTriangle;
@@ -199,4 +205,27 @@ describe("MetricSceneView khoá Draft (T-013)", () => {
       expect(screen.getByRole("button", { name })).toBeEnabled();
     }
   });
+});
+
+
+it("hides collision and selection boxes while Benchmark picks splat points, then restores layer choices", () => {
+  const onState = vi.fn();
+  const boxes = [{id: "A", center: [0,0,1] as [number,number,number], rotation_xyzw: [0,0,0,1] as [number,number,number,number], dimensions: [1,2,3] as [number,number,number], color: "#ffffff", emphasized: false}];
+  render(<MetricSceneView jobId="j" visual={visual} collision={collision} cameras={cameras} objects={[{id: "A", url: null, visible: true, position: [0,0,1], rotation_xyzw: [0,0,0,1]}]} shells={[{id: "A", url: "/shell.glb", style: "selected"}]} boxes={boxes} inspection={{onReady: vi.fn(), onState}} />);
+  act(() => renderViewer.mock.lastCall![0].onApp({}, {setObjectCollision: vi.fn()}));
+  fireEvent.click(screen.getByLabelText("Collision mesh"));
+  expect(setBoxes).toHaveBeenLastCalledWith(boxes);
+  const reportInspection = renderViewer.mock.lastCall![0].onInspectionState;
+  act(() => reportInspection({...EMPTY_INSPECTION, measuring: true}));
+  expect(renderViewer.mock.lastCall![0].onInspectionState).toBe(reportInspection);
+  expect(setCollision).toHaveBeenLastCalledWith(false, .3, false);
+  expect(setColliders.mock.lastCall![1]).toBe(false);
+  expect(setBoxes).toHaveBeenLastCalledWith([]);
+  expect(clearShell).toHaveBeenCalledWith("A");
+  setShell.mockClear();
+  expect(onState).toHaveBeenLastCalledWith({...EMPTY_INSPECTION, measuring: true});
+  act(() => renderViewer.mock.lastCall![0].onInspectionState(EMPTY_INSPECTION));
+  expect(setCollision).toHaveBeenLastCalledWith(true, .3, false);
+  expect(setShell).toHaveBeenCalledWith("A", "/shell.glb", "selected");
+  expect(setBoxes).toHaveBeenLastCalledWith(boxes);
 });

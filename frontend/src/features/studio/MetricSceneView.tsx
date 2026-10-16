@@ -220,6 +220,12 @@ export function MetricSceneView({
   const [runtime, setRuntime] = useState(INITIAL_RUNTIME);
   const [viewerControls, setViewerControls] = useState<ViewerControls | null>(null);
   const sourceFrame: SourceFrame = "z_up";
+  const [measuring, setMeasuring] = useState(false);
+  const notifyInspection = inspection?.onState;
+  const onInspectionState = useCallback((state: InspectionState) => {
+    setMeasuring(state.measuring);
+    notifyInspection?.(state);
+  }, [notifyInspection]);
   const [wheelFactor, setWheelFactor] = useState(2);
   const [thirdPerson, setThirdPerson] = useState(false);
 
@@ -458,13 +464,14 @@ export function MetricSceneView({
   }, [shells]);
   useEffect(() => {
     if (!glow || !overlay) return;
-    const wanted = new Set(shells.map((shell) => shell.id));
+    const visibleShells = measuring ? [] : shells;
+    const wanted = new Set(visibleShells.map((shell) => shell.id));
     for (const id of [...baseShellRefs.current.keys()]) {
       if (wanted.has(id) || previewOwners.current.has(id)) continue;
       glow.clear(id);
       baseShellRefs.current.delete(id);
     }
-    for (const shell of shells) {
+    for (const shell of visibleShells) {
       if (previewOwners.current.has(shell.id)) continue;
       const entity = overlay.objectEntity(shell.id);
       if (!entity) continue; // vật chưa có entity: lần đổi objects sau sẽ thử lại
@@ -474,7 +481,7 @@ export function MetricSceneView({
       baseShellRefs.current.set(shell.id, { key, entity });
       glow.setShell(shell.id, shell.url, shell.style).catch(() => undefined); // vỏ lỗi thì vật không có vỏ; viewer vẫn chạy
     }
-  }, [glow, overlay, shells, objects]);
+  }, [glow, overlay, shells, objects, measuring]);
 
   /** Trả vỏ gốc của vật (từ `shells`) sau khi lần xem trước đóng; vật không có vỏ gốc thì không còn vỏ. */
   const restoreBaseShell = useCallback((objectId: string) => {
@@ -573,17 +580,17 @@ export function MetricSceneView({
   }, [overlay, layers.splat]);
   useEffect(() => {
     // Environment loading must not recreate object layers from their authored pose during a drag.
-    overlay?.setCollision(layers.collision, layers.splat ? 0.3 : 1, layers.triangles);
-  }, [overlay, layers.collision, layers.splat, layers.triangles, collisionState]);
+    overlay?.setCollision(layers.collision && !measuring, layers.splat ? 0.3 : 1, layers.triangles);
+  }, [overlay, layers.collision, layers.splat, layers.triangles, collisionState, measuring]);
   useEffect(() => {
-    overlay?.setColliders(colliderBoxes, layers.collision, layers.triangles);
-  }, [overlay, colliderBoxes, layers.collision, layers.triangles]);
+    overlay?.setColliders(colliderBoxes, layers.collision && !measuring, layers.triangles);
+  }, [overlay, colliderBoxes, layers.collision, layers.triangles, measuring]);
   useEffect(() => {
-    overlay?.setBoxes(layers.boxes ? boxes : []);
-  }, [overlay, boxes, layers.boxes]);
+    overlay?.setBoxes(layers.boxes && !measuring ? boxes : []);
+  }, [overlay, boxes, layers.boxes, measuring]);
   useEffect(() => {
-    overlay?.setSurfaceMarkers(surfacePlanes,layers.collision);
-  }, [overlay,surfacePlanes,layers.collision]);
+    overlay?.setSurfaceMarkers(surfacePlanes,layers.collision && !measuring);
+  }, [overlay,surfacePlanes,layers.collision,measuring]);
 
   if (capability === "failed" || capability === "unavailable") {
     return <Notice tone="rust">{playCanvasErrorMessage(capability)}</Notice>;
@@ -641,7 +648,7 @@ export function MetricSceneView({
         enableInspection={inspection !== null}
         inspectionMaxPoints={2}
         onInspectionReady={inspection?.onReady}
-        onInspectionState={inspection?.onState}
+        onInspectionState={inspection ? onInspectionState : undefined}
         cameras={cameras}
         initialCamera={initialCamera}
         initialCameraMode="fly"

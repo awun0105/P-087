@@ -628,3 +628,11 @@ def test_markdown_marks_l4_as_declared() -> None:
 
     assert line.rstrip().endswith("| khai báo |")
     assert scorecard_markdown(_card()).count("| đo |") >= 1
+
+
+def test_benchmark_markdown_without_gaps_does_not_claim_a_zero_measurement() -> None:
+    from src.services.orchestration.value.scorecard import benchmark_markdown
+
+    assert "Khe khớp: —" in benchmark_markdown([], benchmark_summary([]))
+    measured = benchmark_summary([]).model_copy(update={"gaps_agree_total": 1, "gaps_total": 2})
+    assert "Khe khớp: 1/2" in benchmark_markdown([], measured)

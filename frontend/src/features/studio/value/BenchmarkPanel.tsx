@@ -381,8 +381,8 @@ export function BenchmarkPanel({ jobId, sceneRevision, objects, canEdit, picker 
           <div role="alert" className="space-y-1 rounded-md border border-ochre/40 p-2 text-xs">
             <p>Đã chọn nhưng không còn trong scene: {missing.join(", ")}</p>
             {missing.map((id) => (
-              <Button key={id} size="sm" variant="ghost" disabled={!editable} aria-label={`Bỏ chọn ${id}`} onClick={() => update({ keyObstacleIds: current.keyObstacleIds.filter((other) => other !== id) })}>
-                Bỏ chọn {id}
+              <Button key={id} size="sm" variant="ghost" disabled={!editable} aria-label={`Bỏ chọn vật đã xoá (${id})`} onClick={() => update({ keyObstacleIds: current.keyObstacleIds.filter((other) => other !== id) })}>
+                Bỏ chọn vật đã xoá ({id})
               </Button>
             ))}
           </div>

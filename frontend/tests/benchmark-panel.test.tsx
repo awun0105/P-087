@@ -204,7 +204,7 @@ describe("panel Benchmark", () => {
     await loaded();
     expect(screen.getByRole("alert").textContent).toContain("old-box");
 
-    fireEvent.click(screen.getByRole("button", { name: "Bỏ chọn old-box" }));
+    fireEvent.click(screen.getByRole("button", { name: "Bỏ chọn vật đã xoá (old-box)" }));
     vi.mocked(putBenchmarkTruth).mockResolvedValue({ ...LOADED, version: 4 });
     fireEvent.click(screen.getByRole("button", { name: "Lưu" }));
     await waitFor(() => expect(putBenchmarkTruth).toHaveBeenCalled());

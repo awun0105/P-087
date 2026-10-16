@@ -870,13 +870,14 @@ def csv_document(cards: Iterable[ValueScorecard]) -> str:
 
 
 def benchmark_markdown(rows: Sequence[ValueScorecard], summary: BenchmarkSummary) -> str:
+    gaps = f"{summary.gaps_agree_total}/{summary.gaps_total}" if summary.gaps_total else "—"
     lines = [
         "# Bộ benchmark giá trị",
         "",
         f"Số scene: {summary.scenes} · trung vị phút công người: "
         f"{'—' if summary.hands_on_median_minutes is None else f'{summary.hands_on_median_minutes:.1f}'} "
         f"(n = {summary.hands_on_n}) · đạt ≥ L2: {summary.scenes_at_least_l2} · đạt ≥ L3: {summary.scenes_at_least_l3}",
-        f"Khe khớp: {summary.gaps_agree_total}/{summary.gaps_total} · bỏ sót: {summary.missed_total} · giả: {summary.false_total}",
+        f"Khe khớp: {gaps} · bỏ sót: {summary.missed_total} · giả: {summary.false_total}",
         "",
         "| Scene | Máy (ph) | Người (ph) | Khe khớp | Bỏ sót / Giả | Bậc |",
         "| --- | --- | --- | --- | --- | --- |",
