@@ -80,3 +80,8 @@ Xong 2026-10-16: T-027 → T-035 accepted. Full backend 3.688 pass / 0 fail / 28
 | T-040 | Bỏ chép runtime manifest tay | Identity phần mềm tách phần cứng; worker công bố runtime; lease cho job mồ côi | T-036 | L |
 | T-042 | GPU worker trên RunPod Serverless | Bật khi có việc, tắt khi rảnh; nhiều loại GPU; UI hiện thời gian chờ GPU | T-039, T-040 | L |
 | T-041 | Deploy production thử trọn | Supabase, R2, Railway, Vercel, RunPod Serverless; 5 scene mẫu; đổi loại GPU không sửa API | T-039, T-040, T-042 | L |
+
+### Backlog (chưa lập plan)
+- Worker công bố registry năng lực input vào DB (bỏ chép tay `PRODUCT_INPUT_RUNTIME_REGISTRY`), cùng mẫu T-040.
+- Nút "Chạy lại từ đầu" cho job đã có stage mà runtime không còn worker (T-040 Q1).
+- Lệnh `reset-password` trong `auth.cli`.

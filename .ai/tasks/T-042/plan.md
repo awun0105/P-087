@@ -43,6 +43,11 @@ rồi thoát; RunPod tự tìm máy trong danh sách nhiều loại GPU. Ngườ
    tối đa `RUNPOD_MAX_WORKERS`, `executionTimeout` 6 giờ, `ttl` 24 giờ, ổ container 80 GB, biến môi trường từ
    `worker.env` (DB, R2, EgoBlur, không có khoá RunPod).
 
+### Lưu ý từ review T-040 (đổi phiên bản image)
+Runtime cũ còn "sống" tới 15 phút sau worker cuối, nên job chưa có stage của runtime cũ chưa được rebind trong khi autoscaler
+vẫn đếm chúng → bật worker image mới vô ích. Trong chế độ `drain`, worker image mới được rebind job chưa có stage nếu runtime
+của job có `last_seen_at` trước `first_seen_at` của runtime worker này (image cũ hơn), không chờ hết TTL. Có test.
+
 ## Steps
 1. **Thử nhỏ trước (bắt buộc, có chủ dự án duyệt chi phí).** Tạo endpoint bằng tay với image T-039 và một handler tối
    giản chỉ chạy `preflight`. Đo: thời gian từ `/run` tới lúc handler chạy (lần đầu trên máy mới và lần sau), loại GPU
