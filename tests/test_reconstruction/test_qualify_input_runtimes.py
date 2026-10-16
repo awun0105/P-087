@@ -37,9 +37,9 @@ def _env(tmp_path: Path, record: dict, **overrides: str) -> dict[str, str]:
     env = dict(record["capabilities"]["R1"]["requires"])
     env.update(
         {
-            "REC04_BRUSH_COMMAND": json.dumps([str(brush)]),
-            "REC04_SPLAT_MODULE_PATH": str(splat),
-            "REC17_LIDAR_ODOMETRY_PYTHON": str(odometry),
+            "R2S_BRUSH_COMMAND": json.dumps([str(brush)]),
+            "R2S_SPLAT_MODULE_PATH": str(splat),
+            "R2S_LIDAR_ODOMETRY_PYTHON": str(odometry),
         }
     )
     env.update(overrides)
@@ -78,12 +78,12 @@ def test_wired_unqualified_in_the_record_stays_wired_unqualified(tmp_path: Path,
 
 
 def test_the_machine_can_only_demote_never_promote(tmp_path: Path, record: dict) -> None:
-    drifted = _env(tmp_path, record, REC03_COLMAP_RUNTIME_IDENTITY="colmap-image-sha256:" + "f" * 64)
+    drifted = _env(tmp_path, record, R2S_COLMAP_RUNTIME_IDENTITY="colmap-image-sha256:" + "f" * 64)
     r1 = _by_key(qualify.build_registry(record, drifted))["R1"]
     assert r1["status"] == "incompatible"
     assert "runtime_identity_differs" in r1["reason_codes"]
 
-    no_brush = _env(tmp_path, record, REC04_BRUSH_COMMAND=json.dumps([str(tmp_path / "missing")]))
+    no_brush = _env(tmp_path, record, R2S_BRUSH_COMMAND=json.dumps([str(tmp_path / "missing")]))
     items = _by_key(qualify.build_registry(record, no_brush))
     assert items["R1"]["status"] == items["R2"]["status"] == "unavailable"  # kể cả hướng đang chờ xác minh
 
@@ -141,7 +141,7 @@ def test_main_writes_atomically_is_idempotent_and_runs_in_production(
 def test_view_capabilities_do_not_depend_on_the_video_runtime_but_pin_the_splat_version(
     tmp_path: Path, record: dict
 ) -> None:
-    broken_colmap = _env(tmp_path, record, REC03_COLMAP_RUNTIME_IDENTITY="colmap-image-sha256:" + "f" * 64)
+    broken_colmap = _env(tmp_path, record, R2S_COLMAP_RUNTIME_IDENTITY="colmap-image-sha256:" + "f" * 64)
     items = _by_key(qualify.build_registry(record, broken_colmap))
     assert items["R1"]["status"] == "incompatible"
     assert items["gaussian_ply_view"]["status"] == items["gaussian_sog_view"]["status"] == "qualified"

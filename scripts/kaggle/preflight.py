@@ -15,6 +15,8 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
+from src.runtime_env import runtime_env
+
 
 def _run(command: list[str], timeout: float = 120.0, env: dict[str, str] | None = None) -> tuple[bool, str]:
     """Chạy lệnh kiểm; trả (thành công, dòng cuối của output)."""
@@ -28,7 +30,7 @@ def _run(command: list[str], timeout: float = 120.0, env: dict[str, str] | None 
 
 
 def _command(variable: str) -> list[str] | None:
-    value = os.environ.get(variable)
+    value = runtime_env(os.environ, variable)
     return list(json.loads(value)) if value else None
 
 
@@ -44,10 +46,10 @@ def ffmpeg() -> tuple[bool, str]:
 
 
 def colmap() -> tuple[bool, str]:
-    """Dựng pose camera (REC-03) qua đúng lệnh `REC03_COLMAP_COMMAND`."""
-    command = _command("REC03_COLMAP_COMMAND")
+    """Dựng pose camera (REC-03) qua đúng lệnh `R2S_COLMAP_COMMAND`."""
+    command = _command("R2S_COLMAP_COMMAND")
     if command is None:
-        return False, "chưa đặt REC03_COLMAP_COMMAND"
+        return False, "chưa đặt R2S_COLMAP_COMMAND"
     ok, text = _run([*command, "help"])
     return ok, "chạy được" if ok else text
 
@@ -57,9 +59,9 @@ def colmap_gpu() -> tuple[bool, str]:
     use_gpu_env = os.environ.get("PRODUCT_COLMAP_USE_GPU", "").lower() in {"1", "true", "yes"}
     if not use_gpu_env:
         return True, "bỏ qua (PRODUCT_COLMAP_USE_GPU tắt)"
-    command = _command("REC03_COLMAP_COMMAND")
+    command = _command("R2S_COLMAP_COMMAND")
     if command is None:
-        return False, "chưa đặt REC03_COLMAP_COMMAND"
+        return False, "chưa đặt R2S_COLMAP_COMMAND"
     import tempfile
 
     with tempfile.TemporaryDirectory() as tmp_dir:
@@ -95,9 +97,9 @@ def colmap_gpu() -> tuple[bool, str]:
 
 def colmap_guided() -> tuple[bool, str]:
     """Luồng video + gói LiDAR (ADR 0009) cần `pose_prior_mapper` của COLMAP 4.x; bản 3.x chỉ chạy được luồng video."""
-    command = _command("REC03_COLMAP_COMMAND")
+    command = _command("R2S_COLMAP_COMMAND")
     if command is None:
-        return False, "chưa đặt REC03_COLMAP_COMMAND"
+        return False, "chưa đặt R2S_COLMAP_COMMAND"
     # Cần cả phần trợ giúp (không chỉ dòng cuối như `_run`) để tìm đúng tuỳ chọn của chế độ bám quỹ đạo.
     try:
         done = subprocess.run(
@@ -121,29 +123,29 @@ def vulkan() -> tuple[bool, str]:
 
 
 def brush() -> tuple[bool, str]:
-    """Binary Brush đúng phiên bản ghim (`REC04_BRUSH_EXPECTED_VERSION`)."""
-    command = _command("REC04_BRUSH_COMMAND")
+    """Binary Brush đúng phiên bản ghim (`R2S_BRUSH_EXPECTED_VERSION`)."""
+    command = _command("R2S_BRUSH_COMMAND")
     if command is None:
-        return False, "chưa đặt REC04_BRUSH_COMMAND"
-    extra = json.loads(os.environ.get("REC04_BRUSH_ENVIRONMENT", "{}") or "{}")
+        return False, "chưa đặt R2S_BRUSH_COMMAND"
+    extra = json.loads(runtime_env(os.environ, "R2S_BRUSH_ENVIRONMENT", "{}") or "{}")
     ok, text = _run([*command, "--version"], env={**os.environ, **extra})
-    expected = os.environ.get("REC04_BRUSH_EXPECTED_VERSION", "")
+    expected = runtime_env(os.environ, "R2S_BRUSH_EXPECTED_VERSION", "")
     return ok and text.endswith(expected), text
 
 
 def splat_transform() -> tuple[bool, str]:
     """Nén SOG cho web + dựng voxel collision (Node + splat-transform)."""
-    cli = os.environ.get("REC05_VOXEL_CLI")
+    cli = runtime_env(os.environ, "R2S_VOXEL_CLI")
     if not cli or not Path(cli).is_file() or shutil.which("node") is None:
-        return False, "thiếu node hoặc REC05_VOXEL_CLI"
+        return False, "thiếu node hoặc R2S_VOXEL_CLI"
     return _run(["node", cli, "--version"])
 
 
 def splat_gpu() -> tuple[bool, str]:
-    """GPU cho splat-transform (WebGPU/Dawn); không có thì đặt REC04_SPLAT_DEVICE=cpu (chậm hơn)."""
-    cli = os.environ.get("REC05_VOXEL_CLI")
+    """GPU cho splat-transform (WebGPU/Dawn); không có thì đặt R2S_SPLAT_DEVICE=cpu (chậm hơn)."""
+    cli = runtime_env(os.environ, "R2S_VOXEL_CLI")
     if not cli or shutil.which("node") is None:
-        return False, "thiếu node hoặc REC05_VOXEL_CLI"
+        return False, "thiếu node hoặc R2S_VOXEL_CLI"
     return _run(["node", cli, "--list-gpus"])
 
 
@@ -165,6 +167,26 @@ def scene_runtime() -> tuple[bool, str]:
     return _run([python, "-c", probe], timeout=1800.0)
 
 
+def objectgs_runtime() -> tuple[bool, str]:
+    """Runtime ObjectGS (tuỳ chọn): torch thấy GPU và kernel gsplat nạp từ cache biên dịch dùng chung."""
+    python = os.environ.get("PRODUCT_OBJECTGS_RUNTIME_PYTHON")
+    if not python or not Path(python).is_file():
+        return False, "thiếu PRODUCT_OBJECTGS_RUNTIME_PYTHON"
+    env = dict(os.environ)
+    gsplat = os.environ.get("PRODUCT_OBJECTGS_GSPLAT_REPOSITORY")
+    if gsplat:
+        env["PYTHONPATH"] = gsplat
+    cache = os.environ.get("PRODUCT_OBJECTGS_EXTENSION_CACHE_DIR")
+    if cache:
+        env["TORCH_EXTENSIONS_DIR"] = cache
+    probe = (
+        "import torch;from gsplat.cuda._backend import _C;"
+        "assert torch.cuda.is_available() and _C is not None;"
+        "print(torch.__version__, torch.cuda.get_device_name(0))"
+    )
+    return _run([python, "-c", probe], timeout=1800.0, env=env)
+
+
 #: (tên, hàm kiểm, bắt buộc, hậu quả khi thiếu)
 CHECKS: list[tuple[str, Callable[[], tuple[bool, str]], bool, str]] = [
     ("GPU NVIDIA", gpu, True, "không chạy được"),
@@ -175,8 +197,9 @@ CHECKS: list[tuple[str, Callable[[], tuple[bool, str]], bool, str]] = [
     ("Vulkan (GPU thật)", vulkan, True, "Brush không train được 3DGS"),
     ("Brush", brush, True, "không train được 3DGS"),
     ("splat-transform", splat_transform, True, "không nén SOG / dựng collision"),
-    ("splat-transform GPU", splat_gpu, False, "đặt REC04_SPLAT_DEVICE=cpu"),
+    ("splat-transform GPU", splat_gpu, False, "đặt R2S_SPLAT_DEVICE=cpu"),
     ("Runtime tách theo vật", scene_runtime, False, "scene lùi về đường hộp"),
+    ("Runtime ObjectGS", objectgs_runtime, False, "tách vật dùng đường khác (không có ObjectGS)"),
 ]
 
 

@@ -27,6 +27,8 @@ import subprocess
 import sys
 from dataclasses import asdict, dataclass
 
+from src.runtime_env import runtime_env
+
 #: VRAM cho bước tách theo vật. Giả định thận trọng: lần chạy thật trên T2000 4 GB (scene ~330k Gaussian)
 #: nằm gọn trong 4 GB; chưa đo trên GPU lớn với scene lớn hơn.
 OBJECTIFY_VRAM_GB = 4.0
@@ -125,7 +127,7 @@ def worker_environment(gpu: Gpu, gpu_count: int, base_brush_environment: str | N
     if gpu.wgpu_discrete_index is not None:
         brush = json.loads(base_brush_environment or "{}")
         brush["CUBECL_WGPU_DEFAULT_DEVICE"] = f"DiscreteGpu({gpu.wgpu_discrete_index})"
-        environment["REC04_BRUSH_ENVIRONMENT"] = json.dumps(brush)
+        environment["R2S_BRUSH_ENVIRONMENT"] = json.dumps(brush)
     return environment
 
 
@@ -203,7 +205,7 @@ def plan_for_machine(jobs: int, processing: dict | None = None) -> tuple[list[Gp
         ram_gb=ram_gb,
         job_ram_gb=need["ram"],
         cores=effective_cpu_count(),
-        base_brush_environment=os.environ.get("REC04_BRUSH_ENVIRONMENT"),
+        base_brush_environment=runtime_env(os.environ, "R2S_BRUSH_ENVIRONMENT"),
     )
 
 

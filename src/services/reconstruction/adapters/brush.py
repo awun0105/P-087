@@ -213,7 +213,7 @@ class BrushAdapter:
         return held_out, quality
 
     def _lpips(self, renders: Path, images: Path, workspace: Path) -> float | None:
-        """LPIPS-VGG trong runtime có torch (`REC04_BRUSH_LPIPS_PYTHON`). Không cấu hình hoặc lỗi → None.
+        """LPIPS-VGG trong runtime có torch (`R2S_BRUSH_LPIPS_PYTHON`). Không cấu hình hoặc lỗi → None.
 
         LPIPS là số đo phụ: thiếu runtime, thiếu trọng số mạng hay hết giờ không được làm hỏng bước dựng hình.
         """

@@ -29,19 +29,19 @@ def _env(tmp_path: Path, *, with_odometry: bool) -> dict[str, str]:
     splat = tmp_path / "index.mjs"
     splat.write_text("//")
     env = {
-        "REC03_COLMAP_RUNTIME_IDENTITY": _COLMAP,
-        "REC04_BRUSH_RUNTIME_IDENTITY": _BRUSH,
-        "REC04_BRUSH_EXPECTED_VERSION": "0.3.0",
-        "REC04_BRUSH_COMMAND": json.dumps([str(brush)]),
-        "REC04_SPLAT_MODULE_PATH": str(splat),
+        "R2S_COLMAP_RUNTIME_IDENTITY": _COLMAP,
+        "R2S_BRUSH_RUNTIME_IDENTITY": _BRUSH,
+        "R2S_BRUSH_EXPECTED_VERSION": "0.3.0",
+        "R2S_BRUSH_COMMAND": json.dumps([str(brush)]),
+        "R2S_SPLAT_MODULE_PATH": str(splat),
     }
     if with_odometry:
         python = tmp_path / "python"
         python.write_text("#!/bin/sh\necho 1.3.0\n")
         python.chmod(python.stat().st_mode | stat.S_IXUSR)
-        env["REC17_LIDAR_ODOMETRY_PYTHON"] = str(python)
+        env["R2S_LIDAR_ODOMETRY_PYTHON"] = str(python)
     else:
-        env["REC17_LIDAR_ODOMETRY_PYTHON"] = str(tmp_path / "missing" / "python")
+        env["R2S_LIDAR_ODOMETRY_PYTHON"] = str(tmp_path / "missing" / "python")
     return env
 
 
@@ -66,7 +66,7 @@ def test_without_the_isolated_odometry_runtime_only_r5_and_r6_are_unavailable(tm
 
 def test_a_missing_video_runtime_is_never_claimed_qualified(tmp_path: Path) -> None:
     env = _env(tmp_path, with_odometry=True)
-    env["REC03_COLMAP_RUNTIME_IDENTITY"] = ""
+    env["R2S_COLMAP_RUNTIME_IDENTITY"] = ""
     statuses = _statuses(script.build_registry(env))
     assert statuses["R1"] == statuses["R5"] == "unavailable"
     assert statuses["gaussian_ply_view"] == "qualified"  # xem 3DGS không cần COLMAP
@@ -75,7 +75,7 @@ def test_a_missing_video_runtime_is_never_claimed_qualified(tmp_path: Path) -> N
 def test_the_evidence_follows_the_runtime_identity(tmp_path: Path) -> None:
     env = _env(tmp_path, with_odometry=True)
     first = script.build_registry(env)["capabilities"][0]["qualification_evidence_checksum"]  # type: ignore[index]
-    env["REC03_COLMAP_RUNTIME_IDENTITY"] = "colmap-image-sha256:" + "c" * 64
+    env["R2S_COLMAP_RUNTIME_IDENTITY"] = "colmap-image-sha256:" + "c" * 64
     second = script.build_registry(env)["capabilities"][0]["qualification_evidence_checksum"]  # type: ignore[index]
     assert first != second
 

@@ -1696,7 +1696,7 @@ async def test_estimated_odometry_run_requires_qualified_runtime_and_verified_rg
     from src.services.reconstruction.lidar.cloud_payload import inspect_point_cloud
     from src.services.reconstruction.lidar.odometry import KissIcpProcess
 
-    monkeypatch.setenv("REC17_LIDAR_ODOMETRY_WORK_ROOT", str(studio.root / "odometry-work"))
+    monkeypatch.setenv("R2S_LIDAR_ODOMETRY_WORK_ROOT", str(studio.root / "odometry-work"))
     started = studio.registry.transition_job(job.job_id, TransitionRequest(target_status=JobStatus.RUNNING))
     started = studio.registry.record_stage_progress(started, StageId.LIDAR_ODOMETRY)
     workspace = studio.root / "worker" / job.job_id / "attempt-r5"

@@ -30,6 +30,7 @@ from src.models.contracts.input_assembly import (
     RuntimeQualificationStatus,
     seal_runtime_registry,
 )
+from src.runtime_env import requirement_env_name, runtime_env
 from src.services.reconstruction.lidar.odometry import DEFAULT_LIDAR_ODOMETRY_PROFILE_VERSION
 
 DEFAULT_RECORD = Path(__file__).resolve().parents[2] / "configs/product/input_runtime_qualification_v1.json"
@@ -90,17 +91,17 @@ def load_record(path: Path) -> dict[str, Any]:
 
 def _live(env: Mapping[str, str]) -> dict[str, str]:
     return {
-        name: env.get(name, "").strip()
+        name: runtime_env(env, name, "").strip()
         for name in (
-            "REC03_COLMAP_RUNTIME_IDENTITY",
-            "REC04_BRUSH_RUNTIME_IDENTITY",
-            "REC04_BRUSH_EXPECTED_VERSION",
+            "R2S_COLMAP_RUNTIME_IDENTITY",
+            "R2S_BRUSH_RUNTIME_IDENTITY",
+            "R2S_BRUSH_EXPECTED_VERSION",
         )
     }
 
 
 def _splat_version(env: Mapping[str, str]) -> str | None:
-    module = env.get("REC04_SPLAT_MODULE_PATH", "").strip()
+    module = runtime_env(env, "R2S_SPLAT_MODULE_PATH", "").strip()
     if not module or not Path(module).is_file():
         return None
     package = Path(module).resolve().parents[1] / "package.json"
@@ -111,7 +112,7 @@ def _splat_version(env: Mapping[str, str]) -> str | None:
 
 
 def _brush_binary_present(env: Mapping[str, str]) -> bool:
-    raw = env.get("REC04_BRUSH_COMMAND", "").strip()
+    raw = runtime_env(env, "R2S_BRUSH_COMMAND", "").strip()
     if not raw:
         return False
     try:
@@ -125,9 +126,9 @@ def _brush_binary_present(env: Mapping[str, str]) -> bool:
 def build_registry(record: Mapping[str, Any], env: Mapping[str, str]) -> dict[str, object]:
     live = _live(env)
     colmap, brush, brush_version = (
-        live["REC03_COLMAP_RUNTIME_IDENTITY"],
-        live["REC04_BRUSH_RUNTIME_IDENTITY"],
-        live["REC04_BRUSH_EXPECTED_VERSION"],
+        live["R2S_COLMAP_RUNTIME_IDENTITY"],
+        live["R2S_BRUSH_RUNTIME_IDENTITY"],
+        live["R2S_BRUSH_EXPECTED_VERSION"],
     )
     video_version = f"colmap-{colmap[-12:]}+brush-{brush_version}"
     video_missing = [
@@ -139,7 +140,7 @@ def build_registry(record: Mapping[str, Any], env: Mapping[str, str]) -> dict[st
         )
         if not ok
     ]
-    kiss = odometry_version(Path(env.get("REC17_LIDAR_ODOMETRY_PYTHON", _DEFAULT_ODOMETRY_PYTHON)).expanduser())
+    kiss = odometry_version(Path(runtime_env(env, "R2S_LIDAR_ODOMETRY_PYTHON", _DEFAULT_ODOMETRY_PYTHON)).expanduser())
     odometry_missing = (
         ["odometry_runtime_missing"]
         if kiss is None
@@ -187,7 +188,7 @@ def build_registry(record: Mapping[str, Any], env: Mapping[str, str]) -> dict[st
                 [
                     name
                     for name, expected in (entry.get("requires") or {}).items()
-                    if env.get(name, "").strip() != expected
+                    if runtime_env(env, requirement_env_name(name), "").strip() != expected
                 ]
                 + [
                     f"version_{name}"

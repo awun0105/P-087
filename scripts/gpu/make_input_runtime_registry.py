@@ -28,6 +28,7 @@ from src.models.contracts.input_assembly import (
     RuntimeQualificationStatus,
     seal_runtime_registry,
 )
+from src.runtime_env import runtime_env
 
 DEV_LABEL = "dev-local"
 _ODOMETRY_KEYS = (RuntimeCapabilityKey.R5, RuntimeCapabilityKey.R6)
@@ -76,11 +77,11 @@ def _evidence(capability: str, components: Mapping[str, str]) -> str:
 
 
 def build_registry(env: Mapping[str, str]) -> dict[str, object]:
-    colmap = env.get("REC03_COLMAP_RUNTIME_IDENTITY", "").strip()
-    brush = env.get("REC04_BRUSH_RUNTIME_IDENTITY", "").strip()
-    brush_version = env.get("REC04_BRUSH_EXPECTED_VERSION", "").strip()
-    splat_module = env.get("REC04_SPLAT_MODULE_PATH", "").strip()
-    brush_command = env.get("REC04_BRUSH_COMMAND", "").strip()
+    colmap = runtime_env(env, "R2S_COLMAP_RUNTIME_IDENTITY", "").strip()
+    brush = runtime_env(env, "R2S_BRUSH_RUNTIME_IDENTITY", "").strip()
+    brush_version = runtime_env(env, "R2S_BRUSH_EXPECTED_VERSION", "").strip()
+    splat_module = runtime_env(env, "R2S_SPLAT_MODULE_PATH", "").strip()
+    brush_command = runtime_env(env, "R2S_BRUSH_COMMAND", "").strip()
     brush_binary = ""
     if brush_command:
         try:
@@ -88,7 +89,7 @@ def build_registry(env: Mapping[str, str]) -> dict[str, object]:
             brush_binary = str(parsed[0]) if isinstance(parsed, list) and parsed else str(parsed)
         except (json.JSONDecodeError, ValueError):
             brush_binary = brush_command
-    python = Path(env.get("REC17_LIDAR_ODOMETRY_PYTHON", _DEFAULT_ODOMETRY_PYTHON)).expanduser()
+    python = Path(runtime_env(env, "R2S_LIDAR_ODOMETRY_PYTHON", _DEFAULT_ODOMETRY_PYTHON)).expanduser()
     kiss_version = odometry_version(python)
 
     video_missing = [
