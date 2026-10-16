@@ -6,6 +6,8 @@
  * vì máy chủ từ chối lô chồng lên lô trước của cùng `session_key`.
  */
 
+import { apiFetch } from "@/lib/api/client";
+
 const API = "/api/v1/jobs";
 
 export type OperatorTimeSurface = "studio" | "progress" | "evaluation" | "other";
@@ -85,4 +87,88 @@ export function postOperatorTime(jobId: string, batch: OperatorTimeBatch, option
 
 export function postWalkSession(jobId: string, session: WalkSessionBatch, options: SendOptions = {}): Promise<void> {
   return enqueue(`/${encodeURIComponent(jobId)}/value-events/walk-session`, session, options);
+}
+
+/* ---------------------------------------------------------------------------------------------
+ * Ground truth benchmark (T-030, architecture §15.2): route `/api/v1/jobs/{job_id}/benchmark-truth`.
+ * Toạ độ là hệ canonical của scene (mét, Z-up, sàn z = 0). Máy chủ đặt `tagged_at` của layout.
+ * ------------------------------------------------------------------------------------------- */
+
+export type Vec3 = [number, number, number];
+export type Layout = "A" | "B";
+
+export interface RobotProfile {
+  width_m: number;
+  safety_margin_m: number;
+  height_min_m: number;
+  height_max_m: number;
+}
+
+export interface MeasuredDistance {
+  id: string;
+  label: string;
+  a: Vec3;
+  b: Vec3;
+  real_m: number;
+}
+
+export interface GapCheck {
+  id: string;
+  label: string;
+  layout: Layout;
+  a: Vec3;
+  b: Vec3;
+  real_width_m: number | null;
+  real_passable: boolean;
+}
+
+export interface LayoutRef {
+  scene_revision: string;
+  tagged_at: string;
+}
+
+export interface L4Declaration {
+  layout_a_passed: boolean;
+  layout_b_passed: boolean;
+  matches_reality: boolean;
+  evidence: string;
+}
+
+export interface BenchmarkTruth {
+  schema_version: "1.0";
+  include_in_benchmark: boolean;
+  data_source: "self_capture" | "hf_room" | "synthetic";
+  robot: RobotProfile | null;
+  distances: MeasuredDistance[];
+  gaps: GapCheck[];
+  key_obstacle_ids: string[];
+  layouts: Partial<Record<Layout, LayoutRef>>;
+  manual_baseline_minutes: number | null;
+  l4: L4Declaration | null;
+  notes: string;
+}
+
+export interface BenchmarkTruthResponse {
+  version: number;
+  truth: BenchmarkTruth;
+  updated_at: string | null;
+}
+
+const truthPath = (jobId: string) => `/api/v1/jobs/${encodeURIComponent(jobId)}/benchmark-truth`;
+
+/** Job chưa có tài liệu thì máy chủ trả version 0 và giá trị mặc định (không 404). */
+export function getBenchmarkTruth(jobId: string, signal?: AbortSignal): Promise<BenchmarkTruthResponse> {
+  return apiFetch<BenchmarkTruthResponse>(truthPath(jobId), { signal });
+}
+
+/** Ghi CAS: lệch `expectedVersion` thì máy chủ trả 409 (ApiError.status), sai tham chiếu thì 422. */
+export function putBenchmarkTruth(
+  jobId: string,
+  expectedVersion: number,
+  truth: BenchmarkTruth,
+): Promise<BenchmarkTruthResponse> {
+  return apiFetch<BenchmarkTruthResponse>(truthPath(jobId), {
+    method: "PUT",
+    body: JSON.stringify({ expected_version: expectedVersion, truth }),
+  });
 }
