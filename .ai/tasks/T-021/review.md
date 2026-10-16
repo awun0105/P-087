@@ -19,3 +19,11 @@ Verdict: ACCEPTED
 1. Đầu trang khi Tạo mesh lỗi đang ghi "Chờ duyệt vật"; "Tạo mesh lỗi" (tone rust) rõ hơn.
 2. `rebuildFailed` (Ready) không kiểm revision: một lần sửa khác tạo revision mới (vd. Move) vẫn còn ghi chú lỗi cũ tới yêu cầu dựng tiếp theo.
 3. Danh sách scene ở trang tổng quan (`sceneSummaryStatus`) vẫn ghi "Hoàn tất" cho scene Draft — ngoài phạm vi, cần trường Draft trong SceneSummary.
+
+## Round 2 (theo suggestions) — ACCEPTED
+
+Đọc diff `3dfbc4a5`; chạy lại `geometry-review-{step,row,bell}` + `progress-objectify`: 49 PASS.
+- Suggestion 1: đầu trang khi build lỗi → "Tạo mesh lỗi" (rust); "Chờ duyệt vật" chỉ cho `waiting`. Đạt.
+- Suggestion 2: `rebuildFailed` chỉ khi `base_revision === scene_revision`. Lỗi dựng lại không đổi revision nên vẫn hiện; sửa khác tạo
+  revision mới thì ẩn. Đạt. Hai test cũ sửa vì thiếu revision trong fixture: hợp lý.
+- Suggestion 3 (danh sách scene ghi "Hoàn tất" cho Draft): để task riêng, cần backend đưa trạng thái Draft vào `SceneSummary`.
