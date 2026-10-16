@@ -53,7 +53,8 @@ export function progressSceneStatus(progress: JobProgress, awaitingObjectChoice 
   if (awaitingObjectChoice && progress.status === "SUCCEEDED") return OBJECT_CHOICE_STATUS;
   if (geometry && progress.status === "SUCCEEDED") {
     if (geometry.state === "running") return { label: "Đang tạo mesh", tone: "ember", active: true, group: "running" };
-    if (geometry.state === "waiting" || geometry.state === "failed") return { label: "Chờ duyệt vật", tone: "ochre", active: false, group: "action" };
+    if (geometry.state === "failed") return { label: "Tạo mesh lỗi", tone: "rust", active: false, group: "action" };
+    if (geometry.state === "waiting") return { label: "Chờ duyệt vật", tone: "ochre", active: false, group: "action" };
   }
   return deriveStatus(progress.status, progress.current_stage, progress.waiting_for === "metric_confirmation");
 }

@@ -160,8 +160,10 @@ export function geometryReviewStep(state: ObjectifyState | null): GeometryStep |
     if (failed && state.mode === "geometry" && sameRevision) return { ...base, state: "failed" };
     return { ...base, state: "waiting" };
   }
+  // Lỗi dựng lại vùng chỉ nêu cho đúng revision đã gửi yêu cầu; sau một lần sửa khác thì scene đã đổi, không nêu nữa.
   if (failed && (state.mode === "region" || state.mode === "membership")) {
-    return { ...base, state: "succeeded", rebuildFailed: true };
+    const sameRevision = state.base_revision !== null && state.base_revision === state.scene_revision;
+    return { ...base, state: "succeeded", rebuildFailed: sameRevision };
   }
   return { ...base, state: "succeeded" };
 }

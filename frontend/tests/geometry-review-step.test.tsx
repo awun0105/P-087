@@ -96,9 +96,16 @@ describe("hàng Duyệt vật & Tạo mesh", () => {
 
   it("Ready: dựng lại vùng lỗi thì vẫn xong, nêu rằng scene giữ bản trước", () => {
     const step = geometryReviewStep(
-      objectify({ object_geometry: "ready", status: "failed", mode: "region", error: "vùng không hợp lệ" }),
+      objectify({ object_geometry: "ready", status: "failed", mode: "region", base_revision: "rev-002", error: "vùng không hợp lệ" }),
     );
     expect(step).toMatchObject({ state: "succeeded", rebuildFailed: true, error: "vùng không hợp lệ" });
+  });
+
+  it("Ready: lỗi dựng lại vùng của revision khác không còn được nêu", () => {
+    const step = geometryReviewStep(
+      objectify({ object_geometry: "ready", status: "failed", mode: "region", base_revision: "rev-001", scene_revision: "rev-002", error: "cũ" }),
+    );
+    expect(step).toMatchObject({ state: "succeeded", rebuildFailed: false });
   });
 
   it("Ready bình thường: xong, không có lỗi", () => {
@@ -166,7 +173,7 @@ describe("đầu trang scene theo hàng Duyệt vật & Tạo mesh", () => {
     });
   });
 
-  it("Draft chờ duyệt hoặc tạo mesh lỗi: Chờ duyệt vật, không chạy", () => {
+  it("Draft chờ duyệt: Chờ duyệt vật; tạo mesh lỗi: Tạo mesh lỗi, không chạy", () => {
     expect(progressSceneStatus(succeeded, false, geometryReviewStep(objectify({ status: "idle" })))).toMatchObject({
       label: "Chờ duyệt vật",
       group: "action",
@@ -174,7 +181,7 @@ describe("đầu trang scene theo hàng Duyệt vật & Tạo mesh", () => {
     });
     expect(
       progressSceneStatus(succeeded, false, geometryReviewStep(objectify({ status: "failed", mode: "geometry", base_revision: "rev-002" }))),
-    ).toMatchObject({ label: "Chờ duyệt vật", group: "action" });
+    ).toMatchObject({ label: "Tạo mesh lỗi", group: "action", active: false });
   });
 
   it("đang tạo mesh: Đang tạo mesh, đang chạy", () => {

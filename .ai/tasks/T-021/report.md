@@ -79,3 +79,15 @@ eslint (các file đã sửa) → không lỗi
 - Khi hàng ảo đang chạy, ước lượng thời gian còn lại (ETA) có thể không hiện số vì hàng ảo không có thời gian đo được.
   Chưa kiểm và chưa có test cho ETA.
 - Chưa chạy full suite (T-019 lo).
+
+## Round 2
+
+Sửa theo phản hồi sau khi làm xong:
+
+- Đầu trang: khi Tạo mesh lỗi ở đúng revision hiện tại, nhãn là "Tạo mesh lỗi" (tone rust). "Chờ duyệt vật" chỉ còn cho
+  trạng thái chờ duyệt bình thường.
+- Lỗi dựng lại vùng trên scene Ready (hàng, phụ đề và nút "Mở Studio") chỉ hiện khi lỗi thuộc đúng revision đã gửi yêu cầu.
+  Sau một lần sửa khác, scene đã đổi và lỗi cũ không còn được nêu.
+
+Chưa làm, ngoài phạm vi T-021: danh sách scene ở trang tổng quan vẫn hiện "Hoàn tất" cho scene Draft (`sceneStatus`, nhánh
+`SUCCEEDED` không đọc `object_geometry`). Cần task riêng để quyết định nhãn đúng cho danh sách.

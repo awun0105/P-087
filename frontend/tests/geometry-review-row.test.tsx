@@ -100,7 +100,7 @@ describe("hàng Duyệt vật & Tạo mesh trên tab Tiến trình", () => {
   });
 
   it("Ready, dựng lại vùng lỗi: Mở Studio và thông báo scene giữ bản trước", async () => {
-    renderTab(objectify({ object_geometry: "ready", status: "failed", mode: "region", error: "vùng không hợp lệ" }), {
+    renderTab(objectify({ object_geometry: "ready", status: "failed", mode: "region", base_revision: "rev-001", error: "vùng không hợp lệ" }), {
       onOpenStudio: vi.fn(),
     });
     const geometry = await rowOf(GEOMETRY_ROW);
