@@ -24,11 +24,11 @@ T-023 | Box ban đầu khớp nhóm Gaussian (GR-02) | accepted | —
 T-024 | Chỉ dẫn lỗi banner/donor/409 (GR-03/04/06) | accepted | —
 T-025 | Hiệu năng preview (GR-05) | accepted | —
 T-026 | Danh sách scene hiểu Draft | accepted | — (Architect tự làm)
-T-027 | Nhật ký sự kiện giá trị | changes-requested | engineer
+T-027 | Nhật ký sự kiện giá trị | accepted | —
 T-028 | Đo máy cho hàng đợi tách vật | accepted | —
 T-029 | Bộ đếm phút công người + sự kiện Walk | planned | engineer
 T-030 | Ground truth của benchmark | accepted | —
-T-031 | Máy đo khe, sai số, nhất quán | implemented | summarizer
+T-031 | Máy đo khe, sai số, nhất quán | accepted | —
 T-032 | Bảng metric + xuất JSON/CSV/MD | planned | engineer
 T-033 | Panel Benchmark trong Studio | planned | engineer
 T-034 | Thẻ Giá trị + trang /benchmark | planned | engineer

@@ -269,10 +269,10 @@ Non-goals: không theo dõi người dùng ngoài Studio của job; không gửi
    khi thuộc `SYSTEM_OPERATIONS`; operation lạ → `unknown` và có test bắt buộc mọi chuỗi operation trong `src/` đã được phân loại.
 3. **Khe kiểm**: điểm `a`, `b` ở khung canonical (mét, Z-up, sàn z = 0). Bề rộng mô phỏng = nhỏ nhất theo các độ cao
    `z ∈ [h_min, h_max]` bước 0,05 m của tổng khoảng cách tia ngang từ trung điểm `a–b` theo hai hướng `±(b−a)` tới va chạm đầu
-   tiên, chặn trên ở `|b−a|/2` mỗi phía. Qua được ⇔ bề rộng ≥ `robot.width + 2·robot.safety_margin`.
+   tiên, chặn trên ở `|b−a|/2` mỗi phía; trung điểm nằm trong một **mảnh** collider kín (CoACD nhiều mảnh) → bề rộng 0. Qua được ⇔ bề rộng ≥ `robot.width + 2·robot.safety_margin`.
    Bỏ sót vật cản = thật không qua mà mô phỏng qua; vật cản giả = thật qua mà mô phỏng không qua.
 4. **Nhất quán sau khi dời** (layout B so với A): với mỗi vật có transform khác nhau giữa hai revision: (a) trong hộp bao của vật
-   tại pose A (thu 2 cm mỗi mặt, z trong dải robot) collision tổng hợp của B **không còn** tam giác; (b) tại pose B collider của
+   tại pose A (thu 2 cm mỗi mặt, z trong dải robot) collision **môi trường** của B **không còn** tam giác (collider vật khác ở đó là hợp lệ); (b) tại pose B collider của
    vật có mặt. Đạt khi mọi vật dời đều đạt.
 5. **Bậc sẵn sàng** (đặc tả duy nhất; Playbook diễn đạt lại cùng nội dung bằng lời thường):
    - L1 = đã xác nhận mét và `object_geometry` ready (hoặc scene cũ không có khoá).

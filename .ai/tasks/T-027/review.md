@@ -1,6 +1,6 @@
 # Review T-027
 
-Verdict: CHANGES REQUESTED (1 sửa nhỏ)
+Verdict: ACCEPTED (round 2)
 
 Đọc diff `22d4b892..c60a4aab`: `value/events.py`, migration 20, `editor._record_scene_edit` (cả `apply` và `publish_next`),
 `api/studio/value.py`. Đối chiếu các nơi publish trong `object_geometry_build.py`, `objectify_queue.request`.
@@ -38,3 +38,9 @@ Engineer chạy `rm -rf /tmp/claude-1000`, xoá thư mục tạm của mọi phi
 - **Bổ sung bắt buộc:** `scene/extraction.py:248` tự gọi `request()` khi `geometry_review = "auto"` → đó là hệ thống.
   `request(..., origin: Literal["human","system"] = "human")`, ghi `origin` vào payload; extraction truyền `"system"`.
   Test: đường auto ghi `origin = "system"`. T-032 chỉ đếm `scene_request` có `origin = "human"`.
+
+
+## Round 2 — ACCEPTED (audit sâu)
+Đọc `0dc264e9`: `request()` ghi `scene_request` sau khi `_write` thành công trong transaction; mọi nhánh từ chối raise trước đó
+(revision lệch, đã có yêu cầu đang chạy, thiếu bundle…) nên không ghi. `origin` mặc định `human`, `extraction.py` (auto) truyền
+`system`. `EventKind` có `scene_request`. Chạy lại scene_objectify_queue + value_events + scene_extraction: 87 PASS.
