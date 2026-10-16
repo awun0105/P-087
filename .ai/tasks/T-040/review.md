@@ -1,6 +1,6 @@
 # Review T-040
 
-Verdict: CHANGES REQUESTED (1 sửa nhỏ, kèm hướng dẫn) — phần còn lại đạt.
+Verdict (vòng 1): CHANGES REQUESTED (1 sửa) · Vòng 2: ACCEPTED
 
 Audit: đọc diff 9 commit (`418e1d2a` → `30889790`, 37 file), trọn `jobs/lease.py`, `jobs/worker_runtimes.py`, phần sửa
 `jobs/profile.py`, `jobs/dispatch.py`, `jobs/worker_cli.py` (dispatch, `_leased_call`, `recover_expired_leases`,
@@ -64,3 +64,15 @@ Sửa:
   không chờ hết TTL.
 - `benchmark._tool_timings` lọc usage theo `job.runtime_manifest_checksum`. Job tạo trước T-040 (checksum đầy đủ) mà chạy lại
   sau deploy sẽ ghi usage theo checksum phần mềm → thiếu thời gian công cụ trong snapshot của lượt đó. Chỉ ảnh hưởng job cũ.
+
+## Round 2 — ACCEPTED
+
+Audit `e4e38683`, `491c0954`. Migration 22: `PRIMARY KEY (software_runtime_checksum, config_checksum, seed_key)`, `seed_key`
+`-1` cho seed NULL, `publish` từ chối seed âm; upsert đúng khoá, không còn ghi đè `config_checksum`/`seed`; `select` lọc trong
+SQL; `find` chọn dòng sống mới nhất. `has_live_runtime`, `live_runtime_checksums` còn nguyên (engineer báo đã lỡ xoá rồi khôi
+phục trước commit; đã kiểm có trong HEAD). Sửa 22 tại chỗ hợp lệ: `data/studio_local/runtime.db` vẫn ở schema 21; bảng lease là
+migration 23. Chạy worker_runtimes, selection, migrations, rebind, autoscaler: 55 PASS. `OVERVIEW.md` có mục "Nâng cấp từ bản
+trước T-040".
+
+Lưu ý vận hành: stack đang chạy là code trước T-040; lần khởi động lại kế tiếp sẽ chạy migration 22 và 23 trên
+`data/studio_local/runtime.db`. Nên khởi động lại trong lần làm lại bước 4 của T-036, không trước.
