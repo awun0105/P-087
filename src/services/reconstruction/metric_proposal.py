@@ -13,7 +13,6 @@ import hashlib
 import json
 import logging
 import math
-import subprocess
 from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
@@ -26,6 +25,12 @@ from src.models.contracts.artifacts import ArtifactDataClass, ProductArtifactRef
 from src.models.contracts.identity import canonical_json_bytes
 from src.models.contracts.manifests import StageId
 from src.runtime_env import RuntimeSettings
+from src.services.process_control import (
+    ProcessStalledError,
+    ProcessTimeoutError,
+    file_size_marker,
+    run_cancellable_process,
+)
 from src.services.reconstruction.rgb.canonical.auto_scale import (
     align_scale,
     propose_floor,
@@ -54,6 +59,9 @@ class MogeSettings(RuntimeSettings):
     model: Path | None = None
     device: str = "cuda"
     timeout_seconds: float = Field(default=1800, gt=0, allow_inf_nan=False)
+    #: Log không tăng (không dòng tiến độ nào) trong khoảng này thì coi như treo. Chưa đo được trên GPU thật (xem report
+    #: T-043): 300 s bao gồm nạp mô hình và một ảnh; cần xác nhận khi chạy GPU thật đầu tiên.
+    stall_seconds: float = Field(default=300, gt=0, allow_inf_nan=False)
     #: Mỗi ảnh là một phiếu cho tỉ lệ; sai số của trung vị giảm theo căn số ảnh nên dùng nhiều ảnh.
     max_frames: int = Field(default=60, ge=3)
     max_points: int = Field(default=400, ge=20)
@@ -179,17 +187,26 @@ def _run_moge(request: dict, workspace: Path, settings: MogeSettings) -> dict[st
     request_path, result_path = workspace / "moge.request.json", workspace / "moge.result.npz"
     request_path.write_text(json.dumps(request), encoding="utf-8")
     command = [str(settings.python), str(RUNNER), "--request", str(request_path), "--result", str(result_path)]
-    with (workspace / "moge.log").open("w") as log:
+    log_path = workspace / "moge.log"
+    with log_path.open("w") as log:
         try:
-            completed = subprocess.run(  # noqa: S603 - lệnh cố định, đường dẫn từ Settings
-                command, stdout=log, stderr=subprocess.STDOUT, timeout=settings.timeout_seconds, check=False
+            returncode = run_cancellable_process(
+                command,
+                cwd=workspace,
+                timeout_seconds=settings.timeout_seconds,
+                output=log,
+                stall_seconds=settings.stall_seconds,
+                progress=[file_size_marker(log_path)],
+                label="MoGe",
             )
-        except subprocess.TimeoutExpired as error:
+        except ProcessTimeoutError as error:
             raise ValueError("MoGe quá thời gian cấu hình") from error
+        except ProcessStalledError as error:
+            raise ValueError(f"{error} Xem moge.log của attempt; thử lại hoặc tăng R2S_MOGE_STALL_SECONDS.") from error
         except OSError as error:
             raise ValueError("Không chạy được runtime MoGe") from error
-    if completed.returncode != 0 or not result_path.is_file():
-        raise ValueError(f"MoGe lỗi (exit {completed.returncode}); xem moge.log của attempt")
+    if returncode != 0 or not result_path.is_file():
+        raise ValueError(f"MoGe lỗi (exit {returncode}); xem moge.log của attempt")
     with np.load(result_path) as data:
         return {key: data[key] for key in data.files}
 
