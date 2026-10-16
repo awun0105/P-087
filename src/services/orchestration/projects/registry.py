@@ -314,7 +314,7 @@ class ProjectRegistry:
         display_video: Path,
         created_by: Actor | None = None,
     ) -> ProjectRecord:
-        """Publish original dataset images as pipeline input and an MP4 ref for display only."""
+        """Publish a composed video and its pre-extracted source frames as dataset input."""
         if len(images) < 2 or any(path.suffix.lower() not in {".png", ".jpg", ".jpeg"} for path in images):
             raise ValueError("dataset input requires at least two PNG/JPG/JPEG images")
         if not display_video.is_file() or display_video.suffix.lower() != ".mp4":
@@ -361,6 +361,27 @@ class ProjectRegistry:
             inventory.append({"frame_id": index, "name": image.name, "checksum": checksum})
         video_payload = display_video.read_bytes()
         video_checksum = sha256_bytes(video_payload)
+        video_uri = f"artifact://jobs/{project_id}/input/video/scene.mp4"
+        video_input_ref = ProductArtifactRef(
+            artifact_type="RGBVideo",
+            schema_version="1.0",
+            artifact_uri=video_uri,
+            artifact_checksum=video_checksum,
+            data_class=ArtifactDataClass.PRODUCT_INPUT,
+            producer_stage=StageId.INPUT_VALIDATE,
+            job_id=project_id,
+        )
+        FilesystemArtifactStore(self.runtime_resolver).publish(video_input_ref, video_payload)
+        files.append(
+            InputFile(
+                original_name=display_video.name,
+                media_type="video/mp4",
+                size_bytes=len(video_payload),
+                checksum=video_checksum,
+                artifact_uri=video_uri,
+                data_class=ArtifactDataClass.PRODUCT_INPUT,
+            )
+        )
         display_video_ref = ProductArtifactRef(
             artifact_type="DisplayVideo",
             schema_version="1.0",
@@ -383,7 +404,10 @@ class ProjectRegistry:
             input_configuration=InputConfiguration(rgb_present=True, registered_lidar_present=False),
             source_rights_attestation=attestation,
             dataset_manifest_checksum=dataset_checksum,
-            preparation_provenance={"input_mode": "image_refs", "display_video_only": True},
+            preparation_provenance={
+                "input_mode": "video_with_preextracted_image_refs",
+                "video_decode_skipped": True,
+            },
             input_manifest_checksum="sha256:" + "0" * 64,
         )
         manifest = with_canonical_checksum(draft, "input_manifest_checksum")
@@ -408,6 +432,11 @@ class ProjectRegistry:
             privacy_mode="self_attested",
             input_manifest_ref=manifest_ref,
             display_video_ref=display_video_ref,
+            input_video=InputVideoSummary(
+                original_name=display_video.name,
+                media_type="video/mp4",
+                size_bytes=len(video_payload),
+            ),
             created_at=datetime.now(UTC),
             created_by=created_by,
         )

@@ -285,7 +285,11 @@ def _export_job_bundle(
                 if sha256_file(path) != source_video.checksum:
                     raise SampleExportError("Video gốc sai checksum")
                 video = add_file(out, path, "input" + Path(source_video.original_name).suffix.lower())
-            video_caption = None
+            video_caption = (
+                "Video ghép từ ảnh gốc, dùng làm đầu vào giả lập và xem lại"
+                if source_video is not None and project.display_video_ref is not None
+                else None
+            )
     else:
         video_caption = None
     frame_files: list[DemoFile] = []

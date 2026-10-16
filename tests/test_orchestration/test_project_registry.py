@@ -106,7 +106,7 @@ def test_create_project_stores_attestation(registry: ProjectRegistry, create_inp
     assert record.source_rights_attestation["anonymization_confirmed"] is True
 
 
-def test_dataset_project_uses_images_as_input_and_keeps_display_video_separate(
+def test_dataset_project_submits_video_and_preextracted_images_as_input(
     registry: ProjectRegistry, tmp_path: Path
 ) -> None:
     from src.models.contracts.manifests import InputManifest
@@ -123,10 +123,11 @@ def test_dataset_project_uses_images_as_input_and_keeps_display_video_separate(
         registry.runtime_resolver.require(project.input_manifest_ref).read_bytes()
     )
     assert project.privacy_mode == "self_attested"
-    assert project.display_video_ref is not None and project.input_video is None
-    assert [item.original_name for item in manifest.files] == ["000.jpg", "001.png"]
-    assert all(item.media_type.startswith("image/") for item in manifest.files)
-    assert all("scene.mp4" not in item.artifact_uri for item in manifest.files)
+    assert project.display_video_ref is not None and project.input_video is not None
+    assert [item.original_name for item in manifest.files] == ["000.jpg", "001.png", "scene.mp4"]
+    assert [item.media_type for item in manifest.files] == ["image/jpeg", "image/png", "video/mp4"]
+    assert manifest.preparation_provenance["input_mode"] == "video_with_preextracted_image_refs"
+    assert manifest.preparation_provenance["video_decode_skipped"] is True
     assert registry.runtime_resolver.require(project.display_video_ref).read_bytes() == b"display-only-video"
     assert registry.create_job(JobCreateInput(project_id=project.project_id)).status == JobStatus.QUEUED
 

@@ -182,9 +182,11 @@ class VideoInputPreparer:
         )
 
     def _prepare_dataset(self, request, manifest, stages, publisher, input_started_at):
-        """Quality-check original dataset images and publish them as image_refs, without decoding display MP4."""
+        """Use declared dataset image refs as extracted frames; never decode the composed input MP4."""
         files = [file for file in manifest.files if file.media_type in {"image/png", "image/jpeg"}]
-        if len(files) != len(manifest.files) or len(files) < 2:
+        videos = [file for file in manifest.files if file.media_type in _VIDEO_MEDIA_TYPES]
+        supported_count = len(files) + len(videos)
+        if len(files) < 2 or len(videos) > 1 or supported_count != len(manifest.files):
             return self._failed(
                 request,
                 manifest,
@@ -194,7 +196,9 @@ class VideoInputPreparer:
                     stage_id=StageId.INPUT_VALIDATE,
                     human_message="Dataset preparation expects at least two PNG or JPEG frames",
                     retryable=False,
-                    details={"action": "Declare only ordered dataset image files in the InputManifest"},
+                    details={
+                        "action": "Declare ordered dataset images and at most one composed MP4 in the InputManifest"
+                    },
                 ),
                 input_started_at,
             )
