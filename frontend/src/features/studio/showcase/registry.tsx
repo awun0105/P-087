@@ -30,6 +30,7 @@ export type ShowcaseRenderer = (context: ShowcaseContext) => ReactNode;
 
 export interface StagePresenter {
   icon: ReactNode;
+  handlesAssets?: boolean;
   render: ShowcaseRenderer;
   caption?: (context: ShowcaseContext) => string | undefined;
 }
@@ -44,7 +45,22 @@ function coverOf(demo: DemoManifest) {
   return demo.frames[Math.floor(demo.frames.length / 2)];
 }
 
+function StageResults(context: ShowcaseContext) {
+  const record = context.demo.stages.find((stage) => stage.stage_id === context.stage);
+  const assets = record?.assets ?? [];
+  if (!assets.length) return null;
+  return <div className="space-y-4">{assets.map((asset, index) => (
+    <div key={index}>
+      {asset.title && <p className="mb-2 text-sm font-medium">{asset.title}</p>}
+      {ASSET_RENDERERS[asset.kind](asset, context)}
+    </div>
+  ))}</div>;
+}
+
 export const STAGE_PRESENTERS: Partial<Record<StageId, StagePresenter>> = {
+  "ST-METRIC-CANONICALIZE": { icon: <Aperture aria-hidden />, render: StageResults, handlesAssets: true },
+  "ST-RGB-GEOMETRY": { icon: <Images aria-hidden />, render: StageResults, handlesAssets: true },
+  "ST-OBJECT-EXTRACT": { icon: <ScanSearch aria-hidden />, render: StageResults, handlesAssets: true },
   "ST-INPUT-VALIDATE": {
     icon: <ScanSearch aria-hidden />,
     render: ({ demo, fileUrl }) =>

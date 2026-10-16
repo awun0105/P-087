@@ -85,3 +85,14 @@ describe("parseDemoManifest với asset", () => {
     expect(parsed.stages[0].assets).toEqual([{ kind: "facts", facts: [{ label: "a", value: "b" }] }]);
   });
 });
+
+describe("thẻ ba bước cuối", () => {
+  for (const id of ["ST-METRIC-CANONICALIZE", "ST-RGB-GEOMETRY", "ST-OBJECT-EXTRACT"] as const) {
+    it(id, () => {
+      const demo = manifest([stage(id, { assets: [{kind: "facts", facts: [{label: "Kết quả thật", value: "42"}]}] })]);
+      render(<DemoShowcase demo={demo} stage={id} fraction={1} fileUrl={fileUrl} />);
+      expect(screen.getByText("42")).toBeInTheDocument();
+      expect(screen.queryByRole("status")).toBeNull();
+    });
+  }
+});

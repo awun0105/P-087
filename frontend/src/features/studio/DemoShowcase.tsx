@@ -35,8 +35,11 @@ export function DemoShowcase({
   const evidence = hasEvidence(record);
 
   const cards: ReactNode[] = [];
-  if (evidence && presenter) cards.push(<div key="stage">{presenter.render(context)}</div>);
-  if (evidence) {
+  if (evidence && presenter) {
+    const node = presenter.render(context);
+    if (node) cards.push(<div key="stage">{node}</div>);
+  }
+  if (evidence && !presenter?.handlesAssets) {
     (record?.assets ?? []).forEach((asset, index) => {
       const node = ASSET_RENDERERS[asset.kind]?.(asset, context);
       if (node) {
