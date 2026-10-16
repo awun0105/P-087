@@ -48,3 +48,19 @@ unit tên đó đã tồn tại thì báo, không tự xoá.
 3. Khi chủ dự án cho phép: làm lại bước 4 trọn vẹn, ghi bảng kết quả mới; 4.11 cần đăng nhập để so mã HTTP của 3 job —
    dùng tài khoản Reviewer local (hỏi chủ dự án) hoặc ghi rõ chỉ kiểm được `/health`, `/api/v1/samples`, registry, manifest.
 4. Thêm mục Round 2 vào report.
+
+## Round 2 (một phần): (a) ACCEPTED, chờ làm lại bước 4
+
+Audit `781c28fd`: `splat_transform_version` dùng chung; bản production (`qualify_input_runtimes._splat_version`) giữ đúng
+ngữ nghĩa cũ (cùng `parents[1]/package.json`). Chạy `test_input_runtime_registry_script` + `test_qualify_input_runtimes`:
+17 PASS; ruff sạch. Test mới đỏ trên code cũ như report ghi.
+
+Sửa nhỏ, gộp vào lần làm lại bước 4 (một commit, có test):
+- `make_input_runtime_registry.py` dòng ~118 và ~160: module có mà không đọc được phiên bản (`splat_version is None`) thì
+  bản dev vẫn ghi view là QUALIFIED với `splat-transform-unknown`, còn bản production ghi `splat_transform_missing`. Cho
+  bản dev cùng quy tắc: `view_missing = [] if splat_version else ["splat_transform_missing"]` (tính `splat_version` trước).
+  Test: module tồn tại nhưng `package.json` hỏng → hai view UNAVAILABLE với `splat_transform_missing`.
+
+Bước 4.11: DB local có tài khoản Reviewer nhưng mật khẩu là của chủ dự án; agent **không** hỏi hay dùng mật khẩu, không
+tạo tài khoản mới. Agent kiểm `/health`, `/api/v1/samples` (5 mẫu), registry, manifest, log không có cảnh báo tên cũ;
+chủ dự án tự đăng nhập và mở 3 scene + 5 scene mẫu trên trình duyệt, agent ghi kết quả chủ dự án báo vào report.
