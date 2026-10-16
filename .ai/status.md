@@ -25,7 +25,7 @@ T-024 | Chỉ dẫn lỗi banner/donor/409 (GR-03/04/06) | accepted | —
 T-025 | Hiệu năng preview (GR-05) | accepted | —
 T-026 | Danh sách scene hiểu Draft | accepted | — (Architect tự làm)
 T-027 | Nhật ký sự kiện giá trị | changes-requested | engineer
-T-028 | Đo máy cho hàng đợi tách vật | in-progress | engineer
+T-028 | Đo máy cho hàng đợi tách vật | changes-requested | architect (cần Architect: xem report.md)
 T-029 | Bộ đếm phút công người + sự kiện Walk | planned | engineer
 T-030 | Ground truth của benchmark | implemented | summarizer
 T-031 | Máy đo khe, sai số, nhất quán | planned | engineer
