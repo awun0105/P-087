@@ -7,7 +7,7 @@ import logging
 import math
 from datetime import datetime
 from functools import lru_cache
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from src.models.contracts.manifests import JobManifest, StageId, StageStatus
 from src.services.orchestration.artifacts import ArtifactResolver, ArtifactStoreError
@@ -26,9 +26,8 @@ SCALE_SOURCES = {
 }
 
 
-@lru_cache(maxsize=128)
 def _read(resolver: ArtifactResolver, uri: str, checksum: str) -> dict[str, Any]:
-    """Cache theo checksum bất biến; giới hạn chỉ cho metadata tối đa 4 MiB."""
+    """Đọc và kiểm checksum; tài liệu gốc không được giữ trong cache."""
     path = resolver.require_uri(uri, checksum)
     if path.stat().st_size > 4 * 1024 * 1024:
         raise ValueError("Metadata vượt giới hạn đọc cho tiến trình")
@@ -42,15 +41,80 @@ def read_reference(resolver: ArtifactResolver, ref: dict[str, Any]) -> dict[str,
     return _read(resolver, ref["artifact_uri"], ref["artifact_checksum"])
 
 
-def scene_results(registry: ProjectRegistry, job_id: str) -> dict[str, Any] | None:
-    """Chỉ đọc head đã commit; không gọi current() vì nó có thể nhận head legacy."""
+class _SceneSummary(NamedTuple):
+    candidate_count: int
+    object_extraction: str | None
+    collision_selection_ref: tuple[tuple[str, str], ...] | None
+    collision_source_ref: tuple[tuple[str, str], ...] | None
+    geometry_state: str | None
+    chosen: tuple[str | None, ...]
+    collider_count: int
+    scene_revision: str
+
+
+@lru_cache(maxsize=256)
+def _scene_summary(resolver: ArtifactResolver, uri: str, checksum: str) -> _SceneSummary:
+    scene = _read(resolver, uri, checksum)
+    objects = [item for item in scene["objects"] if item.get("origin") == "reconstructed"]
+    environment = scene["environment"]
+    selection = environment.get("collision_selection_ref")
+    source = environment.get("collision_source_ref")
+    return _SceneSummary(
+        len(objects),
+        scene["provenance"].get("object_extraction"),
+        tuple(selection.items()) if selection else None,
+        tuple(source.items()) if source else None,
+        scene["provenance"].get("object_geometry"),
+        tuple((item.get("provenance", {}).get("surface_selection") or {}).get("chosen") for item in objects),
+        sum(item.get("collider") is not None for item in objects),
+        scene["scene_revision"],
+    )
+
+
+def scene_results(registry: ProjectRegistry, job_id: str) -> _SceneSummary | None:
+    """Chỉ đọc head đã commit; cache tuple rút gọn theo URI và checksum của revision."""
     repository = registry.scene.head_repository
     if repository is None:
         return None
     head = repository.get(job_id)
     if head is None:
         return None
-    return read_reference(registry.runtime_resolver, head.scene_reference.model_dump())
+    ref = head.scene_reference
+    return _scene_summary(registry.runtime_resolver, ref.artifact_uri, ref.artifact_checksum)
+
+
+@lru_cache(maxsize=256)
+def _metric_summary(
+    resolver: ArtifactResolver, uri: str, checksum: str, job_id: str
+) -> tuple[float, str, float, float, float]:
+    record = _read(resolver, uri, checksum)
+    preview = record["preview"]
+    declaration = read_reference(resolver, preview["request"]["anchor"]["measurement_ref"])
+    data = declaration["input"]
+    if declaration["job_id"] != job_id:
+        raise ValueError("Xác nhận thuộc job khác")
+    scale = preview["transform"]["scale_m_per_sfm_unit"]
+    source = data["distance_source"]
+    if source not in SCALE_SOURCES:
+        raise ValueError("Nguồn tỉ lệ chưa được hỗ trợ")
+    estimate = declaration.get("estimate") or {}
+    methods = {"ai_estimated": "moge2_sparse_depth_scale_only", "lidar_trajectory": "lidar_trajectory_alignment"}
+    if source in methods and estimate.get("method") != methods[source]:
+        raise ValueError("Nguồn đề xuất không khớp xác nhận")
+    measured = math.dist(data["check_a"], data["check_b"]) * scale
+    return scale, source, data["check_distance_m"], measured, abs(measured - data["check_distance_m"])
+
+
+@lru_cache(maxsize=256)
+def _collision_summary(
+    resolver: ArtifactResolver, uri: str, checksum: str
+) -> tuple[str | None, tuple[tuple[str, str], ...]]:
+    bundle = _read(resolver, uri, checksum)
+    ref = bundle["canonical_geometry_ref"]
+    source = "LiDAR" if ref["artifact_type"] == "LidarCollisionCandidate" else None
+    if bundle.get("rgb_geometry_ref") and ref["artifact_checksum"] == bundle["rgb_geometry_ref"]["artifact_checksum"]:
+        source = "ảnh"
+    return source, tuple(ref.items())
 
 
 def recorded_results(registry: ProjectRegistry, job: JobManifest) -> dict[str, Any]:
@@ -60,48 +124,20 @@ def recorded_results(registry: ProjectRegistry, job: JobManifest) -> dict[str, A
     confirmation = metric_confirmation_stage(job)
     if confirmation and confirmation.artifact_uri and confirmation.artifact_checksum:
         try:
-            record = _read(resolver, confirmation.artifact_uri, confirmation.artifact_checksum)
-            preview = record["preview"]
-            declaration = read_reference(resolver, preview["request"]["anchor"]["measurement_ref"])
-            data = declaration["input"]
-            if declaration["job_id"] != job.job_id:
-                raise ValueError("Xác nhận thuộc job khác")
-            scale = preview["transform"]["scale_m_per_sfm_unit"]
-            source = data["distance_source"]
-            if source not in SCALE_SOURCES:
-                raise ValueError("Nguồn tỉ lệ chưa được hỗ trợ")
-            estimate = declaration.get("estimate") or {}
-            methods = {
-                "ai_estimated": "moge2_sparse_depth_scale_only",
-                "lidar_trajectory": "lidar_trajectory_alignment",
-            }
-            if source in methods and estimate.get("method") != methods[source]:
-                raise ValueError("Nguồn đề xuất không khớp xác nhận")
-            measured = math.dist(data["check_a"], data["check_b"]) * scale
-            result["metric"] = {
-                "scale": scale,
-                "source": source,
-                "check_distance_m": data["check_distance_m"],
-                "check_measured_m": measured,
-                "check_error_m": abs(measured - data["check_distance_m"]),
-            }
+            values = _metric_summary(resolver, confirmation.artifact_uri, confirmation.artifact_checksum, job.job_id)
+            result["metric"] = dict(
+                zip(("scale", "source", "check_distance_m", "check_measured_m", "check_error_m"), values, strict=True)
+            )
         except (ArtifactStoreError, OSError, ValueError, KeyError, TypeError) as error:
             logger.debug("Không có receipt tỉ lệ hợp lệ cho %s: %s", job.job_id, error)
     for stage in reversed(job.stage_artifacts):
         if stage.artifact_type != "ReconstructionBundle" or stage.status != StageStatus.SUCCEEDED:
             continue
         try:
-            bundle = _read(resolver, stage.artifact_uri, stage.artifact_checksum)
-            ref = bundle["canonical_geometry_ref"]
-            source = "LiDAR" if ref["artifact_type"] == "LidarCollisionCandidate" else None
-            if (
-                bundle.get("rgb_geometry_ref")
-                and ref["artifact_checksum"] == bundle["rgb_geometry_ref"]["artifact_checksum"]
-            ):
-                source = "ảnh"
+            source, ref = _collision_summary(resolver, stage.artifact_uri, stage.artifact_checksum)
             if source:
                 result["collision_source"] = source
-                result["collision_ref"] = ref
+                result["collision_ref"] = dict(ref)
         except (ArtifactStoreError, OSError, ValueError, KeyError, TypeError) as error:
             logger.debug("Không có receipt collision hợp lệ cho %s: %s", job.job_id, error)
         break
@@ -110,28 +146,26 @@ def recorded_results(registry: ProjectRegistry, job: JobManifest) -> dict[str, A
     except (ArtifactStoreError, OSError, ValueError):
         scene = None
     if scene is not None:
-        objects = [item for item in scene["objects"] if item.get("origin") == "reconstructed"]
-        result["candidate_count"] = len(objects)
-        result["object_extraction"] = scene["provenance"].get("object_extraction")
-        environment = scene["environment"]
-        selection = environment.get("collision_selection_ref")
+        result["candidate_count"] = scene.candidate_count
+        result["object_extraction"] = scene.object_extraction
+        selection = scene.collision_selection_ref
         if selection:
             try:
-                mode = read_reference(resolver, selection)["mode"]
+                mode = read_reference(resolver, dict(selection))["mode"]
                 result["collision_source"] = {"lidar_derived": "LiDAR", "rgb_cleaned": "ảnh"}[mode]
-                result["collision_ref"] = environment.get("collision_source_ref")
+                result["collision_ref"] = dict(scene.collision_source_ref) if scene.collision_source_ref else None
             except (ArtifactStoreError, OSError, ValueError, KeyError):
                 result.pop("collision_source", None)
                 result.pop("collision_ref", None)
-        state = scene["provenance"].get("object_geometry")
+        state = scene.geometry_state
         if state in {"awaiting_review", "ready"}:
-            chosen = [(item.get("provenance", {}).get("surface_selection") or {}).get("chosen") for item in objects]
+            chosen = scene.chosen
             result["object_geometry"] = {
                 "state": "succeeded" if state == "ready" else "pending",
                 "duration_seconds": None,
                 "objectgs_count": chosen.count("objectgs") if any(chosen) else None,
                 "shell_count": chosen.count("gaussian_shell") if any(chosen) else None,
-                "collider_count": sum(item.get("collider") is not None for item in objects),
+                "collider_count": scene.collider_count,
             }
             if registry.persistence is not None:
                 with registry.persistence.database.transaction() as tx:
@@ -141,14 +175,14 @@ def recorded_results(registry: ProjectRegistry, job: JobManifest) -> dict[str, A
                     if (
                         state == "awaiting_review"
                         and request.get("mode") == "geometry"
-                        and request.get("base_revision") == scene["scene_revision"]
+                        and request.get("base_revision") == scene.scene_revision
                         and request.get("status") in {"failed", "cancelled"}
                     ):
                         result["object_geometry"]["state"] = "failed"
                     if (
                         request.get("mode") == "geometry"
                         and request.get("status") == "done"
-                        and request.get("result_revision") == scene["scene_revision"]
+                        and request.get("result_revision") == scene.scene_revision
                         and request.get("started_at")
                         and request.get("finished_at")
                     ):
@@ -180,10 +214,15 @@ def result_facts(result: dict[str, Any]) -> dict[StageId, list[tuple[str, str]]]
 
 
 @lru_cache(maxsize=64)
-def _redaction_summary(registry: ProjectRegistry, job_payload: str) -> tuple[int, str, str]:
+def _redaction_summary(registry: ProjectRegistry, job_id: str, checksum: str) -> tuple[int, str, str]:
     from src.services.orchestration.jobs.anonymization_review import _load
+    from src.services.orchestration.jobs.progress import sanitized_frame_stage
 
-    frames, manifest = _load(registry, JobManifest.model_validate_json(job_payload))
+    job = registry.get_job(job_id)
+    stage = sanitized_frame_stage(job)
+    if stage is None or stage.artifact_checksum != checksum:
+        raise ValueError("Bản đã che đã thay đổi trong khi đọc tiến trình")
+    frames, manifest = _load(registry, job)
     return sum(len(frame.regions) for frame in manifest.frames), frames.frame_set_checksum, manifest.manifest_checksum
 
 
@@ -212,9 +251,12 @@ def stage_notes(registry: ProjectRegistry, job: JobManifest) -> dict[StageId, st
         notes[StageId.RGB_GEOMETRY] = f"Lưới từ {result['collision_source']}"
     if "candidate_count" in result:
         notes[StageId.OBJECT_EXTRACT] = f"{result['candidate_count']} vật ứng viên"
-    if sanitized_frame_stage(job) is not None:
+    sanitized = sanitized_frame_stage(job)
+    if sanitized is not None:
         try:
-            count, frame_checksum, manifest_checksum = _redaction_summary(registry, job.model_dump_json())
+            count, frame_checksum, manifest_checksum = _redaction_summary(
+                registry, job.job_id, sanitized.artifact_checksum
+            )
             acceptance = anonymization_acceptance_stage(job)
             if acceptance and acceptance.artifact_uri and acceptance.artifact_checksum:
                 record = _read(registry.runtime_resolver, acceptance.artifact_uri, acceptance.artifact_checksum)
