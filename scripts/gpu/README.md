@@ -8,7 +8,7 @@ Kết quả demo **phải** đến từ chính pipeline này (không vẽ tay, k
 ## 1. Yêu cầu máy
 
 - Ubuntu 22.04/24.04, GPU NVIDIA ≥ 12 GB VRAM, driver có Vulkan
-  (`/usr/share/vulkan/icd.d/nvidia_icd.json`), Docker (COLMAP chạy trong container).
+  (`/usr/share/vulkan/icd.d/nvidia_icd.json`). Docker chỉ cần khi dùng `--colmap=docker`.
 - Python 3.12, Node 20+, `ffmpeg`, `git`.
 
 ## 2. Chuẩn bị
@@ -18,37 +18,27 @@ git clone <repo> /opt/real2sim/app && cd /opt/real2sim/app
 git checkout feat/pipeline-v2                # hoặc develop sau khi PR của nhánh này được merge
 make setup                                   # .venv + dependencies từ lockfile
 (cd frontend && npm ci && npm run build:editor)
-
-# Runtime EX-REC (cùng version với máy local, xem data/reconstruction_runtime/):
-mkdir -p /opt/real2sim/runtime && cd /opt/real2sim/runtime
-#  - Brush 0.3.0 linux archive (sha256 4f0f9a87…): giải nén brush_app vào ./brush/
-#  - splat-transform 3.6.6:   npm install @playcanvas/splat-transform@3.6.6
-#  - COLMAP image pin digest: docker pull colmap/colmap@sha256:b8498ebe…f40954
-#  - colmap-launcher.sh: copy từ data/reconstruction_runtime/colmap-launcher.sh; trên GPU có
-#    thể thêm `--gpus all` nếu bật use_gpu trong processing config.
 ```
 
-Runtime tách scene theo vật (pipeline v2, ADR 0007 — SAM2, gsplat, CoACD, usd-core, LaMa):
+Runtime GPU dựng bằng một lệnh, cùng công thức cho laptop, pod và image:
 
 ```bash
-sudo apt install python3.12-dev               # header để gsplat biên dịch kernel CUDA (cần nvcc)
-scripts/gpu/setup_scene_runtime.sh /opt/real2sim/scene_runtime
-# in ra 3 biến PRODUCT_SCENE_RUNTIME_PYTHON / PRODUCT_SAM2_CHECKPOINT / PRODUCT_LAMA_CHECKPOINT
+sudo scripts/gpu/install.sh /opt/real2sim --apt --colmap=binary --colmap-from-file <colmap-bundle.tar.zst>
+scripts/gpu/doctor.sh /opt/real2sim
 ```
 
-Thiếu runtime này job vẫn chạy: bước tách vật lùi về hộp ứng viên (ADR 0006) hoặc tách hình học.
-
-Runtime ObjectGS (tách vật bằng 3DGS có nhãn) dựng từ commit ghim trong `src/services/scene/objectgs.py`, với
-Python 3.8 và CUDA 11.8 trong hai prefix conda riêng (danh sách ở `configs/runtime/objectgs/`):
-
-```bash
-scripts/gpu/setup_objectgs_runtime.sh /opt/real2sim/objectgs_runtime      # thêm --wheels <dir> để cài offline
-# in ra các biến PRODUCT_OBJECTGS_* để dán vào studio.env; chạy lại trên đích đã cài thì thoát ngay
-```
-
-Script tự tải micromamba bản ghim (có kiểm sha256), cài torch cu118 từ index PyTorch, rồi biên dịch sẵn kernel
-gsplat vào `PRODUCT_OBJECTGS_EXTENSION_CACHE_DIR`. Cần mạng và GPU NVIDIA (hoặc `--skip-gpu-check` để chỉ dựng).
-Kiểm tra: `scripts/kaggle/preflight.py` có mục "Runtime ObjectGS" (tuỳ chọn, thiếu không chặn).
+- Thành phần: `colmap`, `brush`, `splat`, `lidar_odometry`, `scene` (SAM2, gsplat, CoACD, LaMa, MoGe), `objectgs`.
+  Chọn bằng `--only a,b` hoặc `--skip a,b`. Mỗi thành phần đã đúng thì được nhận ra và không cài lại.
+- Phiên bản ghim nằm ở `configs/runtime/pins.env` (COLMAP, Brush, Node, splat-transform, micromamba, KISS-ICP,
+  gói COLMAP). Commit ObjectGS ghim ở `src/services/scene/objectgs.py`.
+- COLMAP: `--colmap=binary` là gói nhị phân 4.x, không cần Docker. `--colmap=docker` dùng image COLMAP ghim qua
+  Docker, là mặc định của máy laptop đang chạy stack. Gói `colmap-bundle.tar.zst` lấy từ kho file của deployment
+  hoặc từ `scripts/gpu/export_colmap_binary.sh` (cần Docker, chạy một lần).
+- `install.sh --check-system` in gói apt còn thiếu mà không cần quyền root. `--apt` cài chúng (cần root).
+- Kết quả: `<gốc>/runtime.env` chỉ chứa đường dẫn và định danh runtime, không secret. Nạp vào shell:
+  `REPO="$PWD"; source scripts/gpu/install.d/_lib.sh; load_runtime_env <gốc>/runtime.env`.
+- Biến ObjectGS (`PRODUCT_OBJECTGS_*`) có trong `runtime.env`. Muốn dùng trong `scripts/gpu/studio.env` thì chép
+  các dòng đó vào file này (xem mục dưới).
 
 Copy `scripts/gpu/studio.env.example` → `scripts/gpu/studio.env`, sửa đường dẫn.
 Giá trị JSON giữ nháy đơn. Sinh runtime manifest **trên chính máy này**:
@@ -78,7 +68,7 @@ tách vật thể, thêm các biến mà `setup_scene_runtime.sh` in ra vào env
 
 `make setup` cài Python dependencies từ lockfile; `npm ci` trong `frontend/` cài
 frontend dependencies. Docker trong stack local này dùng cho COLMAP qua launcher;
-Brush và splat-transform cần cài riêng theo mục 2 khi chạy native. Compose ở root
+Brush và splat-transform do `install.sh` (mục 2) cài khi chạy native. Compose ở root
 khởi động API/web; thêm `docker-compose.gpu.yml` để cài runtime trong image GPU
 và khởi động worker NVIDIA cùng stack.
 

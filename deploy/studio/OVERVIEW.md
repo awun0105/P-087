@@ -96,7 +96,7 @@ ghi vào trong repo. Ba file `api.env.example`, `worker.env.example`, `web.env.e
   hai file lên R2, sau đó pod nào có biến trên cũng tự tải và kiểm sha256 lúc khởi động. Đổi pod không cần
   chép tay.
 - **Worker đo RAM và CPU theo giới hạn của container** (AUD-26.S4). Chưa kiểm trên pod thật.
-- **Image GPU chưa từng được build trọn vẹn** (ghi chú trong `Dockerfile.gpu`). Lần build đầu chạy `preflight`.
+- **Image GPU chưa từng được build trọn vẹn.** Image dựng bằng `scripts/gpu/install.sh` (cùng công thức với laptop, ghi `/opt/real2sim/runtime.env`), nhưng T-038 chưa build image: lần build thật là T-039 và chạy `preflight` trong container.
 
 ## Chưa có trong đóng gói
 

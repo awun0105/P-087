@@ -103,15 +103,7 @@ vulkaninfo --summary | grep -E "deviceName|deviceType"
 ```
 *(RTX 3090 sẽ in ra `NVIDIA GeForce RTX 3090 / DISCRETE_GPU` ngay lập tức).*
 
-### 5.2. Cài đặt các gói công cụ hệ điều hành
-```bash
-export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq
-apt-get install -y colmap ffmpeg libvulkan1 vulkan-tools xz-utils curl git
-```
-> ⚠️ **Lưu ý:** Không chạy `apt-get install libnvidia-gl-*` vì RunPod đã mount sẵn driver từ máy chủ vật lý.
-
-### 5.3. Clone Source Code
+### 5.2. Clone Source Code
 ```bash
 cd /workspace
 git clone https://<GITHUB_PAT>@github.com/AI20K-Build-Phase-Cohort-4/P-087.git real2sim
@@ -120,58 +112,30 @@ git checkout feat/sim    # Hoặc nhánh bạn đang làm việc
 ```
 *(Thay `<GITHUB_PAT>` bằng Personal Access Token bạn đã tạo ở Bước 2).*
 
-### 5.4. Cài đặt Python 3.12 & Thư viện dự án qua `uv`
+### 5.3. Cài đặt Python 3.12 & thư viện dự án qua `uv`
 ```bash
 pip install uv
-mkdir -p /workspace/r2s/runtime
-
-# Tạo virtual environment và đồng bộ lockfile
 uv venv --python 3.12 .venv
 uv pip sync --python .venv/bin/python requirements.lock.txt
 ```
 
-### 5.5. Cài đặt Brush 0.3.0 & Node.js + splat-transform
+### 5.4. Cài runtime GPU bằng một lệnh (`install.sh`)
+Một lệnh dựng mọi thành phần GPU: gói apt (ffmpeg, Vulkan, thư viện của COLMAP), COLMAP 4.x, Brush 0.3.0, Node + splat-transform, LiDAR odometry (KISS-ICP), runtime tách vật (SAM2, LaMa, MoGe) và ObjectGS. Mọi phiên bản ghim nằm ở `configs/runtime/pins.env`. Không cần Docker trên pod.
 ```bash
-# 1. Cài đặt Brush 0.3.0 (3DGS Trainer)
-mkdir -p /workspace/r2s/runtime/brush
-curl -L -o /workspace/r2s/runtime/brush.tar.xz https://github.com/ArthurBrussee/brush/releases/download/v0.3.0/brush-app-x86_64-unknown-linux-gnu.tar.xz
-tar --no-same-owner -xJf /workspace/r2s/runtime/brush.tar.xz -C /workspace/r2s/runtime/brush --strip-components=1
-rm /workspace/r2s/runtime/brush.tar.xz
-chmod +x /workspace/r2s/runtime/brush/brush_app
-
-# Kiểm tra Brush
-/workspace/r2s/runtime/brush/brush_app --version
-
-# 2. Cài đặt Node.js v22 + splat-transform
-mkdir -p /workspace/r2s/runtime/node
-curl -L -o /workspace/r2s/runtime/node.tar.xz https://nodejs.org/dist/v22.20.0/node-v22.20.0-linux-x64.tar.xz
-tar --no-same-owner -xJf /workspace/r2s/runtime/node.tar.xz -C /workspace/r2s/runtime/node --strip-components=1
-rm /workspace/r2s/runtime/node.tar.xz
-
-export PATH="/workspace/r2s/runtime/node/bin:$PATH"
-cd /workspace/r2s/runtime
-npm install --silent @playcanvas/splat-transform@3.6.6
-cd /workspace/real2sim
+sudo scripts/gpu/install.sh /opt/real2sim --apt --colmap=binary --colmap-from-file /workspace/colmap-bundle.tar.zst
+scripts/gpu/doctor.sh /opt/real2sim
 ```
+- `--apt`: cài gói apt còn thiếu. Pod chạy bằng root thì bỏ `sudo`.
+- Gói COLMAP `colmap-bundle.tar.zst`: `install.sh` tự tải từ kho file của deployment khi đã cấu hình `ARTIFACT_S3_*`; chưa có kho thì chép gói từ laptop và truyền bằng `--colmap-from-file`. Gói này xuất từ image ghim bằng `scripts/gpu/export_colmap_binary.sh`.
+- Lần đầu mất vài chục phút (tải torch, biên dịch kernel gsplat). Chạy lại `install.sh` là an toàn: thành phần đã đúng được nhận ra và không cài lại.
+- `doctor.sh` in PASS hoặc THIẾU cho từng mục. Mục ObjectGS là tuỳ chọn.
 
-### 5.6. Cài đặt dependencies cho Frontend
+### 5.5. Cài đặt dependencies cho Frontend
 ```bash
 cd /workspace/real2sim/frontend
 npm ci
 cd /workspace/real2sim
 ```
-
-### 5.7. Cài đặt Scene Runtime cho SAM2, SAMPro3D & LaMa (Tùy chọn — để tách vật thể nâng cao)
-> 💡 **Lưu ý:** Nếu không cài bước này, hệ thống sẽ tự động dùng **Fallback hình học** (`geometric_voxel_components_v1`) tạo hộp bounding box cho vật thể mà không bị lỗi. Nếu bạn muốn chạy phân đoạn AI thật bằng **SAM2 + SAMPro3D** và vá nền bằng **LaMa** (ADR 0006 & 0007), hãy chạy lệnh cài đặt:
-
-```bash
-# Cài đặt header Python 3.12 và build tools (gsplat cần để biên dịch kernel CUDA)
-apt-get install -y python3.12-dev build-essential ninja-build
-
-# Chạy script tự động thiết lập venv riêng data/scene_runtime và tải sẵn các model SAM2 + LaMa + MoGe:
-bash scripts/gpu/setup_scene_runtime.sh /workspace/r2s/runtime/scene_runtime
-```
-*Script sẽ tự động cài `sam-2`, `gsplat`, `coacd`, `lpips`, và tải 3 file checkpoint (`sam2.1_hiera_tiny.pt`, `big-lama.pt`, `moge-2-vitb-normal.pt`) vào `/workspace/r2s/runtime/scene_runtime`.*
 
 ---
 
@@ -222,34 +186,15 @@ PRODUCT_PROCESSING_CONFIG=/workspace/real2sim/configs/product/processing_presets
 PRODUCT_RUNTIME_MANIFEST=/workspace/r2s/runtime_manifest.json
 PRODUCT_GEOMETRY_CONFIG=/workspace/real2sim/configs/product/geometry_v1.json
 
-# COLMAP (apt native)
-R2S_COLMAP_COMMAND='["colmap"]'
-R2S_COLMAP_RUNTIME_IDENTITY=colmap-apt-3.9.1
-R2S_COLMAP_TIMEOUT_SECONDS=7200
-
-# Brush 3DGS Trainer
-R2S_BRUSH_COMMAND='["/workspace/r2s/runtime/brush/brush_app"]'
-R2S_BRUSH_EXPECTED_VERSION=0.3.0
-R2S_BRUSH_RUNTIME_IDENTITY=brush-v0.3.0-linux-archive-sha256:4f0f9a8785d1951c62df26aae247c02c5bba32b00f40b06df4e1c9b867399e20
-R2S_BRUSH_ENVIRONMENT='{"RUST_LOG":"info,wgpu_core=warn","VK_ICD_FILENAMES":"/usr/share/vulkan/icd.d/nvidia_icd.json"}'
-R2S_BRUSH_TIMEOUT_SECONDS=14400
-
-# Splat-transform & Voxel
-R2S_SPLAT_MODULE_PATH=/workspace/r2s/runtime/node_modules/@playcanvas/splat-transform/dist/index.mjs
-R2S_VOXEL_CLI=/workspace/r2s/runtime/node_modules/@playcanvas/splat-transform/bin/cli.mjs
-R2S_VOXEL_MODULE_PATH=/workspace/r2s/runtime/node_modules/@playcanvas/splat-transform/dist/index.mjs
-
-# Scene Runtime cho tách vật thể AI (SAM2, SAMPro3D, LaMa, MoGe)
-PRODUCT_SCENE_RUNTIME_PYTHON=/workspace/r2s/runtime/scene_runtime/bin/python
-PRODUCT_SAM2_CHECKPOINT=/workspace/r2s/runtime/scene_runtime/checkpoints/sam2.1_hiera_tiny.pt
-PRODUCT_LAMA_CHECKPOINT=/workspace/r2s/runtime/scene_runtime/weights/big-lama.pt
-R2S_MOGE_PYTHON=/workspace/r2s/runtime/scene_runtime/bin/python
-R2S_MOGE_MODEL=/workspace/r2s/runtime/scene_runtime/weights/moge-2-vitb-normal.pt
-R2S_BRUSH_LPIPS_PYTHON=/workspace/r2s/runtime/scene_runtime/bin/python
+# Đường dẫn COLMAP, Brush, splat-transform, LiDAR, runtime tách vật KHÔNG viết tay ở đây: mục 5.4 (install.sh) ghi
+# /opt/real2sim/runtime.env, và mỗi shell chạy app cần nạp file đó (xem dưới).
 EOF
 
-# Nạp Node.js vào PATH và sinh Runtime Manifest chứng nhận môi trường máy
-export PATH="/workspace/r2s/runtime/node/bin:$PATH"
+# Nạp runtime.env vào shell này bằng đúng bộ nạp của install.sh (chỉ đặt biến chưa có); lệnh sau kế thừa biến này.
+# Mở shell mới thì chạy lại hai dòng này.
+REPO="$PWD"; source scripts/gpu/install.d/_lib.sh; load_runtime_env /opt/real2sim/runtime.env
+
+# Sinh Runtime Manifest chứng nhận môi trường máy
 source .venv/bin/activate
 set -a; source .env; set +a
 python -m scripts.gpu.make_runtime_manifest --out /workspace/r2s/runtime_manifest.json
@@ -269,7 +214,7 @@ Backend sẽ báo: `Application startup complete` trên port `8000`.
 Mở Terminal 2 trong VS Code:
 ```bash
 cd /workspace/real2sim/frontend
-export PATH="/workspace/r2s/runtime/node/bin:$PATH"
+export PATH="/opt/real2sim/reconstruction_runtime/node/bin:$PATH"
 
 # Cách 1 (Khuyên dùng khi chia sẻ tunnel): Chạy chế độ Production (nhẹ, nhanh, không bị lỗi dev WebSocket/HMR)
 npm run build
@@ -286,6 +231,7 @@ Mở Terminal 3 trong VS Code:
 ```bash
 cd /workspace/real2sim
 source .venv/bin/activate
+REPO="$PWD"; source scripts/gpu/install.d/_lib.sh; load_runtime_env /opt/real2sim/runtime.env
 set -a; source .env; set +a
 python -m scripts.gpu.run_workers
 ```
@@ -322,7 +268,7 @@ https://random-subdomain.trycloudflare.com
 ```
 > 💡 Gửi link `https://...trycloudflare.com` cho nhóm, bất kỳ ai cũng có thể vào dùng ngay lập tức từ trình duyệt trên điện thoại hoặc máy tính cá nhân.
 
-*(Tùy chọn khác không cần tải thêm file: `export PATH="/workspace/r2s/runtime/node/bin:$PATH" && npx localtunnel --port 3000`)*
+*(Tùy chọn khác không cần tải thêm file: `export PATH="/opt/real2sim/reconstruction_runtime/node/bin:$PATH" && npx localtunnel --port 3000`)*
 
 ### 8.3. Tài khoản đăng nhập & Đổi mật khẩu
 Đăng nhập vào Web Studio bằng tài khoản seed:
@@ -417,7 +363,7 @@ curl -F "file=@/workspace/r2s-torwic-complete.zip" https://upload.gofile.io/cont
 Sau khi upload xong, bạn có thể **Stop Pod ngay lập tức** để tiết kiệm chi phí! Teammate chỉ cần tải file `.zip` về và chạy lệnh `python scripts/studio/data_package.py --root . unpack r2s-torwic-complete.zip --force` là có đầy đủ toàn bộ scene 60 FPS trên máy local.
 
 ### 9.4. Tách lại vật thể bằng SAM2 & LaMa (Re-objectify) cho Scene đã có sẵn
-Nếu trước đó bạn đã dựng xong 3DGS & collision mesh nhưng chỉ ở chế độ fallback hình học (`note: chưa cấu hình runtime SAM2; dùng tách hình học`), sau khi đã cài Mục 5.7 bạn có thể **chạy lại bước tách vật thể bằng SAM2 & LaMa** mà **KHÔNG CẦN train lại 3DGS hay chạy lại COLMAP** (chỉ mất khoảng 2–3 phút):
+Nếu trước đó bạn đã dựng xong 3DGS & collision mesh nhưng chỉ ở chế độ fallback hình học (`note: chưa cấu hình runtime SAM2; dùng tách hình học`), sau khi đã cài Mục 5.4 bạn có thể **chạy lại bước tách vật thể bằng SAM2 & LaMa** mà **KHÔNG CẦN train lại 3DGS hay chạy lại COLMAP** (chỉ mất khoảng 2–3 phút):
 
 ```bash
 set -a; source .env; set +a
@@ -438,6 +384,6 @@ Lệnh này sẽ đọc `ReconstructionBundle` có sẵn, dùng SAM2 + SAMPro3D 
 | `Missing API key for LLM provider: openai` | `Settings` yêu cầu key LLM khi khởi tạo | Thêm `OPENAI_API_KEY=not-used-by-studio` vào file `.env`. |
 | `VISUAL_TIMEOUT` trong quá trình Brush 3DGS | Scene nhiều frame (ví dụ > 500 frames) vượt ngưỡng timeout 1800s | Đặt `R2S_BRUSH_TIMEOUT_SECONDS=14400` trong file `.env`. |
 | `Voxel mutation requires X blocks, exceeding 32-bit mutable-grid limit` | 3DGS sinh các hạt floater khổng lồ làm phình bounding box | Đã fix: đặt `max_gaussian_scale_log=1.0` trong `configs/product/geometry_v1.json` để loại bỏ các hạt scale > 2.7m. |
-| `note: chưa cấu hình runtime SAM2; dùng tách hình học` | Chưa cài Mục 5.7 hoặc thiếu biến `PRODUCT_SAM2_CHECKPOINT` | Đây là fallback an toàn, không hỏng job. Để chạy SAM2 thật, làm theo Mục 5.7 rồi chạy `python scripts/scene/reobjectify.py <JOB_ID>`. |
+| `note: chưa cấu hình runtime SAM2; dùng tách hình học` | Chưa cài Mục 5.4 hoặc thiếu biến `PRODUCT_SAM2_CHECKPOINT` | Đây là fallback an toàn, không hỏng job. Để chạy SAM2 thật, làm theo Mục 5.4 rồi chạy `python scripts/scene/reobjectify.py <JOB_ID>`. |
 | `Field required: expected_version, runtime_identity` | Worker không đọc được biến môi trường từ `.env` | Chạy `set -a; source .env; set +a` trước khi chạy script Python worker. |
 | Quên tắt Pod tốn tiền | Pod vẫn tính phí khi đang chạy | Sau khi upload file zip lên GoFile/GDrive, vào console RunPod bấm **Stop Pod** (hoặc **Terminate Pod**). |
