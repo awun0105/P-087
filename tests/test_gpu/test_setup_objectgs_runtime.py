@@ -55,7 +55,7 @@ def test_commit_pins_are_read_from_objectgs_module_not_copied(tmp_path: Path) ->
     (root / "src/services/scene").mkdir(parents=True)
     shutil.copy(SCRIPT, root / "scripts/gpu/setup_objectgs_runtime.sh")
     shutil.copy(REPO / "configs/runtime/pins.env", root / "configs/runtime/pins.env")
-    for name in ["requirements.lock.txt", "torch.txt", "conda-python.txt", "conda-cuda.txt"]:
+    for name in ["requirements.lock.txt", "torch.lock.txt", "conda-python.txt", "conda-cuda.txt"]:
         shutil.copy(LISTS / name, root / "configs/runtime/objectgs" / name)
     source = (REPO / "src/services/scene/objectgs.py").read_text(encoding="utf-8")
     fake = {"OBJECTGS_COMMIT": "1" * 40, "GSPLAT_COMMIT": "2" * 40, "GLM_COMMIT": "3" * 40}
@@ -106,28 +106,54 @@ def test_conda_specs_match_the_laptop_runtime() -> None:
     assert _specs("conda-cuda.txt") == EXPECTED_CUDA
 
 
-def test_pip_lock_is_fully_pinned_hashed_and_leaves_torch_to_its_index() -> None:
-    """Mỗi gói ghim `==` đúng một dòng --hash sha256 (định dạng requirements có --require-hashes)."""
-    text = (LISTS / "requirements.lock.txt").read_text(encoding="utf-8")
-    entries = re.findall(r"^([A-Za-z0-9_.\-]+==[^=\s]+) \\\n    --hash=sha256:([0-9a-f]{64})$", text, flags=re.M)
+def _lock_entries(path: Path) -> list[tuple[str, str, list[str]]]:
+    """(tên, phiên bản, [sha256 …]) của mỗi gói trong khoá có hash."""
+    entries: list[tuple[str, str, list[str]]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip() or line.startswith("#"):
+            continue
+        pin = re.match(r"^([A-Za-z0-9_.\-]+)==([^=\s\\]+)", line)
+        if pin:
+            entries.append((pin[1], pin[2], []))
+        else:
+            entries[-1][2].append(re.search(r"--hash=sha256:([0-9a-f]{64})", line)[1])
+    return entries
+
+
+def test_pip_lock_pins_every_package_with_all_its_hashes() -> None:
+    """Mỗi gói ghim `==` và liệt kê hash của mọi file pip có thể chọn: ít nhất một, không trùng, không có torch."""
+    entries = _lock_entries(LISTS / "requirements.lock.txt")
     assert len(entries) == 126
-    assert len(set(name for name, _ in entries)) == 126
-    assert text.count("--hash=") == 126
-    assert not [name for name, _ in entries if re.match(r"(torch|torchvision|torchaudio|torch-scatter)==", name)]
+    assert len({name for name, _, _ in entries}) == 126
+    assert all(hashes and len(set(hashes)) == len(hashes) for _, _, hashes in entries)
+    assert not [name for name, _, _ in entries if re.match(r"(torch|torchvision|torchaudio|torch-scatter)$", name)]
+
+
+def test_torch_lock_is_hashed_and_installed_without_dependencies() -> None:
+    entries = _lock_entries(LISTS / "torch.lock.txt")
+    assert [(name, version) for name, version, _ in entries] == [
+        ("torch", "2.1.2+cu118"),
+        ("torchaudio", "2.1.2+cu118"),
+        ("torchvision", "0.16.2+cu118"),
+        ("torch-scatter", "2.1.2+pt21cu118"),
+    ]
+    assert all(hashes for _, _, hashes in entries)
+    assert 'pip install --no-deps --require-hashes -r "$LISTS/torch.lock.txt"' in SCRIPT_TEXT
 
 
 def test_pip_lock_is_installed_with_require_hashes() -> None:
     assert 'pip install --require-hashes -r "$LISTS/requirements.lock.txt"' in SCRIPT_TEXT
 
 
-def test_lock_hashes_match_the_offline_wheel_files() -> None:
+def test_lock_contains_the_hash_of_each_wheel_the_laptop_installed() -> None:
+    """Khoá là bản mở rộng: file đã kiểm trên laptop vẫn nằm trong khoá, nên bản offline cũ vẫn khớp."""
     wheels = REPO / "data/objectgs_runtime/wheels"
     if not wheels.is_dir():
         pytest.skip("không có thư mục wheel offline trên máy này")
-    text = (LISTS / "requirements.lock.txt").read_text(encoding="utf-8")
-    entries = re.findall(r"^([A-Za-z0-9_.\-]+)==([^=\s]+) \\\n    --hash=sha256:([0-9a-f]{64})$", text, flags=re.M)
     files = {path.name: path for path in wheels.iterdir() if path.is_file()}
-    for name, version, digest in entries:
+    for name, version, hashes in _lock_entries(LISTS / "requirements.lock.txt") + _lock_entries(
+        LISTS / "torch.lock.txt"
+    ):
         dist = re.sub(r"[-_.]+", "-", name).lower()
         candidates = []
         for fname, path in files.items():
@@ -140,15 +166,36 @@ def test_lock_hashes_match_the_offline_wheel_files() -> None:
             if re.sub(r"[-_.]+", "-", parts[0]).lower() == dist and parts[1] == version:
                 candidates.append(path)
         assert len(candidates) == 1, f"{name}=={version}: {len(candidates)} file"
-        assert hashlib.sha256(candidates[0].read_bytes()).hexdigest() == digest, name
+        assert hashlib.sha256(candidates[0].read_bytes()).hexdigest() in hashes, name
 
 
-def test_torch_pins_use_the_cu118_builds() -> None:
-    torch = (LISTS / "torch.txt").read_text(encoding="utf-8")
-    assert "torch==2.1.2+cu118" in torch
-    assert "torchvision==0.16.2+cu118" in torch
-    assert "torchaudio==2.1.2+cu118" in torch
-    assert "torch-scatter==2.1.2+pt21cu118" in torch
+def test_compatibility_rules_match_cpython_38_on_linux_x86_64() -> None:
+    from scripts.gpu.objectgs_lock import compatible
+
+    for ok in [
+        "numpy-1.24.4-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+        "six-1.16.0-py2.py3-none-any.whl",
+        "pkg-1.0-cp37-abi3-manylinux_2_17_x86_64.whl",
+        "setproctitle-1.3.8.tar.gz",
+    ]:
+        assert compatible(ok), ok
+    for bad in [
+        "numpy-1.26.0-cp39-cp39-manylinux_2_17_x86_64.whl",
+        "pkg-1.0-cp39-abi3-manylinux_2_17_x86_64.whl",
+        "pkg-1.0-cp38-cp38-win_amd64.whl",
+        "pkg-1.0-cp38-cp38-musllinux_1_1_x86_64.whl",
+        "pkg-1.0-cp38-cp38-manylinux_2_40_x86_64.whl",
+        "pkg-1.0-cp38-cp38-macosx_11_0_arm64.whl",
+    ]:
+        assert not compatible(bad), bad
+
+
+def test_torch_pins_are_the_cu118_builds() -> None:
+    lock = (LISTS / "torch.lock.txt").read_text(encoding="utf-8")
+    assert "torch==2.1.2+cu118 \\" in lock
+    assert "torchvision==0.16.2+cu118 \\" in lock
+    assert "torchaudio==2.1.2+cu118 \\" in lock
+    assert "torch-scatter==2.1.2+pt21cu118 \\" in lock
 
 
 def test_extension_is_prebuilt_into_the_shared_cache_with_objectgs_environment() -> None:

@@ -44,11 +44,9 @@ GLM_COMMIT="$(pinned GLM_COMMIT)"
 specs() { grep -v '^#' "$LISTS/$1" | grep . || true; }
 PY_SPECS="$(specs conda-python.txt)"
 CUDA_SPECS="$(specs conda-cuda.txt)"
-TORCH_PINS="$(specs torch.txt | grep -v '^torch-scatter' || true)"
-SCATTER_PIN="$(specs torch.txt | grep '^torch-scatter' || true)"
-[ -n "$PY_SPECS" ] && [ -n "$CUDA_SPECS" ] && [ -n "$TORCH_PINS" ] && [ -n "$SCATTER_PIN" ] \
-  || die "thiếu danh sách trong configs/runtime/objectgs"
+[ -n "$PY_SPECS" ] && [ -n "$CUDA_SPECS" ] || die "thiếu danh sách conda trong configs/runtime/objectgs"
 [ "$(grep -c '==' "$LISTS/requirements.lock.txt")" -gt 0 ] || die "requirements.lock.txt trống"
+[ "$(grep -c '==' "$LISTS/torch.lock.txt")" -gt 0 ] || die "torch.lock.txt trống"
 
 DEST=""
 WHEELS=""
@@ -71,7 +69,7 @@ if [ "$PRINT_PLAN" = 1 ]; then
   echo "GLM_COMMIT=$GLM_COMMIT"
   echo "python: $(echo "$PY_SPECS" | tr '\n' ' ')"
   echo "cuda: $(echo "$CUDA_SPECS" | tr '\n' ' ')"
-  echo "torch: $(echo "$TORCH_PINS" | tr '\n' ' ') $SCATTER_PIN"
+  echo "torch: $(grep -c '==' "$LISTS/torch.lock.txt") gói, có hash (torch.lock.txt)"
   echo "pip lock: $(grep -c '==' "$LISTS/requirements.lock.txt") gói"
   exit 0
 fi
@@ -96,7 +94,7 @@ MAMBA_ROOT="$DEST/.mamba"
 trap 'rm -rf "$TMP"' EXIT
 
 # Dấu đã cài: cùng công thức + cùng commit + cùng danh sách thì thoát ngay.
-RECIPE="objectgs-runtime-1 $OBJECTGS_COMMIT $GSPLAT_COMMIT $GLM_COMMIT $(cd "$LISTS" && sha256sum requirements.lock.txt torch.txt conda-python.txt conda-cuda.txt | cut -d' ' -f1 | tr '\n' ' ')"
+RECIPE="objectgs-runtime-2 $OBJECTGS_COMMIT $GSPLAT_COMMIT $GLM_COMMIT $(cd "$LISTS" && sha256sum requirements.lock.txt torch.lock.txt conda-python.txt conda-cuda.txt | cut -d' ' -f1 | tr '\n' ' ')"
 STAMP="$DEST/.r2s-installed"
 if [ -f "$STAMP" ] && [ "$(cat "$STAMP")" = "$RECIPE" ]; then
   echo "[bỏ qua] đã cài đúng công thức này ở $DEST"
@@ -126,19 +124,17 @@ else
     "$MM" create -y -p "$DEST/cuda" --override-channels -c conda-forge -c nvidia $CUDA_SPECS
   fi
 
-  # Torch: index cu118 (hoặc thư mục wheel khi cài offline), rồi PyG, rồi danh sách khoá.
+  # Torch: khoá có hash, cài --no-deps (phụ thuộc nằm trong khoá chính). Online: index cu118 + PyG; offline: thư mục wheel.
+  # Khoá chính vẫn dùng PyPI khi online, nên nguồn torch không được lẫn vào nó (TORCH_SRC và OFFLINE tách nhau).
   if [ -n "$WHEELS" ]; then
     [ -d "$WHEELS" ] || die "không thấy thư mục wheel: $WHEELS"
+    TORCH_SRC=(--no-index --find-links "$WHEELS")
     OFFLINE=(--no-index --find-links "$WHEELS")
-    # shellcheck disable=SC2086
-    "$PY" -m pip install $TORCH_PINS "${OFFLINE[@]}"
-    "$PY" -m pip install "$(echo "$SCATTER_PIN")" "${OFFLINE[@]}"
   else
-    # shellcheck disable=SC2086
-    "$PY" -m pip install $TORCH_PINS --index-url "$TORCH_INDEX"
-    "$PY" -m pip install "$SCATTER_PIN" --find-links "$PYG_INDEX"
+    TORCH_SRC=(--index-url "$TORCH_INDEX" --find-links "$PYG_INDEX")
     OFFLINE=()
   fi
+  "$PY" -m pip install --no-deps --require-hashes -r "$LISTS/torch.lock.txt" "${TORCH_SRC[@]}"
   # Mỗi gói trong khoá có sha256 của đúng file wheel/sdist trên laptop; file khác (kể cả cùng phiên bản) bị từ chối.
   "$PY" -m pip install --require-hashes -r "$LISTS/requirements.lock.txt" "${OFFLINE[@]}"
 

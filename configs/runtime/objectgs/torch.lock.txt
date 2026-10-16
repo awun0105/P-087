@@ -1,0 +1,10 @@
+# Torch cho ObjectGS, cài trước khoá chính với --no-deps: mỗi gói có sha256 của mọi wheel tương thích CPython 3.8
+# Linux x86_64 trên index cu118 của PyTorch và PyG. Sinh bởi `python -m scripts.gpu.objectgs_lock`.
+torch==2.1.2+cu118 \
+    --hash=sha256:5f0a8085343b55935052f85447f4649641b45cd07fe940023aef4d8f6a7c4c65
+torchaudio==2.1.2+cu118 \
+    --hash=sha256:f9504717938c3ebdd7e21b3264f00d5d70ea658d3fb447ecc840e1fd65340463
+torchvision==0.16.2+cu118 \
+    --hash=sha256:5e4c9f43f3b379c8ce9bc75da0378606fd5ca01c8a82493cc25639bffbd66c74
+torch-scatter==2.1.2+pt21cu118 \
+    --hash=sha256:adea2c960381e0623dd0e46a2c61dde585f3cc2b4bed05ea92af1e27a7dbd1cf
