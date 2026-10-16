@@ -170,3 +170,64 @@ Xem dòng 4 ở mục Acceptance: checksum và `runtime_version` của mọi cap
   registry và manifest, và ghi rõ như vậy.
 - Unit tên `real2sim-studio-demo-route-20261016` là của phiên khác: không dừng, chỉ chạy lại khi cổng đã trống.
 
+
+## Round 2: làm lại bước 4 (đổi trên máy)
+
+### Sửa nhỏ và acceptance 4 (theo review.md)
+- **Sửa nhỏ quy tắc `view_missing`** — commit `ce64d52e`. Test mới đỏ trên code cũ (module splat có, `package.json` hỏng → view
+  vẫn QUALIFIED), đỏ đã xác nhận trước khi sửa. Sau sửa: bản dev dùng cùng quy tắc với production
+  (`splat_transform_missing`). Test fixture `_env` nay tạo gói splat có `package.json` phiên bản (như trên máy thật).
+  `test_input_runtime_registry_script` + `test_qualify_input_runtimes`: 18 pass.
+- **Acceptance 4 (sửa theo quyết định 1, không sửa plan):** `qualification_evidence_checksum` và `runtime_version` của mọi
+  capability khác hai view không đổi; hai view `gaussian_ply_view`, `gaussian_sog_view` đổi đúng một lần (evidence băm
+  phiên bản splat-transform thay vì đường dẫn; `runtime_version` `splat-transform-local` → `splat-transform-3.6.6`);
+  `runtime_manifest_checksum` không đổi.
+
+### Bước 0 và trước khi dừng
+- Sao lưu vào `data/studio_local/backups/` (không commit): `studio.env.before-T-036`, `runtime_manifest.before-T-036.json`,
+  `input_runtime_registry.dev.before-T-036.json`, `checksums.before-T-036.txt`
+  (`runtime_manifest` `a39fbc28…`, registry dev `63f6c2b6…`).
+- `Makefile.studio`: bản làm việc chưa commit (tên `REC*`, đường dẫn cũ) được chuyển vào
+  `data/studio_local/backups/Makefile.studio.working-before-T-036`; file đã về HEAD (`71eda154`, tên mới) trước khi làm lại.
+- Mã HTTP trước khi dừng (chưa đăng nhập): `GET /api/v1/jobs/{id}` và `/scene` đều **401** cho cả 3 job.
+- Điều kiện: không yêu cầu scene đang chạy (1 yêu cầu `failed`), 0 lease, 0 reservation. Chủ dự án đã cho phép dừng.
+
+### Bước 4 — kết quả
+| Bước | Kết quả thật |
+| --- | --- |
+| 4.3 Dừng | `systemctl --user stop real2sim-studio-demo-route-20261016` → inactive; cổng 8010/3010 trống; không còn tiến trình stack. |
+| 4.5 Dời thư mục | `data/rec04_runtime`→`reconstruction_runtime`, `rec07_runtime`→`lidar_open3d_runtime`, `lidar_runtime`→`lidar_odometry_runtime` (`mv`). |
+| 4.6 Shebang | Sửa theo lệnh của plan; `grep` còn đường dẫn cũ trong `bin/`: rỗng. |
+| 4.7 `studio.env` | 18 dòng đổi (tên `R2S_*` và hai đường dẫn). Đảo ngược phép đổi cho ra đúng bản sao lưu. |
+| 4.8 Runtime | `brush-cli 0.3.0`; module splat-transform có mặt; `kiss-icp 1.3.0`; `open3d 0.19.0`. |
+| 4.9 Sinh lại | Manifest sinh vào thư mục tạm: **giống hệt** bản đang dùng. Registry: chỉ `gaussian_ply_view` và `gaussian_sog_view` khác (đúng quyết định); 6 capability còn lại và `runtime_manifest_checksum` không đổi. Sau đó `make -f Makefile.studio registry FORCE_REGISTRY=1` ghi registry dev (exit 0); các capability khớp bản đã kiểm. |
+| 4.10 Bật lại | `systemd-run --user --unit r2s-stack --setenv=STUDIO_FRONTEND=dev scripts/gpu/run_stack.sh scripts/gpu/studio.env` → active; `/health` 200. |
+
+**Cổng:** `studio.env` ghi `APP_PORT=8011`, `STUDIO_WEB_PORT=3011` (có sẵn trong file, không do sửa này). Phiên demo trước dùng 8010/3010 từ file env riêng trong `/tmp`. Stack lần này chạy 8011/3011.
+
+### Schema (migration 22 và 23 của T-040)
+- **Trước khi bật lại:** `r2s_schema.version = 23`, đọc lúc 4.2 khi stack còn chạy. Bảng `r2s_worker_runtimes` (migration 22) và
+  `r2s_job_leases` (migration 23) đã có trong DB.
+- **Sau khi bật lại:** `r2s_schema.version = 23`. Không có dòng migration nào trong journal.
+- **Kết luận:** giả định "lần bật lại sẽ chạy migration 22 và 23" **không đúng**: hai migration đã được áp dụng từ trước.
+  Không có thay đổi schema nào ở lần bật này.
+
+### Kiểm sau khi bật (4.11)
+- `POST /api/v1/auth/login` với tài khoản Reviewer local → **200**, cookie phiên httpOnly.
+  Mật khẩu chỉ được đọc từ biến môi trường `R2S_REVIEWER_PASSWORD` của lần chạy này; không ghi vào file, báo cáo hay commit.
+  Email tài khoản được đọc từ DB trong script và không in ra.
+- Ba job (đã đăng nhập): `GET /api/v1/jobs/{id}` → **200** cho cả ba; `GET /api/v1/jobs/{id}/scene` → **200** cho cả ba.
+  Chưa đăng nhập vẫn **401** như trước (khớp baseline).
+- `GET /api/v1/samples` → 200, 5 mẫu: `aisle-cw`, `aisle-cw-quick`, `room-mip-nerf-360-a14981f7`,
+  `sc-01-01-loidi-kho-thuan-aisle-cw-video-only-b8f744da`, `torwic_scene_01` (đều `origin=pipeline_job`).
+  Manifest mỗi mẫu → 200; file splat `scene.sog` (đọc làm preview) → 200 với kích thước 1,0 MB, 3,98 MB, 14,3 MB, 16,5 MB, 31,9 MB.
+- Log (journal `r2s-stack`, 380 dòng): **0** Traceback/ERROR, **0** cảnh báo tên cũ.
+- **Không kiểm được qua route:** plan nói "GET registry năng lực input mà frontend dùng". Không có route API nào trả registry
+  (đã tìm trong `src/api`); registry chỉ được `InputAssemblyService` đọc phía server qua `PRODUCT_INPUT_RUNTIME_REGISTRY`.
+  Thay bằng kiểm tệp (bước 4.9) và log server không lỗi.
+- **Job thật (12):** chưa chạy (không được chủ dự án cho phép trong lần này).
+- Chủ dự án tự đăng nhập trên trình duyệt và mở 3 scene + 5 mẫu: chưa có kết quả.
+
+### Dọn dẹp
+- File tạm của lần kiểm đã xoá (đường dẫn đầy đủ trong scratchpad). Không có mật khẩu trong file nào của repo, report hay commit.
+- Mật khẩu xuất hiện trong dòng lệnh của lần chạy kiểm 4.11 trong phiên này: nếu cần, đổi mật khẩu sau khi xong.
