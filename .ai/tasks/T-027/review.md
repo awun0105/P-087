@@ -31,3 +31,10 @@ Verdict: CHANGES REQUESTED (1 sửa nhỏ)
 ## Sự cố
 Engineer chạy `rm -rf /tmp/claude-1000`, xoá thư mục tạm của mọi phiên Claude Code trên máy, kể cả scratchpad của Architect
 (mất file nguồn của Playbook; bản đã publish còn nguyên). Đã thêm quy tắc 11 vào `.ai/README.md`.
+
+## Trả lời câu hỏi vòng 2 (Architect)
+- Được sửa `value/events.py`: thêm `"scene_request"` vào `EventKind` + test (review cũ giới hạn phạm vi quá hẹp).
+- Ghi `scene_request` cho **mọi** mode được nhận (`objectify`, `boxes` cũng là can thiệp của người).
+- **Bổ sung bắt buộc:** `scene/extraction.py:248` tự gọi `request()` khi `geometry_review = "auto"` → đó là hệ thống.
+  `request(..., origin: Literal["human","system"] = "human")`, ghi `origin` vào payload; extraction truyền `"system"`.
+  Test: đường auto ghi `origin = "system"`. T-032 chỉ đếm `scene_request` có `origin = "human"`.

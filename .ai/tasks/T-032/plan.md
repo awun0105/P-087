@@ -33,6 +33,10 @@ Chỉ backend. Không có UI (UI là T-033, T-034).
 4. `benchmark_rows`, summary, CSV và Markdown, 6 route, khai báo trong role matrix, test route. Commit.
 Sau mỗi bước: `ruff check` và `ruff format --check` trên các file vừa đổi.
 
+## Ghi chú từ review T-027
+Số lần can thiệp = `scene_edit` có `origin = human` + `scene_request` có `origin = human` (yêu cầu qua hàng đợi;
+đường `geometry_review = auto` ghi `origin = system` và không được đếm).
+
 ## Interfaces
 ```python
 Provenance = Literal["measured", "declared", "unavailable"]
