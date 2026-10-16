@@ -46,7 +46,9 @@ class NorthStar(BaseModel):
     hands_on_before_ready_minutes: Figure     # trước lần đầu object_geometry = ready
     hands_on_after_ready_minutes: Figure
     machine_minutes: Figure                   # processing_seconds / 60
-    hardware: dict[str, str | float | None]   # gpu_name, vram_gb, cpu_count, ram_gb
+    hardware: dict[str, str | float | None]   # gpu_name, vram_gb, cpu_count, ram_gb, peak_vram_gb, peak_ram_gb
+    # peak_* = lớn nhất trên MỌI ResourceUsage `completed` của job, gồm cả `scene.*` (T-028): Tạo mesh/ObjectGS có thể là bước
+    # tốn VRAM nhất, quyết định "chạy được trên GPU nào". Thẻ kỹ thuật cũ và benchmark runtime giữ nguyên, không đọc scene.*.
     gpu_hours: Figure                         # tổng duration_seconds của usage có gpu_name / 3600
     cost_usd: Figure                          # gpu_hours × benchmark_gpu_hourly_usd; None → unavailable
     interventions: dict[str, int]             # operation → số lần, chỉ origin = human; thêm "unknown" nếu có
