@@ -25,3 +25,15 @@ Verdict: CHANGES REQUESTED — chưa đóng được; phần đã làm đạt.
 
 ## Thứ tự trước khi chạy scene demo
 T-022 → T-023 → T-024 → T-021 → T-025 → T-019 round 2 → chạy thử 1 scene.
+
+## Round 2 — ACCEPTED
+
+Full suite một lượt trên source cuối: backend 3538 passed / 28 skipped / 0 failed; frontend 83 file / 880 passed; ruff,
+typecheck, mirror PASS; lint 0 lỗi (7 cảnh báo ở file không đụng). Test budget 300k PASS. Tôi chạy lại các nhóm liên quan
+(backend region/queue/regeneration 140 PASS; frontend region/object-review/geometry-review 179 PASS).
+
+T-022..T-025 và T-021 đã accepted. Tiến hành đầu dependency (T-022.. khi T-019 còn changes-requested) là theo lệnh của tôi: chấp nhận.
+
+Suggestion: lưu log full suite round 2 vào `evidence/` như round 1 (hiện chỉ có số trong report).
+
+Còn lại cho chủ dự án: kiểm bằng mắt trên browser, GPU ObjectGS, Isaac Sim, cảm giác Walk; tham số vỏ trên scene thật.

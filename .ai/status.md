@@ -16,10 +16,10 @@ T-015 | Box overlay + tay nắm + góc nhìn | accepted | -
 T-016 | Region Editor panel | accepted | —
 T-017 | Vỏ phát sáng + điểm thêm/bớt | accepted | —
 T-020 | Lựa chọn Duyệt trước / Tạo mesh ngay khi tạo job | accepted | —
-T-021 | Tiến trình, chuông, đầu trang hiểu Draft | implemented | summarizer
+T-021 | Tiến trình, chuông, đầu trang hiểu Draft | accepted | —
 T-018 | Tương thích scene cũ + Walk/USD với collider vỏ | accepted | -
-T-019 | Full regression + handoff | implemented | summarizer
+T-019 | Full regression + handoff | accepted | —
 T-022 | Giữ số vá nền khi Tạo mesh (GR-01) | accepted | —
-T-023 | Box ban đầu khớp nhóm Gaussian (GR-02) | implemented | summarizer
-T-024 | Chỉ dẫn lỗi banner/donor/409 (GR-03/04/06) | implemented | summarizer
-T-025 | Hiệu năng preview (GR-05) | implemented | summarizer
+T-023 | Box ban đầu khớp nhóm Gaussian (GR-02) | accepted | —
+T-024 | Chỉ dẫn lỗi banner/donor/409 (GR-03/04/06) | accepted | —
+T-025 | Hiệu năng preview (GR-05) | accepted | —
