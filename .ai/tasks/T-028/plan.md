@@ -22,7 +22,7 @@ phút máy của job đếm thiếu. Sau task này mỗi lần chạy xong (ho�
   - `observed_budget` (observed.py:91) chỉ đọc bản ghi có `tool` trong `PHASE_TOOLS` và `params is not None`; bản ghi `scene.*`
     không đặt `params` nên không ảnh hưởng ngân sách VRAM/RAM. Giữ nguyên tính chất này.
   - `api/studio/scenes.py:354` dùng `processing_seconds(load_usages(...))` cho cột thời gian máy của scene.
-- Cần chốt khi làm (không đổi trong task này, ghi vào report): `evaluation/scorecard.py` (`_ram_metric`, `_vram_metric`) và
+- Đã chốt (không đổi trong task này, ghi vào report): `evaluation/scorecard.py` (`_ram_metric`, `_vram_metric`) và
   `benchmark.py` (`_tool_timings`) chọn bản ghi theo `config_checksum`/job. Bản ghi `scene.*` mang `config_checksum` riêng
   của mode. **Architect đã chốt:** hai chỗ này mô tả lượt chạy pipeline của một attempt, nên **giữ nguyên, không đưa `scene.*`
   vào**. Thời gian máy và đỉnh RAM/VRAM của `scene.*` chỉ được đọc ở bảng giá trị T-032. Engineer vẫn ghi vào report việc đã
