@@ -85,4 +85,4 @@ Xong 2026-10-16: T-027 → T-035 accepted. Full backend 3.688 pass / 0 fail / 28
 - Worker công bố registry năng lực input vào DB (bỏ chép tay `PRODUCT_INPUT_RUNTIME_REGISTRY`), cùng mẫu T-040.
 - Nút "Chạy lại từ đầu" cho job đã có stage mà runtime không còn worker (T-040 Q1).
 - Lệnh `reset-password` trong `auth.cli`.
-- Chất lượng mesh ObjectGS trên cube tổng hợp không qua cổng mặt (không kín, bounds lệch) ở cả runtime gốc (8000 vòng, 15/10) lẫn runtime dựng lại (1000 vòng, T-037): cần điều tra riêng trước khi bật ObjectGS cho người dùng.
+- Chất lượng mesh ObjectGS trên cube tổng hợp không qua cổng mặt (không kín, bounds lệch) ở cả runtime gốc (8000 vòng, 15/10) lẫn runtime dựng lại (1000 vòng, T-037): cần điều tra riêng trước khi bật ObjectGS cho người dùng. Hệ quả đã thấy (2026-10-17): scene Room `job-a14981f78f85` rev-100 (60 vật) không mở được lưới va chạm/Walk, API trả 409 `UNREPAIRED_COLLISION_CUT: 954 new boundary edges remain`.
