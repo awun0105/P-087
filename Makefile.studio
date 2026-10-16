@@ -76,7 +76,7 @@ kill_port() {
 }
 endef
 
-.PHONY: help up down status env lidar-runtime registry data-pack data-verify data-unpack docker docker-down
+.PHONY: help up down status env lidar-runtime objectgs-runtime registry data-pack data-verify data-unpack docker docker-down
 
 help:
 	@echo "Studio MVP — lệnh có sẵn:"
@@ -146,6 +146,11 @@ lidar-runtime:
 	else
 	  echo "[!] Không cài được KISS-ICP; các hướng LiDAR R5/R6 sẽ không khả dụng (video vẫn chạy)." >&2
 	fi
+
+## objectgs-runtime: runtime ObjectGS (tách vật bằng 3DGS có nhãn) tại data/objectgs_runtime, dựng từ commit ghim.
+## Cần mạng và GPU; máy đã cài đúng công thức thì script thoát trong vài giây. In sẵn biến PRODUCT_OBJECTGS_* để dán vào env.
+objectgs-runtime:
+	@$(ROOT)/scripts/gpu/setup_objectgs_runtime.sh "$(ROOT)/data/objectgs_runtime" $(if $(wildcard $(ROOT)/data/objectgs_runtime/wheels),--wheels "$(ROOT)/data/objectgs_runtime/wheels",)
 
 ## registry: registry năng lực input DEV-LOCAL (lời khai, không phải kiểm định; production không dùng file này).
 ## Chỉ sinh khi chưa có để không đổi checksum giữa các lần `up` (đổi thì mọi recipe chờ chạy bị coi là cũ).

@@ -38,6 +38,18 @@ scripts/gpu/setup_scene_runtime.sh /opt/real2sim/scene_runtime
 
 Thiếu runtime này job vẫn chạy: bước tách vật lùi về hộp ứng viên (ADR 0006) hoặc tách hình học.
 
+Runtime ObjectGS (tách vật bằng 3DGS có nhãn) dựng từ commit ghim trong `src/services/scene/objectgs.py`, với
+Python 3.8 và CUDA 11.8 trong hai prefix conda riêng (danh sách ở `configs/runtime/objectgs/`):
+
+```bash
+scripts/gpu/setup_objectgs_runtime.sh /opt/real2sim/objectgs_runtime      # thêm --wheels <dir> để cài offline
+# in ra các biến PRODUCT_OBJECTGS_* để dán vào studio.env; chạy lại trên đích đã cài thì thoát ngay
+```
+
+Script tự tải micromamba bản ghim (có kiểm sha256), cài torch cu118 từ index PyTorch, rồi biên dịch sẵn kernel
+gsplat vào `PRODUCT_OBJECTGS_EXTENSION_CACHE_DIR`. Cần mạng và GPU NVIDIA (hoặc `--skip-gpu-check` để chỉ dựng).
+Kiểm tra: `scripts/kaggle/preflight.py` có mục "Runtime ObjectGS" (tuỳ chọn, thiếu không chặn).
+
 Copy `scripts/gpu/studio.env.example` → `scripts/gpu/studio.env`, sửa đường dẫn.
 Giá trị JSON giữ nháy đơn. Sinh runtime manifest **trên chính máy này**:
 

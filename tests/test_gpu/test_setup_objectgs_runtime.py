@@ -104,3 +104,14 @@ def test_extension_is_prebuilt_into_the_shared_cache_with_objectgs_environment()
     assert 'TORCH_EXTENSIONS_DIR="$DEST/torch_extensions"' in SCRIPT_TEXT
     assert "import gsplat.cuda._backend" in SCRIPT_TEXT
     assert "PRODUCT_OBJECTGS_EXTENSION_CACHE_DIR=$DEST/torch_extensions" in SCRIPT_TEXT
+
+
+def test_objectgs_preflight_is_optional_and_reports_missing_runtime(monkeypatch) -> None:
+    """Mục ObjectGS trong preflight là tuỳ chọn: thiếu runtime thì báo thiếu, không đặt cờ bắt buộc."""
+    from scripts.kaggle import preflight
+
+    monkeypatch.delenv("PRODUCT_OBJECTGS_RUNTIME_PYTHON", raising=False)
+    ok, detail = preflight.objectgs_runtime()
+    assert ok is False and "PRODUCT_OBJECTGS_RUNTIME_PYTHON" in detail
+    entry = next(item for item in preflight.CHECKS if item[0] == "Runtime ObjectGS")
+    assert entry[2] is False
