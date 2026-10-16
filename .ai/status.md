@@ -23,3 +23,4 @@ T-022 | Giữ số vá nền khi Tạo mesh (GR-01) | accepted | —
 T-023 | Box ban đầu khớp nhóm Gaussian (GR-02) | accepted | —
 T-024 | Chỉ dẫn lỗi banner/donor/409 (GR-03/04/06) | accepted | —
 T-025 | Hiệu năng preview (GR-05) | accepted | —
+T-026 | Danh sách scene hiểu Draft | accepted | — (Architect tự làm)
