@@ -24,7 +24,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from scripts.gpu.make_input_runtime_registry import odometry_version, parse_env_file
+from scripts.gpu.make_input_runtime_registry import odometry_version, parse_env_file, splat_transform_version
 from src.models.contracts.input_assembly import (
     RuntimeCapabilityKey,
     RuntimeQualificationStatus,
@@ -101,14 +101,7 @@ def _live(env: Mapping[str, str]) -> dict[str, str]:
 
 
 def _splat_version(env: Mapping[str, str]) -> str | None:
-    module = runtime_env(env, "R2S_SPLAT_MODULE_PATH", "").strip()
-    if not module or not Path(module).is_file():
-        return None
-    package = Path(module).resolve().parents[1] / "package.json"
-    try:
-        return str(json.loads(package.read_text(encoding="utf-8")).get("version") or "") or None
-    except (OSError, ValueError):
-        return None
+    return splat_transform_version(runtime_env(env, "R2S_SPLAT_MODULE_PATH", "").strip())
 
 
 def _brush_binary_present(env: Mapping[str, str]) -> bool:

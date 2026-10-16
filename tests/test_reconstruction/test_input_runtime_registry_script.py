@@ -92,3 +92,50 @@ def test_production_is_refused_and_an_existing_file_is_not_overwritten(
     assert script.main(["--out", str(out)]) == 2
     assert out.read_text() == "keep"
     assert os.environ.get("APP_ENV") is None
+
+
+def _splat_module(root: Path, version: str) -> Path:
+    module = root / "dist" / "index.mjs"
+    module.parent.mkdir(parents=True)
+    module.write_text("//")
+    (root / "package.json").write_text(json.dumps({"version": version}), encoding="utf-8")
+    return module
+
+
+_VIEWS = {RuntimeCapabilityKey.GAUSSIAN_PLY_VIEW.value, RuntimeCapabilityKey.GAUSSIAN_SOG_VIEW.value}
+
+
+def _view_records(registry: dict[str, object]) -> dict[str, tuple[str, str]]:
+    return {
+        item["capability_key"]: (item["qualification_evidence_checksum"], item["runtime_version"])  # type: ignore[index]
+        for item in registry["capabilities"]  # type: ignore[index]
+        if item["capability_key"] in _VIEWS  # type: ignore[index]
+    }
+
+
+def _non_view_records(registry: dict[str, object]) -> list[dict[str, object]]:
+    return [item for item in registry["capabilities"] if item["capability_key"] not in _VIEWS]  # type: ignore[index]
+
+
+def test_splat_view_evidence_ignores_the_module_path_when_the_version_is_the_same(tmp_path: Path) -> None:
+    env = _env(tmp_path, with_odometry=True)
+    env["R2S_SPLAT_MODULE_PATH"] = str(_splat_module(tmp_path / "rec04_runtime", "1.2.3"))
+    before = script.build_registry(env)
+    env["R2S_SPLAT_MODULE_PATH"] = str(_splat_module(tmp_path / "reconstruction_runtime", "1.2.3"))
+    after = script.build_registry(env)
+
+    assert _view_records(before) == _view_records(after)
+    assert _non_view_records(before) == _non_view_records(after)
+    assert all(version == "splat-transform-1.2.3" for _, version in _view_records(after).values())
+
+
+def test_splat_view_evidence_follows_the_splat_transform_version(tmp_path: Path) -> None:
+    env = _env(tmp_path, with_odometry=True)
+    env["R2S_SPLAT_MODULE_PATH"] = str(_splat_module(tmp_path / "one", "1.2.3"))
+    before = _view_records(script.build_registry(env))
+    env["R2S_SPLAT_MODULE_PATH"] = str(_splat_module(tmp_path / "two", "1.2.4"))
+    after = _view_records(script.build_registry(env))
+
+    assert set(after) == _VIEWS
+    assert all(before[key][0] != after[key][0] for key in _VIEWS)
+    assert all(version == "splat-transform-1.2.4" for _, version in after.values())

@@ -70,6 +70,20 @@ def odometry_version(python: Path) -> str | None:
     return result.stdout.strip() or None
 
 
+def splat_transform_version(module: str) -> str | None:
+    """Phiên bản splat-transform, đọc từ `package.json` của gói chứa module (`<gốc>/dist/index.mjs` → `<gốc>/package.json`).
+
+    Băm phiên bản, không băm đường dẫn: đường dẫn không phải danh tính của runtime. None nếu module hoặc package.json không đọc được.
+    """
+    if not module or not Path(module).is_file():
+        return None
+    package = Path(module).resolve().parents[1] / "package.json"
+    try:
+        return str(json.loads(package.read_text(encoding="utf-8")).get("version") or "") or None
+    except (OSError, ValueError):
+        return None
+
+
 def _evidence(capability: str, components: Mapping[str, str]) -> str:
     """Checksum của chính lời khai (không phải số đo): đổi runtime thì checksum đổi theo."""
     payload = {"declaration": "dev-local-unmeasured", "capability": capability, "components": dict(components)}
@@ -143,8 +157,11 @@ def build_registry(env: Mapping[str, str]) -> dict[str, object]:
             odometry_components,
             f"colmap-{colmap[-12:]}+brush-{brush_version}+kiss-icp-{kiss_version}",
         )
+    splat_version = splat_transform_version(splat_module)
     for key in _VIEW_KEYS:
-        add(key, view_missing, {"splat_transform": splat_module}, "splat-transform-local")
+        add(
+            key, view_missing, {"splat_transform": splat_version or ""}, f"splat-transform-{splat_version or 'unknown'}"
+        )
     return {
         "schema_version": "1.0",
         "registry_version": f"{DEV_LABEL}-{datetime.now(UTC):%Y%m%d%H%M%S}",
