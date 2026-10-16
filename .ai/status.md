@@ -28,7 +28,7 @@ T-027 | Nhật ký sự kiện giá trị | changes-requested | engineer
 T-028 | Đo máy cho hàng đợi tách vật | accepted | —
 T-029 | Bộ đếm phút công người + sự kiện Walk | planned | engineer
 T-030 | Ground truth của benchmark | accepted | —
-T-031 | Máy đo khe, sai số, nhất quán | in-progress | engineer
+T-031 | Máy đo khe, sai số, nhất quán | implemented | summarizer
 T-032 | Bảng metric + xuất JSON/CSV/MD | planned | engineer
 T-033 | Panel Benchmark trong Studio | planned | engineer
 T-034 | Thẻ Giá trị + trang /benchmark | planned | engineer
