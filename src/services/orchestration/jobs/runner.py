@@ -97,9 +97,7 @@ from src.services.orchestration.jobs.progress import (
     metric_confirmation_stage,
 )
 from src.services.orchestration.jobs.workspace import attempt_lease, cleanup_attempt_workspace, cleanup_finished_job
-from src.services.orchestration.processing import is_presets_file, load_presets
 from src.services.orchestration.processing.capability import latest as latest_capability
-from src.services.orchestration.processing.capability import measure_capacity
 from src.services.orchestration.processing.config import load_job_config
 from src.services.orchestration.processing.observed import load_usages
 from src.services.orchestration.processing.telemetry import (
@@ -109,6 +107,7 @@ from src.services.orchestration.processing.telemetry import (
     ResourceUsage,
     sampled_section,
 )
+from src.services.orchestration.processing.usage_recording import build_sampler, record_usage
 from src.services.orchestration.projects.models import LidarPackageMember, ProjectRecord
 from src.services.orchestration.projects.registry import ProjectRegistry, get_project_registry
 from src.services.reconstruction import (
@@ -279,18 +278,11 @@ def _finish_resources(
 
 
 def _persist_usage(attempt: _Attempt, usage: ResourceUsage) -> None:
-    """Lưu bản ghi vào runtime DB: đĩa của máy GPU thuê mất khi trả máy, DB thì không."""
+    """Lưu bản ghi vào runtime DB khi job có persistence."""
     persistence = attempt.registry.persistence
     if persistence is None:
         return
-    try:
-        with persistence.database.transaction(write=True) as tx:
-            tx.execute(
-                "INSERT INTO r2s_resource_usage(usage_id,job_id,recorded_at,payload) VALUES (?,?,?,?)",
-                (uuid4().hex, usage.job_id, usage.completed_at.isoformat(), usage.model_dump_json()),
-            )
-    except Exception as error:  # noqa: BLE001 - ranh giới DB của số đo: không đổi kết quả job
-        logger.warning("Không lưu được resource telemetry vào DB cause=%s", type(error).__name__)
+    record_usage(persistence.database, usage)
 
 
 @contextmanager
@@ -328,20 +320,10 @@ def _resource_sampler(attempt: _Attempt, tool: str) -> ResourceSampler | None:
             params=job_drivers(registry, settings, attempt.job),
             shared_gpu=shared,
         )
-        ratio: float | None = None
-        path = settings.product_processing_config
-        if path is not None and is_presets_file(path):
-            ratio = load_presets(path)[0].resource_model.danger_ratio
-        return ResourceSampler(
-            context,
-            workspace=attempt.workspace,
-            worker_root=settings.product_worker_root,
-            exhaustion_ratio=ratio,
-            ram_total_gb=measure_capacity(settings.product_worker_root)["ram"],
-        )
     except Exception as error:  # noqa: BLE001 - measurement boundary must not change job execution
         logger.warning("Không tạo được resource sampler cause=%s", type(error).__name__)
         return None
+    return build_sampler(settings, context, attempt.workspace)
 
 
 def _requeue_if_exhausted(attempt: _Attempt) -> JobManifest | None:
