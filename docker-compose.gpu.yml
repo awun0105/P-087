@@ -57,23 +57,35 @@ services:
       PRODUCT_PROCESSING_CONFIG: /opt/real2sim/app/configs/product/processing_presets_v1.json
       PRODUCT_RUNTIME_MANIFEST: /data/studio_local/runtime_manifest.json
       PRODUCT_INPUT_RUNTIME_REGISTRY: /data/studio_local/input_runtime_registry.json
-      REC17_LIDAR_ODOMETRY_PYTHON: /opt/real2sim/lidar_runtime/bin/python
       R2S_STATE: /data
-      # Replace any host-local values inherited from `.env.studio`; all heavy
-      # tools live at these paths inside Dockerfile.gpu.
-      REC03_COLMAP_COMMAND: '["colmap"]'
-      REC03_COLMAP_RUNTIME_IDENTITY:
-      REC04_BRUSH_COMMAND: '["/opt/real2sim/runtime/brush/brush_app"]'
-      REC04_BRUSH_ENVIRONMENT:
-      REC04_BRUSH_RUNTIME_IDENTITY:
-      REC04_SPLAT_MODULE_PATH: /opt/real2sim/runtime/node_modules/@playcanvas/splat-transform/dist/index.mjs
-      REC05_VOXEL_CLI: /opt/real2sim/runtime/node_modules/@playcanvas/splat-transform/bin/cli.mjs
-      REC05_VOXEL_MODULE_PATH: /opt/real2sim/runtime/node_modules/@playcanvas/splat-transform/dist/index.mjs
+      # Ô để trống = image quyết định (runtime.env do install.sh ghi lúc build, nạp bởi docker_entrypoint.sh). Ô trống
+      # cũng chặn đường dẫn máy host trong .env.studio lọt vào image GPU.
+      R2S_COLMAP_COMMAND:
+      R2S_COLMAP_RUNTIME_IDENTITY:
+      R2S_BRUSH_COMMAND:
+      R2S_BRUSH_ENVIRONMENT:
+      R2S_BRUSH_EXPECTED_VERSION:
+      R2S_BRUSH_RUNTIME_IDENTITY:
+      R2S_BRUSH_LPIPS_PYTHON:
+      R2S_SPLAT_DEVICE:
+      R2S_SPLAT_MODULE_PATH:
+      R2S_VOXEL_CLI:
+      R2S_VOXEL_MODULE_PATH:
+      R2S_LIDAR_ODOMETRY_PYTHON:
+      R2S_MOGE_PYTHON:
+      R2S_MOGE_MODEL:
+      R2S_NODE_BIN_DIR:
+      PRODUCT_SCENE_RUNTIME_PYTHON:
+      PRODUCT_SAM2_CHECKPOINT:
+      PRODUCT_LAMA_CHECKPOINT:
+      PRODUCT_OBJECTGS_RUNTIME_PYTHON:
+      PRODUCT_OBJECTGS_REPOSITORY:
+      PRODUCT_OBJECTGS_GSPLAT_REPOSITORY:
+      PRODUCT_OBJECTGS_CUDA_HOME:
+      PRODUCT_OBJECTGS_CXX:
+      PRODUCT_OBJECTGS_GLM_REPOSITORY:
+      PRODUCT_OBJECTGS_EXTENSION_CACHE_DIR:
       PRODUCT_GEOMETRY_CONFIG: ${PRODUCT_GEOMETRY_CONFIG:-/opt/real2sim/app/configs/product/geometry_indoor_v1.json}
-      PRODUCT_SCENE_RUNTIME_PYTHON: /opt/real2sim/scene_runtime/bin/python
-      PRODUCT_SAM2_CHECKPOINT: /opt/real2sim/scene_runtime/checkpoints/sam2.1_hiera_tiny.pt
-      PRODUCT_LAMA_CHECKPOINT: /opt/real2sim/scene_runtime/weights/big-lama.pt
-      REC04_BRUSH_LPIPS_PYTHON: /opt/real2sim/scene_runtime/bin/python
     volumes:
       - type: bind
         source: ${STUDIO_DATA_DIR:-./data}
@@ -94,7 +106,6 @@ services:
       - ${STUDIO_ENV_FILE:-.env.studio}
     environment:
       APP_ENV: development
-      REC17_LIDAR_ODOMETRY_PYTHON: /opt/real2sim/lidar_runtime/bin/python
       AUTH_REQUIRED: "true"
       AUTH_GUEST_SIGNUP_ENABLED: "${AUTH_GUEST_SIGNUP_ENABLED:-true}"
       AUTH_COOKIE_SECURE: "false"
@@ -108,23 +119,35 @@ services:
       PRODUCT_ASSET_PREVIEW_DIR: /data/asset_previews
       PRODUCT_RERUN_RECORDING_DIR: /data/rerun_recordings
       PRODUCT_TRASH_ROOT: /data/studio_local/trash
-      REC04_SPLAT_DEVICE: gpu
       R2S_STATE: /data
-      # Never pass host-local native paths from `.env.studio` into the GPU
-      # image; the pinned tools live at these paths inside Dockerfile.gpu.
-      REC03_COLMAP_COMMAND: '["colmap"]'
-      REC03_COLMAP_RUNTIME_IDENTITY:
-      REC04_BRUSH_COMMAND: '["/opt/real2sim/runtime/brush/brush_app"]'
-      REC04_BRUSH_ENVIRONMENT:
-      REC04_BRUSH_RUNTIME_IDENTITY:
-      REC04_SPLAT_MODULE_PATH: /opt/real2sim/runtime/node_modules/@playcanvas/splat-transform/dist/index.mjs
-      REC05_VOXEL_CLI: /opt/real2sim/runtime/node_modules/@playcanvas/splat-transform/bin/cli.mjs
-      REC05_VOXEL_MODULE_PATH: /opt/real2sim/runtime/node_modules/@playcanvas/splat-transform/dist/index.mjs
+      # Ô để trống = image quyết định (runtime.env do install.sh ghi lúc build, nạp bởi docker_entrypoint.sh). Không để
+      # đường dẫn máy host từ .env.studio lọt vào image: các công cụ đã cài sẵn trong image.
+      R2S_COLMAP_COMMAND:
+      R2S_COLMAP_RUNTIME_IDENTITY:
+      R2S_BRUSH_COMMAND:
+      R2S_BRUSH_ENVIRONMENT:
+      R2S_BRUSH_EXPECTED_VERSION:
+      R2S_BRUSH_RUNTIME_IDENTITY:
+      R2S_BRUSH_LPIPS_PYTHON:
+      R2S_SPLAT_DEVICE:
+      R2S_SPLAT_MODULE_PATH:
+      R2S_VOXEL_CLI:
+      R2S_VOXEL_MODULE_PATH:
+      R2S_LIDAR_ODOMETRY_PYTHON:
+      R2S_MOGE_PYTHON:
+      R2S_MOGE_MODEL:
+      R2S_NODE_BIN_DIR:
+      PRODUCT_SCENE_RUNTIME_PYTHON:
+      PRODUCT_SAM2_CHECKPOINT:
+      PRODUCT_LAMA_CHECKPOINT:
+      PRODUCT_OBJECTGS_RUNTIME_PYTHON:
+      PRODUCT_OBJECTGS_REPOSITORY:
+      PRODUCT_OBJECTGS_GSPLAT_REPOSITORY:
+      PRODUCT_OBJECTGS_CUDA_HOME:
+      PRODUCT_OBJECTGS_CXX:
+      PRODUCT_OBJECTGS_GLM_REPOSITORY:
+      PRODUCT_OBJECTGS_EXTENSION_CACHE_DIR:
       PRODUCT_GEOMETRY_CONFIG: ${PRODUCT_GEOMETRY_CONFIG:-/opt/real2sim/app/configs/product/geometry_indoor_v1.json}
-      PRODUCT_SCENE_RUNTIME_PYTHON: /opt/real2sim/scene_runtime/bin/python
-      PRODUCT_SAM2_CHECKPOINT: /opt/real2sim/scene_runtime/checkpoints/sam2.1_hiera_tiny.pt
-      PRODUCT_LAMA_CHECKPOINT: /opt/real2sim/scene_runtime/weights/big-lama.pt
-      REC04_BRUSH_LPIPS_PYTHON: /opt/real2sim/scene_runtime/bin/python
     volumes:
       - type: bind
         source: ${STUDIO_DATA_DIR:-./data}

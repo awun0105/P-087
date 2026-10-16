@@ -171,7 +171,7 @@ class LidarOdometryWorkerRequest(ContractModel):
 class LidarOdometryRuntimeSettings(RuntimeSettings):
     """Isolated provider interpreter and process limits injected by deployment."""
 
-    python: Path = Path("/opt/real2sim/lidar_runtime/bin/python")
+    python: Path = Path("/opt/real2sim/lidar_odometry_runtime/bin/python")
     work_root: Path = Path("/tmp/real2sim-lidar-odometry")
     timeout_seconds: float = Field(default=3600, gt=0, allow_inf_nan=False)
     provider_version: str = _PINNED_PROVIDER_VERSION

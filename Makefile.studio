@@ -28,6 +28,8 @@ ENV_FILE   := $(ROOT)/scripts/gpu/studio.env
 STACK      := $(ROOT)/scripts/gpu/run_stack.sh
 VENV_PY    := $(ROOT)/.venv/bin/python
 PORT_STATE := $(ROOT)/data/studio_local/studio-ports.env
+# Phiên bản và checksum ghim: một nguồn là configs/runtime/pins.env, không chép tay ở file này.
+pin         = $(shell sed -n 's/^$(1)=//p' $(ROOT)/configs/runtime/pins.env)
 
 API_PORT      ?= 8010
 WEB_PORT      ?= 3010
@@ -115,11 +117,11 @@ env:
 	PRODUCT_DEMO_DIR='$(DEMO_DIR)'
 	R2S_COLMAP_COMMAND='["sh","$(COLMAP)"]'
 	# Identity/version của baseline đã kiểm (job-ac2bfd924cc6); đổi binary thì cập nhật cùng.
-	R2S_COLMAP_RUNTIME_IDENTITY=colmap-image-sha256:b8498ebecab11c3f9b9a25370e3fcfb6de9b6bcd4f3c85d5dc39a40229f40954
+	R2S_COLMAP_RUNTIME_IDENTITY=colmap-image-$(subst colmap/colmap@,,$(call pin,COLMAP_IMAGE))
 	R2S_COLMAP_TIMEOUT_SECONDS=3600
 	R2S_BRUSH_COMMAND='["$(BRUSH)"]'
-	R2S_BRUSH_EXPECTED_VERSION=0.3.0
-	R2S_BRUSH_RUNTIME_IDENTITY=brush-v0.3.0-linux-archive-sha256:4f0f9a8785d1951c62df26aae247c02c5bba32b00f40b06df4e1c9b867399e20
+	R2S_BRUSH_EXPECTED_VERSION=$(call pin,BRUSH_VERSION)
+	R2S_BRUSH_RUNTIME_IDENTITY=brush-v$(call pin,BRUSH_VERSION)-linux-archive-sha256:$(call pin,BRUSH_SHA)
 	# Brush train qua Vulkan: chỉ định ICD NVIDIA để không rơi về GPU tích hợp/CPU.
 	R2S_BRUSH_ENVIRONMENT='{"RUST_LOG":"info,wgpu_core=warn","VK_ICD_FILENAMES":"/usr/share/vulkan/icd.d/nvidia_icd.json"}'
 	R2S_BRUSH_TIMEOUT_SECONDS=3600
