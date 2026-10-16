@@ -83,3 +83,16 @@ Không sửa `data/objectgs_runtime` (kích thước vẫn 9,3 GB, chỉ đọc)
    stack trước hay chờ.
 
 Trạng thái giữ `in-progress | engineer`: task chưa xong, và việc còn lại cần chủ dự án cho phép.
+
+## Cập nhật: bước 4 đã dựng thật (vào /home/lqaq/objectgs_runtime_build, không đụng data/objectgs_runtime)
+
+- Chủ dự án đã giải phóng đĩa; ổ `/` còn ~6,4 GB sau khi dựng (dựng tốn ~10 GB tạm, gồm cache conda/pip).
+- `scripts/gpu/setup_objectgs_runtime.sh /home/lqaq/objectgs_runtime_build --wheels data/objectgs_runtime/wheels`:
+  **EXIT=0**. Đã tạo prefix python và cuda, cài torch cu118, PyG, 126 gói pip, checkout ba repo đúng commit ghim,
+  biên dịch sẵn extension gsplat (`ok: gsplat extension`), in đủ biến `PRODUCT_OBJECTGS_*`.
+- **Acceptance 1 (chạy được, kiểm checksum):** dựng xong; chạy lại lần hai thoát sau 0,035 s (`[bỏ qua] đã cài đúng công thức`).
+  Sha256 micromamba khớp khi tải.
+- **Acceptance 2 (pip freeze trùng laptop):** `pip freeze` của runtime mới và `data/objectgs_runtime/python` đều 130 dòng và **giống hệt nhau** (diff rỗng).
+- **Acceptance 3 (smoke ObjectGS thật):** **chưa chạy.** Smoke dùng GPU (Quadro T2000, 4 GB). Trên máy đang có
+  stack chạy (`run_stack.sh`, API cổng 8010 trả 200), GPU hiện rảnh. Chờ chủ dự án xác nhận trước khi chạy.
+- Chưa xoá thư mục build `/home/lqaq/objectgs_runtime_build`: vẫn cần cho smoke; xoá sau khi xong theo quy tắc dọn tạm.
