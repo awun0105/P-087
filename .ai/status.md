@@ -30,6 +30,6 @@ T-029 | Bộ đếm phút công người + sự kiện Walk | accepted | —
 T-030 | Ground truth của benchmark | accepted | —
 T-031 | Máy đo khe, sai số, nhất quán | accepted | —
 T-032 | Bảng metric + xuất JSON/CSV/MD | accepted | —
-T-033 | Panel Benchmark trong Studio | implemented | summarizer
+T-033 | Panel Benchmark trong Studio | changes-requested | engineer
 T-034 | Thẻ Giá trị + trang /benchmark | planned | engineer
 T-035 | Regression + hướng dẫn đo | planned | engineer
