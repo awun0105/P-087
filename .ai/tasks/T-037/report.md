@@ -96,3 +96,24 @@ Trạng thái giữ `in-progress | engineer`: task chưa xong, và việc còn l
 - **Acceptance 3 (smoke ObjectGS thật):** **chưa chạy.** Smoke dùng GPU (Quadro T2000, 4 GB). Trên máy đang có
   stack chạy (`run_stack.sh`, API cổng 8010 trả 200), GPU hiện rảnh. Chờ chủ dự án xác nhận trước khi chạy.
 - Chưa xoá thư mục build `/home/lqaq/objectgs_runtime_build`: vẫn cần cho smoke; xoá sau khi xong theo quy tắc dọn tạm.
+
+## Cập nhật 2: smoke ObjectGS trên runtime vừa dựng
+
+- **Lần 1 chạy sai (lỗi của tôi):** chạy `smoke_objectgs.py` bằng Python của runtime (3.8). Script import code repo cần
+  Python ≥ 3.11 (`StrEnum`) nên lỗi `ImportError`. Runtime ObjectGS chỉ được gọi qua subprocess, nên smoke phải chạy
+  bằng `.venv/bin/python` (Python của app). Đã chạy lại đúng cách.
+- **Lần 2 (cấu hình smoke: `iterations=1000`, các đường dẫn trỏ vào `/home/lqaq/objectgs_runtime_build`):**
+  - Các bước `runtime-check`, `train`, `export-1` chạy xong: huấn luyện 1000 vòng → 6315 Gaussian; xuất mesh
+    (raw fuse 151050 đỉnh → sau xử lý 134056 đỉnh). Toàn bộ mất khoảng 19 phút.
+  - **Cổng chất lượng mặt không đạt** cho vật `cube`: `branched_boundary, open_boundary,
+    open_or_nonpositive_component, shared_vertex_components, source_bounds_or_metric_scale_mismatch`.
+    Báo cáo chất lượng: 14363 cạnh biên nhưng 0 vòng biên; số Euler từng thành phần rất lệch (ví dụ −1219, −9, −4);
+    bounds mesh khoảng ±0,79 m trong khi cube nguồn ±0,5 m.
+  - Nguyên nhân chưa xác định. Ứng viên: (a) 1000 vòng thấp hơn mặc định 30000, Gaussian chưa hội tụ; (b) lỗi ở
+    runtime hoặc ở fixture. Chưa kiểm được (a) vì 30000 vòng trên Quadro T2000 kéo dài nhiều giờ.
+- **Acceptance 3 (smoke PASS): chưa đạt.** Runtime cài đúng, nạp được, huấn luyện và xuất chạy được end-to-end;
+  cổng chất lượng mặt từ chối kết quả của smoke. Cần chủ dự án quyết định: chạy lại với mặc định 30000 vòng (mất nhiều
+  giờ) hoặc xem smoke này là đủ cho bước dựng runtime.
+- **Dọn dẹp:** đã xoá `/home/lqaq/objectgs_runtime_build` (8,2 GB) và workspace smoke tạm trong scratchpad; không
+  file env nào của stack trỏ vào thư mục build. Muốn dùng lại runtime thì chạy lại `setup_objectgs_runtime.sh`
+  (bản dựng trước đã chứng minh cài và pip freeze khớp laptop).
