@@ -22,7 +22,12 @@ from pydantic import Field, FiniteFloat
 from src.models.contracts.artifacts import ContractModel, Identifier
 from src.models.contracts.coordinates import Transform
 from src.models.contracts.object_membership import ObjectMembershipArtifact
-from src.services.process_control import ProcessCancelledError, run_cancellable_process
+from src.services.process_control import (
+    ProcessCancelledError,
+    ProcessStalledError,
+    file_size_marker,
+    run_cancellable_process,
+)
 from src.services.scene.decomposition.gaussian_split import positions, read_gaussian_ply
 from src.services.scene.diagnostics import EvidenceRecorder
 from src.services.scene.editing.membership import decode_gaussian_membership_labels
@@ -58,8 +63,36 @@ class ObjectGSRuntime(ContractModel):
     gpu_device: int = Field(default=0, ge=0, strict=True)
     iterations: int = Field(default=30000, ge=1, strict=True)
     timeout_seconds: FiniteFloat = Field(default=14400, gt=0)
+    #: Log pha không tăng trong khoảng này thì coi như treo. Pha train ghi tiến độ mỗi ~0,3 s trong log thật
+    #: (xem report T-043); pha biên dịch CUDA lần đầu chưa đo được nên cửa sổ đặt rộng.
+    stall_seconds: FiniteFloat = Field(default=1800, gt=0)
     voxel_size_m: FiniteFloat = Field(default=0.01, gt=0)
     depth_trunc_m: FiniteFloat = Field(default=10, gt=0)
+
+
+def _run_stage_process(
+    command: list[str],
+    *,
+    workspace: Path,
+    stage: str,
+    runtime: ObjectGSRuntime,
+    environment: dict[str, str],
+    cancel_event: Event | None,
+) -> int:
+    """Chạy một pha ObjectGS trong nhóm tiến trình riêng; log không tăng quá `stall_seconds` thì dừng (PROCESS_STALLED)."""
+    log_path = workspace / f"{stage}.log"
+    with _extension_cache_lock(runtime.extension_cache_dir), log_path.open("w") as log:
+        return run_cancellable_process(
+            [str(runtime.python.absolute()), *command[1:]],
+            cwd=workspace,
+            timeout_seconds=runtime.timeout_seconds,
+            output=log,
+            cancel_event=cancel_event,
+            environment=environment,
+            stall_seconds=runtime.stall_seconds,
+            progress=[file_size_marker(log_path)],
+            label=f"ObjectGS {stage}",
+        )
 
 
 def prepare_dataset(
@@ -260,15 +293,18 @@ def run_objectgs(
         trace.emit("stage_started", phase=stage)
         if progress:
             progress(stage)
-        with _extension_cache_lock(runtime.extension_cache_dir), (workspace / f"{stage}.log").open("w") as log:
-            status = run_cancellable_process(
-                [str(runtime.python.absolute()), *command[1:]],
-                cwd=workspace,
-                timeout_seconds=runtime.timeout_seconds,
-                output=log,
-                cancel_event=cancel_event,
+        try:
+            status = _run_stage_process(
+                command,
+                workspace=workspace,
+                stage=stage,
+                runtime=runtime,
                 environment=environment,
+                cancel_event=cancel_event,
             )
+        except ProcessStalledError:
+            trace.emit("stage_failed", phase=stage, reason="stalled")
+            raise
         if status:
             trace.emit("stage_failed", phase=stage, returncode=status)
             raise RuntimeError(f"ObjectGS {stage} failed (exit {status}); see {stage}.log")

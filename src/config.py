@@ -83,6 +83,7 @@ class Settings(BaseSettings):
     product_objectgs_repository: Path | None = None
     product_objectgs_gsplat_repository: Path | None = None
     product_objectgs_timeout_seconds: float = Field(default=14400, gt=0, allow_inf_nan=False)
+    product_objectgs_stall_seconds: float = Field(default=1800, gt=0, allow_inf_nan=False)
     product_objectgs_gpu_device: int = Field(default=0, ge=0)
     product_objectgs_cuda_home: Path | None = None
     product_objectgs_cxx: Path | None = None

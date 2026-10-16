@@ -459,6 +459,7 @@ def objectgs_runtime_for(settings: Settings, config: ObjectifyConfig) -> ObjectG
         gsplat_repository=paths[2].resolve(),
         iterations=config.scene.objectgs_iterations,
         timeout_seconds=settings.product_objectgs_timeout_seconds,
+        stall_seconds=settings.product_objectgs_stall_seconds,
         gpu_device=settings.product_objectgs_gpu_device,
         cuda_home=settings.product_objectgs_cuda_home,
         cxx=settings.product_objectgs_cxx,
