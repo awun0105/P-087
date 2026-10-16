@@ -82,10 +82,10 @@ export function missingObstacleIds(keyObstacleIds: readonly string[], sceneObjec
   return keyObstacleIds.filter((id) => !sceneObjectIds.has(id));
 }
 
-/** Id mới không trùng với các id đang có trong danh sách (`d1`, `d2`... hoặc `g1`, `g2`...). */
+/** Id nhỏ nhất còn trống trong dãy `d1`, `d2`... hoặc `g1`, `g2`... (id đã xoá được dùng lại). */
 export function nextId(prefix: "d" | "g", existing: readonly { id: string }[]): string {
   const taken = new Set(existing.map((item) => item.id));
-  let index = existing.length + 1;
+  let index = 1;
   while (taken.has(`${prefix}${index}`)) index += 1;
   return `${prefix}${index}`;
 }
