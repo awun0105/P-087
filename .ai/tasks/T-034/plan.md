@@ -16,7 +16,9 @@ Người xem thấy 5 metric của một scene ở đầu tab đánh giá, và b
 ## UI/UX
 - **ValueCard**: hàng đầu là metric chính: "Người N phút · Máy M phút trên {GPU} · ~${cost}" (thiếu số thì "chưa đo được" kèm
   lý do). Bốn ô P1 can thiệp, P2 "khe khớp x/y · bỏ sót a · giả b", P3 "đổi→thử N phút · nhất quán Đạt/Không", P4 bậc kèm lý do
-  chưa lên bậc tiếp. Mỗi số có nhãn nguồn: "đo" / "khai báo" / "chưa có". Nút "Mở Benchmark" (sang panel T-033) và "Tải CSV",
+  chưa lên bậc tiếp. Mỗi số có nhãn nguồn: "đo" / "khai báo" / "chưa có". **Riêng P2** (khe khớp, bỏ sót, giả, sai số kích
+  thước) ghi nhãn **"đo, so với số thước"** dù `provenance = declared`: phần mô phỏng do máy đo, chỉ mốc so sánh do người nhập.
+  Không dùng chữ "khai báo" cho P2. Nút "Mở Benchmark" (sang panel T-033) và "Tải CSV",
   "Tải Markdown" (link tới route T-032).
 - **/benchmark**: ô tổng hợp (cùng các ô của sổ kết quả Playbook), bảng một dòng một scene (cột như CSV), lọc theo nguồn dữ liệu,
   nút tải CSV/Markdown của cả bộ. Trạng thái rỗng: "Chưa có scene nào được đưa vào benchmark. Bật 'Đưa vào benchmark' trong
