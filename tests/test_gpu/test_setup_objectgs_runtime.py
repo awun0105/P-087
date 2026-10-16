@@ -123,8 +123,8 @@ def _lock_entries(path: Path) -> list[tuple[str, str, list[str]]]:
 def test_pip_lock_pins_every_package_with_all_its_hashes() -> None:
     """Mỗi gói ghim `==` và liệt kê hash của mọi file pip có thể chọn: ít nhất một, không trùng, không có torch."""
     entries = _lock_entries(LISTS / "requirements.lock.txt")
-    assert len(entries) == 126
-    assert len({name for name, _, _ in entries}) == 126
+    assert len(entries) == 127
+    assert len({name for name, _, _ in entries}) == 127
     assert all(hashes and len(set(hashes)) == len(hashes) for _, _, hashes in entries)
     assert not [name for name, _, _ in entries if re.match(r"(torch|torchvision|torchaudio|torch-scatter)$", name)]
 
