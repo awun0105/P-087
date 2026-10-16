@@ -1,9 +1,12 @@
 """Test tĩnh của scripts/gpu/setup_objectgs_runtime.sh (T-037): không cài gì, chỉ kiểm nội dung và cách đọc số ghim."""
 
+import hashlib
 import re
 import shutil
 import subprocess
 from pathlib import Path
+
+import pytest
 
 REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "scripts/gpu/setup_objectgs_runtime.sh"
@@ -95,11 +98,41 @@ def test_conda_specs_match_the_laptop_runtime() -> None:
     assert _specs("conda-cuda.txt") == EXPECTED_CUDA
 
 
-def test_pip_lock_is_fully_pinned_and_leaves_torch_to_its_index() -> None:
-    lines = [line for line in (LISTS / "requirements.lock.txt").read_text(encoding="utf-8").splitlines() if line]
-    assert len(lines) == 126
-    assert all(re.fullmatch(r"[A-Za-z0-9_.\-]+==[^=\s]+", line) for line in lines)
-    assert not [line for line in lines if re.match(r"(torch|torchvision|torchaudio|torch-scatter)==", line)]
+def test_pip_lock_is_fully_pinned_hashed_and_leaves_torch_to_its_index() -> None:
+    """Mỗi gói ghim `==` đúng một dòng --hash sha256 (định dạng requirements có --require-hashes)."""
+    text = (LISTS / "requirements.lock.txt").read_text(encoding="utf-8")
+    entries = re.findall(r"^([A-Za-z0-9_.\-]+==[^=\s]+) \\\n    --hash=sha256:([0-9a-f]{64})$", text, flags=re.M)
+    assert len(entries) == 126
+    assert len(set(name for name, _ in entries)) == 126
+    assert text.count("--hash=") == 126
+    assert not [name for name, _ in entries if re.match(r"(torch|torchvision|torchaudio|torch-scatter)==", name)]
+
+
+def test_pip_lock_is_installed_with_require_hashes() -> None:
+    assert 'pip install --require-hashes -r "$LISTS/requirements.lock.txt"' in SCRIPT_TEXT
+
+
+def test_lock_hashes_match_the_offline_wheel_files() -> None:
+    wheels = REPO / "data/objectgs_runtime/wheels"
+    if not wheels.is_dir():
+        pytest.skip("không có thư mục wheel offline trên máy này")
+    text = (LISTS / "requirements.lock.txt").read_text(encoding="utf-8")
+    entries = re.findall(r"^([A-Za-z0-9_.\-]+)==([^=\s]+) \\\n    --hash=sha256:([0-9a-f]{64})$", text, flags=re.M)
+    files = {path.name: path for path in wheels.iterdir() if path.is_file()}
+    for name, version, digest in entries:
+        dist = re.sub(r"[-_.]+", "-", name).lower()
+        candidates = []
+        for fname, path in files.items():
+            if fname.endswith(".whl"):
+                parts = fname[:-4].split("-")
+            elif fname.endswith(".tar.gz"):
+                parts = fname[:-7].rsplit("-", 1)
+            else:
+                continue
+            if re.sub(r"[-_.]+", "-", parts[0]).lower() == dist and parts[1] == version:
+                candidates.append(path)
+        assert len(candidates) == 1, f"{name}=={version}: {len(candidates)} file"
+        assert hashlib.sha256(candidates[0].read_bytes()).hexdigest() == digest, name
 
 
 def test_torch_pins_use_the_cu118_builds() -> None:

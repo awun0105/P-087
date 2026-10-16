@@ -134,7 +134,8 @@ else
     "$PY" -m pip install "$SCATTER_PIN" --find-links "$PYG_INDEX"
     OFFLINE=()
   fi
-  "$PY" -m pip install -r "$LISTS/requirements.lock.txt" "${OFFLINE[@]}"
+  # Mỗi gói trong khoá có sha256 của đúng file wheel/sdist trên laptop; file khác (kể cả cùng phiên bản) bị từ chối.
+  "$PY" -m pip install --require-hashes -r "$LISTS/requirements.lock.txt" "${OFFLINE[@]}"
 
   checkout() {  # checkout <url> <thư mục> <commit>: detach đúng commit, cây sạch
     local dir="$2" commit="$3"
