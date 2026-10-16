@@ -50,6 +50,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   return <AuthContext.Provider value={value}>{error && <ErrorFeedback className="mx-4 mt-4" message={"Chưa xác minh được phiên tài khoản. " + error} retry={() => void refresh()} />}{children}</AuthContext.Provider>;
 }
 
+/** Như `useAuth` nhưng ngoài AuthProvider trả null thay vì ném lỗi (để màn hình con tự coi là chỉ xem). */
+export function useOptionalAuth(): AuthState | null {
+  return useContext(AuthContext);
+}
+
 export function useAuth(): AuthState {
   const state = useContext(AuthContext);
   if (!state) throw new Error("useAuth cần nằm trong AuthProvider");

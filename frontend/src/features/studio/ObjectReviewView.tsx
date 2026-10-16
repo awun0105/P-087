@@ -27,6 +27,12 @@ import { subscribeTheme, themeColor, themeKey } from "@/lib/theme";
 
 import { Badge, Button, Notice } from "@/components/studio/primitives";
 import { MetricSceneView } from "@/features/studio/MetricSceneView";
+import { useOptionalAuth } from "@/features/studio/AuthProvider";
+import { BenchmarkPanel, type BenchmarkPickerApi } from "@/features/studio/value/BenchmarkPanel";
+import { EMPTY_INSPECTION, type InspectionState } from "@/features/viewer/inspection-history";
+import { sourceToCanonical } from "@/features/viewer/source-frame";
+import type { SplatInspection } from "@/features/viewer/splat-inspection";
+import { canEdit } from "@/lib/api/auth";
 import { ObjectifyNotice } from "@/features/studio/ObjectifyNotice";
 import { GeometryReviewBanner } from "@/features/studio/GeometryReviewBanner";
 import { RegionEditor } from "@/features/studio/region/RegionEditor";
@@ -294,6 +300,24 @@ export function ObjectReviewView({
   const [selected, setSelected] = useState<string | null>(null);
   const [viewportHidden, setViewportHidden] = useState({ jobId, ids: new Set<string>() });
   const hiddenIds = useMemo(() => viewportHidden.jobId === jobId ? viewportHidden.ids : new Set<string>(), [viewportHidden, jobId]);
+  // Benchmark (T-033): panel nhập ground truth và chọn điểm trên viewer. Ngoài AuthProvider thì chỉ xem.
+  const auth = useOptionalAuth();
+  const benchmarkEditable = auth !== null && canEdit(auth.me);
+  const [benchmarkOpen, setBenchmarkOpen] = useState(false);
+  const [inspectionController, setInspectionController] = useState<SplatInspection | null>(null);
+  const [inspectionState, setInspectionState] = useState<InspectionState>(EMPTY_INSPECTION);
+  const benchmarkPicker = useMemo<BenchmarkPickerApi | null>(() => {
+    if (!inspectionController) return null;
+    return {
+      // Viewer chọn trong hệ nguồn của splat; MetricSceneView dùng khung z_up nên đổi sang canonical là đồng nhất.
+      points: inspectionState.points.map((point) => sourceToCanonical("z_up", [point[0], point[1], point[2]])),
+      start: () => {
+        inspectionController.setPoints([]);
+        inspectionController.setMeasuring(true);
+      },
+      stop: () => inspectionController.setMeasuring(false),
+    };
+  }, [inspectionController, inspectionState.points]);
   const acceptScene = (next: SceneIR, policies: ObjectRepresentation[] = []) => {
     setRepresentations(policies);
     setScene(next);
@@ -780,6 +804,28 @@ export function ObjectReviewView({
             />
           </div>
         )}
+        {benchmarkOpen && (
+          <div className="pointer-events-none absolute top-3 right-3 z-30">
+            <BenchmarkPanel
+              jobId={jobId}
+              sceneRevision={scene.scene_revision}
+              objects={scene.objects.map((object) => ({ id: object.id, name: object.name }))}
+              canEdit={benchmarkEditable}
+              picker={benchmarkPicker}
+              onClose={() => {
+                inspectionController?.setMeasuring(false);
+                setBenchmarkOpen(false);
+              }}
+            />
+          </div>
+        )}
+        {benchmarkEditable && !benchmarkOpen && (
+          <div className="pointer-events-none absolute right-3 bottom-3 z-20">
+            <Button size="sm" variant="secondary" className="pointer-events-auto" onClick={() => setBenchmarkOpen(true)}>
+              Benchmark
+            </Button>
+          </div>
+        )}
         {scene.environment.visual_ref ? (
           <MetricSceneView
             jobId={jobId}
@@ -788,6 +834,7 @@ export function ObjectReviewView({
             sceneRevision={scene.scene_revision}
             lockedReason={geometryLockReason}
             collisionPreview
+            inspection={{ onReady: setInspectionController, onState: setInspectionState }}
             collisionDiagnostics={{
               source: scene.environment.object_aware_collision_ref ? "Object-aware" : "Legacy",
               backgroundChecksum: (scene.environment.collider_ref ?? scene.environment.collision_source_ref ?? scene.environment.geometry_ref).artifact_checksum,

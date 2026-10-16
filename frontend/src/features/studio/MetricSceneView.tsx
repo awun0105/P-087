@@ -37,6 +37,8 @@ import {
   type CameraMarkerLike,
   type SourceFrame,
 } from "@/features/viewer/source-frame";
+import type { InspectionState } from "@/features/viewer/inspection-history";
+import type { SplatInspection } from "@/features/viewer/splat-inspection";
 import { jobArtifactContentUrl, jobLidarOverlayUrl, jobWalkCollisionUrl } from "@/lib/api/endpoints";
 import type { CollisionQuery } from "@playcanvas/supersplat-viewer/viewer";
 import { rotateVector, multiplyQuaternions } from "@/features/viewer/layers";
@@ -100,6 +102,7 @@ export function MetricSceneView({
   regionEdit = null,
   regionApi,
   shells = NO_SHELLS,
+  inspection = null,
 }: {
   jobId: string;
   visual: Ref;
@@ -168,6 +171,14 @@ export function MetricSceneView({
   regionApi?: RefObject<RegionViewApi | null>;
   /** Vỏ của từng vật trong Draft (T-017): GLB vỏ thô theo URL; `selected` cho vật đang chọn. Ready không truyền. */
   shells?: readonly ShellSpec[];
+  /**
+   * Chọn điểm trên scene (Benchmark, T-033). Bật một lần khi mount: đổi cờ này làm dựng lại viewer.
+   * `onReady` và `onState` phải là hàm ổn định (vd setState) vì viewer dựng lại khi chúng đổi.
+   */
+  inspection?: {
+    onReady(controller: SplatInspection | null): void;
+    onState(state: InspectionState): void;
+  } | null;
 }) {
   const [capability, setCapability] = usePlayCanvasCapability();
   const fail = useCallback(() => setCapability("failed"), [setCapability]);
@@ -627,6 +638,10 @@ export function MetricSceneView({
         capability={capability}
         onFailed={fail}
         sourceFrame={sourceFrame}
+        enableInspection={inspection !== null}
+        inspectionMaxPoints={2}
+        onInspectionReady={inspection?.onReady}
+        onInspectionState={inspection?.onState}
         cameras={cameras}
         initialCamera={initialCamera}
         initialCameraMode="fly"
