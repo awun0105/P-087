@@ -45,12 +45,13 @@ Yêu cầu của chủ dự án:
 - Bản quyền: Deep Blending và Mip-NeRF 360 có giấy phép riêng của tác giả (README của dataset). Chỉ dùng nội bộ cho tới khi chủ
   dự án kiểm giấy phép; không công khai bản mẫu.
 
-## Phần A — Code: nhận bộ ảnh làm đầu vào và gắn video chỉ để xem (mỗi ý một commit có test, test mới đỏ trên code cũ)
-1. **Ảnh JPEG giữ nguyên byte.** Cho đường dataset nhận `image/jpeg` cạnh `image/png` (frame extraction, manifest frames,
-   frame set), giữ đúng phần mở rộng thật khi chép cho COLMAP và Brush (không đặt `.png` cho file JPEG). Không chuyển đổi hay nén
-   lại ảnh. Test: bộ frame JPEG đi qua tách khung hình → COLMAP input có đúng tên đuôi `.jpg` và đúng checksum.
-   Nếu thấy thay đổi này đụng quá nhiều chỗ (hơn khoảng 6 file sản phẩm) thì dừng, ghi lý do và hỏi Architect trước khi chuyển sang
-   cách đổi JPG → PNG.
+## Phần A — Code: nạp bộ ảnh làm đầu vào và gắn video chỉ để xem (mỗi ý một commit có test; test mới đỏ trên code cũ khi ý đó sửa code có sẵn)
+1. **Ảnh JPG đổi sang PNG khi nạp (quyết định Architect 2026-10-17, thay cho cách giữ nguyên JPEG).** Engineer đã thử giữ
+   nguyên JPEG: phải sửa ít nhất 8 file sản phẩm, gồm quy định tên ảnh `.png` ở bước tính camera — vượt ngưỡng, đã hoàn tác. Vì
+   vậy: **không sửa pipeline**. Lệnh nạp ở ý 2 giải mã từng JPG và ghi PNG **không mất dữ liệu** (cùng kích thước, cùng điểm ảnh
+   sau giải mã, không resize, không đổi hệ màu; giữ nguyên hướng ảnh theo EXIF nếu có và ghi rõ trong report), đặt tên theo thứ
+   tự. Ghi vào provenance của project: tên và checksum JPG gốc cho từng frame. Test: ảnh PNG sinh ra có cùng kích thước và cùng
+   giá trị điểm ảnh với JPG sau giải mã (so bằng numpy), và pipeline hiện có nhận bộ PNG đó không cần sửa.
 2. **Lệnh nạp một bộ ảnh**: `scripts/datasets/import_image_scene.py --images <thư mục> --name <tên> --video <mp4>` tạo project +
    job theo đúng đường `SourceType.DATASET` hiện có (đọc `scripts/torwic/` để dùng lại, không viết đường mới song song). Ảnh sắp
    theo tên file. Lệnh **từ chối** nếu thư mục có `sparse/` hoặc `poses_bounds.npy` được truyền vào làm đầu vào; chỉ đọc thư
