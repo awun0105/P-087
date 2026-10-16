@@ -4,8 +4,8 @@ import { CircleSlash, Layers } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { ASSET_RENDERERS, STAGE_PRESENTERS, hasEvidence, type ShowcaseContext } from "@/features/studio/showcase/registry";
-import { stageMeta } from "@/features/studio/stages";
-import type { StageId } from "@/lib/contracts/api";
+import { GEOMETRY_REVIEW_STAGE, GEOMETRY_REVIEW_STAGE_ID, stageMeta, type TimelineStageId } from "@/features/studio/stages";
+import { demoReplayStages } from "@/features/studio/demoStages";
 import type { DemoManifest } from "@/lib/contracts/studio";
 import { formatDuration } from "@/lib/format";
 
@@ -23,13 +23,13 @@ export function DemoShowcase({
   fileUrl,
 }: {
   demo: DemoManifest;
-  stage: StageId;
+  stage: TimelineStageId;
   fraction: number;
   /** URL phục vụ file của đúng video mẫu (allow-list + checksum ở backend). */
   fileUrl: (name: string) => string;
 }) {
-  const meta = stageMeta(stage);
-  const record = demo.stages.find((item) => item.stage_id === stage);
+  const meta = stage === GEOMETRY_REVIEW_STAGE_ID ? GEOMETRY_REVIEW_STAGE : stageMeta(stage);
+  const record = demoReplayStages(demo).find((item) => item.stage_id === stage);
   const context: ShowcaseContext = { demo, stage, fraction, fileUrl };
   const presenter = STAGE_PRESENTERS[stage];
   const evidence = hasEvidence(record);

@@ -96,3 +96,27 @@ describe("thẻ ba bước cuối", () => {
     });
   }
 });
+
+describe("kết quả duyệt vật của mẫu", () => {
+  it("chỉ thêm bước khi manifest có mục object_geometry, phát lại và hiện số liệu", async () => {
+    const { demoReplayStages, demoStageList } = await import("@/features/studio/demoStages");
+    const { replayPlan, replayState } = await import("@/features/studio/useDemoReplay");
+    const demo = manifest([stage("ST-OBJECT-EXTRACT")]);
+    expect(demoStageList(demo).some((row) => row.id === "UI-GEOMETRY-REVIEW")).toBe(false);
+    demo.object_geometry = { state: "succeeded", duration_seconds: 10, objectgs_count: 2, shell_count: 3, collider_count: 5 };
+    const parsed = parseDemoManifest(demo);
+    const rows = demoReplayStages(parsed);
+    const list = demoStageList(parsed);
+    expect(list.at(-1)?.id).toBe("UI-GEOMETRY-REVIEW");
+    expect(replayState(rows, replayPlan(rows, list), 999999, list).at(-1)?.state).toBe("succeeded");
+    render(<DemoShowcase demo={parsed} stage="UI-GEOMETRY-REVIEW" fraction={1} fileUrl={fileUrl} />);
+    expect(screen.getByText("Bề mặt từ ObjectGS")).toBeInTheDocument();
+    expect(screen.getByText("5")).toBeInTheDocument();
+  });
+  it("từ chối số đếm hoặc thời lượng tạo mesh sai", () => {
+    const demo = manifest([]);
+    for (const extra of [{objectgs_count: -1}, {duration_seconds: 0}, {shell_count: "2"}]) {
+      expect(() => parseDemoManifest({...demo, object_geometry: {state: "succeeded", duration_seconds: null, objectgs_count: null, shell_count: null, collider_count: null, ...extra}})).toThrow();
+    }
+  });
+});

@@ -8,12 +8,12 @@ import { DemoShowcase } from "@/features/studio/DemoShowcase";
 import { PipelineTimeline } from "@/features/studio/PipelineTimeline";
 import { ProcessingSettings } from "@/features/studio/ProcessingSettings";
 import { ProgressFrame } from "@/features/studio/scene/ProgressFrame";
-import { stagesFor } from "@/features/studio/stages";
+import type { TimelineStageId } from "@/features/studio/stages";
+import { demoReplayStages, demoStageList } from "@/features/studio/demoStages";
 import { useDemoReplay } from "@/features/studio/useDemoReplay";
 import { useProcessingForm } from "@/features/studio/useProcessingForm";
 import { sampleFileUrl } from "@/lib/api/studio";
 import { cn } from "@/lib/cn";
-import type { StageId } from "@/lib/contracts/api";
 import type { DemoManifest, SampleSummary } from "@/lib/contracts/studio";
 import { formatBytes, formatDuration } from "@/lib/format";
 
@@ -204,13 +204,14 @@ export function SampleProcessStep({
   sample: DemoManifest;
   onDone: () => void;
 }) {
-  const stageList = stagesFor(sample.stages.map((stage) => stage.stage_id));
-  const { views, finished, skip } = useDemoReplay(sample.stages, true, stageList);
-  const [manualStage, setManualStage] = useState<StageId | null>(null);
+  const stageList = demoStageList(sample);
+  const replayStages = demoReplayStages(sample);
+  const { views, finished, skip } = useDemoReplay(replayStages, true, stageList);
+  const [manualStage, setManualStage] = useState<TimelineStageId | null>(null);
   const running = views.find((view) => view.state === "running");
   const activeStage = manualStage ?? running?.stage_id ?? views.findLast((view) => view.state === "succeeded")?.stage_id ?? views[0].stage_id;
   const currentView = views.find((view) => view.stage_id === activeStage) ?? views[0];
-  const recorded = sample.stages.filter((stage) => (stage.state ?? "succeeded") === "succeeded");
+  const recorded = replayStages.filter((stage) => (stage.state ?? "succeeded") === "succeeded");
   const missing = stageList.filter((meta) => !recorded.some((stage) => stage.stage_id === meta.id));
   const totalReal = recorded.length > 0 && recorded.every((stage) => stage.duration_seconds !== null)
     ? recorded.reduce((sum, stage) => sum + (stage.duration_seconds ?? 0), 0)

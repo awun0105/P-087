@@ -2,9 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import type { StageView } from "@/features/studio/PipelineTimeline";
-import { STUDIO_STAGES, type StageMeta } from "@/features/studio/stages";
-import type { DemoStage } from "@/lib/contracts/studio";
+import type { TimelineStageView } from "@/features/studio/PipelineTimeline";
+import { STUDIO_STAGES, type TimelineStageMeta } from "@/features/studio/stages";
+import type { ReplayStage } from "@/features/studio/demoStages";
 
 /** Tổng thời gian phát lại; mỗi stage giữ tối thiểu đủ lâu để người xem đọc được. */
 const REPLAY_TOTAL_MS = 12000;
@@ -14,9 +14,9 @@ const STAGE_MIN_MS = 1400;
  * Phân bổ thời gian phát lại theo tỉ lệ thời lượng thật đã ghi trong bundle.
  * Bundle thiếu thời lượng (smoke) → chia đều; không bịa số giây thật.
  */
-export function replayPlan(stages: readonly DemoStage[], stageList: readonly StageMeta[] = STUDIO_STAGES): number[] {
+export function replayPlan(stages: readonly ReplayStage[], stageList: readonly TimelineStageMeta[] = STUDIO_STAGES): number[] {
   const recorded = stageList.map((meta) => stages.find((stage) => stage.stage_id === meta.id))
-    .filter((stage): stage is DemoStage => !!stage && (stage.state ?? "succeeded") === "succeeded");
+    .filter((stage): stage is ReplayStage => !!stage && (stage.state ?? "succeeded") === "succeeded");
   const real = recorded.map((stage) => stage.duration_seconds);
   const known = real.every((value) => value !== null && value > 0);
   const weights = known ? (real as number[]) : real.map(() => 1);
@@ -28,11 +28,11 @@ export function replayPlan(stages: readonly DemoStage[], stageList: readonly Sta
 
 /** Trạng thái phát lại tại thời điểm `elapsedMs` — hàm thuần để test. */
 export function replayState(
-  stages: readonly DemoStage[],
+  stages: readonly ReplayStage[],
   plan: readonly number[],
   elapsedMs: number,
-  stageList: readonly StageMeta[] = STUDIO_STAGES,
-): StageView[] {
+  stageList: readonly TimelineStageMeta[] = STUDIO_STAGES,
+): TimelineStageView[] {
   let cursor = 0;
   return stageList.map((meta, index) => {
     const record = stages.find((stage) => stage.stage_id === meta.id);
@@ -55,7 +55,7 @@ export function replayState(
 
 /** Chạy phát lại khi `running`; `skip()` nhảy tới cuối. Dọn animation frame khi unmount. */
 /** `stageList`: các bước hiển thị (giống tiến trình thật, có thêm bước LiDAR nếu bundle có); mặc định pipeline Studio. */
-export function useDemoReplay(stages: readonly DemoStage[], running: boolean, stageList: readonly StageMeta[] = STUDIO_STAGES) {
+export function useDemoReplay(stages: readonly ReplayStage[], running: boolean, stageList: readonly TimelineStageMeta[] = STUDIO_STAGES) {
   const plan = replayPlan(stages, stageList);
   const total = plan.reduce((sum, value) => sum + value, 0);
   const [elapsed, setElapsed] = useState(0);

@@ -4,7 +4,8 @@ import { Aperture, Cpu, Images, ScanSearch, ShieldCheck } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { cn } from "@/lib/cn";
-import type { StageId } from "@/lib/contracts/api";
+import type { TimelineStageId } from "@/features/studio/stages";
+import { demoReplayStages } from "@/features/studio/demoStages";
 import type { DemoManifest, DemoStage, DemoStageAsset } from "@/lib/contracts/studio";
 
 /**
@@ -20,7 +21,7 @@ import type { DemoManifest, DemoStage, DemoStageAsset } from "@/lib/contracts/st
  */
 export interface ShowcaseContext {
   demo: DemoManifest;
-  stage: StageId;
+  stage: TimelineStageId;
   /** Tiến độ phát lại của bước, 0..1. */
   fraction: number;
   fileUrl: (name: string) => string;
@@ -46,7 +47,7 @@ function coverOf(demo: DemoManifest) {
 }
 
 function StageResults(context: ShowcaseContext) {
-  const record = context.demo.stages.find((stage) => stage.stage_id === context.stage);
+  const record = demoReplayStages(context.demo).find((stage) => stage.stage_id === context.stage);
   const assets = record?.assets ?? [];
   if (!assets.length) return null;
   return <div className="space-y-4">{assets.map((asset, index) => (
@@ -57,7 +58,8 @@ function StageResults(context: ShowcaseContext) {
   ))}</div>;
 }
 
-export const STAGE_PRESENTERS: Partial<Record<StageId, StagePresenter>> = {
+export const STAGE_PRESENTERS: Partial<Record<TimelineStageId, StagePresenter>> = {
+  "UI-GEOMETRY-REVIEW": { icon: <Cpu aria-hidden />, render: StageResults, handlesAssets: true },
   "ST-METRIC-CANONICALIZE": { icon: <Aperture aria-hidden />, render: StageResults, handlesAssets: true },
   "ST-RGB-GEOMETRY": { icon: <Images aria-hidden />, render: StageResults, handlesAssets: true },
   "ST-OBJECT-EXTRACT": { icon: <ScanSearch aria-hidden />, render: StageResults, handlesAssets: true },
@@ -189,7 +191,7 @@ export const ASSET_RENDERERS: Record<DemoStageAsset["kind"], AssetRenderer> = {
 };
 
 /** Bước đã có bằng chứng thật trong bundle (đã chạy xong); bước pending/failed không được vẽ như thành công. */
-export function hasEvidence(record: DemoStage | undefined): boolean {
+export function hasEvidence(record: Pick<DemoStage, "state"> | undefined): boolean {
   return record !== undefined && (record.state ?? "succeeded") === "succeeded";
 }
 

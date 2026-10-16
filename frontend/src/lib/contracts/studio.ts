@@ -484,6 +484,14 @@ export interface SampleSummary {
   machine: Record<string, string>;
 }
 
+export interface DemoObjectGeometry {
+  state: "succeeded" | "pending" | "failed";
+  duration_seconds: number | null;
+  objectgs_count: number | null;
+  shell_count: number | null;
+  collider_count: number | null;
+}
+
 export interface DemoManifest {
   schema_version: "1.0";
   demo_id: string;
@@ -494,6 +502,7 @@ export interface DemoManifest {
   produced_at: string;
   provenance: Record<string, string>;
   stages: DemoStage[];
+  object_geometry?: DemoObjectGeometry | null;
   video: DemoFile | null;
   frames: DemoFile[];
   frame_count: number | null;
@@ -585,6 +594,15 @@ export function parseDemoManifest(value: unknown): DemoManifest {
   for (const stage of value.stages) {
     if (isRecord(stage) && Array.isArray(stage.assets)) {
       stage.assets = stage.assets.filter((asset) => isRecord(asset) && ASSET_KINDS.includes(String(asset.kind)));
+    }
+  }
+  const geometry = value.object_geometry;
+  if (geometry !== undefined && geometry !== null) {
+    if (!isRecord(geometry) || !["succeeded", "pending", "failed"].includes(String(geometry.state)) ||
+        (geometry.duration_seconds !== null && (!isFiniteNumber(geometry.duration_seconds) || geometry.duration_seconds <= 0)) ||
+        !["objectgs_count", "shell_count", "collider_count"].every((key) => geometry[key] === null ||
+          (isFiniteNumber(geometry[key]) && Number.isInteger(geometry[key]) && geometry[key] >= 0))) {
+      throw new Error("Kết quả tạo mesh của mẫu không hợp lệ");
     }
   }
   const assetFiles = value.stages.flatMap((stage) =>

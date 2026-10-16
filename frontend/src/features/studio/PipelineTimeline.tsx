@@ -77,15 +77,15 @@ export function PipelineTimeline({
   jobId?: string;
   /** True nếu job đang RUNNING nhưng heartbeat đã quá hạn (mất kết nối hoặc worker chết). */
   isStale?: boolean;
-  selectedStage?: StageId | null;
-  onSelectStage?: (stageId: StageId) => void;
+  selectedStage?: TimelineStageId | null;
+  onSelectStage?: (stageId: TimelineStageId) => void;
   /** Thao tác người dùng cần làm ở một bước (xác nhận tỉ lệ mét, xem bản đã che…); nút hiện sẵn tại hàng của bước đó. */
   stageActions?: readonly StageAction[];
 }) {
-  const [internalSelected, setInternalSelected] = useState<StageId | null>(null);
+  const [internalSelected, setInternalSelected] = useState<TimelineStageId | null>(null);
   const selected = selectedStage !== undefined ? selectedStage : internalSelected;
   const setSelected = onSelectStage
-    ? (fn: (prev: StageId | null) => StageId | null) => {
+    ? (fn: (prev: TimelineStageId | null) => TimelineStageId | null) => {
         const next = fn(selected);
         if (next) onSelectStage(next);
       }
@@ -159,16 +159,16 @@ export function PipelineTimeline({
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
                     <p className={cn("text-sm font-medium", state === "pending" ? "text-ink-subtle" : "text-ink")}>
-                      {apiStageId !== null && ((jobId && inspectable) || onSelectStage) ? (
+                      {((jobId && inspectable) || onSelectStage) ? (
                         <button
                           type="button"
-                          aria-expanded={selected === apiStageId}
-                          aria-controls={`stage-detail-${apiStageId}`}
+                          aria-expanded={selected === meta.id}
+                          aria-controls={`stage-detail-${meta.id}`}
                           onClick={() => {
                             if (onSelectStage) {
-                              onSelectStage(apiStageId);
+                              onSelectStage(meta.id);
                             } else {
-                              setSelected((value) => (value === apiStageId ? null : apiStageId));
+                              setSelected((value) => (value === meta.id ? null : meta.id));
                             }
                           }}
                           className="cursor-pointer text-left underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-ember"
@@ -256,8 +256,8 @@ export function PipelineTimeline({
                       </div>
                     );
                   })()}
-                  {jobId && inspectable && apiStageId !== null && selected === apiStageId && (
-                    <div id={`stage-detail-${apiStageId}`} className="mt-3 space-y-2 border-t border-line pt-3">
+                  {jobId && inspectable && apiStageId !== null && selected === meta.id && (
+                    <div id={`stage-detail-${meta.id}`} className="mt-3 space-y-2 border-t border-line pt-3">
                       <p className="text-sm leading-relaxed text-ink-muted">{meta.description}</p>
                       {/* Đường vào view kết quả nằm trong phần mở của bước; mũi tên cạnh tên bước báo có phần này. */}
                       {inspectionStage(apiStageId) && (

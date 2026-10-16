@@ -315,3 +315,19 @@ def test_removed_job_can_be_published_again_without_overwriting_the_old_bundle(t
     assert second.demo_id != first.demo_id
     assert published_sample_id(root, JOB_ID) == second.demo_id
     assert (root / first.demo_id / "manifest.json").read_bytes() == original
+
+
+def test_sample_optional_object_geometry_is_validated(tmp_path: Path) -> None:
+    from pydantic import ValidationError
+
+    from src.services.orchestration.samples.models import DemoManifest, DemoObjectGeometry
+
+    registry, _ = _registry(tmp_path)
+    demo = export_job_bundle(
+        registry, JOB_ID, tmp_path / "bundle", demo_id="x", title="x", description="", source=SOURCE
+    )
+    assert DemoManifest.model_validate_json(demo.model_dump_json()).object_geometry is None
+    demo.object_geometry = DemoObjectGeometry(state="succeeded", objectgs_count=2, shell_count=3, collider_count=5)
+    assert DemoManifest.model_validate_json(demo.model_dump_json()).object_geometry.collider_count == 5
+    with pytest.raises(ValidationError):
+        DemoObjectGeometry(state="succeeded", objectgs_count=-1)
