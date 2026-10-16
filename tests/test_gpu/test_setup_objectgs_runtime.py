@@ -13,6 +13,12 @@ SCRIPT = REPO / "scripts/gpu/setup_objectgs_runtime.sh"
 LISTS = REPO / "configs/runtime/objectgs"
 SCRIPT_TEXT = SCRIPT.read_text(encoding="utf-8")
 
+
+def _pin(key: str) -> str:
+    text = (REPO / "configs/runtime/pins.env").read_text(encoding="utf-8")
+    return re.search(rf"^{key}=(.*)$", text, flags=re.M).group(1)
+
+
 EXPECTED_PYTHON = {"python": "3.8.19", "wheel": "0.45.1"}
 EXPECTED_CUDA = {
     "cuda-nvcc": "11.8.89",
@@ -48,6 +54,7 @@ def test_commit_pins_are_read_from_objectgs_module_not_copied(tmp_path: Path) ->
     (root / "configs/runtime/objectgs").mkdir(parents=True)
     (root / "src/services/scene").mkdir(parents=True)
     shutil.copy(SCRIPT, root / "scripts/gpu/setup_objectgs_runtime.sh")
+    shutil.copy(REPO / "configs/runtime/pins.env", root / "configs/runtime/pins.env")
     for name in ["requirements.lock.txt", "torch.txt", "conda-python.txt", "conda-cuda.txt"]:
         shutil.copy(LISTS / name, root / "configs/runtime/objectgs" / name)
     source = (REPO / "src/services/scene/objectgs.py").read_text(encoding="utf-8")
@@ -79,18 +86,19 @@ def test_every_download_goes_through_a_checksum_check() -> None:
     curl_lines = [line for line in SCRIPT_TEXT.splitlines() if "curl " in line]
     assert len(curl_lines) == 1, "chỉ một chỗ được gọi curl, bên trong fetch() có kiểm sha256"
     assert SCRIPT_TEXT.index("fetch() {") < SCRIPT_TEXT.index(curl_lines[0].strip())
-    assert re.fullmatch(r"[0-9a-f]{64}", re.search(r'MICROMAMBA_SHA="([^"]+)"', SCRIPT_TEXT).group(1))
+    assert re.fullmatch(r"[0-9a-f]{64}", _pin("MICROMAMBA_SHA"))
     assert 'fetch "$MICROMAMBA_URL" "$TMP/micromamba.tar.bz2" "$MICROMAMBA_SHA"' in SCRIPT_TEXT
 
 
 def test_micromamba_comes_from_the_official_release_and_its_binary_is_checked() -> None:
-    assert (
-        'MICROMAMBA_URL="https://github.com/mamba-org/micromamba-releases/releases/download/2.0.5-0/'
-        'micromamba-linux-64.tar.bz2"'
-    ) in SCRIPT_TEXT
+    """Giá trị micromamba nằm ở configs/runtime/pins.env (một nguồn); script chỉ đọc và kiểm binary."""
+    assert _pin("MICROMAMBA_URL") == (
+        "https://github.com/mamba-org/micromamba-releases/releases/download/2.0.5-0/micromamba-linux-64.tar.bz2"
+    )
     assert "micro.mamba.pm" not in SCRIPT_TEXT
-    assert re.fullmatch(r"[0-9a-f]{64}", re.search(r'MICROMAMBA_BIN_SHA="([^"]+)"', SCRIPT_TEXT).group(1))
+    assert re.fullmatch(r"[0-9a-f]{64}", _pin("MICROMAMBA_BIN_SHA"))
     assert 'sha_of "$TMP/bin/micromamba")" = "$MICROMAMBA_BIN_SHA"' in SCRIPT_TEXT
+    assert "pins_value MICROMAMBA_BIN_SHA" in SCRIPT_TEXT
 
 
 def test_conda_specs_match_the_laptop_runtime() -> None:

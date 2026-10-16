@@ -12,14 +12,13 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 LISTS="$ROOT/configs/runtime/objectgs"
 
-# micromamba 2.0.5 (mamba-org/micromamba-releases, release 2.0.5-0), dùng để tạo hai prefix conda mà không cần conda trên máy.
-#  - tệp tar.bz2 (6025445 byte, khớp kích thước trong GitHub API): sha256 bfc2e3a414d651af7508c49998a12b5cf3c7029d56c5ef37c9a3248cd7faef78.
-#    Tệp micromamba-linux-64.tar.bz2.sha256 của release ghi cdf5…, tức là sha của binary, không phải của tar; không dùng để kiểm tar.
-#  - binary bin/micromamba bên trong: sha256 cdf5a2e18d213617b6c5c32d8763b4e8fc05f8173b4f4017997683cb984357eb,
-#    khớp file micromamba-linux-64.sha256 của chính release đó.
-MICROMAMBA_URL="https://github.com/mamba-org/micromamba-releases/releases/download/2.0.5-0/micromamba-linux-64.tar.bz2"
-MICROMAMBA_SHA="bfc2e3a414d651af7508c49998a12b5cf3c7029d56c5ef37c9a3248cd7faef78"
-MICROMAMBA_BIN_SHA="cdf5a2e18d213617b6c5c32d8763b4e8fc05f8173b4f4017997683cb984357eb"
+# micromamba: bản ghim nằm ở configs/runtime/pins.env (một nguồn cho mọi runtime GPU). Chi tiết nguồn và checksum ở đó.
+pins_value() { sed -n "s/^$1=\(.*\)\$/\1/p" "$ROOT/configs/runtime/pins.env" | head -n1; }
+MICROMAMBA_URL="$(pins_value MICROMAMBA_URL)"
+MICROMAMBA_SHA="$(pins_value MICROMAMBA_SHA)"
+MICROMAMBA_BIN_SHA="$(pins_value MICROMAMBA_BIN_SHA)"
+[ -n "$MICROMAMBA_URL" ] && [ -n "$MICROMAMBA_SHA" ] && [ -n "$MICROMAMBA_BIN_SHA" ] \
+  || die "thiếu MICROMAMBA_* trong configs/runtime/pins.env"
 OBJECTGS_REPO="https://github.com/RuijieZhu94/ObjectGS.git"
 GSPLAT_REPO="https://github.com/RuijieZhu94/gsplat-object.git"
 GLM_REPO="https://github.com/g-truc/glm.git"

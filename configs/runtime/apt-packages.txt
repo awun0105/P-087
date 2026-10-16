@@ -1,0 +1,32 @@
+# Gói apt hệ thống cần cho runtime GPU (chép từ Dockerfile.gpu, bước cài apt). Dùng bởi install.sh --check-system.
+# Gói python3.12-dev không nằm ở đây: setup_scene_runtime.sh tự kiểm và báo khi thiếu.
+ffmpeg
+libvulkan1
+vulkan-tools
+xz-utils
+curl
+git
+ca-certificates
+libgl1
+libgomp1
+libglew2.2
+libopengl0
+libopenimageio2.4t64
+libqt6core6t64
+libqt6gui6t64
+libqt6opengl6t64
+libqt6openglwidgets6t64
+libqt6svg6
+libqt6widgets6t64
+libceres4t64
+libcholmod5
+libcurl4t64
+libgoogle-glog0v6t64
+libgmp10
+libmetis5
+libmkl-core
+libmkl-intel-lp64
+libmkl-intel-thread
+libomp5-18
+libsqlite3-0
+libssl3t64
