@@ -247,7 +247,7 @@ Non-goals: không theo dõi người dùng ngoài Studio của job; không gửi
 
 ### 15.2 Thành phần
 - **Nhật ký sự kiện** `r2s_value_events` (append-only): `event_id, job_id, at, kind, actor_id, payload`.
-  `kind ∈ {scene_edit, operator_time, walk_session}`. Ghi lỗi nhật ký **không bao giờ** làm hỏng thao tác chính (log + bỏ qua).
+  `kind ∈ {scene_edit, scene_request, operator_time, walk_session}`. Ghi lỗi nhật ký **không bao giờ** làm hỏng thao tác chính (log + bỏ qua).
 - **Đo máy cho hàng đợi tách vật**: mọi mode của `objectify_queue` chạy trong `sampled_section` và ghi `ResourceUsage` với tool
   `scene.<mode>` (vd. `scene.geometry`), cùng `attempt_id` = `operation_id`. `processing_seconds` cộng cả các bản ghi này.
 - **Ground truth** `r2s_benchmark_truth` (một tài liệu có phiên bản mỗi job, CAS theo `version`): hồ sơ robot, đoạn đo thước,
@@ -264,7 +264,8 @@ Non-goals: không theo dõi người dùng ngoài Studio của job; không gửi
    60 s gần nhất. Gửi theo lô ≤ 300 s mỗi lần; máy chủ từ chối lô có `active_seconds > ended_at − started_at`, thời điểm tương
    lai, hoặc chồng lô trước của cùng phiên trình duyệt (`session_key`). Tách theo `surface ∈ {studio, progress, evaluation, other}`
    và theo giai đoạn: trước/sau lần đầu scene đạt `object_geometry = ready`.
-2. **Can thiệp**: `scene_edit` có `origin = human` khi `operation` thuộc bảng thao tác người dùng (`HUMAN_OPERATIONS`), `system`
+2. **Can thiệp** = `scene_edit` có `origin = human` **cộng** `scene_request` (yêu cầu Tạo mesh, chỉnh vùng trên Ready,
+   Brush/Lasso, tách lại — ghi lúc yêu cầu được nhận, vì revision kết quả do worker publish là `system`). Chi tiết: `scene_edit` có `origin = human` khi `operation` thuộc bảng thao tác người dùng (`HUMAN_OPERATIONS`), `system`
    khi thuộc `SYSTEM_OPERATIONS`; operation lạ → `unknown` và có test bắt buộc mọi chuỗi operation trong `src/` đã được phân loại.
 3. **Khe kiểm**: điểm `a`, `b` ở khung canonical (mét, Z-up, sàn z = 0). Bề rộng mô phỏng = nhỏ nhất theo các độ cao
    `z ∈ [h_min, h_max]` bước 0,05 m của tổng khoảng cách tia ngang từ trung điểm `a–b` theo hai hướng `±(b−a)` tới va chạm đầu

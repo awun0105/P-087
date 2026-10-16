@@ -18,3 +18,5 @@
    việc còn dở), đặt `status.md` → `implemented`.
 10. Gặp câu hỏi thiết kế mà plan không trả lời: dừng, ghi câu hỏi vào cuối `report.md`, đặt trạng thái `changes-requested`
     kèm ghi chú "cần Architect", không tự đoán các quyết định khó đảo ngược.
+11. **Không bao giờ xoá gì ngoài thư mục tạm của chính bạn và file bạn tạo trong repo.** Cấm `rm -rf` trên `/tmp`,
+    `/tmp/claude-*`, thư mục home hay thư mục của phiên khác. Dọn file tạm bằng đường dẫn đầy đủ của từng file/thư mục bạn tạo.
