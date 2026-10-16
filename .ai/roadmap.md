@@ -77,6 +77,6 @@ Xong 2026-10-16: T-027 → T-035 accepted. Full backend 3.688 pass / 0 fail / 28
 | T-037 | Script dựng runtime ObjectGS | `setup_objectgs_runtime.sh` dựng lại được môi trường ObjectGS ở mọi máy; cache extension dùng chung | – | M |
 | T-038 | Một công thức cài cho mọi máy GPU | `install.sh` + `doctor`; COLMAP 4.x không cần Docker; `Dockerfile.gpu` gọi `install.sh` | T-036, T-037 | L |
 | T-039 | Build image GPU thật + chạy job trên pod RunPod | Image trên GHCR, `preflight` PASS, một job tới object geometry ready | T-038 | M |
-| T-040 | Bỏ chép runtime manifest tay | Worker công bố runtime; API gắn job theo worker sống; job dở không kẹt (thiết kế duyệt trước) | T-038 | L |
+| T-040 | Bỏ chép runtime manifest tay | Identity phần mềm tách phần cứng; worker công bố runtime; lease cho job mồ côi | T-036 | L |
 | T-042 | GPU worker trên RunPod Serverless | Bật khi có việc, tắt khi rảnh; nhiều loại GPU; UI hiện thời gian chờ GPU | T-039, T-040 | L |
 | T-041 | Deploy production thử trọn | Supabase, R2, Railway, Vercel, RunPod Serverless; 5 scene mẫu; đổi loại GPU không sửa API | T-039, T-040, T-042 | L |
