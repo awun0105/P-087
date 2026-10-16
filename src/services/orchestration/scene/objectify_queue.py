@@ -123,11 +123,48 @@ class ObjectifyState(BaseModel):
     object_geometry: Literal["awaiting_review", "ready"] | None = None
 
 
-def _object_geometry(provenance: JsonObject) -> Literal["awaiting_review", "ready"] | None:
+ObjectGeometry = Literal["awaiting_review", "ready"]
+
+
+def object_geometry_status(provenance: JsonObject) -> ObjectGeometry | None:
     """Khoá thiếu → None; giá trị lạ → "awaiting_review", khớp quy tắc khoá lại của Studio."""
     if "object_geometry" not in provenance or provenance["object_geometry"] is None:
         return None
     return "ready" if provenance["object_geometry"] == "ready" else "awaiting_review"
+
+
+GeometryReview = Literal["waiting", "running", "failed"]
+#: Các chế độ là việc dựng hình học theo vật (khớp `BUILD_MODES` của Studio, T-021).
+_BUILD_MODES = frozenset({"geometry", "region", "membership"})
+
+
+def geometry_review(
+    settings: Settings,
+    job_id: str,
+    object_geometry: ObjectGeometry | None,
+    scene_revision: str,
+) -> GeometryReview | None:
+    """Việc còn lại của bước "Duyệt vật & Tạo mesh" cho danh sách scene; cùng quy tắc với hàng tiến trình của Studio.
+
+    `running`: đang dựng (Tạo mesh hoặc dựng lại vùng). Draft: `failed` khi Tạo mesh lỗi trên đúng revision này, ngược lại
+    `waiting`. Scene Ready không còn việc chờ người dùng nên trả None, kể cả khi lần dựng lại vùng gần nhất lỗi.
+    """
+    if object_geometry is None:
+        return None
+    with _database(settings).transaction() as tx:
+        record = _read(tx, job_id)
+    if record is not None and record.status in {"queued", "running"} and record.mode in _BUILD_MODES:
+        return "running"
+    if object_geometry != "awaiting_review":
+        return None
+    if (
+        record is not None
+        and record.status in {"failed", "cancelled"}
+        and record.mode == "geometry"
+        and record.base_revision == scene_revision
+    ):
+        return "failed"
+    return "waiting"
 
 
 class _Record(BaseModel):
@@ -278,7 +315,7 @@ def state(registry: ProjectRegistry, settings: Settings, job_id: str) -> Objecti
         scene_revision=scene.scene_revision,
         object_centric=provenance.get("object_extraction") == METHOD or provenance.get("geometry_method") == "objectgs",
         awaiting_choice=provenance.get("object_extraction") == AWAITING_CHOICE,
-        object_geometry=_object_geometry(provenance),
+        object_geometry=object_geometry_status(provenance),
         available=runtime_available(settings) or settings.product_objectify_remote_worker,
         note=str(note) if note else None,
     )

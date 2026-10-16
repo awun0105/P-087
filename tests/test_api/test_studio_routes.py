@@ -2420,3 +2420,62 @@ async def test_import_camera_bookmark_and_clear_routes(client: AsyncClient, stud
     clear_patch_resp = await client.patch(f"/api/v1/imports/{import_id}/camera", json={})
     assert clear_patch_resp.status_code == 200
     assert clear_patch_resp.json().get("default_camera") is None
+
+
+def test_scene_list_reports_the_geometry_review_step_of_a_draft_scene(
+    studio: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Scene Draft không được ghi "Hoàn tất" trên danh sách: báo bước Duyệt vật & Tạo mesh, cache theo revision."""
+    from src.api.studio import scenes
+
+    calls: list[tuple[str, str, str]] = []
+
+    def queue_state(job_id: str, geometry: str, revision: str) -> str:
+        calls.append((job_id, geometry, revision))
+        return "waiting"
+
+    monkeypatch.setattr(scenes, "_geometry_queue_state", queue_state)
+    scenes._GEOMETRY_CACHE.clear()
+    studio.registry.seed_from_fixtures()
+    job = _finished_job(studio)
+    registry, reads, holder = _registry_with_scene({"object_geometry": "awaiting_review"})
+    assert scenes._geometry_review(registry, job) == "waiting"
+    assert scenes._geometry_review(registry, job) == "waiting"
+    assert reads == [job.job_id]  # lần hai lấy trạng thái scene từ bộ nhớ đệm, hàng đợi vẫn đọc lại
+    assert calls == [(job.job_id, "awaiting_review", "rev-001")] * 2
+    holder.head = SimpleNamespace(scene_revision="rev-002")
+    scenes._geometry_review(registry, job)
+    assert len(reads) == 2 and calls[-1][2] == "rev-002"
+
+    # Scene cũ không có khoá: không đọc hàng đợi. Job chưa xong: không đọc scene.
+    scenes._GEOMETRY_CACHE.clear()
+    calls.clear()
+    legacy, _, _ = _registry_with_scene({})
+    assert scenes._geometry_review(legacy, job) is None
+    assert calls == []
+    registry, reads, _ = _registry_with_scene({"object_geometry": "awaiting_review"})
+    assert scenes._geometry_review(registry, _finished_job(studio, status="RUNNING")) is None
+    assert scenes._geometry_review(registry, _finished_job(studio, object_stage=False)) is None
+    assert reads == []
+
+    # Scene chưa đọc được: không đoán.
+    scenes._GEOMETRY_CACHE.clear()
+    broken, _, _ = _registry_with_scene({}, error=FileNotFoundError("scene.json"))
+    assert scenes._geometry_review(broken, job) is None
+
+
+@pytest.mark.asyncio
+async def test_scene_list_response_carries_the_geometry_review_step(
+    client: AsyncClient, studio: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from src.api.studio import scenes
+
+    studio.registry.seed_from_fixtures()
+    upload = await _upload(client)
+    await client.post(
+        "/api/v1/scenes/from-upload",
+        json={"upload_id": upload["upload_id"], "name": "Kho A", "attestation": _ATTESTATION},
+    )
+    assert (await client.get("/api/v1/scenes")).json()["scenes"][0]["geometry_review"] is None
+    monkeypatch.setattr(scenes, "_geometry_review", lambda registry, job: "failed")
+    assert (await client.get("/api/v1/scenes")).json()["scenes"][0]["geometry_review"] == "failed"

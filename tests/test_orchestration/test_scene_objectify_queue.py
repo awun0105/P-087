@@ -1171,3 +1171,37 @@ def test_state_reports_object_geometry_for_the_ui(world, monkeypatch, tmp_path) 
         job.job_id, current.scene_revision, current.model_copy(update={"provenance": provenance}), "fixture-legacy"
     )
     assert scene_objectify_queue.state(registry, settings, job.job_id).object_geometry is None
+
+
+@pytest.mark.parametrize(
+    ("geometry", "record", "expected"),
+    [
+        (None, None, None),
+        (None, ("running", "geometry", "rev-001"), None),
+        ("awaiting_review", None, "waiting"),
+        ("awaiting_review", ("queued", "geometry", "rev-001"), "running"),
+        ("awaiting_review", ("running", "geometry", "rev-001"), "running"),
+        ("awaiting_review", ("failed", "geometry", "rev-001"), "failed"),
+        ("awaiting_review", ("cancelled", "geometry", "rev-001"), "failed"),
+        ("awaiting_review", ("failed", "geometry", "rev-000"), "waiting"),
+        ("awaiting_review", ("running", "objectify", "rev-001"), "waiting"),
+        ("ready", None, None),
+        ("ready", ("running", "region", "rev-001"), "running"),
+        ("ready", ("running", "membership", "rev-001"), "running"),
+        ("ready", ("failed", "region", "rev-001"), None),
+    ],
+)
+def test_geometry_review_for_the_scene_list(world, geometry, record, expected) -> None:  # noqa: ANN001
+    """Danh sách scene dùng cùng quy tắc với hàng "Duyệt vật & Tạo mesh": Draft chờ/lỗi, đang dựng; Ready và scene cũ: None."""
+    _, job, _, settings = world
+    if record is not None:
+        status, mode, base = record
+        with scene_objectify_queue._database(settings).transaction(write=True) as tx:
+            scene_objectify_queue._write(
+                tx,
+                job.job_id,
+                scene_objectify_queue._Record(
+                    status=status, mode=mode, base_revision=base, requested_at=datetime.now(UTC)
+                ),
+            )
+    assert scene_objectify_queue.geometry_review(settings, job.job_id, geometry, "rev-001") == expected

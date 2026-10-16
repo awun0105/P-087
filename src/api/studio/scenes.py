@@ -85,6 +85,9 @@ class SceneSummary(BaseModel):
     #: Job đã xong nhưng tách theo vật lỗi hết số lần thử: scene chỉ có môi trường, chờ người dùng chọn chạy lại hoặc dùng
     #: hộp ứng viên (cùng điều kiện với `awaiting_choice` của `GET /jobs/{id}/scene/objectify`).
     awaiting_object_choice: bool = False
+    #: Bước "Duyệt vật & Tạo mesh" của scene theo vật: chờ duyệt, đang dựng, hoặc Tạo mesh lỗi. None = không còn việc
+    #: (scene Ready) hoặc scene cũ không có bước này. Cùng quy tắc với hàng tiến trình trong Studio (T-021).
+    geometry_review: objectify_queue.GeometryReview | None = None
     #: Thời gian máy đã xử lý của job mới nhất (tổng các bước đã chạy xong); không gồm lúc xếp hàng và lúc chờ người
     #: dùng. None = job chưa có bước nào được đo.
     processing_seconds: float | None = None
@@ -296,6 +299,47 @@ def _awaiting_object_choice(registry: ProjectRegistry, job: JobManifest) -> bool
         return False  # scene chưa đọc được: danh sách không đoán, màn scene sẽ nói rõ
 
 
+#: Trạng thái hình học theo (job, revision scene hiện tại); chỉ đọc SceneIR khi revision đổi, như `_OBJECT_CHOICE_CACHE`.
+_GEOMETRY_CACHE: dict[tuple[str, str], objectify_queue.ObjectGeometry | None] = {}
+_GEOMETRY_CACHE_MAX = 512
+
+
+def _geometry_review(registry: ProjectRegistry, job: JobManifest) -> objectify_queue.GeometryReview | None:
+    """Scene của job còn việc ở bước "Duyệt vật & Tạo mesh" không (Draft chờ duyệt, đang dựng, Tạo mesh lỗi)."""
+    done = any(
+        stage.stage_id == StageId.OBJECT_EXTRACT and stage.status == StageStatus.SUCCEEDED
+        for stage in job.stage_artifacts
+    )
+    if job.status != JobStatus.SUCCEEDED or not done:
+        return None
+    try:
+        head = registry.scene.head_repository.get(job.job_id) if registry.scene.head_repository is not None else None
+        key = (job.job_id, head.scene_revision) if head is not None else None
+        if key is not None and key in _GEOMETRY_CACHE:
+            geometry = _GEOMETRY_CACHE[key]
+            revision = head.scene_revision
+        else:
+            scene = registry.scene.current(job.job_id).scene
+            geometry = objectify_queue.object_geometry_status(scene.provenance)
+            revision = head.scene_revision if head is not None else scene.scene_revision
+            if key is not None:
+                if len(_GEOMETRY_CACHE) >= _GEOMETRY_CACHE_MAX:
+                    _GEOMETRY_CACHE.clear()
+                _GEOMETRY_CACHE[key] = geometry
+        if geometry is None:
+            return None  # scene cũ không có bước này: không đọc hàng đợi
+        # Trạng thái hàng đợi đổi nhanh nên không cache.
+        return _geometry_queue_state(job.job_id, geometry, revision)
+    except (SceneError, ArtifactStoreError, ValueError, OSError):
+        return None  # scene chưa đọc được: danh sách không đoán, màn scene sẽ nói rõ
+
+
+def _geometry_queue_state(
+    job_id: str, geometry: objectify_queue.ObjectGeometry, revision: str
+) -> objectify_queue.GeometryReview | None:
+    return objectify_queue.geometry_review(deps.settings(), job_id, geometry, revision)
+
+
 def _objectify_request_pending(registry: ProjectRegistry, job_id: str) -> bool:
     """Có yêu cầu dựng lại tập vật đang xếp hàng hoặc chạy của job không (chỉ gọi cho scene đang chờ chọn)."""
     return objectify_queue.state(registry, deps.settings(), job_id).status in {"queued", "running"}
@@ -344,6 +388,7 @@ def list_scenes(user: UserRecord | None = Depends(require_contributor)) -> Scene
                 preview_ready=latest is not None and deps.preview_ready(registry, latest.job_id),
                 awaiting_anonymization_review=latest is not None and awaiting_anonymization_review(latest),
                 awaiting_object_choice=latest is not None and _awaiting_object_choice(registry, latest),
+                geometry_review=None if latest is None else _geometry_review(registry, latest),
                 processing_seconds=None if latest is None else measured.get(latest.job_id),
                 requested_by=None if latest is None else with_current_role(requester_actors.get(latest.job_id), actors),
                 capabilities=SceneCapabilities(can_delete_project=can_delete_project),
