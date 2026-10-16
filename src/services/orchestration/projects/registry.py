@@ -76,7 +76,12 @@ from src.services.orchestration.inputs.loose_package import LoosePackageError, v
 from src.services.orchestration.inputs.runs import InputAssemblyRunCommit, InputAssemblyRunResult
 from src.services.orchestration.jobs import worker_runtimes
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
-from src.services.orchestration.jobs.models import JobAttemptRecord, PreparedInputReceipt, TransitionRequest
+from src.services.orchestration.jobs.models import (
+    JobAttemptRecord,
+    PreparedInputReceipt,
+    RuntimeRebound,
+    TransitionRequest,
+)
 from src.services.orchestration.jobs.profile import ExecutionProfile
 from src.services.orchestration.jobs.service import JobLifecycle
 from src.services.orchestration.processing import JobProcessingConfig, config_bytes, job_config_reference
@@ -877,6 +882,31 @@ class ProjectRegistry:
         updated, reference = self.lifecycle.apply(current, request, sequence)
         self._jobs[job_id] = updated
         self._record_attempt(job_id, updated, request, reference, requested_by=requested_by)
+        return updated
+
+    def rebind_job_runtime(self, job: JobManifest, runtime_checksum: Checksum, *, reason: str) -> JobManifest:
+        """Gắn job QUEUED chưa có stage sang runtime của worker đang sống (T-040, Q1); CAS theo revision."""
+        if self.persistence is None:
+            raise RuntimeError("Gắn lại runtime cần durable registry")
+        history = self.persistence.list_attempts(job.job_id)
+        updated = with_canonical_checksum(
+            job.model_copy(update={"runtime_manifest_checksum": runtime_checksum}), "job_manifest_checksum"
+        )
+        reference = self.lifecycle.store.publish_manifest(updated)
+        event = JobAttemptRecord(
+            attempt=history[-1].attempt if history else 1,
+            status=JobStatus.QUEUED,
+            current_stage=job.current_stage,
+            recorded_at=datetime.now(UTC),
+            job_manifest_uri=reference.artifact_uri,
+            job_manifest_checksum=reference.artifact_checksum,
+            runtime_rebound=RuntimeRebound(
+                from_checksum=job.runtime_manifest_checksum,
+                to_checksum=runtime_checksum,
+                reason=reason,
+            ),
+        )
+        self.persistence.save_job(updated, reference, event, expected=job, runtime_rebind=True)
         return updated
 
     def _record_attempt(

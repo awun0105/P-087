@@ -245,8 +245,10 @@ def job_progress(
         and (job.status == JobStatus.QUEUED or awaiting_finalize(job) or awaiting_reviewed_preview(job))
         else None
     )
+    # Snapshot chờ tài nguyên chỉ do worker đang sống ghi, nên job đó đã có máy xét và không thiếu runtime.
     runtime_pending = (
         runtime_wait
+        and resources is None
         and not waiting
         and not reviewing
         and (job.status == JobStatus.QUEUED or awaiting_finalize(job) or awaiting_reviewed_preview(job))

@@ -4,6 +4,7 @@ import { Square } from "lucide-react";
 import { Button, Notice, ProgressBar } from "@/components/studio/primitives";
 import { HelpDetails } from "@/components/studio/feedback";
 import { PipelineTimeline, type StageAction, type StageView, type TimelineStageView } from "@/features/studio/PipelineTimeline";
+import { runtimeWaitText } from "@/features/studio/sceneStatus";
 import { isJobStale, stageSeconds, useNow, type SceneInfo } from "@/features/studio/scene/state";
 import { GEOMETRY_REVIEW_STAGE, GEOMETRY_REVIEW_STAGE_ID, stagesFor, type TimelineStageMeta } from "@/features/studio/stages";
 import { AnonymizationReviewPanel } from "@/features/studio/scene/AnonymizationReviewPanel";
@@ -115,7 +116,7 @@ export function ProgressTab({ jobId, progress, info, busy, canCancel, canAccept 
       {reviewing && <div id={ANONYMIZATION_PANEL_ID} className="scroll-mt-4"><AnonymizationReviewPanel key={jobId + ":" + progress.attempt} jobId={jobId} canAccept={canAccept} onAccepted={() => onChanged?.()} /></div>}
       {!reviewing && (progress?.status === "QUEUED" || progress?.waiting_for === "resources" || progress?.queue) && <div role="status" className="mb-5 space-y-2 text-sm text-ink-muted">
         <p>{progress.waiting_for === "runtime"
-          ? "Đang chờ GPU: chưa có máy xử lý nào đang chạy đúng phiên bản công cụ của job này. Job tự chạy khi máy đó lên."
+          ? runtimeWaitText(progress)
           : progress.waiting_for === "resources" ? "Đang chờ đủ tài nguyên trên máy xử lý." : "Job đã vào hàng đợi, đang chờ máy xử lý."} Cấu hình đã chọn được giữ nguyên; job tự chạy tiếp khi đến lượt và đủ tài nguyên.</p>
         <ProgressBar value={null} label="Đang chờ trong hàng đợi" />
         {progress.queue && <QueueStatus queue={progress.queue} />}

@@ -59,6 +59,17 @@ export function sceneSummaryStatus(scene: SceneSummary): SceneStatusView {
 }
 
 /**
+ * Câu báo cho job chờ GPU đúng runtime (T-040). Job đã có stage không tự chạy tiếp trên máy khác:
+ * phiên bản công cụ có thể đã đổi, khi đó job cần chạy lại từ đầu.
+ */
+export function runtimeWaitText(progress: JobProgress): string {
+  const started = progress.stages.some((stage) => stage.state === "succeeded" || stage.state === "running" || stage.state === "failed");
+  return started
+    ? "Chưa có máy đúng phiên bản công cụ của job đang chạy. Nếu phiên bản đã đổi, job này cần chạy lại từ đầu."
+    : "Đang chờ GPU: chưa có máy xử lý nào đang chạy đúng phiên bản công cụ của job này. Job tự chạy khi máy đó lên.";
+}
+
+/**
  * Header scene đọc progress thật; cùng bảng nhãn với Scenes/Jobs, không suy DONE từ preview. `geometry` là hàng
  * "Duyệt vật & Tạo mesh" (T-021): job đã xong nhưng scene Draft thì header phải nói còn việc phải làm.
  */

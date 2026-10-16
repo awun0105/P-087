@@ -20,6 +20,7 @@ from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeSta
 from src.services.orchestration.jobs.dispatch import load_prepared_profile, prepared_frame_reference, require_profile
 from src.services.orchestration.jobs.log_context import configure_worker_logging, job_log_context
 from src.services.orchestration.jobs.models import TransitionRequest
+from src.services.orchestration.jobs.profile import ExecutionProfile
 from src.services.orchestration.jobs.progress import (
     awaiting_anonymization_review,
     awaiting_finalize,
@@ -33,7 +34,7 @@ from src.services.orchestration.jobs.runner import (
     run_reviewed_preview_job,
     run_video_job,
 )
-from src.services.orchestration.jobs.worker_runtimes import publisher
+from src.services.orchestration.jobs.worker_runtimes import has_live_runtime, publisher
 from src.services.orchestration.jobs.workspace import attempt_in_use, job_attempts, job_root
 from src.services.orchestration.processing import is_presets_file, load_presets
 from src.services.orchestration.processing.capability import probe as probe_capability
@@ -235,8 +236,9 @@ def _dispatch(
     reviewed_runner: VideoRunner = run_reviewed_preview_job,
 ) -> bool:
     """Một lượt quét hàng đợi của `dispatch_next`."""
-    if registry.persistence is None:
-        raise ValueError("Queue consumer cần durable registry")
+    if registry.persistence is None or registry.execution_profile is None:
+        raise ValueError("Queue consumer cần durable registry và execution profile")
+    profile = registry.execution_profile
     # Thứ tự xoay vòng theo người yêu cầu (jobs/queue.py): cũng là thứ tự UI báo cho người dùng.
     for job_id in [item.job_id for item in fair_order(waiting_jobs(registry))]:
         job: JobManifest | None = None
@@ -250,6 +252,8 @@ def _dispatch(
                     # Người dùng đã xác nhận tỉ lệ (job RUNNING, hoặc QUEUED khi retry): chạy
                     # tiếp REC-05/REC-10 trên cùng job; vẫn qua cổng privacy của project.
                     require_project_dispatch(registry.get_project(candidate.project_id))
+                    if not _runtime_matches(profile, candidate):
+                        continue  # T-040 Q4: chờ máy đúng runtime; không hoàn tất bằng cấu hình của máy khác
                     if admission is not None and not admission(candidate, "finalize"):
                         continue
                     try:
@@ -269,7 +273,9 @@ def _dispatch(
                         continue
                     reviewed_runner(job_id, expected_checksum=candidate.job_manifest_checksum)
                     return True
-                require_profile(candidate, registry.execution_profile)
+                if _rebind_orphaned_job(registry, candidate, profile):
+                    return True  # Lượt sau dispatch job này trên runtime mới.
+                require_profile(candidate, profile)
                 project = registry.get_project(candidate.project_id)
                 require_project_dispatch(project)
                 job = candidate
@@ -294,6 +300,29 @@ def _dispatch(
                     _record_dispatch_failure(registry, job, error)
                     return True
     return False
+
+
+def _runtime_matches(profile: ExecutionProfile, job: JobManifest) -> bool:
+    return profile.accepts_runtime(job.runtime_manifest_checksum) and job.seed == profile.seed
+
+
+def _rebind_orphaned_job(registry: ProjectRegistry, job: JobManifest, profile: ExecutionProfile) -> bool:
+    """T-040 Q1: job QUEUED chưa có stage mà runtime của nó không còn worker sống, còn máy này sống và chạy được.
+
+    Job đã có stage không bao giờ được gắn lại ở đây; người dùng xử lý theo `waiting_for="runtime"`.
+    """
+    if job.status != JobStatus.QUEUED or job.stage_artifacts or job.seed != profile.seed:
+        return False
+    if profile.accepts_runtime(job.runtime_manifest_checksum):
+        return False
+    if registry.persistence is None or has_live_runtime(registry.persistence.database, job.runtime_manifest_checksum):
+        return False
+    try:
+        registry.rebind_job_runtime(job, profile.job_runtime_checksum, reason="no_live_worker")
+    except RuntimeStateConflictError:
+        return False  # Máy khác đã gắn lại trước (CAS); lượt sau đọc revision mới.
+    logger.info("Job %s được gắn lại sang runtime của worker đang sống", job.job_id)
+    return True
 
 
 #: Chu kỳ đo lại cấu hình máy; nhỏ hơn TTL của số đo (15 phút) để UI luôn có số mới.
