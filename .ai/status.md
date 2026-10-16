@@ -32,4 +32,4 @@ T-031 | Máy đo khe, sai số, nhất quán | accepted | —
 T-032 | Bảng metric + xuất JSON/CSV/MD | accepted | —
 T-033 | Panel Benchmark trong Studio | accepted | —
 T-034 | Thẻ Giá trị + trang /benchmark | accepted | —
-T-035 | Regression + hướng dẫn đo | planned | engineer
+T-035 | Regression + hướng dẫn đo | implemented | summarizer
