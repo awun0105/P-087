@@ -1,6 +1,6 @@
 # Review T-033
 
-Verdict: CHANGES REQUESTED (3 sửa, kèm hướng dẫn chi tiết)
+Verdict (vòng 1): CHANGES REQUESTED (3 sửa, kèm hướng dẫn chi tiết) · Vòng 2: ACCEPTED
 
 Audit: đọc trọn `value/BenchmarkPanel.tsx` (509 dòng), `value/benchmark-draft.ts`, `source-frame.ts` (`sourceToCanonical`),
 `AuthProvider.useOptionalAuth`, phần gắn trong `ObjectReviewView.tsx` và `MetricSceneView.tsx`, `SplatInspection.onPointerDown`.
@@ -89,3 +89,19 @@ if (draft.manualBaselineMinutes.trim() !== "" && parseMinutes(draft.manualBaseli
 ## Sau khi sửa
 Chạy: `./node_modules/.bin/vitest run tests/benchmark-panel.test.tsx tests/object-review.test.tsx <test StudioTab nếu có>`,
 `npm run typecheck`, eslint các file đã sửa. Thêm mục "Round 2" vào report, đặt `implemented`.
+
+## Round 2 — ACCEPTED
+
+Audit commit `02ce031d`, `10880451`. Chạy benchmark-panel + object-review: 76 PASS; eslint 4 file đã sửa sạch;
+không còn chỗ nào dùng `useOptionalAuth`.
+
+1. **Race chọn điểm:** đúng như hướng dẫn (`pickBaseline` gán trong `startPick`, effect bỏ qua khi `picker.points` vẫn là bộ cũ).
+   Test "thêm khe ngay sau một đoạn" mô phỏng đủ ba nhịp: điểm cũ → viewer đã xoá → hai điểm mới. Bỏ `eslint-disable` thừa: eslint
+   vẫn sạch, chấp nhận.
+2. **Quyền sửa:** `StudioTab` truyền `canMutate` (từ `progress.capabilities.can_mutate` ở `ScenePage`) xuống `ObjectReviewView`,
+   mặc định `false`. Nút Benchmark hiện cho mọi người, panel chỉ đọc khi không có quyền: tốt hơn plan (người xem vẫn đọc được
+   ground truth). Có test cả hai nhánh.
+3. **Mốc làm tay:** lỗi vào `draftProblems`, khoá Lưu; test "-5" bị khoá và "12.5" gửi 12.5.
+
+Suggestions vòng 1 (tắt lớp phủ khi chọn điểm, nhãn "Bỏ chọn {id}" với id thô) chưa làm; chuyển sang T-035 làm việc dọn.
+Ghi chú trong báo cáo về `value.ts`/`ValueCard.tsx` chưa commit đã cũ: T-034 đã commit hai file này.
