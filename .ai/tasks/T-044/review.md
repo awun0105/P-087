@@ -1,6 +1,6 @@
 # Review T-044
 
-Verdict: CHANGES REQUESTED (1 sửa, kèm hướng dẫn)
+Verdict (vòng 1): CHANGES REQUESTED (1 sửa) · Vòng 2: ACCEPTED
 
 Audit: 12 commit `d2c5d3cb` → `e3523b64`. Đọc trọn `src/services/orchestration/jobs/stage_results.py` (nguồn mọi dòng kết quả và
 dữ kiện bundle), mô tả bước trong `frontend/src/features/studio/stages.ts`, quyết định về thời gian trong report. Chạy
@@ -42,3 +42,11 @@ Sửa:
   hiện không có dòng nào vì `elif` chỉ chạy khi chưa có bản chấp nhận. Nên hiện "Chờ bạn duyệt N vùng đã che" khi
   `awaiting_anonymization_review(job)` bất kể có bản chấp nhận cũ.
 - Dòng ghi chú tỉ lệ "Bạn đo tay" có thể thêm ", bạn đã xác nhận" cho đồng giọng với các nhánh còn lại.
+
+## Round 2 — ACCEPTED
+
+Audit `5ebc1703`: `_read` không còn `@lru_cache`; đệm chuyển sang `_scene_summary`, `_metric_summary`, `_collision_summary`
+(`maxsize=256`) trả tuple rút gọn — `_SceneSummary` chỉ gồm số vật, nguồn tách vật, hai ref collision dạng tuple, trạng thái hình
+học, danh sách `surface_selection.chosen`, số collider, revision; không giữ dict scene đầy đủ. `_redaction_summary` khoá theo
+`(job_id, checksum)`. Chạy `test_progress_notes.py` + `test_sample_export.py`: 55 PASS. Thời gian `/progress` đo nội bộ vẫn
+khoảng 10–15 ms mỗi lượt (report dùng dấu phẩy thập phân), dưới ngưỡng 50 ms.

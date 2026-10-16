@@ -40,4 +40,4 @@ T-039 | Build image GPU thật + job trên pod RunPod | planned | engineer
 T-040 | Bỏ chép runtime manifest tay | accepted | —
 T-041 | Deploy production thử trọn | planned | engineer
 T-042 | GPU worker trên RunPod Serverless | planned | engineer
-T-044 | Trang tiến trình nói đúng, đủ cho scene thật và scene mẫu | implemented | summarizer
+T-044 | Trang tiến trình nói đúng, đủ cho scene thật và scene mẫu | accepted | —
