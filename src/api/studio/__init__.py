@@ -21,6 +21,7 @@ from src.api.studio import (
     simulation,
     trash,
     uploads,
+    value,
 )
 
 router = APIRouter(tags=["studio"])
@@ -38,6 +39,7 @@ for module in (
     evaluation,
     demo,
     anonymization,
+    value,
 ):
     router.include_router(module.router, dependencies=[Depends(require_contributor)])
 for module in (samples, processing):

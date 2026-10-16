@@ -44,6 +44,8 @@ REVIEWER = {
 
 #: Đã đăng nhập (Guest trở lên). Quyền sửa resource của người khác do `src/api/ownership.py` quyết định.
 AUTHENTICATED = {
+    ("POST", "/jobs/{job_id}/value-events/operator-time"),
+    ("POST", "/jobs/{job_id}/value-events/walk-session"),
     ("GET", "/imports"),
     ("POST", "/imports"),
     ("DELETE", "/imports/{import_id}"),
