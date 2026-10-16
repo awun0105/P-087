@@ -2,6 +2,8 @@
 
 import logging
 import os
+import re
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -203,3 +205,33 @@ def test_runtime_env_reads_the_new_name_then_the_legacy_one_then_default(caplog:
         assert read_env({"REC04_BRUSH_LPIPS_PYTHON": "/old"}, "R2S_BRUSH_LPIPS_PYTHON") == "/old"
         assert read_env({}, "R2S_BRUSH_LPIPS_PYTHON", "/default") == "/default"
     assert len(_warnings(caplog)) == 1  # chỉ lần đọc tên cũ mới cảnh báo
+
+
+_REPO = Path(__file__).resolve().parents[1]
+_GUARDED = [_REPO / "src", _REPO / "scripts", _REPO / "eval", _REPO / "Makefile.studio"]
+#: File không thuộc phạm vi: entrypoint Docker (T-038 đổi), file env riêng của máy (không trong git; T-036 bước 4 đổi).
+_OUT_OF_SCOPE = {_REPO / "scripts/gpu/docker_entrypoint.sh", _REPO / "scripts/gpu/studio.env"}
+#: Bảng đổi tên là nơi duy nhất được phép chứa tên cũ.
+_ALLOWED = {_REPO / "src/runtime_env.py"}
+_OLD_NAME = re.compile(r"\bREC(?:03_COLMAP|04_BRUSH|04_SPLAT|05_VOXEL|06_MOGE|17_LIDAR_ODOMETRY)_[A-Z0-9_]+")
+
+
+def _guarded_files() -> list[Path]:
+    files: list[Path] = []
+    for root in _GUARDED:
+        candidates = [root] if root.is_file() else [path for path in root.rglob("*") if path.is_file()]
+        files += [path for path in candidates if "__pycache__" not in path.parts and path.suffix != ".pyc"]
+    return sorted(path for path in files if path not in _OUT_OF_SCOPE and path not in _ALLOWED)
+
+
+def test_no_legacy_runtime_name_is_left_outside_the_rename_table() -> None:
+    hits: list[str] = []
+    for path in _guarded_files():
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        for number, line in enumerate(text.splitlines(), start=1):
+            if _OLD_NAME.search(line):
+                hits.append(f"{path.relative_to(_REPO)}:{number}: {line.strip()[:120]}")
+    assert hits == [], "tên RECxx_* còn sót ngoài bảng đổi tên:\n" + "\n".join(hits)

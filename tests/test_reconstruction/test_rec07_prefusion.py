@@ -224,9 +224,9 @@ def test_validate_inputs_desynchronized_timestamps(tmp_path: Path) -> None:
 
 def test_cli_prefusion_e2e_execution(tmp_path: Path) -> None:
     """Thực thi CLI build_registered_lidar.py với python runtime của REC-07."""
-    py_runtime = Path("data/rec07_runtime/bin/python").absolute()
+    py_runtime = Path("data/lidar_open3d_runtime/bin/python").absolute()
     if not py_runtime.is_file():
-        pytest.skip("data/rec07_runtime chưa được provision")
+        pytest.skip("data/lidar_open3d_runtime chưa được provision")
 
     dataset_root = tmp_path / "dataset"
     dataset_root.mkdir()
@@ -276,9 +276,9 @@ def test_cli_prefusion_e2e_execution(tmp_path: Path) -> None:
 
 def test_prefusion_deterministic_output(tmp_path: Path) -> None:
     """Hai lần chạy độc lập với cùng input bắt buộc sinh ra byte PLY và checksum y hệt nhau."""
-    py_runtime = Path("data/rec07_runtime/bin/python").absolute()
+    py_runtime = Path("data/lidar_open3d_runtime/bin/python").absolute()
     if not py_runtime.is_file():
-        pytest.skip("data/rec07_runtime chưa được provision")
+        pytest.skip("data/lidar_open3d_runtime chưa được provision")
 
     dataset_root = tmp_path / "dataset"
     dataset_root.mkdir()

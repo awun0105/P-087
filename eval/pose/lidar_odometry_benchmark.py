@@ -9,7 +9,7 @@ Evaluation-only: quỹ đạo chuẩn và bản đồ chuẩn không bao giờ �
 
     .venv/bin/python -m eval.pose.lidar_odometry_benchmark \
         --scenes /media/usb/AI20K/TorWIC_Raw_Scenes --map data/torwic_slam/raw/global/groundtruth_map.ply \
-        --odometry-python data/lidar_runtime/bin/python --out eval/results/lidar_odometry_torwic.json
+        --odometry-python data/lidar_odometry_runtime/bin/python --out eval/results/lidar_odometry_torwic.json
 """
 
 from __future__ import annotations

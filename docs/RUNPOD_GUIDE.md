@@ -223,29 +223,29 @@ PRODUCT_RUNTIME_MANIFEST=/workspace/r2s/runtime_manifest.json
 PRODUCT_GEOMETRY_CONFIG=/workspace/real2sim/configs/product/geometry_v1.json
 
 # COLMAP (apt native)
-REC03_COLMAP_COMMAND='["colmap"]'
-REC03_COLMAP_RUNTIME_IDENTITY=colmap-apt-3.9.1
-REC03_COLMAP_TIMEOUT_SECONDS=7200
+R2S_COLMAP_COMMAND='["colmap"]'
+R2S_COLMAP_RUNTIME_IDENTITY=colmap-apt-3.9.1
+R2S_COLMAP_TIMEOUT_SECONDS=7200
 
 # Brush 3DGS Trainer
-REC04_BRUSH_COMMAND='["/workspace/r2s/runtime/brush/brush_app"]'
-REC04_BRUSH_EXPECTED_VERSION=0.3.0
-REC04_BRUSH_RUNTIME_IDENTITY=brush-v0.3.0-linux-archive-sha256:4f0f9a8785d1951c62df26aae247c02c5bba32b00f40b06df4e1c9b867399e20
-REC04_BRUSH_ENVIRONMENT='{"RUST_LOG":"info,wgpu_core=warn","VK_ICD_FILENAMES":"/usr/share/vulkan/icd.d/nvidia_icd.json"}'
-REC04_BRUSH_TIMEOUT_SECONDS=14400
+R2S_BRUSH_COMMAND='["/workspace/r2s/runtime/brush/brush_app"]'
+R2S_BRUSH_EXPECTED_VERSION=0.3.0
+R2S_BRUSH_RUNTIME_IDENTITY=brush-v0.3.0-linux-archive-sha256:4f0f9a8785d1951c62df26aae247c02c5bba32b00f40b06df4e1c9b867399e20
+R2S_BRUSH_ENVIRONMENT='{"RUST_LOG":"info,wgpu_core=warn","VK_ICD_FILENAMES":"/usr/share/vulkan/icd.d/nvidia_icd.json"}'
+R2S_BRUSH_TIMEOUT_SECONDS=14400
 
 # Splat-transform & Voxel
-REC04_SPLAT_MODULE_PATH=/workspace/r2s/runtime/node_modules/@playcanvas/splat-transform/dist/index.mjs
-REC05_VOXEL_CLI=/workspace/r2s/runtime/node_modules/@playcanvas/splat-transform/bin/cli.mjs
-REC05_VOXEL_MODULE_PATH=/workspace/r2s/runtime/node_modules/@playcanvas/splat-transform/dist/index.mjs
+R2S_SPLAT_MODULE_PATH=/workspace/r2s/runtime/node_modules/@playcanvas/splat-transform/dist/index.mjs
+R2S_VOXEL_CLI=/workspace/r2s/runtime/node_modules/@playcanvas/splat-transform/bin/cli.mjs
+R2S_VOXEL_MODULE_PATH=/workspace/r2s/runtime/node_modules/@playcanvas/splat-transform/dist/index.mjs
 
 # Scene Runtime cho tách vật thể AI (SAM2, SAMPro3D, LaMa, MoGe)
 PRODUCT_SCENE_RUNTIME_PYTHON=/workspace/r2s/runtime/scene_runtime/bin/python
 PRODUCT_SAM2_CHECKPOINT=/workspace/r2s/runtime/scene_runtime/checkpoints/sam2.1_hiera_tiny.pt
 PRODUCT_LAMA_CHECKPOINT=/workspace/r2s/runtime/scene_runtime/weights/big-lama.pt
-REC06_MOGE_PYTHON=/workspace/r2s/runtime/scene_runtime/bin/python
-REC06_MOGE_MODEL=/workspace/r2s/runtime/scene_runtime/weights/moge-2-vitb-normal.pt
-REC04_BRUSH_LPIPS_PYTHON=/workspace/r2s/runtime/scene_runtime/bin/python
+R2S_MOGE_PYTHON=/workspace/r2s/runtime/scene_runtime/bin/python
+R2S_MOGE_MODEL=/workspace/r2s/runtime/scene_runtime/weights/moge-2-vitb-normal.pt
+R2S_BRUSH_LPIPS_PYTHON=/workspace/r2s/runtime/scene_runtime/bin/python
 EOF
 
 # Nạp Node.js vào PATH và sinh Runtime Manifest chứng nhận môi trường máy
@@ -436,7 +436,7 @@ Lệnh này sẽ đọc `ReconstructionBundle` có sẵn, dùng SAM2 + SAMPro3D 
 | `ERROR_INCOMPATIBLE_DRIVER` khi gọi `vulkaninfo` | Chọn GPU máy chủ (như L4) hoặc thiếu biến quyền đồ họa | Phải chọn GPU **RTX 3090 / 4090 / RTX 4000 Ada** và đặt biến môi trường `NVIDIA_DRIVER_CAPABILITIES=all` lúc tạo Pod. |
 | `tar: Cannot change ownership to uid 1001, gid 1001: Operation not permitted` | Phân vùng `/workspace` là network mount không cho phép lệnh `tar` chạy quyền root đổi ownership gốc trong archive | Thêm cờ `--no-same-owner` vào lệnh `tar` (ví dụ `tar --no-same-owner -xJf ...`). |
 | `Missing API key for LLM provider: openai` | `Settings` yêu cầu key LLM khi khởi tạo | Thêm `OPENAI_API_KEY=not-used-by-studio` vào file `.env`. |
-| `VISUAL_TIMEOUT` trong quá trình Brush 3DGS | Scene nhiều frame (ví dụ > 500 frames) vượt ngưỡng timeout 1800s | Đặt `REC04_BRUSH_TIMEOUT_SECONDS=14400` trong file `.env`. |
+| `VISUAL_TIMEOUT` trong quá trình Brush 3DGS | Scene nhiều frame (ví dụ > 500 frames) vượt ngưỡng timeout 1800s | Đặt `R2S_BRUSH_TIMEOUT_SECONDS=14400` trong file `.env`. |
 | `Voxel mutation requires X blocks, exceeding 32-bit mutable-grid limit` | 3DGS sinh các hạt floater khổng lồ làm phình bounding box | Đã fix: đặt `max_gaussian_scale_log=1.0` trong `configs/product/geometry_v1.json` để loại bỏ các hạt scale > 2.7m. |
 | `note: chưa cấu hình runtime SAM2; dùng tách hình học` | Chưa cài Mục 5.7 hoặc thiếu biến `PRODUCT_SAM2_CHECKPOINT` | Đây là fallback an toàn, không hỏng job. Để chạy SAM2 thật, làm theo Mục 5.7 rồi chạy `python scripts/scene/reobjectify.py <JOB_ID>`. |
 | `Field required: expected_version, runtime_identity` | Worker không đọc được biến môi trường từ `.env` | Chạy `set -a; source .env; set +a` trước khi chạy script Python worker. |

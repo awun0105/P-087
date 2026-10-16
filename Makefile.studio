@@ -34,10 +34,10 @@ WEB_PORT      ?= 3010
 PORT_SCAN     ?= 20
 FRONTEND_MODE ?= dev
 DEMO_DIR      ?= $(ROOT)/data/demo/library
-BRUSH  := $(ROOT)/data/rec04_runtime/brush/brush-app-x86_64-unknown-linux-gnu/brush_app
-SPLAT  := $(ROOT)/data/rec04_runtime/node_modules/@playcanvas/splat-transform/dist/index.mjs
-COLMAP := $(ROOT)/data/rec04_runtime/colmap-launcher.sh
-LIDAR_PY      := $(ROOT)/data/lidar_runtime/bin/python
+BRUSH  := $(ROOT)/data/reconstruction_runtime/brush/brush-app-x86_64-unknown-linux-gnu/brush_app
+SPLAT  := $(ROOT)/data/reconstruction_runtime/node_modules/@playcanvas/splat-transform/dist/index.mjs
+COLMAP := $(ROOT)/data/reconstruction_runtime/colmap-launcher.sh
+LIDAR_PY      := $(ROOT)/data/lidar_odometry_runtime/bin/python
 ODOM_LOCK     := $(ROOT)/requirements-lidar-odometry.lock.txt
 REGISTRY      := $(ROOT)/data/studio_local/input_runtime_registry.dev.json
 FORCE_REGISTRY ?= 0
@@ -84,7 +84,7 @@ help:
 	@echo "  make -f Makefile.studio down     # kill tiến trình đang giữ port của stack"
 	@echo "  make -f Makefile.studio status   # in port/pid hiện tại"
 	@echo "  make -f Makefile.studio env      # sinh lại scripts/gpu/studio.env (FORCE_ENV=1 để ghi đè)"
-	@echo "  make -f Makefile.studio lidar-runtime  # tạo runtime KISS-ICP cô lập (data/lidar_runtime) nếu chưa có"
+	@echo "  make -f Makefile.studio lidar-runtime  # tạo runtime KISS-ICP cô lập (data/lidar_odometry_runtime) nếu chưa có"
 	@echo "  make -f Makefile.studio registry       # sinh registry năng lực input dev-local (FORCE_REGISTRY=1 để sinh lại)"
 	@echo "  make -f Makefile.studio data-pack KEEP_SEED_ACCOUNTS=1 OUT=/duong/dan/r2s-studio-data.zip"
 	@echo "  make -f Makefile.studio data-verify DATA=/duong/dan/r2s-studio-data.zip"
@@ -113,22 +113,22 @@ env:
 	PRODUCT_RUNTIME_MANIFEST='$(ROOT)/data/studio_local/runtime_manifest.json'
 	# Thư viện video mẫu: mỗi thư mục con là một bundle đã xử lý sẵn.
 	PRODUCT_DEMO_DIR='$(DEMO_DIR)'
-	REC03_COLMAP_COMMAND='["sh","$(COLMAP)"]'
+	R2S_COLMAP_COMMAND='["sh","$(COLMAP)"]'
 	# Identity/version của baseline đã kiểm (job-ac2bfd924cc6); đổi binary thì cập nhật cùng.
-	REC03_COLMAP_RUNTIME_IDENTITY=colmap-image-sha256:b8498ebecab11c3f9b9a25370e3fcfb6de9b6bcd4f3c85d5dc39a40229f40954
-	REC03_COLMAP_TIMEOUT_SECONDS=3600
-	REC04_BRUSH_COMMAND='["$(BRUSH)"]'
-	REC04_BRUSH_EXPECTED_VERSION=0.3.0
-	REC04_BRUSH_RUNTIME_IDENTITY=brush-v0.3.0-linux-archive-sha256:4f0f9a8785d1951c62df26aae247c02c5bba32b00f40b06df4e1c9b867399e20
+	R2S_COLMAP_RUNTIME_IDENTITY=colmap-image-sha256:b8498ebecab11c3f9b9a25370e3fcfb6de9b6bcd4f3c85d5dc39a40229f40954
+	R2S_COLMAP_TIMEOUT_SECONDS=3600
+	R2S_BRUSH_COMMAND='["$(BRUSH)"]'
+	R2S_BRUSH_EXPECTED_VERSION=0.3.0
+	R2S_BRUSH_RUNTIME_IDENTITY=brush-v0.3.0-linux-archive-sha256:4f0f9a8785d1951c62df26aae247c02c5bba32b00f40b06df4e1c9b867399e20
 	# Brush train qua Vulkan: chỉ định ICD NVIDIA để không rơi về GPU tích hợp/CPU.
-	REC04_BRUSH_ENVIRONMENT='{"RUST_LOG":"info,wgpu_core=warn","VK_ICD_FILENAMES":"/usr/share/vulkan/icd.d/nvidia_icd.json"}'
-	REC04_BRUSH_TIMEOUT_SECONDS=3600
-	REC04_SPLAT_MODULE_PATH='$(SPLAT)'
-	REC04_SPLAT_DEVICE=gpu
+	R2S_BRUSH_ENVIRONMENT='{"RUST_LOG":"info,wgpu_core=warn","VK_ICD_FILENAMES":"/usr/share/vulkan/icd.d/nvidia_icd.json"}'
+	R2S_BRUSH_TIMEOUT_SECONDS=3600
+	R2S_SPLAT_MODULE_PATH='$(SPLAT)'
+	R2S_SPLAT_DEVICE=gpu
 	# Luồng nhập mới: năng lực xử lý input của máy dev (sinh bằng `make -f Makefile.studio registry`).
 	PRODUCT_INPUT_RUNTIME_REGISTRY='$(REGISTRY)'
-	REC17_LIDAR_ODOMETRY_PYTHON='$(LIDAR_PY)'
-	REC17_LIDAR_ODOMETRY_WORK_ROOT='$(ROOT)/data/studio_local/lidar_odometry'
+	R2S_LIDAR_ODOMETRY_PYTHON='$(LIDAR_PY)'
+	R2S_LIDAR_ODOMETRY_WORK_ROOT='$(ROOT)/data/studio_local/lidar_odometry'
 	# LLM_PROVIDER/OPENAI_API_KEY lấy từ .env ở root repo (Settings đọc .env); không ghi key vào đây.
 	EOF
 	fi
@@ -139,8 +139,8 @@ lidar-runtime:
 	@if [ -x "$(LIDAR_PY)" ] && "$(LIDAR_PY)" -c 'import kiss_icp' 2>/dev/null; then
 	  echo "[lidar] đã có runtime KISS-ICP: $(LIDAR_PY)"; exit 0
 	fi
-	echo "[lidar] tạo runtime KISS-ICP cô lập tại $(ROOT)/data/lidar_runtime"
-	if python3 -m venv "$(ROOT)/data/lidar_runtime" \
+	echo "[lidar] tạo runtime KISS-ICP cô lập tại $(ROOT)/data/lidar_odometry_runtime"
+	if python3 -m venv "$(ROOT)/data/lidar_odometry_runtime" \
 	   && "$(LIDAR_PY)" -m pip install --quiet --require-hashes -r "$(ODOM_LOCK)"; then
 	  echo "[lidar] xong."
 	else
@@ -157,8 +157,8 @@ objectgs-runtime:
 registry: env lidar-runtime
 	@ensure() { grep -qE "^$$1=" "$(ENV_FILE)" || printf '%s=%s\n' "$$1" "$$2" >> "$(ENV_FILE)"; }
 	ensure PRODUCT_INPUT_RUNTIME_REGISTRY "'$(REGISTRY)'"
-	ensure REC17_LIDAR_ODOMETRY_PYTHON "'$(LIDAR_PY)'"
-	ensure REC17_LIDAR_ODOMETRY_WORK_ROOT "'$(ROOT)/data/studio_local/lidar_odometry'"
+	ensure R2S_LIDAR_ODOMETRY_PYTHON "'$(LIDAR_PY)'"
+	ensure R2S_LIDAR_ODOMETRY_WORK_ROOT "'$(ROOT)/data/studio_local/lidar_odometry'"
 	mkdir -p "$(ROOT)/data/studio_local/lidar_odometry"
 	if [ -f "$(REGISTRY)" ] && [ "$(FORCE_REGISTRY)" != "1" ]; then
 	  echo "[registry] giữ nguyên $(REGISTRY) (FORCE_REGISTRY=1 để sinh lại)."; exit 0

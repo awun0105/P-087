@@ -198,15 +198,17 @@ template cũ và khai báo LiDAR riêng đã được hợp nhất vào các c�
 `scripts/gpu/studio.env`, `Makefile.studio` hoặc giá trị mặc định trong code dùng theo đường dẫn — đổi tên thì phải sửa
 cấu hình tương ứng.
 
+Tên biến môi trường của runtime ngoài theo chức năng: `R2S_*` (ví dụ `R2S_COLMAP_COMMAND`). Tên cũ `RECxx_*` vẫn được nhận và in cảnh báo; bảng đổi tên nằm ở `src/runtime_env.py`.
+
 | Thư mục | Nội dung | Tạo lại bằng |
 |---|---|---|
 | `data/studio_local/` | Stack Studio cục bộ (cấu hình trỏ tới): `runtime.db`, `artifacts/` (kho artifact của các scene), `workers/` (thư mục làm việc của worker — xoá được khi không có job đang chạy), `trash/` (scene đã gỡ bằng `projects/delete_cli`, khôi phục được tới khi `purge`), `backups/`, `qa/` (script và ảnh kiểm thử trình duyệt), `seed-accounts/` | `make -f Makefile.studio up` |
 | `data/demo/library/` | Thư viện video mẫu đã xử lý sẵn (`PRODUCT_DEMO_DIR`) | `scripts/demo/export_demo_bundle.py` |
 | `data/asset_previews/` | GLB xem trước của asset danh mục | `scripts/scene/build_asset_previews.py` |
 | `data/rerun_recordings/` | Bản ghi Rerun của quá trình train (`<job_id>.rrd`) | `eval/visual/brush_quality.py --rerun-save` |
-| `data/rec04_runtime/` | Công cụ dựng hình (cấu hình trỏ tới): launcher COLMAP, Brush, splat-transform | [`scripts/gpu/README.md`](./scripts/gpu/README.md) |
+| `data/reconstruction_runtime/` | Công cụ dựng hình (cấu hình trỏ tới): launcher COLMAP, Brush, splat-transform | [`scripts/gpu/README.md`](./scripts/gpu/README.md) |
 | `data/scene_runtime/` | Môi trường Python tách vật thể (cấu hình trỏ tới): PyTorch, SAM2, gsplat, LaMa, CoACD, usd-core và trọng số | `scripts/gpu/setup_scene_runtime.sh` |
-| `data/rec07_runtime/` | Môi trường Python cho tooling LiDAR offline (Open3D); test REC-07 tự bỏ qua khi thiếu | `requirements-offline.lock.txt` |
+| `data/lidar_open3d_runtime/` | Môi trường Python cho tooling LiDAR offline (Open3D); test REC-07 tự bỏ qua khi thiếu | `requirements-offline.lock.txt` |
 | `data/tools/rerun-0.24.1/` | Viewer Rerun đúng phiên bản Brush nhúng | [`eval/visual/README.md`](./eval/visual/README.md) |
 | `data/torwic_slam/` | Dataset TorWIC: `raw/` (gốc, bất biến), `normalized/`, `derived/`, `evaluation_only/`. Ảnh RGB nằm ở `normalized/`. Trên máy của owner, `raw/…/image_left` và `raw/…/lidar` là symlink tới ổ ngoài (`/media/usb/AI20K/TorWIC SLAM Dataset/Aisle_CW`), nên tooling dataset và validator cần cắm ổ; máy giữ cả bản raw thì gộp ảnh trùng bằng hardlink | `scripts/torwic/`; gộp ảnh trùng: `scripts/torwic/dedupe_rgb_frames.py` |
 | `data/evidence/` | Bằng chứng chạy thử theo task (REC-05/06/07, sweep chất lượng). Task file cũ ghi đường dẫn không có `evidence/` | — |

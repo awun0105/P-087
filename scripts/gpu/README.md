@@ -19,12 +19,12 @@ git checkout feat/pipeline-v2                # hoặc develop sau khi PR của n
 make setup                                   # .venv + dependencies từ lockfile
 (cd frontend && npm ci && npm run build:editor)
 
-# Runtime EX-REC (cùng version với máy local, xem data/rec04_runtime/):
+# Runtime EX-REC (cùng version với máy local, xem data/reconstruction_runtime/):
 mkdir -p /opt/real2sim/runtime && cd /opt/real2sim/runtime
 #  - Brush 0.3.0 linux archive (sha256 4f0f9a87…): giải nén brush_app vào ./brush/
 #  - splat-transform 3.6.6:   npm install @playcanvas/splat-transform@3.6.6
 #  - COLMAP image pin digest: docker pull colmap/colmap@sha256:b8498ebe…f40954
-#  - colmap-launcher.sh: copy từ data/rec04_runtime/colmap-launcher.sh; trên GPU có
+#  - colmap-launcher.sh: copy từ data/reconstruction_runtime/colmap-launcher.sh; trên GPU có
 #    thể thêm `--gpus all` nếu bật use_gpu trong processing config.
 ```
 
@@ -120,7 +120,7 @@ Ngưỡng mặc định: đóng băng khi CPU ≥ 90°C hoặc GPU ≥ 82°C, ch
 ### Đứt giữa chừng: checkpoint và chạy tiếp
 
 Trong lúc train 3DGS, Brush xuất checkpoint định kỳ vào `PRODUCT_WORKER_ROOT/<job_id>/resume/` (mặc định khoảng
-2.500 bước một lần; đổi bằng `REC04_BRUSH_CHECKPOINT_EVERY`, đặt `0` để tắt). Job `FAILED` vì máy tắt/worker chết
+2.500 bước một lần; đổi bằng `R2S_BRUSH_CHECKPOINT_EVERY`, đặt `0` để tắt). Job `FAILED` vì máy tắt/worker chết
 thì bấm **Thử lại** (hoặc `POST /api/v1/jobs/<job_id>/retry`): attempt mới dùng lại kết quả COLMAP và train tiếp
 từ checkpoint mới nhất. Kho này chỉ nằm trên máy worker; đổi máy thì chạy lại từ đầu.
 
