@@ -1,50 +1,52 @@
-# T-039: Build image GPU thật, đẩy lên GHCR, chạy một job từ đầu tới cuối trên GPU thuê
+# T-039: Build image GPU thật, đẩy lên GHCR, chạy một job từ đầu tới cuối trên pod RunPod
 
 ## Goal
-Có một image `ghcr.io/<owner>/real2sim-gpu:<git-sha>` đã build thật, đã chạy `doctor` PASS và một job thật trên GPU
-thuê. Thuê GPU lần sau chỉ cần chọn image này.
+Có image `ghcr.io/<owner>/real2sim-gpu:<git-sha>` đã build thật, `preflight` PASS trên GPU thật, và một job video chạy
+tới object geometry ready (ObjectGS) trên pod RunPod. Image này là đầu vào cho T-042 (RunPod Serverless) và T-041.
 
 ## Context
 - `Dockerfile.gpu` chưa từng build trọn (laptop thiếu ổ). Sau T-038 nó gọi `install.sh`.
-- Entrypoint có chế độ `stack` (API + worker trên chính pod, SQLite trên `/data`), dùng để thử trọn luồng mà chưa cần
-  Supabase/R2/Railway (đó là T-041).
-- Chi phí thật và tài khoản: việc của chủ dự án. Agent chuẩn bị lệnh, chủ dự án duyệt và cấp quyền.
+- Entrypoint có chế độ `stack` (API + worker trên chính pod, SQLite trên `/data`): thử trọn luồng mà chưa cần
+  Supabase/R2/Railway.
+- Nhà cung cấp GPU đã chọn: **RunPod** (Serverless ở T-042; task này dùng pod thường để build và thử).
+- Chi phí và tài khoản là việc của chủ dự án; agent chuẩn bị lệnh, chủ dự án duyệt.
 
 ## Cần chủ dự án làm trước (agent hỏi, không tự làm)
-1. Chọn nơi build: một máy thuê có Docker, **≥ 150 GB ổ**, GPU NVIDIA (để chạy thử ngay sau build). Vast.ai hoặc
-   RunPod pod có Docker. Agent đề xuất cấu hình và giá/giờ, chủ dự án thuê.
-2. Tạo GitHub token có quyền `write:packages` và `docker login ghcr.io` trên máy build. Token không ghi vào repo hay log.
-3. Đưa gói COLMAP nhị phân (T-038 bước 2) lên GitHub Release nếu chưa, để `pins.env` có URL.
-4. Duyệt ngân sách tối đa (ví dụ: 3 giờ GPU). Agent dừng khi gần chạm.
+1. Nơi build: Docker cần **≥ 150 GB ổ**. Pod RunPod thường không chạy được Docker daemon bên trong, nên chọn một trong:
+   (a) máy có Docker của chủ dự án/teammate đủ ổ; (b) GitHub Actions runner lớn; (c) một VM có Docker (ví dụ RunPod CPU
+   pod hỗ trợ Docker, hoặc nhà cung cấp VM khác). Agent đề xuất phương án rẻ nhất, chủ dự án chọn.
+2. GitHub token có `write:packages`, `docker login ghcr.io` trên máy build. Không ghi token vào repo hay log. Nếu package
+   GHCR để riêng tư thì cần thêm thông tin đăng nhập registry trong RunPod (Settings → Container Registry Auth).
+3. Ngân sách tối đa (ví dụ 3 giờ GPU), tài khoản RunPod đã nạp tiền.
 
 ## Steps
-1. **Build.** Trên máy build: `git clone` đúng commit đã accepted của T-038,
-   `docker build -f Dockerfile.gpu -t ghcr.io/<owner>/real2sim-gpu:<git-sha> .` Ghi: thời gian build, kích thước image
-   (`docker image inspect`), từng lớp lớn (`docker history`). Build lỗi: sửa trong phạm vi `install.d/*`/`Dockerfile.gpu`,
-   commit riêng từng bản sửa, ghi nguyên nhân vào report.
-2. **Kiểm trong container.** `docker run --rm --gpus all <image> preflight` phải PASS mọi mục bắt buộc; mục ObjectGS
-   tuỳ chọn cũng phải PASS (image có ObjectGS). Ghi nguyên output vào report.
-3. **Đẩy image.** `docker push`; ghi digest `sha256:...`. Đặt thêm tag `latest-accepted` **chỉ sau** bước 5 PASS.
-4. **Thời gian khởi động thật.** Trên một pod Vast.ai **mới** (khác máy build) chọn image theo digest: đo thời gian từ lúc
-   bấm tạo tới lúc `preflight` PASS (chủ yếu là thời gian tải image). Đây là số cho tài liệu deploy.
-5. **Job thật ở chế độ `stack`.** `docker run --gpus all -p 8000:8000 -v <đĩa pod>:/data <image> stack` với
-   `AUTH_REQUIRED=true` và một tài khoản Reviewer tạo bằng lệnh trong `deploy/studio/README.md`. Tải lên video
-   `Aisle_CW_0_1091__left.mp4` (có trong `data/studio_local/samples`, chép lên pod), chạy tới: preview 3DGS, xác nhận tỉ
-   lệ mét (dùng lệnh xác nhận tự động trong `RUNPOD_GUIDE.md` nếu không mở được WebGL), tách vật, Tạo mesh với ObjectGS.
-   Ghi thời gian từng bước, VRAM đỉnh, và lỗi gặp. So thời gian với laptop trong `eval/results/` nếu có số cùng video.
-6. **Tắt pod** ngay khi xong (chủ dự án xác nhận đã tắt). Ghi tổng giờ GPU và chi phí.
-7. **Tài liệu.** `docs/RUNPOD_GUIDE.md` và `deploy/studio/OVERVIEW.md`: mục "Dùng image dựng sẵn" với digest, kích
-   thước, thời gian khởi động đo được, và lệnh chạy. Xoá ghi chú "CHƯA build" trong `Dockerfile.gpu`. Commit.
+1. **Build** từ commit sạch đã accepted của T-038:
+   `docker build -f Dockerfile.gpu -t ghcr.io/<owner>/real2sim-gpu:<git-sha> .` Ghi thời gian build, kích thước image,
+   lớp lớn (`docker history`). Build lỗi: sửa trong `install.d/*`/`Dockerfile.gpu`, mỗi bản sửa một commit, ghi nguyên
+   nhân.
+2. **Đẩy** `docker push`, ghi digest `sha256:...`.
+3. **Pod RunPod** (GPU 24 GB, ví dụ RTX 4090, Community Cloud), image theo digest, ổ container ≥ 80 GB:
+   - Đo thời gian từ lúc tạo pod tới lúc container chạy (chủ yếu là kéo image).
+   - `preflight` (lệnh trong entrypoint) PASS mọi mục bắt buộc và mục ObjectGS. Ghi nguyên output.
+4. **Job thật ở chế độ `stack`** trên pod đó (`AUTH_REQUIRED=true`, Reviewer tạo bằng lệnh trong
+   `deploy/studio/README.md`; mở cổng HTTP của pod hoặc dùng SSH tunnel). Upload `Aisle_CW_0_1091__left.mp4`
+   (`data/studio_local/samples`), chạy tới preview 3DGS → xác nhận tỉ lệ mét (lệnh tự động trong `RUNPOD_GUIDE.md` nếu
+   không có WebGL) → tách vật → Tạo mesh bằng ObjectGS. Ghi thời gian từng bước, VRAM đỉnh, lỗi gặp; so với laptop nếu có
+   số cùng video.
+5. **Tắt và xoá pod** ngay khi xong (chủ dự án xác nhận). Ghi tổng giờ GPU, chi phí.
+6. **Tài liệu:** mục "Dùng image dựng sẵn" trong `docs/RUNPOD_GUIDE.md` và `deploy/studio/OVERVIEW.md` (digest, kích
+   thước, thời gian kéo image, lệnh chạy). Xoá ghi chú "CHƯA build" trong `Dockerfile.gpu`. Đặt tag `latest-accepted`
+   sau khi bước 4 PASS. Commit.
 
 ## Acceptance criteria
-1. Image build thành công từ commit sạch; digest ghi trong tài liệu.
-2. `preflight` PASS trong container trên GPU thật, kể cả ObjectGS.
-3. Một job video chạy tới object geometry ready bằng ObjectGS trên pod thuê; số thời gian/VRAM thật trong report.
-4. Pod đã tắt; giờ GPU và chi phí ghi trong report.
+1. Image build từ commit sạch; digest ghi trong tài liệu.
+2. `preflight` PASS trên GPU thật, kể cả ObjectGS.
+3. Một job video tới object geometry ready bằng ObjectGS trên pod RunPod; số thời gian/VRAM thật trong report.
+4. Pod đã xoá; giờ GPU và chi phí ghi trong report.
 
 ## Tests required
-Không có test tự động mới. Report ghi đủ output `preflight`, log job (đã lược secret), thời gian và kích thước image.
-Nếu sửa script: `bash -n` + `pytest tests/test_gpu tests/test_packaging -q`.
+Không có test tự động mới. Report ghi output `preflight`, log job (đã lược secret), thời gian, kích thước image.
+Nếu sửa script: `bash -n` + `.venv/bin/python -m pytest tests/test_gpu tests/test_packaging -q`.
 
 ## Commit
 Mỗi bản sửa build một commit; một commit tài liệu; một commit report + status. Không Co-Authored-By. Không ghi token,

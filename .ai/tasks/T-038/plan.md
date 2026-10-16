@@ -43,7 +43,7 @@ Laptop: COLMAP hiện chạy qua Docker; **giữ được** bằng tuỳ chọn 
   `splat`, `lidar_odometry`, `scene` (gọi `setup_scene_runtime.sh`), `objectgs` (gọi `setup_objectgs_runtime.sh`).
 - Mỗi hàm idempotent: có file `.r2s-installed` ghi phiên bản công thức; khớp thì bỏ qua.
 - Phiên bản ghim ở **một file**: `configs/runtime/pins.env` (BRUSH_VERSION, BRUSH_SHA, NODE_VERSION, NODE_SHA,
-  SPLAT_TRANSFORM_VERSION, COLMAP_IMAGE digest, COLMAP_TARBALL_URL, COLMAP_TARBALL_SHA, MICROMAMBA...). `Dockerfile.gpu`,
+  SPLAT_TRANSFORM_VERSION, COLMAP_IMAGE digest, COLMAP_TARBALL_SHA, MICROMAMBA...). `Dockerfile.gpu`,
   `install.d/*` đều đọc từ đây; xoá các ARG trùng trong Dockerfile.
 - Cuối cùng ghi `<gốc>/runtime.env` (ghi file tạm rồi `mv`), gồm các biến `R2S_*` và `PRODUCT_*` về đường dẫn runtime
   mà `docker_entrypoint.sh` dòng 40–80 đang đặt, cộng `PRODUCT_OBJECTGS_*`. Không ghi DATABASE_URL, khoá hay đường dẫn
@@ -52,13 +52,18 @@ Laptop: COLMAP hiện chạy qua Docker; **giữ được** bằng tuỳ chọn 
   dòng 37–42, chuyển vào `configs/runtime/apt-packages.txt`). Có quyền root và thêm `--apt` thì tự `apt-get install`.
 
 ### COLMAP không cần Docker (`--colmap=binary`)
-Pod SSH thường không chạy được Docker. Tạo **gói nhị phân** một lần:
+Pod SSH thường không chạy được Docker, apt chỉ có COLMAP 3.x. Tạo **gói nhị phân** một lần và lưu trên **R2 của
+deployment**, theo đúng mẫu `scripts/gpu/egoblur_weights.py` (upload một lần, pod tự fetch và kiểm sha256):
 - `scripts/gpu/export_colmap_binary.sh <out.tar.zst>`: trên máy có Docker, `docker create` từ `COLMAP_IMAGE` ghim, chép
-  đúng các file mà stage `colmap` của `Dockerfile.gpu` đang chép (dòng 16–19), nén, in sha256.
-- File nén đưa lên **GitHub Release** của repo (chủ dự án làm, vì cần quyền), URL + sha256 ghi vào `pins.env`.
-- `install_colmap --colmap=binary` tải, kiểm sha256, giải nén vào `<gốc>/colmap`, tạo wrapper như `Dockerfile.gpu`
-  dòng 54–59, chạy hai lệnh kiểm `colmap help | grep "^COLMAP 4\."` và `pose_prior_mapper -h`.
+  đúng các file mà stage `colmap` của `Dockerfile.gpu` đang chép (dòng 16–19), **kèm file giấy phép** của COLMAP (BSD) và
+  onnxruntime (MIT) lấy từ image, nén, in sha256.
+- `scripts/gpu/colmap_binary.py upload --from <tar>` / `fetch --to <dir>`: chép cấu trúc `egoblur_weights.py` (dùng
+  `ArtifactRemote` của `ARTIFACT_S3_*`, `REMOTE_DIR = "runtime-binaries/colmap-<digest ngắn>"`, sha256 ghim trong
+  `pins.env` và đọc từ đó). Fetch có thêm `--from-file <tar>` cho máy không có khoá R2 (dùng thử ngoài production).
+- `install_colmap --colmap=binary` gọi fetch, giải nén vào `<gốc>/colmap`, tạo wrapper như `Dockerfile.gpu` dòng 54–59,
+  chạy `colmap help | grep "^COLMAP 4\."` và `colmap pose_prior_mapper -h`.
 - Identity giữ `colmap-image-sha256:<digest>` vì byte của binary là của đúng image đó.
+- Image Docker vẫn lấy COLMAP từ stage `colmap` (không cần R2 lúc build).
 
 ### `doctor`
 - `scripts/gpu/doctor.sh <gốc>`: `source <gốc>/runtime.env` rồi `python -m scripts.kaggle.preflight`. Exit khác 0 khi
@@ -86,7 +91,7 @@ COPY . .
 
 ## Files
 - Tạo: `scripts/gpu/install.sh`, `scripts/gpu/install.d/{colmap,brush,splat,lidar_odometry,scene,objectgs}.sh`,
-  `scripts/gpu/doctor.sh`, `scripts/gpu/export_colmap_binary.sh`, `configs/runtime/pins.env`,
+  `scripts/gpu/doctor.sh`, `scripts/gpu/export_colmap_binary.sh`, `scripts/gpu/colmap_binary.py`, `configs/runtime/pins.env`,
   `configs/runtime/apt-packages.txt`, `tests/test_gpu/test_install_scripts.py`.
 - Sửa: `Dockerfile.gpu`, `scripts/gpu/docker_entrypoint.sh`, `docker-compose.gpu.yml`, `deploy/studio/*.env.example`,
   `src/services/reconstruction/lidar/odometry.py` (mặc định), `Makefile.studio` (target `gpu-setup`, `doctor`; các target
@@ -98,8 +103,8 @@ COPY . .
    mọi `curl` có kiểm sha256; không còn số phiên bản nào chép tay ngoài `pins.env` (quét `Dockerfile.gpu`, `install.d`,
    `Makefile.studio`); `runtime.env` sinh ra từ một gốc giả chỉ có biến trong danh sách cho phép. Commit.
 2. `export_colmap_binary.sh` + nhánh `--colmap=binary`. Chạy thật trên laptop (có Docker): tạo gói, giải nén vào thư mục
-   tạm, chạy hai lệnh kiểm COLMAP. Ghi sha256 vào report; **không tự đưa lên GitHub Release**, báo chủ dự án làm, rồi điền
-   URL vào `pins.env` (để trống kèm chú thích nếu chưa có). Commit.
+   tạm, chạy hai lệnh kiểm COLMAP. Ghi sha256 vào `pins.env`. Chưa có R2 production thì kiểm `fetch --from-file`; việc
+   `upload` lên R2 thật làm ở T-041. Commit.
 3. Laptop: `make -f Makefile.studio gpu-setup` trên `data/` phải nhận ra mọi runtime đã có (không cài lại gì) và sinh
    `data/runtime.env`; `doctor` PASS. So các biến trong `data/runtime.env` với `scripts/gpu/studio.env` (chỉ phần đường
    dẫn runtime): phải trỏ cùng chỗ. Commit phần Makefile.
@@ -108,6 +113,7 @@ COPY . .
    Thêm vào cuối `Dockerfile.gpu` ghi chú "build thật ở T-039". Commit.
 5. Tài liệu: `RUNPOD_GUIDE.md` mục cài còn: thuê pod → `git clone` → `sudo scripts/gpu/install.sh /opt/real2sim --apt
    --colmap=binary` → `doctor`; và cách dùng image (T-039). Bỏ hướng dẫn COLMAP apt. Commit.
+6. Thêm test cho `colmap_binary.py` theo mẫu test của `egoblur_weights` (sai sha256 thì từ chối, idempotent). Commit.
 
 ## Acceptance criteria
 1. Một lệnh `install.sh <gốc>` dựng đủ runtime; chạy lại không cài lại.

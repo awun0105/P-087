@@ -2,7 +2,7 @@
 
 ## Goal
 Chạy đủ 8 bước của `deploy/studio/OVERVIEW.md` trên hạ tầng thật một lần: Supabase (PostgreSQL), Cloudflare R2,
-Railway (API), Vercel (Studio), GPU thuê dùng image của T-039. Kết quả: một Studio production dùng được, 5 scene mẫu có
+Railway (API), Vercel (Studio), GPU trên **RunPod Serverless** (T-042) chạy image của T-039. Kết quả: một Studio production dùng được, 5 scene mẫu có
 trên đó, một job mới chạy từ upload tới thẻ Giá trị, và tài liệu deploy sửa theo đúng những gì đã vấp.
 
 ## Context
@@ -11,11 +11,12 @@ trên đó, một job mới chạy từ upload tới thẻ Giá trị, và tài 
   `python -m scripts.studio.deploy_env check/render`.
 - Chưa từng chạy thật: PostgreSQL thật (ghi chú T-035: nhánh PostgreSQL của ground truth T-030 mới có test), R2 thật,
   Railway, Vercel, đo RAM/CPU theo giới hạn container trên pod (AUD-26.S4).
-- Sau T-040 không còn bước chép manifest tay.
+- Sau T-040 không còn bước chép manifest tay. Sau T-042 GPU tự bật khi có việc qua autoscaler `GPU_PROVIDER=runpod`.
+- Quyết định của chủ dự án: API ở Railway, giao diện ở Vercel, không chuyển sang Cloudflare.
 - Isaac validation (L3) **ngoài phạm vi**: scene production tối đa L2 ở lần này.
 
 ## Cần chủ dự án làm/duyệt (agent không tự tạo tài khoản, không tự trả tiền)
-1. Tài khoản và project: Supabase, Cloudflare (R2 + Pages), Railway, Vercel, Vast.ai; quyền cho agent qua CLI/token
+1. Tài khoản và project: Supabase, Cloudflare (R2 + Pages), Railway, Vercel, RunPod (đã nạp tiền); quyền cho agent qua CLI/token
    **chỉ trong phiên**, không ghi vào repo.
 2. Ngân sách tối đa cho lần thử (Railway, Vercel thường miễn phí ở mức này; GPU theo giờ). Agent báo trước mỗi bước tốn
    tiền.
@@ -36,9 +37,12 @@ trên đó, một job mới chạy từ upload tới thẻ Giá trị, và tài 
    `R2S_TEST_POSTGRES_URL=postgresql://postgres:<tạm>@127.0.0.1:15432/postgres .venv/bin/python -m pytest tests -q -k postgres`.
    Ghi số pass/skip/fail; đặc biệt các test ground truth T-030 và migration. Tắt container sau khi xong. Trên Supabase
    chỉ kiểm migration chạy hết và `schema_version` đúng. Lỗi → task sửa riêng, không vá trong T-041.
-4. **GPU worker.** Thuê pod theo digest image T-039, nạp `worker.env`, chế độ `worker`. Kiểm worker đã công bố runtime
-   (T-040) và `preflight` PASS.
-5. **API trên Railway.** Volume, `api.env`, deploy, `/health` 200. Tạo Reviewer đầu tiên.
+4. **GPU worker.** Đưa gói COLMAP nhị phân lên R2 (`scripts/gpu/colmap_binary.py upload`, T-038) và trọng số EgoBlur
+   nếu có. Tạo endpoint RunPod Serverless bằng `scripts/cloud/runpod_endpoint.py` (T-042) với image theo digest T-039 và
+   biến từ `worker.env`. Gửi một yêu cầu `preflight` qua endpoint: PASS; worker công bố runtime (T-040).
+5. **API trên Railway.** Volume, `api.env`, deploy, `/health` 200. Tạo Reviewer đầu tiên. Autoscaler chạy thường
+   trực cạnh API (service thứ hai trên Railway cùng image API, lệnh `python -m scripts.cloud.gpu_autoscaler`, biến
+   `GPU_PROVIDER=runpod`, `RUNPOD_API_KEY`, `RUNPOD_ENDPOINT_ID`); trước đó chạy `--once --dry-run` và xem log.
 6. **Studio trên Vercel** (`REAL2SIM_API_URL`), build `npm run build:editor && npm run build`. Đăng nhập được, cookie
    giữ qua `/api/v1/*`.
 7. **Landing** lên Cloudflare Pages (nếu chủ dự án muốn ở lần này).
@@ -46,15 +50,16 @@ trên đó, một job mới chạy từ upload tới thẻ Giá trị, và tài 
    của README. Mở từng scene trên Studio production: preview, Walk, thẻ Giá trị đọc được.
 9. **Job thật.** Upload `Aisle_CW_0_1091__left.mp4`, chạy tới object geometry ready, Walk, mở panel Benchmark nhập một
    đoạn thước và một khe giả định, xem thẻ Giá trị và `/benchmark`, tải CSV. Ghi thời gian từng bước và chi phí GPU.
-10. **Thử đổi pod.** Trả pod, thuê pod GPU **khác loại**, không đụng API: job mới phải chạy (kiểm T-040).
-11. **Dọn**: tắt pod GPU. Giữ hay tắt Railway/Vercel/Supabase do chủ dự án quyết.
+10. **Thử đổi loại GPU.** Sửa thứ tự GPU của endpoint để loại khác đứng đầu, không đụng API: job mới phải chạy trên
+    GPU mới (kiểm T-040). Kiểm khi không có việc: endpoint về 0 worker.
+11. **Dọn**: endpoint về 0 worker (không tốn tiền GPU). Giữ hay tắt Railway/Vercel/Supabase do chủ dự án quyết.
 12. **Tài liệu.** Sửa `OVERVIEW.md`, `README.md`, `production.env.example` theo mọi chỗ vấp thật; thêm mục "Đã deploy thử
     ngày …" với phiên bản, digest image, chi phí và thời gian từng bước. Commit.
 
 ## Acceptance criteria
 1. Studio production mở được, đăng nhập được, 5 scene mẫu xem được.
 2. Một job mới chạy từ upload tới object geometry ready trên GPU thuê, thẻ Giá trị có phút máy, phần cứng, chi phí.
-3. Đổi pod khác loại GPU không cần sửa API.
+3. Đổi loại GPU không cần sửa API; lúc rảnh không có worker GPU nào chạy.
 4. Test PostgreSQL thật đã chạy, số thật trong report.
 5. Tài liệu deploy khớp với những gì đã làm; không còn bước nào chỉ có trong đầu người làm.
 6. Không secret nào trong repo, report hay log commit.
@@ -65,4 +70,4 @@ Bước 3 (PostgreSQL thật). Còn lại là kiểm tay theo Steps, ghi output 
 ## Commit
 Commit tài liệu; commit report + status. Bản sửa code phát hiện trong lúc deploy: mỗi lỗi một task riêng do Architect
 lập, trừ sửa tài liệu/ví dụ env. Không Co-Authored-By.
-Cần T-039 và T-040 accepted.
+Cần T-039, T-040 và T-042 accepted.
