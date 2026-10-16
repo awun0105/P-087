@@ -3,7 +3,7 @@
 import { render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ValueCard, figureText, p2Label, p4Label, sourceLabel } from "@/features/studio/value/ValueCard";
+import { ValueCard, figureText, p2GapText, p2Label, p4Label, sourceLabel } from "@/features/studio/value/ValueCard";
 import type { Figure, ValueScorecard } from "@/lib/api/value";
 
 const MISSING = (note: string): Figure => ({ value: null, unit: null, provenance: "unavailable", note });
@@ -144,5 +144,24 @@ describe("ValueCard", () => {
     expect(csv).toHaveAttribute("href", "/api/v1/jobs/job-1/value-metrics.csv");
     expect(screen.getByRole("link", { name: /Tải Markdown/ })).toHaveAttribute("href", "/api/v1/jobs/job-1/value-metrics.md");
     expect(screen.getByRole("link", { name: "Mở Benchmark" })).toHaveAttribute("href", "/scenes/job-1?tab=studio");
+  });
+});
+
+describe("P2 khi chưa đo khe nào", () => {
+  beforeEach(() => { vi.unstubAllGlobals(); });
+
+  it("chưa đo khe nào thì không hiện 0/0 và bỏ sót 0", async () => {
+    const card = scorecard({
+      p2: { ...scorecard().p2, gaps_checked: 0, gaps_agree: 0, missed_obstacles: 0, false_obstacles: 0 },
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => reply(card)));
+    render(<ValueCard jobId="job-1" revision="rev-004" />);
+
+    expect(await screen.findByText("chưa có khe kiểm nào được đo")).toBeInTheDocument();
+    expect(screen.queryByText(/khe khớp 0\/0/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/bỏ sót 0/)).not.toBeInTheDocument();
+    expect(p2Label({ ...card.p2, max_distance_error_cm: MISSING("chưa có đoạn đo thước") })).toBe("chưa có");
+    expect(p2Label(card.p2)).toBe("đo, so với số thước"); // còn sai số kích thước đo được
+    expect(p2GapText(card.p2)).toBeNull();
   });
 });

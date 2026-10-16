@@ -164,3 +164,23 @@ describe("BenchmarkPage", () => {
     expect(screen.getByText("(khai báo)")).toBeInTheDocument();
   });
 });
+
+describe("bảng benchmark khi chưa đo khe nào", () => {
+  beforeEach(() => { vi.unstubAllGlobals(); });
+
+  it("scene chưa đo khe nào hiện 'chưa có' ở hai ô khe, không hiện 0/0", async () => {
+    const base = row({ job_id: "job-1", scene_name: "Kho A" });
+    const response: BenchmarkResponse = {
+      rows: [{ ...base, p2: { ...base.p2, gaps_checked: 0, gaps_agree: 0, missed_obstacles: 0, false_obstacles: 0 } }],
+      summary: SUMMARY,
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => reply(response)));
+    render(<BenchmarkPage />);
+
+    await screen.findByRole("table");
+    const cells = within(bodyRows()[0]).getAllByRole("cell").map((cell) => cell.textContent);
+    expect(cells).not.toContain("0/0");
+    expect(cells).not.toContain("0 / 0");
+    expect(cells.filter((text) => text === "chưa có")).toHaveLength(2);
+  });
+});

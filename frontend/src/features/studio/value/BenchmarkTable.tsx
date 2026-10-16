@@ -48,6 +48,8 @@ export function BenchmarkTable({ rows }: { rows: ValueScorecard[] }) {
 function BenchmarkRow({ row }: { row: ValueScorecard }) {
   const ns = row.north_star;
   const p2Unknown = row.p2.unavailable_reason !== null;
+  const noGaps = p2Unknown || row.p2.gaps_checked === 0;
+  const gapTitle = p2Unknown ? row.p2.unavailable_reason ?? "" : noGaps ? "chưa có khe kiểm nào được đo" : p2Label(row.p2);
   const gpu = ns.hardware.gpu_name;
   return (
     <tr className="border-t border-line align-top">
@@ -67,11 +69,11 @@ function BenchmarkRow({ row }: { row: ValueScorecard }) {
       <td className="px-3 py-2 text-right tabular-nums">
         {ns.interventions_total.value === null ? "chưa đo được" : `${ns.interventions_total.value}`}
       </td>
-      <td className="px-3 py-2 tabular-nums" title={p2Unknown ? row.p2.unavailable_reason ?? "" : p2Label(row.p2)}>
-        {p2Unknown ? "chưa có" : `${row.p2.gaps_agree}/${row.p2.gaps_checked}`}
+      <td className="px-3 py-2 tabular-nums" title={gapTitle}>
+        {noGaps ? "chưa có" : `${row.p2.gaps_agree}/${row.p2.gaps_checked}`}
       </td>
       <td className="px-3 py-2 tabular-nums">
-        {p2Unknown ? "chưa có" : `${row.p2.missed_obstacles} / ${row.p2.false_obstacles}`}
+        {noGaps ? "chưa có" : `${row.p2.missed_obstacles} / ${row.p2.false_obstacles}`}
       </td>
       <td className="px-3 py-2 text-right tabular-nums">{figureText(row.p2.max_distance_error_cm)}</td>
       <td className="px-3 py-2 text-right tabular-nums">{figureText(row.p3.edit_to_retest_minutes)}</td>

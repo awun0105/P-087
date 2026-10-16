@@ -23,7 +23,15 @@ export function sourceLabel(figure: Figure): string {
 
 /** P2 luôn là "đo, so với số thước": phần mô phỏng do máy đo, chỉ mốc so sánh do người nhập (không gọi là "khai báo"). */
 export function p2Label(p2: ValueScorecard["p2"]): string {
-  return p2.unavailable_reason ? "chưa có" : "đo, so với số thước";
+  if (p2.unavailable_reason) return "chưa có";
+  if (p2.gaps_checked === 0 && p2.max_distance_error_cm.value === null) return "chưa có";
+  return "đo, so với số thước";
+}
+
+/** Phần khe của P2. Chưa đo khe nào thì không có số để hiện (không phải 0). */
+export function p2GapText(p2: ValueScorecard["p2"]): string | null {
+  if (p2.unavailable_reason || p2.gaps_checked === 0) return null;
+  return `khe khớp ${p2.gaps_agree}/${p2.gaps_checked} · bỏ sót ${p2.missed_obstacles} · giả ${p2.false_obstacles}`;
 }
 
 /** Bậc L4 là khai báo tay; L0–L3 là đo bằng máy. */
@@ -87,8 +95,11 @@ function P2Cell({ p2 }: { p2: ValueScorecard["p2"] }) {
   return (
     <Cell title="P2 · Độ đúng" label={label}>
       <p className="text-sm font-semibold text-ink">
-        khe khớp {p2.gaps_agree}/{p2.gaps_checked} · bỏ sót {p2.missed_obstacles} · giả {p2.false_obstacles}
+        {p2GapText(p2) ?? "chưa có khe kiểm nào được đo"}
       </p>
+      {p2GapText(p2) === null && (
+        <p className="mt-0.5 text-xs text-ink-muted">Thêm khe và gắn layout trong panel Benchmark của scene.</p>
+      )}
       <p className="mt-0.5 text-xs text-ink-muted">
         sai số kích thước tối đa: {error.value === null ? "chưa đo được" : figureText(error)} · vật cản chính có collider {p2.key_obstacles_with_collider}
       </p>
