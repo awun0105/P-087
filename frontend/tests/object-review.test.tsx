@@ -1554,3 +1554,48 @@ describe("ObjectReviewView vỏ và Gaussian theo Draft/Ready (T-017)", () => {
     expect(await screen.findByRole("region", { name: "Chỉnh vùng" })).toBeInTheDocument();
   });
 });
+
+describe("ObjectReviewView Benchmark theo quyền sửa job (T-033)", () => {
+  const emptyTruth = {
+    schema_version: "1.0",
+    include_in_benchmark: false,
+    data_source: "self_capture",
+    robot: null,
+    distances: [],
+    gaps: [],
+    key_obstacle_ids: [],
+    layouts: {},
+    manual_baseline_minutes: null,
+    l4: null,
+    notes: "",
+  };
+
+  beforeEach(() => {
+    vi.mocked(global.fetch).mockReset();
+  });
+
+  it("canMutateJob=false: panel Benchmark chỉ đọc, không có nút Lưu hoạt động", async () => {
+    routeFetch({
+      "/scene": [reply({ scene: scene("rev-001", "CANDIDATE") })],
+      "/benchmark-truth": [reply({ version: 0, truth: emptyTruth, updated_at: null })],
+    });
+    render(<ObjectReviewView jobId="job-a" canMutateJob={false} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Benchmark" }));
+    expect((await screen.findByLabelText("Bề rộng (m)")) as HTMLInputElement).toBeDisabled();
+    expect((screen.getByRole("button", { name: "Lưu" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/chỉ có quyền xem/)).toBeInTheDocument();
+  });
+
+  it("canMutateJob=true: panel Benchmark sửa được và Lưu khi có thay đổi", async () => {
+    routeFetch({
+      "/scene": [reply({ scene: scene("rev-001", "CANDIDATE") })],
+      "/benchmark-truth": [reply({ version: 0, truth: emptyTruth, updated_at: null })],
+    });
+    render(<ObjectReviewView jobId="job-a" canMutateJob />);
+    fireEvent.click(await screen.findByRole("button", { name: "Benchmark" }));
+    const width = (await screen.findByLabelText("Bề rộng (m)")) as HTMLInputElement;
+    expect(width).toBeEnabled();
+    fireEvent.change(width, { target: { value: "0.8" } });
+    expect((screen.getByRole("button", { name: "Lưu" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+});

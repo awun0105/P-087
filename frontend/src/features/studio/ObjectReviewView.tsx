@@ -27,12 +27,10 @@ import { subscribeTheme, themeColor, themeKey } from "@/lib/theme";
 
 import { Badge, Button, Notice } from "@/components/studio/primitives";
 import { MetricSceneView } from "@/features/studio/MetricSceneView";
-import { useOptionalAuth } from "@/features/studio/AuthProvider";
 import { BenchmarkPanel, type BenchmarkPickerApi } from "@/features/studio/value/BenchmarkPanel";
 import { EMPTY_INSPECTION, type InspectionState } from "@/features/viewer/inspection-history";
 import { sourceToCanonical } from "@/features/viewer/source-frame";
 import type { SplatInspection } from "@/features/viewer/splat-inspection";
-import { canEdit } from "@/lib/api/auth";
 import { ObjectifyNotice } from "@/features/studio/ObjectifyNotice";
 import { GeometryReviewBanner } from "@/features/studio/GeometryReviewBanner";
 import { RegionEditor } from "@/features/studio/region/RegionEditor";
@@ -285,12 +283,15 @@ export function ObjectReviewView({
   revision,
   onSaveState,
   sceneStateControls,
+  canMutateJob = false,
 }: {
   jobId: string;
   /** Revision mới nhất nơi khác biết; khác revision đang giữ thì tải lại (tránh 409 khi thao tác). */
   revision?: string | null;
   onSaveState?: (state: SaveState) => void;
   sceneStateControls?: ReactNode;
+  /** Quyền sửa job (`progress.capabilities.can_mutate` qua StudioTab); quyết định panel Benchmark có ghi được không. */
+  canMutateJob?: boolean;
 }) {
   const [representations, setRepresentations] = useState<ObjectRepresentation[]>([]);
   const [scene, setScene] = useState<SceneIR | null>(null);
@@ -300,9 +301,8 @@ export function ObjectReviewView({
   const [selected, setSelected] = useState<string | null>(null);
   const [viewportHidden, setViewportHidden] = useState({ jobId, ids: new Set<string>() });
   const hiddenIds = useMemo(() => viewportHidden.jobId === jobId ? viewportHidden.ids : new Set<string>(), [viewportHidden, jobId]);
-  // Benchmark (T-033): panel nhập ground truth và chọn điểm trên viewer. Ngoài AuthProvider thì chỉ xem.
-  const auth = useOptionalAuth();
-  const benchmarkEditable = auth !== null && canEdit(auth.me);
+  // Benchmark (T-033): panel nhập ground truth và chọn điểm trên viewer. Quyền sửa là quyền sửa job của máy chủ.
+  const benchmarkEditable = canMutateJob;
   const [benchmarkOpen, setBenchmarkOpen] = useState(false);
   const [inspectionController, setInspectionController] = useState<SplatInspection | null>(null);
   const [inspectionState, setInspectionState] = useState<InspectionState>(EMPTY_INSPECTION);
@@ -819,7 +819,7 @@ export function ObjectReviewView({
             />
           </div>
         )}
-        {benchmarkEditable && !benchmarkOpen && (
+        {!benchmarkOpen && (
           <div className="pointer-events-none absolute right-3 bottom-3 z-20">
             <Button size="sm" variant="secondary" className="pointer-events-auto" onClick={() => setBenchmarkOpen(true)}>
               Benchmark
