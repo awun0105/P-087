@@ -13,7 +13,7 @@ Chạy toàn bộ test sau Sprint 6, cập nhật hướng dẫn đo cho team.
    - Link tải CSV/Markdown dùng `<a download>`: phiên hết hạn thì file tải về là JSON lỗi; đăng nhập lại rồi tải lại.
    - "Mở Benchmark" ở thẻ Giá trị chỉ mở tab Studio; người dùng bấm nút "Benchmark" ở góc viewer.
 3. Dọn nhỏ còn lại từ review T-033 (commit riêng, có test): tắt lớp phủ collider/vỏ/box trong lúc chọn điểm Benchmark để cú bấm
-   trúng splat; nút "Bỏ chọn {id}" của vật cản chính đã bị xoá khỏi scene ghi "vật đã xoá ({id})" thay vì id thô.
+   trúng splat; dòng tổng hợp đầu `benchmark_markdown` ghi "—" thay "0/0" khi `gaps_total == 0`; nút "Bỏ chọn {id}" của vật cản chính đã bị xoá khỏi scene ghi "vật đã xoá ({id})" thay vì id thô.
 4. Ghi lại mục "Sản phẩm cần thêm gì" của Playbook thành "đã có" (Architect cập nhật trang; engineer ghi danh sách vào handoff).
 
 ## Acceptance criteria

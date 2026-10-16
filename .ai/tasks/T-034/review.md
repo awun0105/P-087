@@ -1,6 +1,6 @@
 # Review T-034
 
-Verdict: CHANGES REQUESTED (1 sửa, kèm hướng dẫn chi tiết)
+Verdict (vòng 1): CHANGES REQUESTED (1 sửa) · Vòng 2: ACCEPTED
 
 Audit: đọc trọn `lib/api/value.ts` (phần T-034), `value/ValueCard.tsx`, `value/BenchmarkPage.tsx`, `value/BenchmarkTable.tsx`,
 route `app/(studio)/benchmark/page.tsx`, diff `ReviewTab.tsx`, `AppShell.tsx`, `Breadcrumbs.tsx`; đối chiếu kiểu TS với model
@@ -148,3 +148,16 @@ cd .. && .venv/bin/pytest tests/test_orchestration/test_value_scorecard.py -q
 
 ## Ghi chú cho T-035
 - "Mở Benchmark" chưa mở thẳng panel; sau khi T-033 accepted có thể thêm `?panel=benchmark` mà `ObjectReviewView` đọc.
+
+## Round 2 — ACCEPTED
+
+Audit commit `b0925b96` (backend), `84a5acff` (frontend). Chạy `test_value_scorecard.py`: 34 PASS; value-card + benchmark-page +
+evaluation-card: 22 PASS.
+
+- Backend: `_no_gap_measured` dùng chung cho `_agree_text`, `_missed_text`, `_csv_row`; dòng P2 Markdown ghi "chưa có khe kiểm nào
+  được đo", cột nguồn P2 là "—" khi không có cả khe lẫn sai số; cột nguồn P4 ghi "khai báo" khi L4. Bảng benchmark Markdown cũng
+  ra "—" vì đi qua `_agree_text`/`_missed_text`.
+- Frontend: `p2GapText`, `p2Label` và dòng bảng đúng như hướng dẫn; sai số kích thước vẫn hiện khi có đoạn thước.
+
+Còn nhỏ, không chặn (chuyển T-035): dòng tổng hợp đầu `benchmark_markdown` (scorecard.py ~869) vẫn ghi "Khe khớp: 0/0" khi cả bộ
+chưa đo khe nào; ô tổng hợp trên trang /benchmark đã ghi "chưa đo được".
