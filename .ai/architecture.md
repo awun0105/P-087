@@ -273,8 +273,14 @@ Non-goals: không theo dõi người dùng ngoài Studio của job; không gửi
 4. **Nhất quán sau khi dời** (layout B so với A): với mỗi vật có transform khác nhau giữa hai revision: (a) trong hộp bao của vật
    tại pose A (thu 2 cm mỗi mặt, z trong dải robot) collision tổng hợp của B **không còn** tam giác; (b) tại pose B collider của
    vật có mặt. Đạt khi mọi vật dời đều đạt.
-5. **Bậc sẵn sàng**: L1 = đã xác nhận mét và `object_geometry` ready (hoặc scene cũ không có khoá); L2 = L1 + mọi vật cản chính
-   có collider + có ≥ 1 `walk_session` hoàn tất trên revision + khe kiểm của layout A không có bỏ sót; L3 = L2 + có gói mô phỏng
-   cho revision hiện tại + có lần validation Isaac `COMPLETED` cho gói đó; L4 = L3 + khai báo tay bài thử robot A và B (ghi rõ
-   "khai báo", kèm ghi chú bằng chứng).
+5. **Bậc sẵn sàng** (đặc tả duy nhất; Playbook diễn đạt lại cùng nội dung bằng lời thường):
+   - L1 = đã xác nhận mét và `object_geometry` ready (hoặc scene cũ không có khoá).
+   - L2 = L1 + mọi vật cản chính có collider + có ≥ 1 `walk_session` hoàn tất trên revision + khe kiểm của layout A **không có
+     bỏ sót vật cản**. Khe được đo trên **chính collision tổng hợp mà Walk dùng** (`effective_collision_for_revision` + collider
+     vật), nên đây là cách máy kiểm "Walk chặn đúng ở khe kiểm" của Playbook. Vật cản giả không chặn L2 nhưng luôn hiện ở P2.
+   - L3 = L2 + có gói mô phỏng cho revision hiện tại + có lần validation Isaac `COMPLETED` cho gói đó **với
+     `ValidationReport.overall_result = PASS`** ("mở được trong Isaac Sim, collider khớp"). Run COMPLETED mà FAIL/ERROR → chưa L3,
+     `reasons` nêu kết quả.
+   - L4 = L3 + khai báo tay bài thử robot: `layout_a_passed`, `layout_b_passed`, `matches_reality` đều True (ghi rõ "khai báo",
+     kèm bằng chứng).
 6. Mọi số trong bảng ghi rõ nguồn: `measured` (máy đo), `declared` (người nhập), `unavailable` (thiếu dữ liệu, không đoán).
