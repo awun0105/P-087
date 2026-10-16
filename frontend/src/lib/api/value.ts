@@ -172,3 +172,123 @@ export function putBenchmarkTruth(
     body: JSON.stringify({ expected_version: expectedVersion, truth }),
   });
 }
+
+/* ---------------------------------------------------------------------------------------------
+ * Bảng metric giá trị (T-032, architecture §15.1): `/api/v1/jobs/{id}/value-metrics` và benchmark.
+ * Mọi số thiếu dữ liệu là `provenance: "unavailable"` kèm `note`; không bao giờ là 0 giả.
+ * ------------------------------------------------------------------------------------------- */
+
+export type Provenance = "measured" | "declared" | "unavailable";
+
+export interface Figure {
+  value: number | string | null;
+  unit: string | null;
+  provenance: Provenance;
+  note: string | null;
+}
+
+export interface GapResult {
+  gap_id: string;
+  sim_width_m: number;
+  sim_passable: boolean;
+  real_passable: boolean;
+  agree: boolean;
+  kind: "ok" | "missed_obstacle" | "false_obstacle";
+  heights_checked: number;
+}
+
+export interface MoveResult {
+  object_id: string;
+  old_cleared: boolean;
+  new_present: boolean;
+  passed: boolean;
+}
+
+export interface NorthStar {
+  hands_on_minutes: Figure;
+  hands_on_before_ready_minutes: Figure;
+  hands_on_after_ready_minutes: Figure;
+  machine_minutes: Figure;
+  hardware: Record<string, string | number | null>;
+  gpu_hours: Figure;
+  cost_usd: Figure;
+  interventions: Record<string, number>;
+  interventions_total: Figure;
+}
+
+export interface ScorecardP2 {
+  gaps_checked: number;
+  gaps_agree: number;
+  missed_obstacles: number;
+  false_obstacles: number;
+  gap_results: GapResult[];
+  max_distance_error_cm: Figure;
+  key_obstacles_with_collider: string;
+  unavailable_reason: string | null;
+}
+
+export interface ScorecardP3 {
+  edit_to_retest_minutes: Figure;
+  moves: MoveResult[];
+  consistent: boolean | null;
+  unavailable_reason: string | null;
+}
+
+export interface ScorecardP4 {
+  level: 0 | 1 | 2 | 3 | 4;
+  reasons: string[];
+}
+
+export interface ValueScorecard {
+  job_id: string;
+  scene_name: string;
+  generated_at: string;
+  scene_revision: string | null;
+  data_source: string;
+  notes: string;
+  north_star: NorthStar;
+  p2: ScorecardP2;
+  p3: ScorecardP3;
+  p4: ScorecardP4;
+  manual_baseline_minutes: Figure;
+}
+
+export interface BenchmarkSummary {
+  scenes: number;
+  hands_on_median_minutes: number | null;
+  hands_on_n: number;
+  machine_median_minutes_by_gpu: Record<string, number | null>;
+  machine_n_by_gpu: Record<string, number>;
+  gaps_agree_total: number;
+  gaps_total: number;
+  missed_total: number;
+  false_total: number;
+  scenes_at_least_l2: number;
+  scenes_at_least_l3: number;
+  manual_median_minutes: number | null;
+  manual_n: number;
+}
+
+export interface BenchmarkResponse {
+  rows: ValueScorecard[];
+  summary: BenchmarkSummary;
+}
+
+const VALUE_API = "/api/v1";
+
+export function getValueMetrics(jobId: string, signal?: AbortSignal): Promise<ValueScorecard> {
+  return apiFetch<ValueScorecard>(`/api/v1/jobs/${encodeURIComponent(jobId)}/value-metrics`, { signal });
+}
+
+export function getBenchmarkMetrics(signal?: AbortSignal): Promise<BenchmarkResponse> {
+  return apiFetch<BenchmarkResponse>(`${VALUE_API}/value-metrics/benchmark`, { signal });
+}
+
+/** Đường dẫn tải thật tới API (không tạo file ở phía client). */
+export function valueMetricsUrl(jobId: string, format: "md" | "csv"): string {
+  return `${VALUE_API}/jobs/${encodeURIComponent(jobId)}/value-metrics.${format}`;
+}
+
+export function benchmarkMetricsUrl(format: "md" | "csv"): string {
+  return `${VALUE_API}/value-metrics/benchmark.${format}`;
+}
