@@ -408,6 +408,25 @@ MIGRATIONS += (
         ),
     ),
 )
+MIGRATIONS += (
+    (
+        22,
+        (
+            """CREATE TABLE r2s_worker_runtimes (
+                software_runtime_checksum TEXT PRIMARY KEY,
+                runtime_manifest_checksum TEXT NOT NULL,
+                config_checksum TEXT NOT NULL,
+                seed INTEGER,
+                gpu_name TEXT,
+                hardware TEXT NOT NULL,
+                manifest TEXT NOT NULL,
+                first_seen_at TEXT NOT NULL,
+                last_seen_at TEXT NOT NULL
+            )""",
+            "CREATE INDEX r2s_worker_runtimes_by_config ON r2s_worker_runtimes(config_checksum, last_seen_at)",
+        ),
+    ),
+)
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
 #: DB đã kiểm/chạy migration trong tiến trình này. API tạo RuntimeDatabase mỗi request;

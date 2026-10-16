@@ -7,6 +7,7 @@ reclaim RUNNING theo timeout vì trainer có thể vẫn còn sống trên host 
 import argparse
 import logging
 import signal
+from collections.abc import Callable
 from pathlib import Path
 from threading import Event, Thread
 from typing import Protocol
@@ -32,6 +33,7 @@ from src.services.orchestration.jobs.runner import (
     run_reviewed_preview_job,
     run_video_job,
 )
+from src.services.orchestration.jobs.worker_runtimes import publisher
 from src.services.orchestration.jobs.workspace import attempt_in_use, job_attempts, job_root
 from src.services.orchestration.processing import is_presets_file, load_presets
 from src.services.orchestration.processing.capability import probe as probe_capability
@@ -299,7 +301,10 @@ CAPABILITY_INTERVAL_SECONDS = 300
 
 
 def _start_capability_heartbeat(
-    registry: ProjectRegistry, worker_root: Path, admission: ResourceAdmission | None = None
+    registry: ProjectRegistry,
+    worker_root: Path,
+    admission: ResourceAdmission | None = None,
+    publish_runtime: Callable[[RuntimeDatabase], None] | None = None,
 ) -> Event:
     """Đo và ghi cấu hình máy ngay, rồi lặp ở luồng nền (job dài không làm số đo quá hạn).
 
@@ -318,6 +323,8 @@ def _start_capability_heartbeat(
                     idle = admission.machine_idle() if admission is not None else False
                     previous = probe_capability(worker_root, idle=idle, previous=previous)
                     record_capability(database, previous)
+                    if publish_runtime is not None:
+                        publish_runtime(database)
                     from src.services.orchestration.uploads.temporary import TemporaryUploadService
 
                     TemporaryUploadService(database, registry.runtime_resolver).purge_expired()
@@ -358,7 +365,12 @@ def main(argv: list[str] | None = None) -> int:
     validation_worker = IsaacValidationWorker(registry, settings, admission)
     if admission.discard_leftover_reservation():
         logger.warning("Đã xoá giữ chỗ tài nguyên còn sót của lần chạy trước worker=%s", admission.worker_id)
-    heartbeat = _start_capability_heartbeat(registry, settings.product_worker_root, admission)
+    publish_runtime = (
+        publisher(settings.product_processing_config, settings.product_runtime_manifest, registry.execution_profile)
+        if settings.product_runtime_manifest is not None
+        else None
+    )
+    heartbeat = _start_capability_heartbeat(registry, settings.product_worker_root, admission, publish_runtime)
     previous = signal.getsignal(signal.SIGTERM)
 
     def interrupt(signum: int, frame: object) -> None:

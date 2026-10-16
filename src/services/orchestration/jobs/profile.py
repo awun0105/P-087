@@ -31,6 +31,14 @@ def software_runtime_checksum(manifest: RuntimeManifest) -> str:
     return with_canonical_checksum(draft, "runtime_manifest_checksum").runtime_manifest_checksum
 
 
+def load_runtime_manifest(runtime: Path) -> RuntimeManifest:
+    """Đọc manifest và kiểm canonical checksum; file bị sửa tay thì từ chối."""
+    manifest = RuntimeManifest.model_validate_json(runtime.read_bytes())
+    if manifest.runtime_manifest_checksum != canonical_content_checksum(manifest, "runtime_manifest_checksum"):
+        raise ArtifactChecksumError("RuntimeManifest canonical checksum không khớp")
+    return manifest
+
+
 class ExecutionProfile(BaseModel):
     """Identity đã khóa tại composition root, không do browser tự khai."""
 
@@ -45,9 +53,7 @@ class ExecutionProfile(BaseModel):
     @classmethod
     def load(cls, config: Path, runtime: Path, seed: int | None) -> "ExecutionProfile":
         """Runtime manifest dùng canonical checksum; config dùng exact bytes."""
-        manifest = RuntimeManifest.model_validate_json(runtime.read_bytes())
-        if manifest.runtime_manifest_checksum != canonical_content_checksum(manifest, "runtime_manifest_checksum"):
-            raise ArtifactChecksumError("RuntimeManifest canonical checksum không khớp")
+        manifest = load_runtime_manifest(runtime)
         return cls(
             config_checksum=sha256_file(config),
             runtime_manifest_checksum=manifest.runtime_manifest_checksum,
