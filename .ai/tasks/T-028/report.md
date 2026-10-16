@@ -98,3 +98,61 @@ Không chạy full test suite (theo hướng dẫn). `graphify update .` đã ch
 nguyên số như trước. Đỉnh RAM/VRAM của `scene.*` để T-032 đọc như đã chốt. Chờ Architect chọn trước khi làm.
 
 Chưa chạy job thật trên GPU, nên thời gian máy thật của `scene.*` chưa được đo.
+
+## Round 2
+
+Đã làm theo `review.md`, mục "Required changes":
+
+1. `processing/observed.py`: thêm `SCENE_TOOL_PREFIX = "scene."`, `is_scene_operation(usage)` và
+   `pipeline_usages(usages)` (bỏ mọi bản ghi tool bắt đầu bằng `scene.`). `processing_seconds` dùng `is_scene_operation`.
+2. Áp `pipeline_usages` ở bốn chỗ "Loại":
+
+| Nơi đọc usage | Thay đổi | Commit |
+| --- | --- | --- |
+| `evaluation/scorecard.py` `_system_metrics` | lọc `completed` qua `pipeline_usages` (thẻ RAM/VRAM/cấu hình) | `e745d56d` |
+| `jobs/runner.py` `_requeue_if_exhausted` (đếm `exhausted` của job) | `pipeline_usages(load_usages(...))` | `e745d56d` |
+| `jobs/admission.py` (`exhausted_before` + `observed_budget`) | `pipeline_usages(load_usages(...))` | `e745d56d` |
+| `scripts/resources/calibrate_resource_model.py` | `pipeline_usages(load_usages(db))` | `e745d56d` |
+
+   Giữ nguyên: `processing_seconds` (cần `scene.*`), `benchmark._tool_timings` và `observed_budget` / `observed_for_config`
+   (đã lọc theo tool, config, params), T-032 đọc trực tiếp.
+
+3. Test:
+   - (a) `test_scene_operations_leave_the_pipeline_resource_metrics_unchanged` (`test_evaluation.py`): thêm
+     `scene.geometry` completed và `scene.region` failed vào job có usage pipeline → danh sách (key, value, display) của
+     `_system_metrics` **giống hệt** khi không có `scene.*`. Mốc gốc được kiểm: `system.peak_ram` = 5,19 GB,
+     "5,2 GB (bước scene_extract)".
+   - (b) `test_scene_exhaustion_never_forces_a_pipeline_requeue_decision` (`test_observed_budget.py`): một lượt pipeline hết
+     bộ nhớ + hai `scene.geometry` hết bộ nhớ → `_requeue_if_exhausted` vẫn xếp lại (QUEUED).
+     `test_scene_exhaustion_does_not_make_a_pipeline_job_run_alone` (`test_resource_admission.py`): `scene.geometry`
+     hết bộ nhớ không làm job pipeline chạy một mình (`exclusive` = False).
+   - (c) `test_benchmark_timings_skip_scene_operations`: `scene.*` có `config_checksum` khác cấu hình job nên không vào
+     `_tool_timings`. `test_scene_records_do_not_change_the_observed_budget` mở rộng: thêm bản ghi `scene.*` có `params`
+     khớp và bản ghi `failed` + `exhausted` → ngân sách không đổi.
+
+### Kiểm chứng đột biến
+
+Tạm thời bỏ lọc trong `pipeline_usages` (`return list(usages)`) rồi chạy các test có chữ `scene`:
+- `test_scene_exhaustion_never_forces_a_pipeline_requeue_decision`: FAIL
+- `test_scene_exhaustion_does_not_make_a_pipeline_job_run_alone`: FAIL
+- `test_scene_operations_leave_the_pipeline_resource_metrics_unchanged`: FAIL
+- 3 test còn lại (`test_scene_records_do_not_change_the_observed_budget`, `test_benchmark_timings_skip_scene_operations`,
+  và test cộng dồn `scene.*`) vẫn PASS: đây là các test bảo vệ tính chất đã có sẵn trong code, không phải test bắt lỗi
+  của bộ lọc mới.
+Đã khôi phục `observed.py` và kiểm tra lại `is_scene_operation(usage)]` có trong file.
+
+### Tests (kết quả thật)
+
+- `pytest test_scene_objectify_queue.py test_observed_budget.py test_resource_telemetry.py
+  tests/integration/test_studio_processing_job.py test_evaluation.py test_resource_admission.py -q`: **178 passed**
+- `pytest test_pipeline_timing.py test_processing_config.py -q`: **41 passed**
+- `ruff check src tests scripts/resources`: All checks passed.
+- `ruff format --check src tests scripts/resources`: 681 files already formatted.
+
+Không chạy full test suite. `graphify update .` đã chạy, exit 0.
+
+### Ghi chú
+
+- `objectify_queue.py` có thay đổi chưa commit của người khác trong cây làm việc. Tôi không sửa và không commit file này.
+- Q1 trong "Câu hỏi cho Architect" đã được `review.md` quyết định (loại `scene.*` khỏi các chỗ đọc của pipeline); mục
+  đó được coi là đã đóng ở vòng này.
