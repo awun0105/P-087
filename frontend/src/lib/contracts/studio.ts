@@ -154,6 +154,8 @@ export interface SceneSummary {
   awaiting_anonymization_review?: boolean;
   /** Job xong nhưng tách theo vật lỗi hết số lần thử, chờ người dùng chọn; API cũ không gửi trường này. */
   awaiting_object_choice?: boolean;
+  /** Bước "Duyệt vật & Tạo mesh": chờ duyệt, đang dựng, Tạo mesh lỗi; null = không còn việc hoặc scene cũ. API cũ không gửi. */
+  geometry_review?: "waiting" | "running" | "failed" | null;
   /** Caller-specific ownership decision; absent on older APIs is treated as denied. */
   capabilities?: { can_delete_project: boolean };
   /** Thời gian máy đã xử lý (tổng các bước đã chạy xong), không gồm lúc xếp hàng và lúc chờ người dùng; null = chưa đo. */

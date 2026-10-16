@@ -192,6 +192,28 @@ describe("job xong nhưng tách vật thể chờ người dùng chọn", () => 
   });
 });
 
+describe("scene Draft: job xong nhưng còn bước Duyệt vật & Tạo mesh", () => {
+  it("danh sách ghi đúng bước còn lại, không ghi 'Đã dựng scene', chỉ khi job đã SUCCEEDED", async () => {
+    const { sceneStatus, sceneSummaryStatus } = await import("@/features/studio/sceneStatus");
+    const finished = scene("job-d", "SUCCEEDED");
+    expect(sceneSummaryStatus({ ...finished, geometry_review: "waiting" })).toMatchObject({ label: "Chờ duyệt vật", group: "action", active: false });
+    expect(sceneSummaryStatus({ ...finished, geometry_review: "running" })).toMatchObject({ label: "Đang tạo mesh", group: "running", active: true });
+    expect(sceneSummaryStatus({ ...finished, geometry_review: "failed" })).toMatchObject({ label: "Tạo mesh lỗi", tone: "rust", group: "action" });
+    // Ready hoặc API cũ không gửi trường này: giữ nhãn cũ.
+    expect(sceneSummaryStatus({ ...finished, geometry_review: null })).toMatchObject({ label: "Đã dựng scene", group: "done" });
+    expect(sceneSummaryStatus(finished)).toMatchObject({ label: "Đã dựng scene", group: "done" });
+    expect(sceneStatus(scene("job-r", "RUNNING").latest_job, false, false, false, "waiting").group).toBe("running");
+  });
+
+  it("Tổng quan đưa scene Draft vào 'Cần bạn xử lý'", async () => {
+    const draft = { ...scene("job-d", "SUCCEEDED"), geometry_review: "waiting" as const };
+    vi.mocked(listScenes).mockResolvedValue({ ok: true, data: { scenes: [draft] } });
+    render(<OverviewPage />);
+    expect(await screen.findByRole("link", { name: /Kho job-d/ })).toHaveTextContent("Chờ duyệt vật");
+    expect(within(screen.getByText("Cần bạn xử lý", { selector: "dt" }).parentElement!).getByText("1")).toBeInTheDocument();
+  });
+});
+
 describe("trạng thái scene chờ xem bản đã che", () => {
   it("được tính là cần xử lý, không active, và ưu tiên hơn trạng thái worker", async () => {
     const { sceneStatus } = await import("@/features/studio/sceneStatus");
