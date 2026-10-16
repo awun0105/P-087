@@ -45,6 +45,7 @@ from src.services.orchestration.processing.observed import (
     exhausted_before,
     load_usages,
     observed_budget,
+    pipeline_usages,
     resource_observation_params,
 )
 from src.services.orchestration.processing.procfs import process_alive, process_table, process_tree
@@ -350,7 +351,7 @@ class ResourceAdmission:
             # runner báo lỗi theo đường có sẵn (ghi FAILED đúng stage), thay vì chờ vô hạn.
             logger.warning("Không đọc được cấu hình job để ước lượng cause=%s", type(error).__name__)
             return None
-        usages = load_usages(self.database)
+        usages = pipeline_usages(load_usages(self.database))
         budget = None
         colmap_use_gpu = config.colmap.get("use_gpu", False)
         if not exhausted_before(usages, job.job_id) and isinstance(colmap_use_gpu, bool):

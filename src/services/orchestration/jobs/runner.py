@@ -99,7 +99,7 @@ from src.services.orchestration.jobs.progress import (
 from src.services.orchestration.jobs.workspace import attempt_lease, cleanup_attempt_workspace, cleanup_finished_job
 from src.services.orchestration.processing.capability import latest as latest_capability
 from src.services.orchestration.processing.config import load_job_config
-from src.services.orchestration.processing.observed import load_usages
+from src.services.orchestration.processing.observed import load_usages, pipeline_usages
 from src.services.orchestration.processing.telemetry import (
     Outcome,
     ResourceContext,
@@ -341,7 +341,9 @@ def _requeue_if_exhausted(attempt: _Attempt) -> JobManifest | None:
         if current.status != JobStatus.FAILED:
             return None
         earlier = sum(
-            1 for usage in load_usages(persistence.database) if usage.job_id == current.job_id and usage.exhausted
+            1
+            for usage in pipeline_usages(load_usages(persistence.database))
+            if usage.job_id == current.job_id and usage.exhausted
         )
         if earlier > 1:
             logger.warning("Job %s hết bộ nhớ cả khi chạy một mình; giữ FAILED", current.job_id)

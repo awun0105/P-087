@@ -68,6 +68,21 @@ def load_usages(database: RuntimeDatabase) -> list[ResourceUsage]:
     return usages
 
 
+#: Tiền tố tool của hàng đợi tách vật (`scene.<mode>`); không thuộc lượt chạy pipeline của job.
+SCENE_TOOL_PREFIX = "scene."
+
+
+def is_scene_operation(usage: ResourceUsage) -> bool:
+    """Bản ghi của hàng đợi tách vật (Tạo mesh, dựng lại vùng...), không phải một bước của pipeline."""
+    return usage.tool.startswith(SCENE_TOOL_PREFIX)
+
+
+def pipeline_usages(usages: Iterable[ResourceUsage]) -> list[ResourceUsage]:
+    """Bỏ mọi bản ghi `scene.*`. Mọi chỗ đọc số đo để quyết định cho pipeline (thẻ đánh giá, xếp lại,
+    ngân sách, hiệu chỉnh) phải đi qua đây, để một việc làm sau đó không đổi kết quả của lượt chạy đã xong."""
+    return [usage for usage in usages if not is_scene_operation(usage)]
+
+
 def processing_seconds(usages: Iterable[ResourceUsage]) -> dict[str, float]:
     """Thời gian máy đã xử lý của từng job: tổng thời lượng các bước đã chạy xong.
 
@@ -84,7 +99,7 @@ def processing_seconds(usages: Iterable[ResourceUsage]) -> dict[str, float]:
     for usage in usages:
         if usage.outcome != "completed":
             continue
-        if usage.tool.startswith("scene."):
+        if is_scene_operation(usage):
             totals[usage.job_id] = totals.get(usage.job_id, 0.0) + usage.duration_seconds
             continue
         key = (usage.job_id, usage.tool)
