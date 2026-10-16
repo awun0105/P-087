@@ -1,14 +1,21 @@
 """Model ground truth của benchmark: biên giá trị, id trùng, độ dài danh sách (architecture §15.2)."""
 
+import threading
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
+from src.services.orchestration.jobs.database import RuntimeDatabase
 from src.services.orchestration.value.ground_truth import (
     BenchmarkTruth,
     GapCheck,
     L4Declaration,
     MeasuredDistance,
     RobotProfile,
+    TruthVersionConflictError,
+    read_truth,
+    write_truth,
 )
 
 
@@ -102,3 +109,82 @@ def test_unknown_fields_are_rejected_at_every_level() -> None:
         BenchmarkTruth(surprise=1)  # type: ignore[call-arg]
     with pytest.raises(ValidationError):
         BenchmarkTruth(distances=[_distance(extra_field=1)])
+
+
+@pytest.fixture
+def database(tmp_path: Path) -> RuntimeDatabase:
+    return RuntimeDatabase(f"sqlite:///{tmp_path / 'runtime.db'}")
+
+
+def _truth(**overrides: object) -> BenchmarkTruth:
+    body: dict[str, object] = {"include_in_benchmark": True, "notes": "bản thử"}
+    body.update(overrides)
+    return BenchmarkTruth(**body)  # type: ignore[arg-type]
+
+
+def test_missing_document_reads_as_version_zero_with_defaults(database: RuntimeDatabase) -> None:
+    stored = read_truth(database, "job-missing")
+
+    assert stored.version == 0
+    assert stored.updated_at is None
+    assert stored.truth == BenchmarkTruth()
+
+
+def test_write_from_version_zero_then_update_bumps_version(database: RuntimeDatabase) -> None:
+    first = write_truth(database, "job-a", 0, _truth(notes="lần đầu"))
+    second = write_truth(database, "job-a", 1, _truth(notes="lần hai"))
+
+    assert (first.version, second.version) == (1, 2)
+    stored = read_truth(database, "job-a")
+    assert stored.version == 2
+    assert stored.truth.notes == "lần hai"
+    assert stored.updated_at is not None and stored.updated_at.tzinfo is not None
+
+
+def test_stale_expected_version_is_rejected_and_keeps_the_stored_document(database: RuntimeDatabase) -> None:
+    write_truth(database, "job-b", 0, _truth(notes="của A"))
+    write_truth(database, "job-b", 1, _truth(notes="của A, vòng hai"))
+
+    with pytest.raises(TruthVersionConflictError) as error:
+        write_truth(database, "job-b", 1, _truth(notes="của B, ghi muộn"))
+
+    assert (error.value.expected_version, error.value.current_version) == (1, 2)
+    stored = read_truth(database, "job-b")
+    assert (stored.version, stored.truth.notes) == (2, "của A, vòng hai")
+
+
+def test_creating_twice_from_version_zero_conflicts(database: RuntimeDatabase) -> None:
+    write_truth(database, "job-c", 0, _truth())
+
+    with pytest.raises(TruthVersionConflictError):
+        write_truth(database, "job-c", 0, _truth(notes="ghi thứ hai"))
+    assert read_truth(database, "job-c").version == 1
+
+
+def test_concurrent_writers_from_the_same_version_yield_one_winner(tmp_path: Path) -> None:
+    url = f"sqlite:///{tmp_path / 'runtime.db'}"
+    RuntimeDatabase(url)  # chạy migration một lần trước khi tranh chấp
+    start = threading.Barrier(2)
+    outcomes: list[str] = []
+    lock = threading.Lock()
+
+    def writer(name: str) -> None:
+        start.wait()
+        try:
+            write_truth(RuntimeDatabase(url), "job-race", 0, _truth(notes=name))
+            result = "won"
+        except TruthVersionConflictError:
+            result = "conflict"
+        with lock:
+            outcomes.append(result)
+
+    threads = [threading.Thread(target=writer, args=(name,)) for name in ("alpha", "beta")]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+
+    assert sorted(outcomes) == ["conflict", "won"]
+    stored = read_truth(RuntimeDatabase(url), "job-race")
+    assert stored.version == 1
+    assert stored.truth.notes in {"alpha", "beta"}

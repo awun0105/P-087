@@ -400,6 +400,14 @@ MIGRATIONS += (
         ),
     ),
 )
+MIGRATIONS += (
+    (
+        21,
+        (
+            "CREATE TABLE r2s_benchmark_truth (job_id TEXT PRIMARY KEY, version INTEGER NOT NULL, payload TEXT NOT NULL)",
+        ),
+    ),
+)
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
 #: DB đã kiểm/chạy migration trong tiến trình này. API tạo RuntimeDatabase mỗi request;
