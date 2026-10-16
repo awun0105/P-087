@@ -55,6 +55,8 @@ class Settings(BaseSettings):
     #: Từ điển COLMAP chuẩn, tải bằng scripts/assets/download_vocab_tree.py; None dùng vị trí chuẩn trong repo.
     product_colmap_vocab_tree: Path | None = None
     product_runtime_manifest: Path | None = None
+    #: T-040: API không cần manifest; job mới lấy runtime mà GPU worker đã công bố vào DB (cần PRODUCT_PROCESSING_CONFIG).
+    product_runtime_from_workers: bool = False
     #: Runtime qualification registry for grouped input recipes; absent means no new recipe dispatch is enabled.
     product_input_runtime_registry: Path | None = None
     #: Server-owned policy/profile for durable Isaac validation; not accepted from request payloads.
@@ -185,7 +187,13 @@ class Settings(BaseSettings):
             raise ValueError(f"Missing API key for LLM provider: {self.llm_provider}")
         if self.app_env in {"staging", "production"} and not self.artifact_root.is_absolute():
             raise ValueError("ARTIFACT_ROOT must be absolute outside development/test")
-        if (self.product_processing_config is None) != (self.product_runtime_manifest is None):
+        if self.product_runtime_manifest is not None and self.product_processing_config is None:
+            raise ValueError("PRODUCT_RUNTIME_MANIFEST cần PRODUCT_PROCESSING_CONFIG")
+        if self.product_runtime_from_workers and self.product_processing_config is None:
+            raise ValueError("PRODUCT_RUNTIME_FROM_WORKERS cần PRODUCT_PROCESSING_CONFIG")
+        if not self.product_runtime_from_workers and (self.product_processing_config is None) != (
+            self.product_runtime_manifest is None
+        ):
             raise ValueError("PRODUCT_PROCESSING_CONFIG và PRODUCT_RUNTIME_MANIFEST phải khai báo cùng nhau")
         if (self.product_isaac_validation_config is None) != (self.product_isaac_validation_profile is None):
             raise ValueError(

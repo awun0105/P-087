@@ -74,6 +74,7 @@ from src.services.orchestration.inputs.assembly import InputResolutionRecord
 from src.services.orchestration.inputs.compatibility import INPUT_ASSEMBLY_RUNNABLE_RECIPE_GROUPS
 from src.services.orchestration.inputs.loose_package import LoosePackageError, verify_package_members
 from src.services.orchestration.inputs.runs import InputAssemblyRunCommit, InputAssemblyRunResult
+from src.services.orchestration.jobs import worker_runtimes
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
 from src.services.orchestration.jobs.models import JobAttemptRecord, PreparedInputReceipt, TransitionRequest
 from src.services.orchestration.jobs.profile import ExecutionProfile
@@ -133,6 +134,9 @@ class ProjectRegistry:
         database: RuntimeDatabase | None = None,
         execution_profile: ExecutionProfile | None = None,
         remote: ArtifactRemote | None = None,
+        runtime_from_workers: bool = False,
+        processing_config_checksum: Checksum | None = None,
+        job_seed: int | None = None,
     ) -> None:
         self.fixture_root = fixture_root
         self.job_fixture_dir = fixture_root / "mock_job"
@@ -144,6 +148,10 @@ class ProjectRegistry:
         self.runtime_resolver = ArtifactResolver(runtime_root, remote)
         self.persistence = ProjectPersistence(database, self.runtime_resolver) if database else None
         self.execution_profile = execution_profile
+        #: T-040: runtime cho job mới lấy từ worker đã công bố khi không có profile ghim.
+        self.runtime_from_workers = runtime_from_workers
+        self.processing_config_checksum = processing_config_checksum
+        self.job_seed = job_seed
         self.store = FilesystemArtifactStore(self.resolver)
         self.lifecycle = JobLifecycle(self.runtime_resolver, self.resolver)
         self.scene = SceneEditor(
@@ -1693,15 +1701,33 @@ class ProjectRegistry:
         self.persistence.save_job(updated, reference, event, expected=expected)
         return updated
 
+    def job_profile(self, now: datetime | None = None) -> ExecutionProfile | None:
+        """Runtime gắn vào job mới: profile ghim tay nếu có, không thì runtime worker công bố gần nhất.
+
+        Không có worker nào từng công bố thì None; worker đã mất (quá TTL) vẫn được chọn để job không bị từ chối.
+        """
+        if self.execution_profile is not None:
+            return self.execution_profile
+        if not self.runtime_from_workers or self.persistence is None or self.processing_config_checksum is None:
+            return None
+        runtime = worker_runtimes.select(
+            self.persistence.database,
+            config_checksum=self.processing_config_checksum,
+            seed=self.job_seed,
+            now=now,
+        )
+        return None if runtime is None else runtime.profile()
+
     def _build_queued_job(
         self, project: ProjectRecord, scene_revision: str, job_id: str, config_checksum: Checksum | None
     ) -> JobManifest:
         """Runtime job không được mang config/versions synthetic của fixture."""
-        profile = self.execution_profile
+        profile = self.job_profile()
         if profile is None:
             if self.persistence is not None and project.source_rights_attestation.get("fixture") is not True:
                 raise RuntimeStateConflictError(
-                    "Chưa cấu hình execution profile: cần PRODUCT_PROCESSING_CONFIG và PRODUCT_RUNTIME_MANIFEST"
+                    "Chưa có runtime cho job: cần PRODUCT_PROCESSING_CONFIG và PRODUCT_RUNTIME_MANIFEST, "
+                    "hoặc GPU worker đã công bố runtime (PRODUCT_RUNTIME_FROM_WORKERS=true)"
                 )
             profile = ExecutionProfile(
                 config_checksum=self._fixture_config_checksum(),
@@ -1933,6 +1959,11 @@ def get_project_registry() -> ProjectRegistry:
         database=RuntimeDatabase(settings.database_url),
         execution_profile=profile,
         remote=artifact_remote(settings),
+        runtime_from_workers=settings.product_runtime_from_workers,
+        processing_config_checksum=(
+            sha256_file(settings.product_processing_config) if settings.product_processing_config is not None else None
+        ),
+        job_seed=settings.product_seed,
     )
     if settings.product_fixture_mode:
         registry.seed_from_fixtures()
