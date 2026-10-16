@@ -356,3 +356,61 @@ async def test_truth_routes_return_404_for_an_unknown_job(client: AsyncClient, w
 
     assert (await client.get(_TRUTH.format(job_id="job-missing"))).status_code == 404
     assert (await client.put(_TRUTH.format(job_id="job-missing"), json=_truth_body(0))).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_layout_tag_time_is_set_by_the_server_and_kept_while_the_revision_is_unchanged(
+    client: AsyncClient, world: SimpleNamespace, as_user
+) -> None:  # noqa: ANN001
+    """P3 so mốc gắn layout với giờ máy chủ của sự kiện: đồng hồ trình duyệt (ở đây lệch về năm 2001) không được dùng."""
+    as_user(None)
+    url = _TRUTH.format(job_id=_SCENE_JOB)
+    revision = world.registry.scene.current(_SCENE_JOB).scene.scene_revision
+    skewed = {"scene_revision": revision, "tagged_at": "2001-01-01T00:00:00+00:00"}
+
+    first = await client.put(url, json=_truth_body(0, layouts={"A": skewed}))
+    tagged = first.json()["truth"]["layouts"]["A"]["tagged_at"]
+    second = await client.put(url, json=_truth_body(1, layouts={"A": skewed}, notes="sửa ghi chú"))
+
+    assert first.status_code == 200 and not tagged.startswith("2001")
+    assert second.status_code == 200 and second.json()["truth"]["layouts"]["A"]["tagged_at"] == tagged
+
+
+@pytest.mark.asyncio
+async def test_layouts_a_and_b_must_be_different_revisions(
+    client: AsyncClient, world: SimpleNamespace, as_user
+) -> None:  # noqa: ANN001
+    as_user(None)
+    revision = world.registry.scene.current(_SCENE_JOB).scene.scene_revision
+    layout = {"scene_revision": revision, "tagged_at": "2026-10-16T08:00:00+00:00"}
+
+    response = await client.put(
+        _TRUTH.format(job_id=_SCENE_JOB), json=_truth_body(0, layouts={"A": layout, "B": layout})
+    )
+
+    assert response.status_code == 422
+    assert "khác nhau" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_a_stored_obstacle_that_left_the_scene_does_not_block_later_saves(
+    client: AsyncClient, world: SimpleNamespace, as_user, monkeypatch: pytest.MonkeyPatch
+) -> None:  # noqa: ANN001
+    """Chỉ id vật cản mới thêm được đối chiếu với scene; id đã lưu trước đó không chặn việc sửa phần khác."""
+    from src.api.studio import value as value_routes
+    from src.services.orchestration.value.ground_truth import BenchmarkTruth, write_truth
+
+    as_user(None)
+    database = value_routes._database()
+    write_truth(database, _SCENE_JOB, 0, BenchmarkTruth(key_obstacle_ids=["vat-da-roi-scene"]))
+
+    kept = await client.put(
+        _TRUTH.format(job_id=_SCENE_JOB), json=_truth_body(1, key_obstacle_ids=["vat-da-roi-scene"])
+    )
+    added = await client.put(
+        _TRUTH.format(job_id=_SCENE_JOB), json=_truth_body(2, key_obstacle_ids=["vat-da-roi-scene", "vat-moi-khong-co"])
+    )
+
+    assert kept.status_code == 200
+    assert added.status_code == 422 and "vat-moi-khong-co" in added.json()["detail"]
+    assert "vat-da-roi-scene" not in added.json()["detail"]

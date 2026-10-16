@@ -170,20 +170,46 @@ def _truth_response(stored: StoredTruth) -> BenchmarkTruthResponse:
     return BenchmarkTruthResponse(version=stored.version, truth=stored.truth, updated_at=stored.updated_at)
 
 
-def _reference_problems(job_id: str, truth: BenchmarkTruth) -> list[str]:
-    """Revision của layout và vật cản chính phải có thật trong job; trả danh sách lỗi tiếng Việt."""
-    if not truth.layouts and not truth.key_obstacle_ids:
-        return []
-    registry = deps.registry()
+def _with_server_tag_times(truth: BenchmarkTruth, previous: BenchmarkTruth) -> BenchmarkTruth:
+    """`tagged_at` do máy chủ đặt: giữ mốc đã lưu khi layout vẫn trỏ cùng revision, ngược lại lấy giờ máy chủ.
+
+    P3 (đổi → thử lại) so mốc này với thời điểm sự kiện do máy chủ ghi, nên không được tin đồng hồ trình duyệt.
+    """
+    now = datetime.now(UTC)
+    layouts = {}
+    for key, layout in truth.layouts.items():
+        kept = previous.layouts.get(key)
+        tagged_at = kept.tagged_at if kept is not None and kept.scene_revision == layout.scene_revision else now
+        layouts[key] = layout.model_copy(update={"tagged_at": tagged_at})
+    return truth.model_copy(update={"layouts": layouts})
+
+
+def _reference_problems(job_id: str, truth: BenchmarkTruth, previous: BenchmarkTruth) -> list[str]:
+    """Revision của layout và vật cản chính phải có thật trong job; trả danh sách lỗi tiếng Việt.
+
+    Chỉ kiểm phần mới hoặc đổi so với tài liệu đã lưu: một vật cản chính sau này rời khỏi scene không được chặn mọi lần lưu khác.
+    """
     problems: list[str] = []
+    layout_a, layout_b = truth.layouts.get("A"), truth.layouts.get("B")
+    if layout_a is not None and layout_b is not None and layout_a.scene_revision == layout_b.scene_revision:
+        problems.append("layout A và B phải là hai revision khác nhau")
+    changed_layouts = {
+        key: layout
+        for key, layout in truth.layouts.items()
+        if (kept := previous.layouts.get(key)) is None or kept.scene_revision != layout.scene_revision
+    }
+    new_obstacles = [item for item in truth.key_obstacle_ids if item not in set(previous.key_obstacle_ids)]
+    if not changed_layouts and not new_obstacles:
+        return problems
+    registry = deps.registry()
     try:
-        for key in sorted(truth.layouts):
-            revision = truth.layouts[key].scene_revision
+        for key in sorted(changed_layouts):
+            revision = changed_layouts[key].scene_revision
             if registry.scene.revision(job_id, revision) is None:
                 problems.append(f"layout {key}: revision {revision} không phải revision của job này")
-        if truth.key_obstacle_ids:
+        if new_obstacles:
             objects = {item.id for item in registry.scene.current(job_id).scene.objects}
-            missing = [item for item in truth.key_obstacle_ids if item not in objects]
+            missing = [item for item in new_obstacles if item not in objects]
             if missing:
                 problems.append("vật cản chính không có trong scene hiện tại: " + ", ".join(missing))
     except SceneError:
@@ -210,11 +236,13 @@ def write_benchmark_truth(
 ) -> BenchmarkTruthResponse:
     """Ghi ground truth với kiểm version (CAS): lệch version thì 409, sai tham chiếu thì 422."""
     _authorize(user, job_id, operation="sửa ground truth benchmark của")
-    problems = _reference_problems(job_id, body.truth)
+    database = _database()
+    previous = read_truth(database, job_id).truth
+    problems = _reference_problems(job_id, body.truth, previous)
     if problems:
         raise _reject("; ".join(problems))
     try:
-        stored = write_truth(_database(), job_id, body.expected_version, body.truth)
+        stored = write_truth(database, job_id, body.expected_version, _with_server_tag_times(body.truth, previous))
     except TruthVersionConflictError as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     return _truth_response(stored)
