@@ -15,6 +15,35 @@ from src.models.contracts.artifacts import JsonObject
 from src.services.orchestration.jobs.database import RuntimeDatabase
 
 EventKind = Literal["scene_edit", "operator_time", "walk_session"]
+Origin = Literal["human", "system", "unknown"]
+
+#: Thao tác do người bấm trong Studio (API người dùng hoặc hành động chỉnh sửa trực tiếp).
+HUMAN_OPERATIONS: frozenset[str] = frozenset(
+    {
+        "transform_edit",
+        "confirm",
+        "ignore",
+        "hide",
+        "delete",
+        "rename",
+        "restore",
+        "duplicate",
+        "label",
+        "edit_collider",
+        "add_primitive",
+        "add_catalog_asset",
+        "restore_revision",
+        "object_region_edit",
+        "collision_surface",
+        "object_membership_merge",
+        "object_membership_reassign",
+        "select_lidar_collision_source",
+    }
+)
+#: Thao tác do pipeline tự publish (worker, bước xử lý, nạp bundle ban đầu).
+SYSTEM_OPERATIONS: frozenset[str] = frozenset(
+    {"objectify", "use_boxes", "object_geometry_build", "physics_enrich", "publish_initial"}
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +57,15 @@ class ValueEvent(BaseModel):
     kind: EventKind
     actor_id: str | None
     payload: JsonObject
+
+
+def operation_origin(operation: str) -> Origin:
+    """Người hay hệ thống đã kích hoạt `operation`; thao tác lạ trả `unknown` (test sẽ bắt khi quên phân loại)."""
+    if operation in HUMAN_OPERATIONS:
+        return "human"
+    if operation in SYSTEM_OPERATIONS:
+        return "system"
+    return "unknown"
 
 
 def record_event(
