@@ -243,7 +243,8 @@ def _expected_limit(attempt: _Attempt, name: str, fixed_timeout: float) -> tuple
 
 def _gpu_budget_at_start(attempt: _Attempt, name: str, estimate: Estimate | None) -> tuple[float, float] | None:
     """(giờ GPU đã dùng, trần) khi job có trần và công cụ dùng GPU; chưa đủ ước thì chỉ kiểm phần đã dùng."""
-    cap = attempt.settings.product_job_gpu_hours_max
+    # Settings giả trong test có thể thiếu trường mới: coi như không đặt trần (cùng mẫu với api/studio/deps.py).
+    cap = getattr(attempt.settings, "product_job_gpu_hours_max", None)
     if cap is None or name not in GPU_TOOLS or attempt.registry.persistence is None:
         return None
     spent = spent_gpu_hours(load_usages(attempt.registry.persistence.database), attempt.job.job_id)
