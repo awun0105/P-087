@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, Box, ChevronsUpDown, Clapperboard, FolderDown, LayoutDashboard, Loader2, LogIn, LogOut, PanelLeftClose, PanelLeftOpen, PlusCircle, Trash2, Users, UserRound } from "lucide-react";
+import { ArrowLeft, Box, ChartBarBig, ChevronsUpDown, Clapperboard, FolderDown, LayoutDashboard, Loader2, LogIn, LogOut, PanelLeftClose, PanelLeftOpen, PlusCircle, Trash2, Users, UserRound } from "lucide-react";
 import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -52,6 +52,7 @@ const NAV = [
     { href: "/new", label: "Tạo scene mới", icon: PlusCircle, reviewerOnly: false },
     { href: "/scenes", label: "Scenes từ video", icon: Clapperboard, reviewerOnly: false },
     { href: "/imports", label: "Scenes đã import", icon: FolderDown, reviewerOnly: false },
+    { href: "/benchmark", label: "Benchmark", icon: ChartBarBig, reviewerOnly: false },
     { href: "/trash", label: "Thùng rác", icon: Trash2, reviewerOnly: false },
   ] },
   { heading: "Quản lý", items: [
