@@ -42,3 +42,24 @@ Lệnh chạy và kết quả thật:
 - **Audit noise**: editor/reviewer gửi lô thời gian cho job của người khác sẽ tạo một dòng `operator.intervention` trong audit mỗi lô (hành vi có sẵn của `_authorize_owner`). Có thể gây nhiễu, nên cân nhắc khi làm T-029.
 - **Chưa có kiểm thử PostgreSQL** cho migration 20 và `list_events` (bảng `r2s_value_events` và câu `IN (?)` chỉ được kiểm trên SQLite).
 - `frontend` chưa đụng tới (T-029).
+
+## Round 2
+Sửa theo "Required changes" của review vòng 1 và "Trả lời câu hỏi vòng 2" (commit `0dc264e9`):
+- `value/events.py`: thêm `"scene_request"` vào `EventKind`.
+- `scene/objectify_queue.py::request`: tham số mới `origin: Literal["human","system"] = "human"`. Sau khi yêu cầu được ghi
+  (ngoài transaction), ghi `scene_request` với `{mode, base_revision, operation_id, origin}` và `region_object_id` khi có;
+  `actor_id` lấy từ tham số có sẵn. Yêu cầu bị từ chối không ghi gì. Ghi cho mọi mode được nhận, gồm `objectify` và `boxes`.
+  Thêm một dòng import `record_event` ở đầu file (ngoài thân `request()` nhưng bắt buộc để hàm chạy).
+- `scene/extraction.py`: đường `geometry_review="auto"` truyền `origin="system"`.
+
+Test:
+- `test_scene_objectify_queue.py`: geometry, boxes, region, membership → đúng 1 `scene_request` (`origin=human`, `actor_id`
+  đúng, region có `region_object_id`); yêu cầu bị từ chối (revision lệch, đang có yêu cầu) → không thêm sự kiện.
+- `test_scene_extraction.py`: đường auto ghi `origin=system`, `actor_id=system`; retry không ghi thêm.
+
+Lệnh và kết quả:
+- `pytest tests/test_orchestration/test_scene_extraction.py tests/test_orchestration/test_scene_objectify_queue.py tests/test_orchestration/test_value_events.py tests/test_api/test_value_routes.py tests/test_api/test_role_matrix.py tests/test_orchestration/test_scene_editor.py -q` → 157 passed.
+- `ruff check src tests` → All checks passed; `ruff format --check src tests` → 682 files already formatted.
+
+Lệch plan: không. Ghi chú: `scene_request` không nằm trong §15.2 của architecture; Architect đã duyệt trong câu trả lời vòng 2.
+Còn dở: chưa có test riêng cho `origin` không hợp lệ (type Literal đã chặn ở mức type-check, không kiểm ở runtime).
