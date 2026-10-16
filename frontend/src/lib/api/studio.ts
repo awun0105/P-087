@@ -856,6 +856,7 @@ export interface ObjectifyState {
   cancellation_requested: boolean;
   /** Trạng thái hình học theo vật của scene; null = scene cũ không có khoá (luồng cũ, T-021). */
   object_geometry?: "awaiting_review" | "ready" | null;
+  geometry_note?: string | null;
 }
 
 export function getObjectifyState(jobId: string, signal?: AbortSignal): Promise<ObjectifyState> {

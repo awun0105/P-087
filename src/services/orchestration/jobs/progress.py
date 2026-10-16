@@ -80,6 +80,7 @@ class StageProgress(BaseModel):
     started_at: datetime | None = None
     completed_at: datetime | None = None
     error: ExecutionError | None = None
+    note: str | None = None
 
 
 class JobProgress(BaseModel):
@@ -186,6 +187,7 @@ def job_progress(
     queue: QueuePosition | None = None,
     heartbeat_at: datetime | None = None,
     runtime_wait: bool = False,
+    notes: dict[StageId, str] | None = None,
 ) -> JobProgress:
     """Chiếu JobManifest + journal thành tiến trình từng stage của attempt hiện tại.
 
@@ -289,6 +291,7 @@ def job_progress(
                 started_at=(record.started_at if record is not None else None) or stage_starts.get(stage_id),
                 completed_at=completed_at,
                 error=error,
+                note=(notes or {}).get(stage_id),
             )
         )
     base_updated = resources.checked_at if resources else (events[-1].recorded_at if events else job.started_at)

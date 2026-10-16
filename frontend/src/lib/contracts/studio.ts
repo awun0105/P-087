@@ -180,6 +180,7 @@ export interface ExecutionErrorView {
 }
 
 export interface StageProgress {
+  note?: string | null;
   stage_id: StageId;
   state: StageState;
   started_at: string | null;
@@ -527,7 +528,8 @@ export function parseJobProgress(value: unknown): JobProgress {
   }
   for (const stage of value.stages) {
     if (!isRecord(stage) || typeof stage.stage_id !== "string" ||
-        !STAGE_STATES.includes(stage.state as StageState)) {
+        !STAGE_STATES.includes(stage.state as StageState) ||
+        (stage.note !== undefined && stage.note !== null && typeof stage.note !== "string")) {
       throw new Error("Stage trong tiến trình không hợp lệ");
     }
   }

@@ -36,6 +36,7 @@ from src.services.orchestration.jobs.admission import (
 )
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeTransaction
 from src.services.orchestration.jobs.profile import machine_runtime_checksum
+from src.services.orchestration.jobs.stage_results import geometry_surface_note
 from src.services.orchestration.jobs.stage_views import job_bundle
 from src.services.orchestration.processing.capability import worker_identity
 from src.services.orchestration.processing.telemetry import Outcome, ResourceContext, ResourceSampler, sampled_section
@@ -126,6 +127,7 @@ class ObjectifyState(BaseModel):
     cancellation_requested: bool = False
     #: Trạng thái hình học theo vật của scene hiện tại; None = scene không có khoá `object_geometry` (luồng cũ).
     object_geometry: Literal["awaiting_review", "ready"] | None = None
+    geometry_note: str | None = None
 
 
 ObjectGeometry = Literal["awaiting_review", "ready"]
@@ -321,6 +323,7 @@ def state(registry: ProjectRegistry, settings: Settings, job_id: str) -> Objecti
         object_centric=provenance.get("object_extraction") == METHOD or provenance.get("geometry_method") == "objectgs",
         awaiting_choice=provenance.get("object_extraction") == AWAITING_CHOICE,
         object_geometry=object_geometry_status(provenance),
+        geometry_note=geometry_surface_note(scene.objects),
         available=runtime_available(settings) or settings.product_objectify_remote_worker,
         note=str(note) if note else None,
     )

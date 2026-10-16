@@ -167,3 +167,66 @@ def result_facts(result: dict[str, Any]) -> dict[StageId, list[tuple[str, str]]]
     if "candidate_count" in result:
         facts[StageId.OBJECT_EXTRACT] = [("Số vật ứng viên", str(result["candidate_count"]))]
     return facts
+
+
+@lru_cache(maxsize=64)
+def _redaction_summary(registry: ProjectRegistry, job_payload: str) -> tuple[int, str, str]:
+    from src.services.orchestration.jobs.anonymization_review import _load
+
+    frames, manifest = _load(registry, JobManifest.model_validate_json(job_payload))
+    return sum(len(frame.regions) for frame in manifest.frames), frames.frame_set_checksum, manifest.manifest_checksum
+
+
+def stage_notes(registry: ProjectRegistry, job: JobManifest) -> dict[StageId, str]:
+    """Một dòng tiếng Việt từ đúng receipt của job, không suy theo cấu hình yêu cầu."""
+    from src.services.orchestration.jobs.progress import (
+        anonymization_acceptance_stage,
+        awaiting_anonymization_review,
+        sanitized_frame_stage,
+    )
+
+    result = recorded_results(registry, job)
+    notes: dict[StageId, str] = {}
+    metric = result.get("metric")
+    if metric:
+        source = metric["source"]
+        label = {
+            "user_measured": "Bạn đo tay",
+            "ai_estimated": "Tỉ lệ máy đề xuất từ ảnh, bạn đã chấp nhận",
+            "lidar_trajectory": "Tỉ lệ máy đề xuất từ LiDAR, bạn đã chấp nhận",
+            "lidar_demo": "Tỉ lệ đo từ LiDAR, bạn đã chấp nhận",
+        }.get(source)
+        if label:
+            notes[StageId.METRIC_CANONICALIZE] = label
+    if result.get("collision_source"):
+        notes[StageId.RGB_GEOMETRY] = f"Lưới từ {result['collision_source']}"
+    if "candidate_count" in result:
+        notes[StageId.OBJECT_EXTRACT] = f"{result['candidate_count']} vật ứng viên"
+    if sanitized_frame_stage(job) is not None:
+        try:
+            count, frame_checksum, manifest_checksum = _redaction_summary(registry, job.model_dump_json())
+            acceptance = anonymization_acceptance_stage(job)
+            if acceptance and acceptance.artifact_uri and acceptance.artifact_checksum:
+                record = _read(registry.runtime_resolver, acceptance.artifact_uri, acceptance.artifact_checksum)
+                if (
+                    record["frame_set_checksum"] == frame_checksum
+                    and record["sanitization_manifest_checksum"] == manifest_checksum
+                ):
+                    notes[StageId.FRAME_EXTRACT] = (
+                        f"Đã che {count} vùng (mặt, biển số); bạn đã chấp nhận"
+                        if count
+                        else "Không có vùng cần che; hệ thống đã kiểm tra"
+                    )
+            elif awaiting_anonymization_review(job):
+                notes[StageId.FRAME_EXTRACT] = f"Chờ bạn duyệt {count} vùng đã che"
+        except (ArtifactStoreError, OSError, ValueError, KeyError, TypeError) as error:
+            logger.debug("Không có receipt che hợp lệ cho %s: %s", job.job_id, error)
+    return notes
+
+
+def geometry_surface_note(objects: list[Any]) -> str | None:
+    """Chỉ đếm vật có QA lựa chọn bề mặt, không coi dữ liệu thiếu là vỏ cũ."""
+    chosen = [(item.provenance.get("surface_selection") or {}).get("chosen") for item in objects]
+    if not any(value in {"objectgs", "gaussian_shell"} for value in chosen):
+        return None
+    return f"{chosen.count('objectgs')} vật dùng bề mặt ObjectGS; {chosen.count('gaussian_shell')} vật dùng cách cũ (vỏ Gaussian)"

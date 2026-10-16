@@ -33,6 +33,7 @@ from src.services.orchestration.jobs.progress import (
     job_progress,
 )
 from src.services.orchestration.jobs.queue import job_requester_actors, job_requesters, queue_position
+from src.services.orchestration.jobs.stage_results import stage_notes
 from src.services.orchestration.jobs.stage_views import StageViewList, stage_views
 from src.services.orchestration.jobs.thumbnails import scene_thumbnail
 from src.services.orchestration.jobs.worker_runtimes import has_live_runtime
@@ -427,6 +428,7 @@ def get_job_progress(job_id: str, user: UserRecord | None = Depends(require_cont
         position,
         heartbeat_at=heartbeat_at,
         runtime_wait=runtime_wait,
+        notes=stage_notes(registry, job),
     )
     progress = filter_job_progress_errors(progress, user)
     allowed = owner_mutation_allowed(
