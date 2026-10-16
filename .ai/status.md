@@ -27,7 +27,7 @@ T-026 | Danh sách scene hiểu Draft | accepted | — (Architect tự làm)
 T-027 | Nhật ký sự kiện giá trị | changes-requested | engineer
 T-028 | Đo máy cho hàng đợi tách vật | changes-requested | engineer
 T-029 | Bộ đếm phút công người + sự kiện Walk | planned | engineer
-T-030 | Ground truth của benchmark | implemented | summarizer
+T-030 | Ground truth của benchmark | accepted | —
 T-031 | Máy đo khe, sai số, nhất quán | planned | engineer
 T-032 | Bảng metric + xuất JSON/CSV/MD | planned | engineer
 T-033 | Panel Benchmark trong Studio | planned | engineer
