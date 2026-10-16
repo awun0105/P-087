@@ -31,6 +31,15 @@ def software_runtime_checksum(manifest: RuntimeManifest) -> str:
     return with_canonical_checksum(draft, "runtime_manifest_checksum").runtime_manifest_checksum
 
 
+def machine_runtime_checksum(profile: "ExecutionProfile | None", job_runtime_checksum: str) -> str:
+    """Runtime thật của máy đang chạy attempt (T-040 Q4), ghi vào số đo thay cho checksum của job.
+
+    Job tạo trước T-040 mang checksum đầy đủ, nhưng máy đang chạy nó có runtime phần mềm riêng; số đo phải ghi
+    đúng máy đó để ngân sách và benchmark của cấu hình đó không bị trộn với máy khác.
+    """
+    return profile.job_runtime_checksum if profile is not None else job_runtime_checksum
+
+
 def load_runtime_manifest(runtime: Path) -> RuntimeManifest:
     """Đọc manifest và kiểm canonical checksum; file bị sửa tay thì từ chối."""
     manifest = RuntimeManifest.model_validate_json(runtime.read_bytes())

@@ -91,6 +91,7 @@ from src.services.orchestration.jobs.dispatch import (
 from src.services.orchestration.jobs.lease import lease_lost
 from src.services.orchestration.jobs.log_context import configure_worker_logging, job_log_context
 from src.services.orchestration.jobs.models import PreparedInputReceipt, TransitionRequest
+from src.services.orchestration.jobs.profile import machine_runtime_checksum
 from src.services.orchestration.jobs.progress import (
     awaiting_anonymization_review,
     awaiting_finalize,
@@ -319,7 +320,9 @@ def _resource_sampler(attempt: _Attempt, tool: str) -> ResourceSampler | None:
             attempt_id=attempt.workspace.name,
             tool=tool,
             config_checksum=attempt.job.config_checksum,
-            runtime_manifest_checksum=attempt.job.runtime_manifest_checksum,
+            runtime_manifest_checksum=machine_runtime_checksum(
+                registry.execution_profile, attempt.job.runtime_manifest_checksum
+            ),
             params=job_drivers(registry, settings, attempt.job),
             shared_gpu=shared,
         )

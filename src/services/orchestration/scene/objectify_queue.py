@@ -35,6 +35,7 @@ from src.services.orchestration.jobs.admission import (
     WaitReason,
 )
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeTransaction
+from src.services.orchestration.jobs.profile import machine_runtime_checksum
 from src.services.orchestration.jobs.stage_views import job_bundle
 from src.services.orchestration.processing.capability import worker_identity
 from src.services.orchestration.processing.telemetry import Outcome, ResourceContext, ResourceSampler, sampled_section
@@ -745,7 +746,9 @@ def _scene_sampler(
             attempt_id=operation_id,
             tool=f"scene.{mode}",
             config_checksum=config_checksum,
-            runtime_manifest_checksum=job.runtime_manifest_checksum,
+            runtime_manifest_checksum=machine_runtime_checksum(
+                admission.registry.execution_profile, job.runtime_manifest_checksum
+            ),
             shared_gpu=admission.shares_gpu(),
         )
     except Exception as error:  # noqa: BLE001 - measurement boundary must not change objectify
