@@ -44,6 +44,7 @@ from src.models.contracts.reconstruction import (
 )
 from src.runtime_env import RuntimeSettings
 from src.services.orchestration.artifacts.store import ArtifactResolver, FilesystemArtifactStore
+from src.services.process_control import ProgressWatchdog, file_size_marker
 from src.services.reconstruction.inputs.timestamps import parse_timestamp_rows, timestamps_in_seconds
 from src.services.reconstruction.lidar.cloud_payload import load_xyz_points
 from src.services.reconstruction.lidar.fusion import FusionConfig, FusionStats, ScanPose, fuse_scans, ply_bytes
@@ -174,6 +175,9 @@ class LidarOdometryRuntimeSettings(RuntimeSettings):
     python: Path = Path("/opt/real2sim/lidar_odometry_runtime/bin/python")
     work_root: Path = Path("/tmp/real2sim-lidar-odometry")
     timeout_seconds: float = Field(default=3600, gt=0, allow_inf_nan=False)
+    #: Log không tăng (không dòng tiến độ theo scan) trong khoảng này thì coi như treo. Chưa đo được trên worker thật
+    #: (xem report T-043); xác nhận khi chạy known-motion đầu tiên trên máy có runtime.
+    stall_seconds: float = Field(default=300, gt=0, allow_inf_nan=False)
     provider_version: str = _PINNED_PROVIDER_VERSION
     model_config = SettingsConfigDict(env_prefix="R2S_LIDAR_ODOMETRY_", extra="forbid")
 
@@ -222,6 +226,12 @@ class LidarOdometryLeaseLostError(LidarOdometryError):
     """A stale operation lease may not publish or return an ingest binding."""
 
     error_code = "LIDAR_ODOMETRY_LEASE_LOST"
+
+
+class LidarOdometryStalledError(LidarOdometryError):
+    """Provider stopped reporting progress for the stall window; its process group was reaped."""
+
+    error_code = "LIDAR_ODOMETRY_STALLED"
 
 
 class LidarOdometryProcessError(LidarOdometryError):
@@ -287,6 +297,7 @@ class KissIcpProcess:
                     env=environment,
                 )
                 deadline = start + self.settings.timeout_seconds
+                watchdog = ProgressWatchdog(self.settings.stall_seconds, [file_size_marker(log_path)])
                 while True:
                     if cancel_event is not None and cancel_event.is_set():
                         self._kill_and_reap(process)
@@ -298,6 +309,13 @@ class KissIcpProcess:
                     if remaining <= 0:
                         self._kill_and_reap(process)
                         raise LidarOdometryTimeoutError("LiDAR odometry exceeded its configured timeout")
+                    watchdog.poll()
+                    if watchdog.stalled():
+                        self._kill_and_reap(process)
+                        raise LidarOdometryStalledError(
+                            f"LiDAR odometry không tiến triển trong {int(self.settings.stall_seconds)} giây "
+                            "và đã bị dừng; xem log của attempt."
+                        )
                     try:
                         return_code = process.wait(timeout=min(0.2, remaining))
                         break
