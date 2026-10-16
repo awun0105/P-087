@@ -135,6 +135,10 @@ export function ProgressTab({ jobId, progress, info, busy, canCancel, canAccept 
     {progress && <AttemptHistory jobId={jobId} attempt={progress.attempt} status={progress.status} />}
     <HelpDetails title="Đầu vào và cách theo dõi">
       {info?.videoName && <p>Video gốc: {info.videoName}{info.videoSize !== null ? " · " + formatBytes(info.videoSize) : ""}</p>}
+      {info?.displayVideoUrl && <figure className="max-w-2xl">
+        <video src={info.displayVideoUrl} controls muted playsInline preload="metadata" className="mt-2 aspect-video w-full rounded-xl bg-viewport" />
+        <figcaption className="mt-1.5 text-xs text-ink-muted">Video ghép từ ảnh gốc, chỉ để xem lại</figcaption>
+      </figure>}
       {info?.createdBy && <p>Scene do {info.createdBy} tạo.</p>}
       <p>Job vẫn chạy khi bạn rời trang. Bước tỉ lệ mét cần thao tác của bạn trong Studio; view giai đoạn 6 chỉ mở sau khi bước này hoàn tất.</p>
       <p>Thời gian từng bước lấy từ API; thời gian chờ bạn xác nhận không được trình bày như thời gian máy xử lý.</p>

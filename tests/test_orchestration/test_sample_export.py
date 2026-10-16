@@ -25,8 +25,9 @@ SOURCE = DemoSource(dataset="Studio", sequence="Kho thử")
 
 
 class _Resolver:
-    def __init__(self, splat: Path) -> None:
+    def __init__(self, splat: Path, display_video: Path | None = None) -> None:
         self.splat = splat
+        self.display_video = display_video
 
     def require_uri(self, uri: str, checksum: str) -> Path:
         raise ArtifactStoreError("không có artifact này")
@@ -36,14 +37,18 @@ class _Resolver:
             return self.splat
         if reference == "RAW_VIDEO_MANIFEST":
             raise AssertionError("video gốc chưa che không được đọc để đưa vào thư viện công khai")
+        if getattr(reference, "artifact_type", None) == "DISPLAY_VIDEO" and self.display_video is not None:
+            return self.display_video
         raise ArtifactStoreError("không có artifact này")
 
 
-def _registry(tmp_path: Path, *, preview_ok: bool = True, raw_video: bool = False):  # noqa: ANN202
+def _registry(tmp_path: Path, *, preview_ok: bool = True, raw_video: bool = False, display_video: bool = False):  # noqa: ANN202
     real = ProjectRegistry(runtime_root=tmp_path / "artifacts")
     real.seed_from_fixtures()
     splat = tmp_path / "preview.sog"
     splat.write_bytes(b"sog-bytes" * 20)
+    display = tmp_path / "display.mp4"
+    display.write_bytes(b"replay-video")
     preview = SimpleNamespace(
         delivery_ref="DELIVERY", camera_pose_ref=None, attempt_id="attempt-1", producer_version="v1"
     )
@@ -58,10 +63,29 @@ def _registry(tmp_path: Path, *, preview_ok: bool = True, raw_video: bool = Fals
         scene=real.scene,
         persistence=None,
         get_preview=get_preview,
-        runtime_resolver=_Resolver(splat),
-        get_project=lambda project_id: SimpleNamespace(input_manifest_ref="RAW_VIDEO_MANIFEST" if raw_video else None),
+        runtime_resolver=_Resolver(splat, display if display_video else None),
+        get_project=lambda project_id: SimpleNamespace(
+            input_manifest_ref="RAW_VIDEO_MANIFEST" if raw_video else ("IMAGE_MANIFEST" if display_video else None),
+            input_video=None,
+            display_video_ref=(
+                SimpleNamespace(artifact_type="DISPLAY_VIDEO", artifact_checksum=sha256_file(display))
+                if display_video
+                else None
+            ),
+        ),
         list_job_attempts=lambda job_id: [],
     ), splat
+
+
+def test_dataset_sample_exports_replay_video_without_reading_it_as_input(tmp_path: Path) -> None:
+    registry, _ = _registry(tmp_path, display_video=True)
+    out = tmp_path / "sample"
+    manifest = export_job_bundle(
+        registry, JOB_ID, out, demo_id="dataset-video", title="Dataset", description="", source=SOURCE
+    )
+    assert manifest.video is not None and manifest.video.name == "display.mp4"
+    assert manifest.video_caption == "Video ghép từ ảnh gốc, chỉ để xem lại"
+    assert (out / "files" / manifest.video.name).read_bytes() == b"replay-video"
 
 
 def test_slugify_drops_vietnamese_marks() -> None:

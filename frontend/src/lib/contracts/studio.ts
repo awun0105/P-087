@@ -96,6 +96,7 @@ export interface StudioProject {
   source_type: "upload" | "dataset";
   privacy: StudioPrivacy;
   input_video: { original_name: string; media_type: VideoMediaType; size_bytes: number } | null;
+  display_video_url?: string | null;
   created_at: string | null;
   created_by?: Actor | null;
   /** Mốc bản demo nếu scene được đánh dấu là bản demo. */
@@ -505,6 +506,7 @@ export interface DemoManifest {
   stages: DemoStage[];
   object_geometry?: DemoObjectGeometry | null;
   video: DemoFile | null;
+  video_caption?: string | null;
   frames: DemoFile[];
   frame_count: number | null;
   splat: DemoFile;

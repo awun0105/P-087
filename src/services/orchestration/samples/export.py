@@ -269,12 +269,25 @@ def _export_job_bundle(
     video = None
     # Job đã che khuôn mặt/biển số: frame trong bundle là bản đã che, nên không đưa video gốc chưa che ra thư viện công khai.
     if project.input_manifest_ref is not None and sanitized_frame_stage(job) is None:
-        manifest = InputManifest.model_validate_json(resolver.require(project.input_manifest_ref).read_bytes())
-        first = manifest.files[0]
-        path = resolver.resolve(first.artifact_uri)
-        if sha256_file(path) != first.checksum:
-            raise SampleExportError("Video gốc sai checksum")
-        video = add_file(out, path, "input" + Path(first.original_name).suffix.lower())
+        if project.input_video is None and project.display_video_ref is not None:
+            path = resolver.require(project.display_video_ref)
+            if sha256_file(path) != project.display_video_ref.artifact_checksum:
+                raise SampleExportError("Video ghép để xem lại sai checksum")
+            video = add_file(out, path, "display.mp4")
+            video_caption = "Video ghép từ ảnh gốc, chỉ để xem lại"
+        else:
+            manifest = InputManifest.model_validate_json(resolver.require(project.input_manifest_ref).read_bytes())
+            source_video = next(
+                (item for item in manifest.files if item.media_type in {"video/mp4", "video/quicktime"}), None
+            )
+            if source_video is not None:
+                path = resolver.resolve(source_video.artifact_uri)
+                if sha256_file(path) != source_video.checksum:
+                    raise SampleExportError("Video gốc sai checksum")
+                video = add_file(out, path, "input" + Path(source_video.original_name).suffix.lower())
+            video_caption = None
+    else:
+        video_caption = None
     frame_files: list[DemoFile] = []
     frame_count = None
     frame_ref = prepared_frame_reference(job)
@@ -348,6 +361,7 @@ def _export_job_bundle(
         stages=stages,
         object_geometry=DemoObjectGeometry.model_validate(geometry) if geometry else None,
         video=video,
+        video_caption=video_caption,
         frames=frame_files,
         frame_count=frame_count,
         splat=splat,

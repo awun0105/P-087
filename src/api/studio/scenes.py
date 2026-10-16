@@ -20,7 +20,7 @@ from src.api.ownership import authorize_upload_mutation, owner_mutation_allowed
 from src.api.studio import deps
 from src.api.studio.error_view import filter_job_progress_errors, filter_manifest_errors
 from src.models.contracts.manifests import JobManifest, JobStatus, StageId, StageStatus
-from src.services.orchestration.artifacts import ArtifactStoreError
+from src.services.orchestration.artifacts import ArtifactStoreError, sha256_file
 from src.services.orchestration.auth import Actor, UserRecord, actor_of, with_current_role
 from src.services.orchestration.auth.quota_ledger import GuestQuotaExceededError, GuestQuotaIdempotencyConflictError
 from src.services.orchestration.jobs.admission import job_reservation, resource_wait
@@ -43,8 +43,8 @@ from src.services.orchestration.projects import (
     JobCreateInput,
     JobNotFoundError,
     PrivacyGateBlockedError,
-    ProjectNotFoundError,
 )
+from src.services.orchestration.projects.errors import ProjectNotFoundError
 from src.services.orchestration.projects.models import UploadProjectInput
 from src.services.orchestration.projects.registry import ProjectRegistry
 from src.services.orchestration.scene import objectify_queue
@@ -53,6 +53,25 @@ from src.services.orchestration.scene.objectify import AWAITING_CHOICE
 from src.services.orchestration.uploads import UploadNotFoundError
 
 router = APIRouter()
+
+
+@router.get("/projects/{project_id}/display-video", response_class=FileResponse)
+def get_project_display_video(project_id: str) -> FileResponse:
+    """Serve the optional replay-only MP4 without adding it to the pipeline InputManifest."""
+    registry = deps.registry()
+    try:
+        project = registry.get_project(project_id)
+        reference = project.display_video_ref
+        if reference is None:
+            raise HTTPException(status_code=404, detail="Project không có video xem lại")
+        path = registry.runtime_resolver.require(reference)
+        if sha256_file(path) != reference.artifact_checksum:
+            raise HTTPException(status_code=409, detail="Video xem lại sai checksum")
+    except ProjectNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Không tìm thấy project") from error
+    except ArtifactStoreError as error:
+        raise HTTPException(status_code=404, detail="Không tìm thấy video xem lại") from error
+    return FileResponse(path, media_type="video/mp4", headers={"Cache-Control": "private, no-cache"})
 
 
 class SceneCapabilities(BaseModel):

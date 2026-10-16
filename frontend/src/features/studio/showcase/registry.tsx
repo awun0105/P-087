@@ -67,15 +67,18 @@ export const STAGE_PRESENTERS: Partial<Record<TimelineStageId, StagePresenter>> 
     icon: <ScanSearch aria-hidden />,
     render: ({ demo, fileUrl }) =>
       demo.video ? (
-        <video
-          src={fileUrl(demo.video.name)}
-          className="aspect-video w-full rounded-xl bg-viewport object-cover"
-          muted
-          loop
-          autoPlay
-          playsInline
-          aria-label="Video gốc của video mẫu"
-        />
+        <figure>
+          <video
+            src={fileUrl(demo.video.name)}
+            className="aspect-video w-full rounded-xl bg-viewport object-cover"
+            muted
+            loop
+            autoPlay
+            playsInline
+            aria-label={demo.video_caption ?? "Video gốc của video mẫu"}
+          />
+          {demo.video_caption && <figcaption className="mt-1.5 text-xs text-ink-muted">{demo.video_caption}</figcaption>}
+        </figure>
       ) : (
         <FrameImage src={coverOf(demo) ? fileUrl(coverOf(demo)!.name) : undefined} />
       ),

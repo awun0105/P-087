@@ -54,6 +54,15 @@ describe("khung xem trước phát lại", () => {
     expect(screen.getByLabelText("Khung hình đã tách").querySelectorAll("img")).toHaveLength(2);
     expect(screen.getByText(/40 khung hình được giữ lại/)).toBeInTheDocument();
   });
+
+  it("video ghép từ ảnh được ghi rõ là chỉ để xem lại", () => {
+    const demo = manifest([stage("ST-INPUT-VALIDATE")]);
+    demo.video = { ...file("display.mp4"), media_type: "video/mp4" };
+    demo.video_caption = "Video ghép từ ảnh gốc, chỉ để xem lại";
+    render(<DemoShowcase demo={demo} stage="ST-INPUT-VALIDATE" fraction={1} fileUrl={fileUrl} />);
+    expect(screen.getByLabelText("Video ghép từ ảnh gốc, chỉ để xem lại")).toHaveAttribute("src", "/files/display.mp4");
+    expect(screen.getByText("Video ghép từ ảnh gốc, chỉ để xem lại")).toBeInTheDocument();
+  });
 });
 
 describe("parseDemoManifest với asset", () => {

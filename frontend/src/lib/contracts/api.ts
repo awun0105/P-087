@@ -231,6 +231,7 @@ export interface ProjectResponse {
   privacy: PrivacyStateResponse;
   /** Chỉ có với project tạo từ video upload (Studio MVP). */
   input_video?: { original_name: string; media_type: string; size_bytes: number } | null;
+  display_video_url?: string | null;
   created_at?: string | null;
   /** Người tạo scene; null với project cũ hoặc khi không bật đăng nhập. */
   created_by?: { user_id: string; display_name: string } | null;

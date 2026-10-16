@@ -16,6 +16,7 @@ export interface SceneInfo {
   name: string;
   videoName: string | null;
   videoSize: number | null;
+  displayVideoUrl?: string | null;
   /** Tên người tạo scene (không gian chung của nhóm); null khi không biết. */
   createdBy?: string | null;
 }

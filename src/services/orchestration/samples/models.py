@@ -144,6 +144,7 @@ class DemoManifest(BaseModel):
     stages: list[DemoStage]
     object_geometry: DemoObjectGeometry | None = None
     video: DemoFile | None = None
+    video_caption: str | None = Field(default=None, exclude_if=lambda value: value is None)
     frames: list[DemoFile] = Field(default_factory=list, max_length=48)
     frame_count: int | None = Field(default=None, ge=0)
     splat: DemoFile

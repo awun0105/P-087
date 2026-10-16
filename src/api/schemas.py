@@ -91,6 +91,7 @@ class ProjectResponse(ApiModel):
     source_rights_attestation: JsonObject
     privacy: PrivacyStateResponse
     input_video: InputVideoSummary | None = None
+    display_video_url: str | None = None
     created_at: datetime | None = None
     created_by: Actor | None = None
     #: Mốc bản demo nếu scene được đánh dấu là bản demo (nút Khôi phục về mốc gốc đưa scene về mốc này).
@@ -333,6 +334,7 @@ def project_response(record: ProjectRecord) -> ProjectResponse:
         source_rights_attestation=record.source_rights_attestation,
         privacy=privacy_state(record),
         input_video=record.input_video,
+        display_video_url=(f"/api/v1/projects/{record.project_id}/display-video" if record.display_video_ref else None),
         created_at=record.created_at,
         created_by=record.created_by,
         demo_baseline=record.demo_baseline,
