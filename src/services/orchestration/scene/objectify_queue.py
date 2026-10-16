@@ -13,6 +13,7 @@ import logging
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from threading import Event, Thread
 from typing import Literal
 from uuid import uuid4
@@ -36,6 +37,8 @@ from src.services.orchestration.jobs.admission import (
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeTransaction
 from src.services.orchestration.jobs.stage_views import job_bundle
 from src.services.orchestration.processing.capability import worker_identity
+from src.services.orchestration.processing.telemetry import Outcome, ResourceContext, ResourceSampler, sampled_section
+from src.services.orchestration.processing.usage_recording import build_sampler, record_usage
 from src.services.orchestration.projects.registry import ProjectRegistry
 from src.services.orchestration.scene.errors import SceneError, SceneRevisionConflictError
 from src.services.orchestration.scene.extraction import box_candidates_require_gpu, use_boxes
@@ -709,6 +712,48 @@ def _commit_guard(
     return guard
 
 
+#: Kết quả của lượt tách vật → outcome của bản ghi đo; chỉ `completed` được cộng vào thời gian máy.
+_SCENE_OUTCOMES: dict[str, Outcome] = {"done": "completed", "cancelled": "cancelled", "failed": "failed"}
+
+
+def _scene_sampler(
+    settings: Settings,
+    admission: ResourceAdmission,
+    job: JobManifest,
+    mode: str,
+    operation_id: str,
+    config_checksum: Checksum,
+    workspace: Path,
+) -> ResourceSampler | None:
+    """Sampler cho một lượt tách vật (tool `scene.<mode>`); lỗi đo trả None, không làm hỏng việc dựng."""
+    try:
+        workspace.mkdir(parents=True, exist_ok=True)
+        context = ResourceContext(
+            job_id=job.job_id,
+            attempt_id=operation_id,
+            tool=f"scene.{mode}",
+            config_checksum=config_checksum,
+            runtime_manifest_checksum=job.runtime_manifest_checksum,
+            shared_gpu=admission.shares_gpu(),
+        )
+    except Exception as error:  # noqa: BLE001 - measurement boundary must not change objectify
+        logger.warning("Không tạo được resource sampler cause=%s", type(error).__name__)
+        return None
+    return build_sampler(settings, context, workspace)
+
+
+def _record_scene_usage(settings: Settings, sampler: ResourceSampler | None, outcome: dict[str, object] | None) -> None:
+    """Ghi bản ghi đo của lượt vừa xong; lỗi ghi chỉ log, không đổi kết quả job."""
+    if sampler is None:
+        return
+    status = outcome.get("status") if outcome is not None else None
+    try:
+        usage = sampler.finish(_SCENE_OUTCOMES.get(str(status), "interrupted"), None)
+        record_usage(_database(settings), usage)
+    except Exception as error:  # noqa: BLE001 - telemetry boundary: keep the operation result
+        logger.warning("Không ghi được resource telemetry cause=%s", type(error).__name__)
+
+
 def process_next(registry: ProjectRegistry, settings: Settings) -> bool:
     """Handle at most one request; resource waits are requeued and let the worker sleep."""
     recover_interrupted(settings)
@@ -726,6 +771,7 @@ def process_next(registry: ProjectRegistry, settings: Settings) -> bool:
     )
     outcome: dict[str, object] | None = None
     reserved = False
+    sampler: ResourceSampler | None = None
     try:
         # The remote resolver may update local artifacts, but it cannot change the captured base revision.
         registry.runtime_resolver.sync_down(job_id)
@@ -780,57 +826,64 @@ def process_next(registry: ProjectRegistry, settings: Settings) -> bool:
 
         root = settings.product_worker_root.expanduser().resolve() / job_id
         workspace = root / f"{running.mode}-{uuid4().hex}"
+        sampler = _scene_sampler(
+            settings, admission, job, running.mode, request.operation_id, config_checksum, workspace
+        )
         arguments = dict(
             expected_revision=running.base_revision,
             commit_guard=_commit_guard(job_id, running, admission, request),
             cancel_event=cancel_event,
         )
-        if running.mode in {"membership", "geometry", "region"}:
+        with sampled_section(
+            sampler,
+            on_error=lambda error: logger.warning("Không lấy được resource sample cause=%s", type(error).__name__),
+        ):
+            if running.mode in {"membership", "geometry", "region"}:
 
-            def progress(phase: str) -> None:
-                with _database(settings).transaction(write=True) as tx:
-                    record = _read(tx, job_id, lock=True)
-                    if not _active_lease(
-                        record, running.lease_token or "", running.lease_generation, datetime.now(UTC)
-                    ):
-                        cancel_event.set()
-                        raise ProcessCancelledError(f"{running.mode} progress lost worker lease")
-                    _write(tx, job_id, record.model_copy(update={"phase": phase}))
+                def progress(phase: str) -> None:
+                    with _database(settings).transaction(write=True) as tx:
+                        record = _read(tx, job_id, lock=True)
+                        if not _active_lease(
+                            record, running.lease_token or "", running.lease_generation, datetime.now(UTC)
+                        ):
+                            cancel_event.set()
+                            raise ProcessCancelledError(f"{running.mode} progress lost worker lease")
+                        _write(tx, job_id, record.model_copy(update={"phase": phase}))
 
-            if running.mode == "geometry":
-                revision = build_object_geometry(
-                    registry, settings, job_id, workspace=workspace, progress=progress, **arguments
-                )
-            elif running.mode == "region":
-                if running.region_command is None or running.region_object_id is None or running.actor_id is None:
-                    raise ObjectifyRequestError("queued region payload is missing")
-                revision = rebuild_region_ready(
-                    registry,
-                    settings,
-                    job_id,
-                    workspace,
-                    object_id=running.region_object_id,
-                    command=running.region_command,
-                    actor_id=running.actor_id,
-                    progress=progress,
-                    **arguments,
-                )
+                if running.mode == "geometry":
+                    revision = build_object_geometry(
+                        registry, settings, job_id, workspace=workspace, progress=progress, **arguments
+                    )
+                elif running.mode == "region":
+                    if running.region_command is None or running.region_object_id is None or running.actor_id is None:
+                        raise ObjectifyRequestError("queued region payload is missing")
+                    revision = rebuild_region_ready(
+                        registry,
+                        settings,
+                        job_id,
+                        workspace,
+                        object_id=running.region_object_id,
+                        command=running.region_command,
+                        actor_id=running.actor_id,
+                        progress=progress,
+                        **arguments,
+                    )
+                else:
+                    if running.correction_command is None or running.actor_id is None:
+                        raise ObjectifyRequestError("queued correction payload is missing")
+                    revision = regenerate_membership(
+                        registry,
+                        job_id,
+                        settings,
+                        workspace,
+                        command=running.correction_command,
+                        actor_id=running.actor_id,
+                        progress=progress,
+                        **arguments,
+                    )
             else:
-                if running.correction_command is None or running.actor_id is None:
-                    raise ObjectifyRequestError("queued correction payload is missing")
-                revision = regenerate_membership(
-                    registry,
-                    job_id,
-                    settings,
-                    workspace,
-                    command=running.correction_command,
-                    actor_id=running.actor_id,
-                    progress=progress,
-                    **arguments,
-                )
-        else:
-            operation = reobjectify if running.mode == "objectify" else use_boxes
-            revision = operation(registry, job_id, settings, workspace, **arguments)
+                operation = reobjectify if running.mode == "objectify" else use_boxes
+                revision = operation(registry, job_id, settings, workspace, **arguments)
         outcome = {
             "status": "done",
             "phase": "done",
@@ -865,6 +918,7 @@ def process_next(registry: ProjectRegistry, settings: Settings) -> bool:
     finally:
         heartbeat_stop.set()
         heartbeat_thread.join(timeout=_LEASE_HEARTBEAT_SECONDS + 1)
+        _record_scene_usage(settings, sampler, outcome)
         if reserved and operation_request[0] is not None:
             admission.release_operation(operation_request[0])
 

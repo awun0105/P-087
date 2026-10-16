@@ -20,6 +20,8 @@ from src.models.contracts.artifacts import ArtifactDataClass, ProductArtifactRef
 from src.models.contracts.manifests import StageId
 from src.models.contracts.reconstruction import ReconstructionBundle
 from src.services.orchestration.artifacts import FilesystemArtifactStore, sha256_bytes
+from src.services.orchestration.processing.observed import processing_seconds
+from src.services.orchestration.processing.telemetry import ResourceSampler, ResourceUsage
 from src.services.orchestration.scene import extraction as scene_extraction
 from src.services.orchestration.scene import objectify as scene_objectify
 from src.services.orchestration.scene import objectify_queue as scene_objectify_queue
@@ -1205,3 +1207,89 @@ def test_geometry_review_for_the_scene_list(world, geometry, record, expected) -
                 ),
             )
     assert scene_objectify_queue.geometry_review(settings, job.job_id, geometry, "rev-001") == expected
+
+
+def _scene_usages(settings: Settings) -> list[ResourceUsage]:
+    with scene_objectify_queue._database(settings).transaction() as tx:
+        rows = tx.execute("SELECT payload FROM r2s_resource_usage").fetchall()
+    return [ResourceUsage.model_validate_json(row[0]) for row in rows]
+
+
+def _region_stub(registry, base, finish):  # noqa: ANN001, ANN202
+    from src.services.orchestration.scene.object_geometry_build import ObjectGeometryBuildError
+    from src.services.process_control import ProcessCancelledError
+
+    def operation(  # noqa: ANN202
+        registry_arg,
+        settings_arg,
+        job_id,
+        workspace,
+        *,
+        object_id,
+        command,
+        actor_id,
+        expected_revision,
+        progress,
+        commit_guard,
+        cancel_event,
+    ):
+        time.sleep(0.05)  # bảo đảm duration_seconds > 0 với sampler thật
+        if finish == "failure":
+            raise ObjectGeometryBuildError("Object A: shell failed", object_id=object_id, retryable=False)
+        if finish == "cancelled":
+            raise ProcessCancelledError("cancelled")
+        return registry.scene.publish_next(
+            job_id, expected_revision, base, "region", commit_guard=commit_guard
+        ).revision.scene.scene_revision
+
+    return operation
+
+
+@pytest.mark.parametrize(
+    ("finish", "expected"), [("success", "completed"), ("failure", "failed"), ("cancelled", "cancelled")]
+)
+def test_region_run_records_one_scene_usage_with_its_outcome(world, monkeypatch, tmp_path, finish, expected) -> None:  # noqa: ANN001
+    registry, job, _, settings = world
+    base, command = _ready_region_request(world, monkeypatch, tmp_path)
+    monkeypatch.setattr(scene_objectify_queue, "rebuild_region_ready", _region_stub(registry, base, finish))
+    queued = scene_objectify_queue.request(
+        registry, settings, job.job_id, base.scene_revision, "region", region=("object-a", command), actor_id="reviewer"
+    )
+    assert scene_objectify_queue.process_next(registry, settings) is True
+    usages = _scene_usages(settings)
+    assert [(u.tool, u.outcome, u.attempt_id, u.job_id) for u in usages] == [
+        ("scene.region", expected, queued.operation_id, job.job_id)
+    ]
+    assert usages[0].duration_seconds > 0
+    expected_seconds = {job.job_id: usages[0].duration_seconds} if expected == "completed" else {}
+    assert processing_seconds(usages) == expected_seconds
+
+
+def test_sampler_failures_never_change_the_region_result(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    registry, job, _, settings = world
+    base, command = _ready_region_request(world, monkeypatch, tmp_path)
+    monkeypatch.setattr(scene_objectify_queue, "rebuild_region_ready", _region_stub(registry, base, "success"))
+
+    def broken_sample(self, root):  # noqa: ANN001, ANN202
+        raise RuntimeError("probe unavailable")
+
+    monkeypatch.setattr(ResourceSampler, "sample", broken_sample)
+    scene_objectify_queue.request(
+        registry, settings, job.job_id, base.scene_revision, "region", region=("object-a", command), actor_id="reviewer"
+    )
+    scene_objectify_queue.process_next(registry, settings)
+    state = scene_objectify_queue.state(registry, settings, job.job_id)
+    assert state.status == "done" and state.result_revision is not None
+
+
+def test_missing_sampler_still_publishes_and_records_nothing(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    registry, job, _, settings = world
+    base, command = _ready_region_request(world, monkeypatch, tmp_path)
+    monkeypatch.setattr(scene_objectify_queue, "rebuild_region_ready", _region_stub(registry, base, "success"))
+    monkeypatch.setattr(scene_objectify_queue, "build_sampler", lambda *args: None)
+    scene_objectify_queue.request(
+        registry, settings, job.job_id, base.scene_revision, "region", region=("object-a", command), actor_id="reviewer"
+    )
+    scene_objectify_queue.process_next(registry, settings)
+    assert scene_objectify_queue.state(registry, settings, job.job_id).status == "done"
+    assert _scene_usages(settings) == []
