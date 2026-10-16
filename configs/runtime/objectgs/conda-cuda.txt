@@ -1,0 +1,8 @@
+# Prefix CUDA 11.8 + toolchain: `micromamba create -p <đích>/cuda -c conda-forge -c nvidia --override-channels <các gói dưới>`
+# Lịch sử cài trên laptop: conda create --override-channels -c conda-forge -c nvidia --prefix .../cuda ...
+cuda-nvcc=11.8.89
+cuda-cudart=11.8.89
+cuda-cudart-dev=11.8.89
+cuda-cccl=11.8.89
+gxx_linux-64=11.4.0
+sysroot_linux-64=2.39

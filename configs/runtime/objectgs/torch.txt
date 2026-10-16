@@ -1,0 +1,6 @@
+# Torch cho ObjectGS: cài từ index PyTorch cu118 và PyG (không có trong requirements.lock.txt).
+# Nguồn: data/objectgs_runtime/pytorch.txt và scatter.txt trên laptop, ngày 15/10.
+torch==2.1.2+cu118
+torchaudio==2.1.2+cu118
+torchvision==0.16.2+cu118
+torch-scatter==2.1.2+pt21cu118
