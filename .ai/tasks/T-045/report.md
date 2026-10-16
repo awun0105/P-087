@@ -4,9 +4,18 @@
 
 A1: pipeline nhận trực tiếp PNG, JPG và JPEG, gồm đuôi viết hoa và một bộ ảnh trộn định dạng. Các bản sao đưa vào COLMAP và Brush giữ nguyên byte ảnh nguồn. Tên ảnh trong camera pose và sparse model giữ đúng đuôi định dạng.
 
-A2–A4: đã có lệnh nạp một scene dataset thành project/job, ghép MP4 chỉ để phát lại, và nối worker dataset qua quality → privacy self-attestation → image refs. `InputManifest` của job chỉ khai báo ảnh; worker không đọc MP4. Preset được chọn theo scene. Video xem lại hiện trên trang tiến trình, endpoint project và bundle xuất mẫu có nhãn rõ ràng.
+A2–A4: lệnh nạp ghép MP4 từ ảnh theo thứ tự và tạo project/job dataset. Theo chỉ đạo mới nhất, MP4 được khai báo trong `InputManifest` như video đầu vào; các ảnh gốc cũng được khai báo và dùng làm frame đã tách sẵn. Worker dataset chạy quality → privacy self-attestation → image refs, không decode/tách lại MP4. Project giữ ref video để phát lại; bundle xuất mẫu có nhãn video ghép.
 
 Phần A đã code, test focused và commit. T-045 còn `in-progress`: các kiểm tra acceptance tổng hợp và Phần B đang chờ. Chưa chạy scene. Lựa chọn dung lượng là C: chạy tuần tự, xuất mẫu lên USB; chưa chuyển/xoá artifact laptop vì chưa có job kết thúc.
+
+### Điều chỉnh theo chỉ đạo mới nhất
+
+Chủ dự án yêu cầu đưa video ghép vào pipeline, nhưng dùng ảnh dataset có sẵn làm kết quả của bước tách ảnh. Vì vậy, thay đổi A3 ban đầu (video chỉ playback, vắng mặt khỏi manifest) được thay bằng hành vi: manifest có MP4 + ảnh; dataset worker chỉ nhận các ảnh làm frame refs và không gọi video decoder. Không dùng sparse/COLMAP/poses của dataset. Export lấy MP4 đã khai báo và gắn nhãn video ghép.
+
+- Commit sửa: `84e56abe Submit composed dataset videos to pipeline jobs`.
+- Test đỏ trước sửa: `test_dataset_project_submits_video_and_preextracted_images_as_input` thất bại vì `project.input_video` rỗng.
+- Kiểm tra sau sửa: 42 test liên quan pass; Ruff check/format pass; `graphify update .` pass (27.720 nodes, 86.636 edges, 827 communities).
+- Giới hạn: kiểm tra hiện tại chứng minh manifest/job preparation cùng các ảnh đã publish; chưa chứng minh COLMAP/Brush/GPU trên 9 scene thật.
 
 ## Scope decision
 
@@ -14,7 +23,7 @@ Chỉ dẫn chủ dự án ngày 2026-10-17 yêu cầu sửa pipeline để nh�
 
 Adapter TorWIC giữ hợp đồng PNG theo layout normalized riêng của TorWIC. Các boundary pipeline dùng chung nhận `image/png` và `image/jpeg`.
 
-Chủ dự án chỉ đạo dùng `self_attested` cho batch dataset. Project khai báo `public_or_synthetic`, chủ sở hữu dataset, mục đích `kiểm thử nội bộ`; video ghép nằm ở `display_video_ref`, tách biệt khỏi `InputManifest.files`.
+Chủ dự án chỉ đạo dùng `self_attested` cho batch dataset. Project khai báo `public_or_synthetic`, chủ sở hữu dataset, mục đích `kiểm thử nội bộ`; video ghép nằm trong `InputManifest.files` cùng các ảnh và project giữ `display_video_ref` cho playback.
 
 ## Changed files — A1
 
@@ -30,9 +39,9 @@ Chủ dự án chỉ đạo dùng `self_attested` cho batch dataset. Project kha
 ## Changed files — A2–A4
 
 - `src/services/orchestration/projects/dataset_video.py`: ghép danh sách ảnh theo tên thành H.264/yuv420p, 3 fps, cạnh dài tối đa 1920, kích thước chia hết cho 2; xác minh số frame bằng ffprobe.
-- `scripts/datasets/import_image_scene.py`: lệnh một scene/job; từ chối thư mục có sidecar COLMAP/NeRF, dùng Reviewer credentials từ `R2S_REVIEWER_EMAIL`/`R2S_REVIEWER_PASSWORD` mà không in ra, lưu video dưới dạng display-only, gán preset trong cấu hình theo scene và tạo job owner-bound.
-- `src/services/orchestration/projects/registry.py`, `projects/models.py`, `projects/privacy.py`: publish ảnh gốc vào input manifest, video riêng vào display ref, hỗ trợ project dataset tự khai và dispatch theo chỉ đạo.
-- `src/services/reconstruction/prepare_cli.py`: dataset đi qua quality và self-attested gate; `image_refs` giữ nguyên ảnh nguồn, không decode/timestamp video.
+- `scripts/datasets/import_image_scene.py`: lệnh một scene/job; từ chối thư mục có sidecar COLMAP/NeRF, dùng Reviewer credentials từ `R2S_REVIEWER_EMAIL`/`R2S_REVIEWER_PASSWORD` mà không in ra, gán preset trong cấu hình theo scene và tạo job owner-bound.
+- `src/services/orchestration/projects/registry.py`, `projects/models.py`, `projects/privacy.py`: publish ảnh gốc và MP4 vào input manifest, giữ video playback ref, hỗ trợ project dataset tự khai và dispatch theo chỉ đạo.
+- `src/services/reconstruction/prepare_cli.py`: dataset đi qua quality và self-attested gate; `image_refs` giữ nguyên ảnh nguồn và thay đầu ra tách video, worker không decode/timestamp MP4.
 - `src/api/studio/scenes.py`, `api/schemas.py`, `samples/export.py`, `samples/models.py`: endpoint video playback, export chọn video display và nhãn `Video ghép từ ảnh gốc, chỉ để xem lại`.
 - `frontend/src/features/studio/ScenePage.tsx`, `scene/ProgressTab.tsx`, `showcase/registry.tsx`, `lib/contracts/*`: phát video display ở Studio và gắn nhãn trong replay mẫu.
 - Tests mới: `test_dataset_video.py`, `test_dataset_import_cli.py`, `test_display_video_model.py`; mở rộng `test_rec_prepare_input.py`, `test_project_registry.py`, `test_sample_export.py`, `test_studio_routes.py`, `studio-demo-showcase.test.tsx`.
@@ -42,6 +51,7 @@ Chủ dự án chỉ đạo dùng `self_attested` cho batch dataset. Project kha
 - `cec33009 Compose replay video from ordered dataset images` (A4).
 - `d146100d Keep dataset replay video separate from pipeline input` (A3).
 - `834d7a46 Run dataset image projects through image reference preparation` (A2).
+- `84e56abe Submit composed dataset videos to pipeline jobs` (điều chỉnh A3 theo chỉ đạo mới).
 
 ## Verification — A2–A4 (focused)
 
