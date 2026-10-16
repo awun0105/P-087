@@ -86,3 +86,70 @@ Các đột biến được khôi phục ngay và đã xác nhận file trở v�
 3. **Cổng T-036**: có chấp nhận Phần B đã làm trước khi T-036 accepted, hay cần đóng T-036 (làm lại bước 4 và sửa `Makefile.studio`) trước khi T-040 được coi là accepted?
 4. **Khoá bảng `r2s_worker_runtimes`**: có cần thêm config và seed vào khoá (một dòng cho mỗi cặp) thay cho việc ghi đè?
 5. **`PRODUCT_INPUT_RUNTIME_REGISTRY`**: có tạo task để bỏ chép tay không?
+
+## Round 2 (review `.ai/tasks/T-040/review.md`, commit `7087ea35`)
+
+Verdict của review: changes requested, một sửa bắt buộc (khoá bảng) và một dòng hướng dẫn nâng cấp. Phần còn lại đạt.
+
+### Required change 1 — khoá `r2s_worker_runtimes` gồm config và seed (đã làm, commit `e4e38683`)
+
+Lỗi đã thấy: hai worker cùng image nhưng khác file config hoặc seed ghi đè nhau trên cùng một dòng theo nhịp heartbeat.
+API với config A lúc thấy dòng của B thì `select` trả `None` và tạo scene bị từ chối một cách ngẫu nhiên.
+
+Đã sửa:
+- **Migration 22 sửa tại chỗ, không thêm migration 23 cho việc này.** Kiểm schema `data/studio_local/runtime.db` ở chế độ
+  chỉ đọc (`mode=ro`) hai lần, lần cuối ngay trước commit: `r2s_schema.version = 21`, bảng `r2s_worker_runtimes` chưa tồn
+  tại. Không DB nào đã lên 22, nên sửa tại chỗ là đúng quy tắc. Migration 23 (bảng lease, bước 6) giữ nguyên.
+- Khoá: `PRIMARY KEY (software_runtime_checksum, config_checksum, seed_key)`. `seed_key` là `seed`, hoặc `-1` khi
+  `seed` là `NULL` (PostgreSQL không cho NULL trong khoá chính). Cột `seed` vẫn được giữ để đọc. `publish` từ chối seed âm
+  vì `-1` đã là mã của `NULL`.
+- Upsert theo `ON CONFLICT(software_runtime_checksum, config_checksum, seed_key)`.
+- `select` lọc `config_checksum` và `seed_key` trong SQL, không lọc sau khi đọc.
+- `find(database, checksum, *, now=None)` trả dòng mới nhất trong các dòng cùng checksum phần mềm, ưu tiên dòng đang sống.
+- `has_live_runtime` và `live_runtime_checksums` giữ nguyên nghĩa.
+
+Test (`tests/test_orchestration/test_worker_runtimes.py`, bốn test mới):
+- `test_two_configs_sharing_one_software_runtime_keep_their_own_rows`: A và B công bố xen kẽ ba lượt; `select` cho config
+  nào cũng trả đúng dòng của config đó.
+- `test_seed_none_and_a_numbered_seed_are_separate_rows`.
+- `test_find_prefers_the_live_row_among_rows_with_the_same_software_checksum`.
+- `test_publish_rejects_a_negative_seed`.
+
+Đỏ trên code cũ (đã chạy, không dùng môi trường khác):
+- Worktree tạm ở `HEAD` = `7087ea35`, copy file test mới vào, có `.env` để chạy tham số PostgreSQL: **8 tham số đỏ**
+  (4 test × SQLite/PostgreSQL). Worktree đã xoá.
+- Lưu ý: `test_find_...` đỏ một phần vì chữ ký cũ của `find` không có `now`, nên không phải hoàn toàn do khoá. Hai test
+  hai-config và seed-NULL đỏ đúng nguyên nhân khoá.
+- Trên cây sửa: `test_worker_runtimes.py` **22 passed** (gồm cả tham số PostgreSQL).
+
+### Dòng hướng dẫn nâng cấp (đã làm, commit riêng)
+
+Thêm mục `## Nâng cấp từ bản trước T-040` vào `deploy/studio/OVERVIEW.md`, trước "Những chỗ dễ vấp", với đúng câu của
+review: "Nâng cấp từ bản trước T-040 khi còn job RUNNING: đưa job đó về FAILED retryable bằng tay trước khi bật worker mới."
+Thêm một dòng về migration tự chạy và worker công bố runtime ngay nhịp đầu.
+
+### Trả lời của review cho 5 câu hỏi (đã áp dụng)
+
+1. Job RUNNING cũ lúc deploy: đã ghi vào OVERVIEW như trên, không thêm bước tự động.
+2. Nút "Chạy lại từ đầu": để backlog, **không làm** trong round này.
+3. Cổng T-036: review chấp nhận làm Phần B trước. Lỗi `Makefile.studio` vẫn thuộc T-036.
+4. Khoá bảng: đã sửa (Required change 1).
+5. `PRODUCT_INPUT_RUNTIME_REGISTRY`: tách task sau. **Không làm** trong round này.
+
+### Kiểm chứng round 2
+
+- `tests/test_orchestration tests/test_api tests/test_gpu tests/test_packaging`: **1714 passed, exit 0** (139.76 s), trên
+  cây sau commit `e4e38683` và trước khi commit OVERVIEW.
+- `tests/test_orchestration/test_runtime_migrations.py` vẫn ghim 23 (đúng: số migration không đổi, chỉ đổi nội dung 22).
+- Ruff check và format-check trên các file Python đã đổi: sạch.
+
+### Không làm (không bắt buộc theo review)
+
+- Gợi ý rebind khi worker image mới khởi động (ảnh hưởng T-042): review đã ghi vào `.ai/tasks/T-042/plan.md`
+  (commit `7087ea35`), không làm trong T-040.
+- `benchmark._tool_timings` với job cũ chạy lại sau deploy: chỉ ảnh hưởng job tạo trước T-040. Chưa sửa.
+
+### Lưu ý khi khởi động lại stack (không làm trong round này)
+
+- Stack đang chạy (API `uvicorn` và worker `worker_cli`) vẫn là code trước T-040 và DB ở schema 21. Chưa khởi động lại.
+- Lần khởi động lại kế tiếp: migration 22 (khoá mới) và 23 (lease) chạy tự động trên DB ở 21, không cần thao tác tay.
