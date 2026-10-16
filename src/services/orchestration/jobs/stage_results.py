@@ -10,7 +10,7 @@ from functools import lru_cache
 from typing import TYPE_CHECKING, Any
 
 from src.models.contracts.manifests import JobManifest, StageId, StageStatus
-from src.services.orchestration.artifacts import ArtifactStoreError
+from src.services.orchestration.artifacts import ArtifactResolver, ArtifactStoreError
 from src.services.orchestration.jobs.progress import metric_confirmation_stage
 
 if TYPE_CHECKING:
@@ -27,7 +27,7 @@ SCALE_SOURCES = {
 
 
 @lru_cache(maxsize=128)
-def _read(resolver: Any, uri: str, checksum: str) -> dict[str, Any]:
+def _read(resolver: ArtifactResolver, uri: str, checksum: str) -> dict[str, Any]:
     """Cache theo checksum bất biến; giới hạn chỉ cho metadata tối đa 4 MiB."""
     path = resolver.require_uri(uri, checksum)
     if path.stat().st_size > 4 * 1024 * 1024:
@@ -38,7 +38,7 @@ def _read(resolver: Any, uri: str, checksum: str) -> dict[str, Any]:
     return value
 
 
-def read_reference(resolver: Any, ref: dict[str, Any]) -> dict[str, Any]:
+def read_reference(resolver: ArtifactResolver, ref: dict[str, Any]) -> dict[str, Any]:
     return _read(resolver, ref["artifact_uri"], ref["artifact_checksum"])
 
 
@@ -101,6 +101,7 @@ def recorded_results(registry: ProjectRegistry, job: JobManifest) -> dict[str, A
                 source = "ảnh"
             if source:
                 result["collision_source"] = source
+                result["collision_ref"] = ref
         except (ArtifactStoreError, OSError, ValueError, KeyError, TypeError) as error:
             logger.debug("Không có receipt collision hợp lệ cho %s: %s", job.job_id, error)
         break
@@ -109,7 +110,7 @@ def recorded_results(registry: ProjectRegistry, job: JobManifest) -> dict[str, A
     except (ArtifactStoreError, OSError, ValueError):
         scene = None
     if scene is not None:
-        objects = scene["objects"]
+        objects = [item for item in scene["objects"] if item.get("origin") == "reconstructed"]
         result["candidate_count"] = len(objects)
         result["object_extraction"] = scene["provenance"].get("object_extraction")
         environment = scene["environment"]
@@ -118,8 +119,10 @@ def recorded_results(registry: ProjectRegistry, job: JobManifest) -> dict[str, A
             try:
                 mode = read_reference(resolver, selection)["mode"]
                 result["collision_source"] = {"lidar_derived": "LiDAR", "rgb_cleaned": "ảnh"}[mode]
+                result["collision_ref"] = environment.get("collision_source_ref")
             except (ArtifactStoreError, OSError, ValueError, KeyError):
                 result.pop("collision_source", None)
+                result.pop("collision_ref", None)
         state = scene["provenance"].get("object_geometry")
         if state in {"awaiting_review", "ready"}:
             chosen = [(item.get("provenance", {}).get("surface_selection") or {}).get("chosen") for item in objects]
@@ -135,6 +138,13 @@ def recorded_results(registry: ProjectRegistry, job: JobManifest) -> dict[str, A
                     row = tx.execute("SELECT payload FROM r2s_scene_requests WHERE job_id=?", (job.job_id,)).fetchone()
                 if row is not None:
                     request = json.loads(row[0])
+                    if (
+                        state == "awaiting_review"
+                        and request.get("mode") == "geometry"
+                        and request.get("base_revision") == scene["scene_revision"]
+                        and request.get("status") in {"failed", "cancelled"}
+                    ):
+                        result["object_geometry"]["state"] = "failed"
                     if (
                         request.get("mode") == "geometry"
                         and request.get("status") == "done"

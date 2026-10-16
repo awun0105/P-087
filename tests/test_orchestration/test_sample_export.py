@@ -388,10 +388,16 @@ def test_sample_exports_recorded_metric_collision_objects_and_geometry(
             }
         },
     )
+    import trimesh
+
+    mesh_path = tmp_path / "collision.glb"
+    mesh_path.write_bytes(trimesh.creation.box().export(file_type="glb"))
     geometry_ref = {
         "artifact_type": "LidarCollisionCandidate" if source == "lidar_trajectory" else "GeometryArtifact",
-        "artifact_checksum": "sha256:" + "1" * 64,
+        "artifact_uri": f"artifact://jobs/{JOB_ID}/collision.glb",
+        "artifact_checksum": sha256_file(mesh_path),
     }
+    refs[geometry_ref["artifact_uri"]] = mesh_path
     bundle = publish(
         "bundle.json",
         {
@@ -407,9 +413,11 @@ def test_sample_exports_recorded_metric_collision_objects_and_geometry(
             "environment": {},
             "objects": [
                 {
+                    "origin": "reconstructed",
                     "collider": {},
                     "provenance": {"surface_selection": {"chosen": "objectgs" if objectgs else "gaussian_shell"}},
-                }
+                },
+                {"origin": "user_added", "collider": {}, "provenance": {}},
             ],
         },
     )
@@ -444,6 +452,7 @@ def test_sample_exports_recorded_metric_collision_objects_and_geometry(
     assert facts[StageId.METRIC_CANONICALIZE]["Tỉ lệ"] == "2 m/đơn vị"
     assert facts[StageId.METRIC_CANONICALIZE]["Sai số C–D"] == "0 m"
     assert facts[StageId.RGB_GEOMETRY]["Nguồn lưới va chạm"] == ("LiDAR" if source == "lidar_trajectory" else "ảnh")
+    assert facts[StageId.RGB_GEOMETRY]["Số tam giác của lưới"] == "12"
     assert facts[StageId.OBJECT_EXTRACT]["Số vật ứng viên"] == "1"
     assert demo.object_geometry.objectgs_count == int(objectgs)
     assert demo.object_geometry.shell_count == int(not objectgs)

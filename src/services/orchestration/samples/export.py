@@ -298,6 +298,15 @@ def _export_job_bundle(
         stage_id: [StageAssetSpec(kind="facts", facts=tuple(facts))]
         for stage_id, facts in result_facts(results).items()
     }
+    collision = results.get("collision_ref")
+    if collision and StageId.RGB_GEOMETRY in automatic:
+        import trimesh
+
+        path = resolver.require_uri(collision["artifact_uri"], collision["artifact_checksum"])
+        mesh = trimesh.load(path, force="mesh", process=False)
+        automatic[StageId.RGB_GEOMETRY].append(
+            StageAssetSpec(kind="facts", facts=(("Số tam giác của lưới", str(len(mesh.faces))),))
+        )
     # Ảnh xem trước chỉ lấy từ artifact đã publish của job, không render ảnh mới.
     for stage in job.stage_artifacts:
         if stage.status != StageStatus.SUCCEEDED or not stage.artifact_uri:
