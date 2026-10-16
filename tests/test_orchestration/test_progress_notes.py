@@ -112,3 +112,14 @@ def test_progress_small_receipts_are_cached_by_checksum(tmp_path: Path) -> None:
     assert stage_results._read.cache_info().hits == before.hits + 1
     path.write_text(json.dumps({"n": 2}))
     assert stage_results._read(resolver, uri, sha256_file(path)) == {"n": 2}
+
+
+def test_progress_contract_mirror_detects_a_missing_note() -> None:
+    from scripts.check_contract_mirror import _check_models
+    from src.services.orchestration.jobs.progress import StageProgress
+
+    source = Path("frontend/src/lib/contracts/studio.ts").read_text()
+    assert _check_models(source, [("StageProgress", StageProgress)]) == []
+    assert "StageProgress.note: có trong Pydantic, thiếu ở TypeScript" in _check_models(
+        source.replace("  note?: string | null;", ""), [("StageProgress", StageProgress)]
+    )

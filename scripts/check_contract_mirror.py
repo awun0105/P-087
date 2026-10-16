@@ -32,6 +32,7 @@ from src.models.contracts.manifests import (  # noqa: E402
 )
 from src.models.contracts.object_membership import ObjectRegionCommand, RegionBox  # noqa: E402
 from src.models.contracts.scene import ColliderSpec, SceneEnvironment, SceneObject, SourceCollisionRegion  # noqa: E402
+from src.services.orchestration.jobs.progress import StageProgress  # noqa: E402
 from src.services.orchestration.jobs.transitions import ALLOWED_TRANSITIONS  # noqa: E402
 
 # TS constant -> giá trị backend tương ứng
@@ -98,13 +99,13 @@ def _check_enums(source: str) -> list[str]:
     return problems
 
 
-def _check_models(source: str) -> list[str]:
+def _check_models(source: str, mirrors: list[tuple[str, type[BaseModel]]] = MODEL_MIRRORS) -> list[str]:
     problems = []
-    for name, model in MODEL_MIRRORS:
+    for name, model in mirrors:
         expected = set(model.model_fields)
         actual = _ts_interface_fields(source, name)
         if actual is None:
-            problems.append(f"{name}: không tìm thấy interface trong api.ts")
+            problems.append(f"{name}: không tìm thấy interface trong mirror TypeScript")
             continue
         for missing in sorted(expected - actual):
             problems.append(f"{name}.{missing}: có trong Pydantic, thiếu ở TypeScript")
@@ -158,6 +159,8 @@ def _check_no_widening(source: str) -> list[str]:
 def main() -> int:
     source = _read()
     problems = _check_enums(source) + _check_models(source) + _check_transitions(source) + _check_no_widening(source)
+    studio = (ROOT / "frontend/src/lib/contracts/studio.ts").read_text(encoding="utf-8")
+    problems += _check_models(studio, [("StageProgress", StageProgress)])
     if problems:
         print("FAIL — mirror TypeScript lệch với Pydantic:")
         for problem in problems:
@@ -165,7 +168,7 @@ def main() -> int:
         print("\nSửa cả hai bên rồi chạy lại. Đừng nới union để cho TypeScript im lặng.")
         return 1
     print(
-        f"PASS — {len(ENUM_MIRRORS)} enum, {len(MODEL_MIRRORS)} model khớp Pydantic; "
+        f"PASS — {len(ENUM_MIRRORS)} enum, {len(MODEL_MIRRORS) + 1} model khớp Pydantic; "
         "không có union nào bị nới thành `string`."
     )
     return 0
