@@ -12,6 +12,7 @@ import { SimulationPackagePanel } from "@/features/studio/SimulationPackagePanel
 import { HelpDetails } from "@/components/studio/feedback";
 import { floorFitDiagnostic } from "@/features/studio/scene/floorFitDiagnostic";
 import { EvaluationCard } from "@/features/studio/evaluation/EvaluationCard";
+import { ValueCard } from "@/features/studio/value/ValueCard";
 import { ValidationReportCard } from "@/features/studio/ValidationReportCard";
 import { getJobScene, type ReviewStateView } from "@/lib/api/studio";
 import { GEOMETRY_NOT_READY_REASON, objectGeometryState } from "@/lib/scene/geometry-state";
@@ -96,8 +97,16 @@ export function ReviewTab({ jobId, canMutateJob, onSaveState }: { jobId: string;
         </Card>
       )}
       <Card className="overflow-hidden lg:col-span-2">
-        <EvaluationCard jobId={jobId} revision={revision} />
+        <ValueCard jobId={jobId} revision={revision} />
       </Card>
+      <details className="lg:col-span-2">
+        <summary className="cursor-pointer select-none px-1 py-2 text-sm font-semibold text-ink-muted hover:text-ink">
+          Chi tiết kỹ thuật
+        </summary>
+        <Card className="mt-2 overflow-hidden">
+          <EvaluationCard jobId={jobId} revision={revision} />
+        </Card>
+      </details>
       <div className="lg:col-span-2"><HelpDetails title="Gói và quyết định duyệt gắn với revision nào?">
         Mọi thay đổi vật thể sau khi tạo gói sẽ sinh revision mới: gói, báo cáo validation và quyết định duyệt cũ không còn áp dụng
         cho revision đó.
