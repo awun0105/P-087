@@ -82,6 +82,7 @@ Xong 2026-10-16: T-027 → T-035 accepted. Full backend 3.688 pass / 0 fail / 28
 | T-041 | Deploy production thử trọn | Supabase, R2, Railway, Vercel, RunPod Serverless; 5 scene mẫu; đổi loại GPU không sửa API | T-039, T-040, T-042 | L |
 | T-044 | Trang tiến trình đúng và đủ | Mô tả bước tiếng Việt rõ; khung xem đủ cho scene mẫu, có bước Duyệt vật; dòng kết quả thật dưới mỗi bước | – | M |
 | T-043 | Dừng công cụ theo tiến độ và khối lượng | Canh treo theo tiến độ cho mọi công cụ; hạn tự tính theo số đo trên đúng GPU; trần giờ GPU mỗi scene | – | M |
+| T-045 | 9 scene dataset chạy hết pipeline | Đầu vào là ảnh (1/2), COLMAP của pipeline, video ghép chỉ để xem; agent tự chạy và sửa lỗi | – | L |
 
 ### Backlog (chưa lập plan)
 - Worker công bố registry năng lực input vào DB (bỏ chép tay `PRODUCT_INPUT_RUNTIME_REGISTRY`), cùng mẫu T-040.
