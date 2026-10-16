@@ -80,6 +80,16 @@ def test_every_download_goes_through_a_checksum_check() -> None:
     assert 'fetch "$MICROMAMBA_URL" "$TMP/micromamba.tar.bz2" "$MICROMAMBA_SHA"' in SCRIPT_TEXT
 
 
+def test_micromamba_comes_from_the_official_release_and_its_binary_is_checked() -> None:
+    assert (
+        'MICROMAMBA_URL="https://github.com/mamba-org/micromamba-releases/releases/download/2.0.5-0/'
+        'micromamba-linux-64.tar.bz2"'
+    ) in SCRIPT_TEXT
+    assert "micro.mamba.pm" not in SCRIPT_TEXT
+    assert re.fullmatch(r"[0-9a-f]{64}", re.search(r'MICROMAMBA_BIN_SHA="([^"]+)"', SCRIPT_TEXT).group(1))
+    assert 'sha_of "$TMP/bin/micromamba")" = "$MICROMAMBA_BIN_SHA"' in SCRIPT_TEXT
+
+
 def test_conda_specs_match_the_laptop_runtime() -> None:
     assert _specs("conda-python.txt") == EXPECTED_PYTHON
     assert _specs("conda-cuda.txt") == EXPECTED_CUDA
