@@ -228,3 +228,53 @@ Gaussian (dưới mức đó → 422, gợi ý dùng Delete).
 
 1. Ngưỡng opacity 0.1 và voxel 0.02 m cho vỏ mịn: giá trị khởi đầu, cần chỉnh trên scene thật.
 2. ~~Chế độ `auto` trong UI tạo job?~~ Đã chốt: **có**, radio riêng ngoài mục nâng cao (T-020).
+
+## 15. Hệ thống ghi và xuất metric giá trị (Sprint 6)
+
+### 15.1 Mục tiêu
+Sản phẩm tự ghi đủ dữ liệu để xuất **bảng 5 metric** của Benchmark Playbook (https://claude.ai/artifact/HxAyREwmuoxmXFXdTcsNuN),
+cho từng scene và cho cả bộ benchmark, không cần bấm giờ hay ghi tay ngoài các số đo thước (ground truth):
+
+| Metric | Nguồn dữ liệu |
+| --- | --- |
+| **Chính:** phút công người · phút máy trên [GPU, VRAM, CPU, RAM] · chi phí | `operator_time` (trình duyệt) · `ResourceUsage` của job **và** của hàng đợi tách vật · `MachineCapability` · `Settings.benchmark_gpu_hourly_usd` |
+| Số lần can thiệp | `scene_edit` (mỗi `publish_next`, phân loại người/hệ thống) |
+| **P2:** khớp khe hẹp, bỏ sót / giả, sai số kích thước, vật cản chính có collider | Ground truth + máy đo khe trên collision tổng hợp |
+| **P3:** phút đổi bố trí → thử lại, nhất quán sau khi dời | `scene_edit` + `walk_session` + layout A/B trong ground truth + kiểm nhất quán |
+| **P4:** bậc sẵn sàng L1–L4 | Trạng thái scene, xác nhận mét, gói mô phỏng, lần chạy validation Isaac, khai báo L4 |
+
+Non-goals: không theo dõi người dùng ngoài Studio của job; không gửi dữ liệu ra ngoài; không chấm điểm cá nhân.
+
+### 15.2 Thành phần
+- **Nhật ký sự kiện** `r2s_value_events` (append-only): `event_id, job_id, at, kind, actor_id, payload`.
+  `kind ∈ {scene_edit, operator_time, walk_session}`. Ghi lỗi nhật ký **không bao giờ** làm hỏng thao tác chính (log + bỏ qua).
+- **Đo máy cho hàng đợi tách vật**: mọi mode của `objectify_queue` chạy trong `sampled_section` và ghi `ResourceUsage` với tool
+  `scene.<mode>` (vd. `scene.geometry`), cùng `attempt_id` = `operation_id`. `processing_seconds` cộng cả các bản ghi này.
+- **Ground truth** `r2s_benchmark_truth` (một tài liệu có phiên bản mỗi job, CAS theo `version`): hồ sơ robot, đoạn đo thước,
+  khe kiểm, vật cản chính, layout A/B → revision, mốc làm tay, khai báo L4, cờ đưa vào benchmark.
+- **Máy đo** `value_measure.py`: sai số đoạn đo; bề rộng khe trên collision tổng hợp của một revision (môi trường hiệu lực +
+  collider vật theo transform); nhất quán sau khi dời. Thuần tính toán, có test số học.
+- **Bảng metric** `value_scorecard.py`: gom mọi nguồn thành `ValueScorecard` + xuất JSON / CSV / Markdown, cho một job và cho
+  bộ benchmark (mọi job có `include_in_benchmark`).
+- **Frontend**: bộ đếm phút công người, sự kiện Walk, panel "Benchmark" trong Studio để nhập ground truth, thẻ "Giá trị" ở đầu
+  tab đánh giá, trang `/benchmark` liệt kê và xuất bảng.
+
+### 15.3 Quy tắc đo (bắt buộc)
+1. **Phút công người**: chỉ tính khi trang scene của job đang mở, tab hiển thị, và có thao tác (pointer/keyboard/wheel) trong
+   60 s gần nhất. Gửi theo lô ≤ 300 s mỗi lần; máy chủ từ chối lô có `active_seconds > ended_at − started_at`, thời điểm tương
+   lai, hoặc chồng lô trước của cùng phiên trình duyệt (`session_key`). Tách theo `surface ∈ {studio, progress, evaluation, other}`
+   và theo giai đoạn: trước/sau lần đầu scene đạt `object_geometry = ready`.
+2. **Can thiệp**: `scene_edit` có `origin = human` khi `operation` thuộc bảng thao tác người dùng (`HUMAN_OPERATIONS`), `system`
+   khi thuộc `SYSTEM_OPERATIONS`; operation lạ → `unknown` và có test bắt buộc mọi chuỗi operation trong `src/` đã được phân loại.
+3. **Khe kiểm**: điểm `a`, `b` ở khung canonical (mét, Z-up, sàn z = 0). Bề rộng mô phỏng = nhỏ nhất theo các độ cao
+   `z ∈ [h_min, h_max]` bước 0,05 m của tổng khoảng cách tia ngang từ trung điểm `a–b` theo hai hướng `±(b−a)` tới va chạm đầu
+   tiên, chặn trên ở `|b−a|/2` mỗi phía. Qua được ⇔ bề rộng ≥ `robot.width + 2·robot.safety_margin`.
+   Bỏ sót vật cản = thật không qua mà mô phỏng qua; vật cản giả = thật qua mà mô phỏng không qua.
+4. **Nhất quán sau khi dời** (layout B so với A): với mỗi vật có transform khác nhau giữa hai revision: (a) trong hộp bao của vật
+   tại pose A (thu 2 cm mỗi mặt, z trong dải robot) collision tổng hợp của B **không còn** tam giác; (b) tại pose B collider của
+   vật có mặt. Đạt khi mọi vật dời đều đạt.
+5. **Bậc sẵn sàng**: L1 = đã xác nhận mét và `object_geometry` ready (hoặc scene cũ không có khoá); L2 = L1 + mọi vật cản chính
+   có collider + có ≥ 1 `walk_session` hoàn tất trên revision + khe kiểm của layout A không có bỏ sót; L3 = L2 + có gói mô phỏng
+   cho revision hiện tại + có lần validation Isaac `COMPLETED` cho gói đó; L4 = L3 + khai báo tay bài thử robot A và B (ghi rõ
+   "khai báo", kèm ghi chú bằng chứng).
+6. Mọi số trong bảng ghi rõ nguồn: `measured` (máy đo), `declared` (người nhập), `unavailable` (thiếu dữ liệu, không đoán).

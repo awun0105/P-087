@@ -51,3 +51,17 @@
 | T-023 | Box ban đầu khớp nhóm Gaussian hiện tại (GR-02, P1) | Route fit; mở lại Chỉnh vùng không loại hàng | T-019 | M |
 | T-024 | Chỉ dẫn lỗi: banner, donor, preview 409 (GR-03/04/06) | Người dùng thấy lỗi trước khi bấm | T-019 | M |
 | T-025 | Hiệu năng preview + khoá cache (GR-05) | Warm 2M hàng ≤ 1,5 s; không chặn khi đọc PLY | T-024 | M |
+
+## Sprint 6: Hệ thống ghi và xuất metric giá trị (architecture §15)
+
+| ID | Tiêu đề | Mục tiêu | Cần | Cỡ |
+| --- | --- | --- | --- | --- |
+| T-027 | Nhật ký sự kiện giá trị | Bảng `r2s_value_events`, ghi `scene_edit` từ `publish_next`, API nhận `operator_time` / `walk_session` | – | M |
+| T-028 | Đo máy cho hàng đợi tách vật | `ResourceUsage` cho mọi mode của `objectify_queue`; phút máy đủ | – | S |
+| T-029 | Bộ đếm phút công người + sự kiện Walk | Hook trình duyệt gửi lô thời gian thao tác; Walk gửi phiên | T-027 | M |
+| T-030 | Ground truth của benchmark | Model + bảng + API CAS: robot, đoạn đo, khe, vật cản chính, layout A/B, mốc làm tay, L4 | – | M |
+| T-031 | Máy đo khe, sai số, nhất quán | Tính trên collision tổng hợp của revision | T-030 | L |
+| T-032 | Bảng metric + xuất JSON/CSV/MD | `ValueScorecard` cho job và cho bộ benchmark | T-027..T-031 | M |
+| T-033 | Panel Benchmark trong Studio | Nhập ground truth: chọn điểm, khe, vật cản chính, gắn layout, mốc làm tay | T-030 | L |
+| T-034 | Thẻ Giá trị + trang /benchmark | Hiển thị 5 metric, bảng nhiều scene, nút xuất | T-032 | M |
+| T-035 | Regression + hướng dẫn đo | Full suite, cập nhật Playbook và handoff | tất cả | S |
