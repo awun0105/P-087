@@ -6,7 +6,7 @@ Route ghi sự kiện không trả dữ liệu; mọi lô bị từ chối 422 t
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 from src.api.auth import require_contributor
@@ -23,6 +23,16 @@ from src.services.orchestration.value.ground_truth import (
     TruthVersionConflictError,
     read_truth,
     write_truth,
+)
+from src.services.orchestration.value.scorecard import (
+    BenchmarkResponse,
+    ValueScorecard,
+    benchmark_markdown,
+    benchmark_rows,
+    benchmark_summary,
+    build_scorecard,
+    csv_document,
+    scorecard_markdown,
 )
 
 router = APIRouter()
@@ -246,3 +256,58 @@ def write_benchmark_truth(
     except TruthVersionConflictError as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     return _truth_response(stored)
+
+
+def _scorecard(job_id: str) -> ValueScorecard:
+    try:
+        return build_scorecard(deps.registry(), deps.settings(), job_id)
+    except JobNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+
+
+def _download(content: str, media_type: str, filename: str) -> Response:
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/jobs/{job_id}/value-metrics", response_model=ValueScorecard, responses=_ERRORS)
+def get_value_metrics(job_id: str, user: UserRecord | None = Depends(require_contributor)) -> ValueScorecard:
+    """Bảng metric giá trị của một job (chỉ đọc; số thiếu dữ liệu là unavailable, không phải 0)."""
+    return _scorecard(job_id)
+
+
+@router.get("/jobs/{job_id}/value-metrics.md", responses=_ERRORS)
+def download_value_metrics_markdown(job_id: str, user: UserRecord | None = Depends(require_contributor)) -> Response:
+    card = _scorecard(job_id)
+    return _download(scorecard_markdown(card), "text/markdown; charset=utf-8", f"value-metrics-{job_id}.md")
+
+
+@router.get("/jobs/{job_id}/value-metrics.csv", responses=_ERRORS)
+def download_value_metrics_csv(job_id: str, user: UserRecord | None = Depends(require_contributor)) -> Response:
+    card = _scorecard(job_id)
+    return _download(csv_document([card]), "text/csv; charset=utf-8", f"value-metrics-{job_id}.csv")
+
+
+@router.get("/value-metrics/benchmark", response_model=BenchmarkResponse)
+def get_value_metrics_benchmark(user: UserRecord | None = Depends(require_contributor)) -> BenchmarkResponse:
+    """Job mới nhất của mỗi project có `include_in_benchmark`, kèm tổng hợp."""
+    rows = benchmark_rows(deps.registry(), deps.settings())
+    return BenchmarkResponse(rows=rows, summary=benchmark_summary(rows))
+
+
+@router.get("/value-metrics/benchmark.md")
+def download_benchmark_markdown(user: UserRecord | None = Depends(require_contributor)) -> Response:
+    rows = benchmark_rows(deps.registry(), deps.settings())
+    return _download(
+        benchmark_markdown(rows, benchmark_summary(rows)), "text/markdown; charset=utf-8", "value-benchmark.md"
+    )
+
+
+@router.get("/value-metrics/benchmark.csv")
+def download_benchmark_csv(user: UserRecord | None = Depends(require_contributor)) -> Response:
+    return _download(
+        csv_document(benchmark_rows(deps.registry(), deps.settings())), "text/csv; charset=utf-8", "value-benchmark.csv"
+    )

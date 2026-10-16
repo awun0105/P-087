@@ -17,6 +17,7 @@ from src.services.orchestration.jobs.database import RuntimeDatabase
 from src.services.orchestration.projects import ProjectRegistry
 from src.services.orchestration.projects.models import JobCreateInput
 from src.services.orchestration.value import list_events
+from src.services.orchestration.value.ground_truth import BenchmarkTruth, write_truth
 
 _OPERATOR = "/api/v1/jobs/{job_id}/value-events/operator-time"
 _WALK = "/api/v1/jobs/{job_id}/value-events/walk-session"
@@ -45,7 +46,7 @@ def world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         owner_user_id=owner.user_id,
     )
     monkeypatch.setattr(deps, "registry", lambda: registry)
-    monkeypatch.setattr(deps, "settings", lambda: SimpleNamespace(database_url=url))
+    monkeypatch.setattr(deps, "settings", lambda: SimpleNamespace(database_url=url, benchmark_gpu_hourly_usd=None))
     return SimpleNamespace(url=url, registry=registry, job_id=job.job_id, database=RuntimeDatabase(url))
 
 
@@ -414,3 +415,91 @@ async def test_a_stored_obstacle_that_left_the_scene_does_not_block_later_saves(
     assert kept.status_code == 200
     assert added.status_code == 422 and "vat-moi-khong-co" in added.json()["detail"]
     assert "vat-da-roi-scene" not in added.json()["detail"]
+
+
+_SCORE = "/api/v1/jobs/{job_id}/value-metrics"
+_BENCH = "/api/v1/value-metrics/benchmark"
+
+
+@pytest.mark.asyncio
+async def test_scorecard_of_a_job_without_ground_truth_is_unavailable_not_zero(
+    client: AsyncClient, world: SimpleNamespace, as_user
+) -> None:  # noqa: ANN001
+    as_user(None)
+
+    response = await client.get(_SCORE.format(job_id=_SCENE_JOB))
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["p2"]["unavailable_reason"] == "chưa có ground truth"
+    assert body["p3"]["unavailable_reason"] == "chưa có ground truth"
+    assert body["manual_baseline_minutes"]["provenance"] == "unavailable"
+    assert body["north_star"]["hands_on_minutes"]["provenance"] == "unavailable"
+    assert body["north_star"]["cost_usd"]["provenance"] == "unavailable"
+
+
+@pytest.mark.asyncio
+async def test_scorecard_exports_reject_an_unknown_job_with_404(
+    client: AsyncClient, world: SimpleNamespace, as_user
+) -> None:  # noqa: ANN001
+    as_user(None)
+
+    for suffix in ("", ".md", ".csv"):
+        response = await client.get(_SCORE.format(job_id="job-missing") + suffix)
+        assert response.status_code == 404, suffix
+
+
+@pytest.mark.asyncio
+async def test_markdown_and_csv_exports_have_the_expected_shape(
+    client: AsyncClient, world: SimpleNamespace, as_user
+) -> None:  # noqa: ANN001
+    as_user(None)
+
+    markdown = await client.get(_SCORE.format(job_id=_SCENE_JOB) + ".md")
+    csv_response = await client.get(_SCORE.format(job_id=_SCENE_JOB) + ".csv")
+
+    assert markdown.status_code == 200 and markdown.headers["content-type"].startswith("text/markdown")
+    assert "| Metric | Giá trị | Nguồn |" in markdown.text
+    assert csv_response.status_code == 200 and csv_response.headers["content-type"].startswith("text/csv")
+    assert csv_response.content.startswith(b"\xef\xbb\xbf")
+    assert csv_response.content.decode("utf-8-sig").splitlines()[0].startswith("Scene,Nguồn,Phần cứng")
+
+
+@pytest.mark.asyncio
+async def test_benchmark_lists_only_jobs_marked_for_the_benchmark(
+    client: AsyncClient, world: SimpleNamespace, as_user
+) -> None:  # noqa: ANN001
+    as_user(None)
+    write_truth(world.database, _SCENE_JOB, 0, BenchmarkTruth(include_in_benchmark=True, notes="benchmark"))
+
+    response = await client.get(_BENCH)
+    markdown = await client.get(_BENCH + ".md")
+    csv_response = await client.get(_BENCH + ".csv")
+
+    assert response.status_code == 200
+    job_ids = [row["job_id"] for row in response.json()["rows"]]
+    assert _SCENE_JOB in job_ids
+    assert world.job_id not in job_ids
+    assert response.json()["summary"]["scenes"] == len(job_ids)
+    assert markdown.status_code == 200 and "Bộ benchmark giá trị" in markdown.text
+    assert csv_response.status_code == 200 and csv_response.content.startswith(b"\xef\xbb\xbf")
+
+
+@pytest.mark.asyncio
+async def test_benchmark_takes_the_newest_marked_job_of_each_project(
+    client: AsyncClient, world: SimpleNamespace, as_user
+) -> None:  # noqa: ANN001
+    as_user(None)
+    newer = world.registry.create_job(
+        JobCreateInput(project_id="project-fixture-001"),
+        requested_by=Actor(user_id="user-owner", display_name="Owner", role="guest"),
+        owner_user_id="user-owner",
+    )
+    write_truth(world.database, world.job_id, 0, BenchmarkTruth(include_in_benchmark=True))
+    write_truth(world.database, newer.job_id, 0, BenchmarkTruth(include_in_benchmark=True))
+
+    response = await client.get(_BENCH)
+
+    job_ids = [row["job_id"] for row in response.json()["rows"]]
+    assert newer.job_id in job_ids
+    assert world.job_id not in job_ids
