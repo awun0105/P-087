@@ -306,6 +306,25 @@ def build_objectgs(fixture: SimpleNamespace, **kwargs: object) -> str:
     )
 
 
+def test_objectgs_only_trains_selected_objects_and_preserves_original_membership(objectgs: SimpleNamespace) -> None:
+    from src.services.scene.editing.commands import ignore_object
+
+    source_membership = objectgs.scene.environment.membership
+    reviewed = ignore_object(objectgs.scene, "candidate-001")
+    objectgs.scene = objectgs.registry.scene.publish_next(
+        objectgs.job_id, objectgs.scene.scene_revision, reviewed, "fixture-keep-window"
+    ).revision.scene
+    build_objectgs(objectgs)
+    request = objectgs.calls.objectgs[0]
+    assert request.membership.label_to_object_id == {"2": "candidate-002"}
+    labels = np.frombuffer(request.source_labels.read_bytes(), dtype="<i4")
+    assert set(labels) == {-1, 2}
+    ready = objectgs.registry.scene.current(objectgs.job_id).scene
+    assert ready.environment.membership == source_membership
+    assert ready.objects[0].collider is None
+    assert ready.objects[1].collider is not None
+
+
 def test_objectgs_build_uses_objectgs_surfaces_and_publishes_evidence(objectgs: SimpleNamespace) -> None:
     from src.models.contracts.artifacts import ProductArtifactRef
     from src.models.contracts.object_geometry import ObjectSurfaceManifest

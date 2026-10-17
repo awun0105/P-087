@@ -38,6 +38,12 @@ const collision = { artifact_uri: "artifact://jobs/j/collision.glb", artifact_ch
 const cameras: [] = [];
 
 describe("MetricSceneView effective collision", () => {
+  it("requests the original reconstruction collision explicitly for a stage preview", () => {
+    render(<MetricSceneView jobId="j" visual={visual} collision={collision} cameras={cameras} reconstruction />);
+    const url = renderViewer.mock.lastCall![0].collisionUrl;
+    expect(url).toContain("reconstruction=true");
+    expect(url).not.toContain("scene_revision");
+  });
   it("changes revision collision URL while preserving the reconstruction content URL", () => {
     const { rerender } = render(<MetricSceneView jobId="j" visual={visual} collision={collision} cameras={cameras} sceneRevision="rev-1" />);
     const before = renderViewer.mock.lastCall![0];

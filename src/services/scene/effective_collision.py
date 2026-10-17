@@ -94,15 +94,22 @@ def _object_aware_environment(
         raise SourceCollisionOwnershipError("object-aware geometry is stale; regenerate from current membership")
     # collider_ref may be a derived USD layer after physics enrichment. The sealed
     # manifest owns the immutable GLB baseline; never re-carve a derived layer.
-    if set(manifest.removed_object_ids) != set(manifest.source_membership.label_to_object_id.values()):
-        raise SourceCollisionOwnershipError("object-aware baseline must separate every source object")
+    separated = set(manifest.removed_object_ids)
+    retained = set(manifest.source_membership.label_to_object_id.values()) - separated
+    objects_by_id = {item.id: item for item in scene.objects}
+    if any(
+        object_id not in objects_by_id or objects_by_id[object_id].provenance.get("review") != "IGNORED"
+        for object_id in retained
+    ):
+        raise SourceCollisionOwnershipError(
+            "object-aware background retains an object that needs separate geometry; rebuild mesh"
+        )
     # Read the sealed source map too: a manifest must not attest to corrupt/missing membership bytes.
     decode_gaussian_membership_labels(read(manifest.source_membership.labels_ref), manifest.source_membership)
     mesh = trimesh.load(io.BytesIO(read(manifest.collision_ref)), file_type="glb", force="mesh", process=False)
     if not len(mesh.faces) or not np.isfinite(mesh.vertices).all():
         raise SourceCollisionOwnershipError("invalid object-aware environment mesh")
     meshes = [mesh]
-    objects_by_id = {item.id: item for item in scene.objects}
     for object_id in manifest.removed_object_ids:
         item = objects_by_id.get(object_id)
         if item is None or item.source_collision is None or item.source_collision.source_geometry_ref != source_ref:

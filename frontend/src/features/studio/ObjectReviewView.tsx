@@ -299,6 +299,10 @@ export function ObjectReviewView({
   const [missing, setMissing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
+  const [backgroundSelection, setBackgroundSelection] = useState({ jobId, ids: new Set<string>() });
+  const backgroundTargets = scene?.objects.filter((object) => backgroundSelection.jobId === jobId
+    && backgroundSelection.ids.has(object.id) && !isIgnored(object)
+    && !["DELETED", "MERGED"].includes(String(object.provenance.review))) ?? [];
   const [viewportHidden, setViewportHidden] = useState({ jobId, ids: new Set<string>() });
   const hiddenIds = useMemo(() => viewportHidden.jobId === jobId ? viewportHidden.ids : new Set<string>(), [viewportHidden, jobId]);
   // Benchmark (T-033): panel nhập ground truth và chọn điểm trên viewer. Quyền sửa là quyền sửa job của máy chủ.
@@ -407,7 +411,7 @@ export function ObjectReviewView({
     setReassignTargetId(null);
     setRoi(EMPTY_ROI);
     setColliderDraft(null);
-  }, [scene?.scene_revision]);
+  }, [scene?.scene_revision, jobId]);
 
   /** Chọn và cho camera bay tới vật (từ danh sách hoặc nút trong inspector). */
   const flyTo = (id: string) => {
@@ -539,17 +543,17 @@ export function ObjectReviewView({
   );
 
   const counts = useMemo(
-    () => Object.fromEntries(FILTERS.map((item) => [item.value, scene?.objects.filter((object) => item.match(object, hiddenIds)).length ?? 0])) as Record<Filter, number>,
-    [scene, hiddenIds],
+    () => Object.fromEntries(FILTERS.map((item) => [item.value, scene?.objects.filter((object) => geometryLockReason && item.value === "all" ? !["DELETED", "MERGED"].includes(String(object.provenance.review)) : item.match(object, hiddenIds)).length ?? 0])) as Record<Filter, number>,
+    [scene, hiddenIds, geometryLockReason],
   );
   const visibleObjects = useMemo(() => {
     const match = FILTERS.find((item) => item.value === filter)!.match;
-    const objects = scene?.objects.filter((object) => match(object, hiddenIds)) ?? [];
+    const objects = scene?.objects.filter((object) => geometryLockReason && filter === "all" ? !["DELETED", "MERGED"].includes(String(object.provenance.review)) : match(object, hiddenIds)) ?? [];
     if (filter === "ignored") objects.sort((a, b) =>
       ARCHIVE_CATEGORIES.findIndex((item) => item.value === archiveCategory(a, hiddenIds)) -
       ARCHIVE_CATEGORIES.findIndex((item) => item.value === archiveCategory(b, hiddenIds)));
     return objects;
-  }, [scene, filter, hiddenIds]);
+  }, [scene, filter, hiddenIds, geometryLockReason]);
   const theme = useSyncExternalStore(subscribeTheme, themeKey, () => "light:default");
   const visibleCollisionCandidates = collisionCandidatesLoadedFor === jobId ? collisionCandidates : [];
   const currentColliderDraft = colliderDraft?.sceneRevision === scene?.scene_revision ? colliderDraft : null;
@@ -640,6 +644,26 @@ export function ObjectReviewView({
 
   const act = (object: SceneObject, action: ObjectAction, extra?: ActionExtra) =>
     run((revision) => applyObjectAction(jobId, object.id, action, revision, extra));
+
+  async function keepAsBackground(targets: SceneObject[]) {
+    if (!scene || !targets.length) return;
+    const remaining = [...targets];
+    let completedRevision: string | undefined;
+    await run(async (revision) => {
+      let response: { scene: SceneIR; representations?: ObjectRepresentation[] } = { scene };
+      let expected = completedRevision ?? revision;
+      while (remaining.length) {
+        const item = remaining[0];
+        response = await applyObjectAction(jobId, item.id, "ignore", expected);
+        expected = response.scene.scene_revision;
+        completedRevision = expected;
+        remaining.shift();
+        acceptScene(response.scene, response.representations);
+        setBackgroundSelection((previous) => ({ ...previous, ids: new Set([...previous.ids].filter((id) => id !== item.id)) }));
+      }
+      return response;
+    });
+  }
 
   async function restoreListedObject(object: SceneObject, confirmedMerge = false) {
     if (object.provenance.review === "MERGED" && !confirmedMerge) {
@@ -761,13 +785,6 @@ export function ObjectReviewView({
       </AlertDialog>
       {/* Viewport 3D chiếm toàn bộ không gian khung nhìn */}
       <div className="relative size-full">
-        {geometryLockReason && (
-          <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex justify-center">
-            <div className="pointer-events-auto w-full max-w-xl">
-              <GeometryReviewBanner jobId={jobId} scene={scene} onRevision={() => setReload((value) => value + 1)} />
-            </div>
-          </div>
-        )}
         {regionRequest === selected && !regionOpen && current && membership && (
           <div className="pointer-events-none absolute top-3 right-3 z-20">
             <RegionFitGate
@@ -819,13 +836,6 @@ export function ObjectReviewView({
                 setBenchmarkOpen(false);
               }}
             />
-          </div>
-        )}
-        {!benchmarkOpen && (
-          <div className="pointer-events-none absolute right-3 bottom-3 z-20">
-            <Button size="sm" variant="secondary" className="pointer-events-auto" onClick={() => setBenchmarkOpen(true)}>
-              Benchmark
-            </Button>
           </div>
         )}
         {scene.environment.visual_ref ? (
@@ -945,6 +955,7 @@ export function ObjectReviewView({
         )}
       >
         {leftCollapsed ? (
+          <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={() => setLeftCollapsed(false)}
@@ -959,12 +970,15 @@ export function ObjectReviewView({
             </span>
             <ChevronDown className="size-3.5 text-on-dark/70" aria-hidden />
           </button>
+          {!benchmarkOpen && <Button size="sm" variant="secondary" onClick={() => setBenchmarkOpen(true)}>Benchmark</Button>}
+          </div>
         ) : (
           <>
             <div className="space-y-2 border-b border-line-dark px-3 py-2.5 bg-viewport-deep/50">
               <div className="flex items-center justify-between gap-2">
                 <h2 className="label-tech text-on-dark/70">Quản lý scene</h2>
                 <div className="flex items-center gap-1">
+                  {!benchmarkOpen && <Button size="sm" variant="secondary" className="px-2 text-xs" onClick={() => setBenchmarkOpen(true)}>Benchmark</Button>}
                   {previous && (
                     <Button
                       size="sm"
@@ -1003,10 +1017,20 @@ export function ObjectReviewView({
                 <div ref={setSurfaceToolsTarget} />
               </TabsContent>
               <TabsContent value="objects" forceMount hidden={panelTab !== "objects"} className="m-0 flex min-h-0 flex-col data-[state=inactive]:hidden">
+              {geometryLockReason && <>
+                <GeometryReviewBanner jobId={jobId} scene={scene} busy={busy} onRevision={() => setReload((value) => value + 1)} />
+                {scene.objects.some((item) => item.state === "CANDIDATE" && !isIgnored(item)) && <div className="px-3 pb-2">
+                  <Button size="sm" variant="secondary" disabled={busy} onClick={() => void keepAsBackground(scene.objects.filter((item) => item.state === "CANDIDATE" && !isIgnored(item)))}>Giữ vật chưa chọn làm nền</Button>
+                </div>}
+              </>}
               <div className="space-y-2 border-b border-line-dark px-3 py-2.5">
               <p className="text-xs font-semibold text-on-dark">
                 {scene.objects.length} vật thể · {scene.objects.filter((object) => object.state === "CANDIDATE" && !isIgnored(object)).length} chờ xác nhận
               </p>
+              {geometryLockReason && <>
+                <p className="text-xs text-on-dark/80">Đánh dấu các vật cần giữ trong nền cố định, rồi bấm nút bên dưới.</p>
+                <Button size="sm" variant="secondary" disabled={busy || !backgroundTargets.length} onClick={() => void keepAsBackground(backgroundTargets)}>Cho {backgroundTargets.length} vật đã chọn làm nền</Button>
+              </>}
               <div className="flex flex-wrap gap-1" role="group" aria-label="Lọc vật thể">
                 {FILTERS.map((item) => (
                   <button
@@ -1021,7 +1045,7 @@ export function ObjectReviewView({
                         : "border-line-dark text-on-dark/70 hover:text-on-dark hover:bg-on-dark/10",
                     )}
                   >
-                    {`${item.label} · ${counts[item.value]}`}
+                    {`${geometryLockReason && item.value === "all" ? "Tất cả" : item.label} · ${counts[item.value]}`}
                   </button>
                 ))}
               </div>
@@ -1292,6 +1316,21 @@ export function ObjectReviewView({
                     <span className="size-2.5 shrink-0 rounded-sm" style={{ background: stateColor(object) }} aria-hidden />
                     <span className="truncate text-sm text-on-dark">{object.name}</span>
                   </button>
+                  {geometryLockReason && !["DELETED", "MERGED"].includes(String(object.provenance.review)) && <input
+                    type="checkbox"
+                    aria-label={`Đánh dấu ${object.name} để làm nền`}
+                    checked={backgroundTargets.some((item) => item.id === object.id)}
+                    disabled={busy || isIgnored(object)}
+                    onChange={(event) => {
+                      const checked = event.target.checked;
+                      setBackgroundSelection((previous) => {
+                        const ids = new Set(previous.jobId === jobId ? previous.ids : []);
+                        if (checked) ids.add(object.id);
+                        else ids.delete(object.id);
+                        return { jobId, ids };
+                      });
+                    }}
+                  />}
                   {archiveCategory(object, hiddenIds) ? (
                     <span className="flex shrink-0 items-center gap-1">
                       {hiddenIds.has(object.id) ? <Badge>Ẩn màn hình</Badge> : <StateBadge object={object} />}
@@ -1299,9 +1338,9 @@ export function ObjectReviewView({
                         <Undo2 className="size-3.5" aria-hidden />
                       </Button>
                     </span>
-                  ) : object.state === "CANDIDATE" && !isIgnored(object) ? (
+                  ) : (object.state === "CANDIDATE" || geometryLockReason) && !isIgnored(object) ? (
                     <span className="flex shrink-0 gap-1">
-                      <Button
+                      {object.state === "CANDIDATE" && <Button
                         size="sm"
                         variant="secondary"
                         disabled={busy}
@@ -1311,13 +1350,13 @@ export function ObjectReviewView({
                         className="size-7 p-0 border-line-dark bg-viewport-deep/80 text-on-dark hover:bg-viewport-deep"
                       >
                         <Check className="size-3.5" aria-hidden />
-                      </Button>
+                      </Button>}
                       <Button
                         size="sm"
                         variant="ghost"
                         disabled={busy}
-                        aria-label={`Loại ${object.name}`}
-                        title="Loại"
+                        aria-label={geometryLockReason ? `Giữ ${object.name} trong nền cố định` : `Loại ${object.name}`}
+                        title={geometryLockReason ? "Giữ trong nền cố định" : "Loại"}
                         onClick={() => act(object, "ignore")}
                         className="size-7 p-0 text-on-dark/70 hover:text-on-dark hover:bg-on-dark/10"
                       >
@@ -1415,6 +1454,7 @@ export function ObjectReviewView({
                   busy={busy}
                   catalog={catalog}
                   sceneRevision={scene.scene_revision}
+                  reviewing={Boolean(geometryLockReason)}
                   colliderFormReset={colliderFormReset}
                   onColliderDraftChange={(draft) =>
                     setColliderDraft(draft ? { ...draft, sceneRevision: scene.scene_revision } : null)
@@ -1512,6 +1552,7 @@ function Inspector({
   busy,
   catalog,
   sceneRevision,
+  reviewing,
   colliderFormReset,
   onColliderDraftChange,
   onColliderSave,
@@ -1527,6 +1568,7 @@ function Inspector({
   busy: boolean;
   catalog: SceneCatalog | null;
   sceneRevision: string;
+  reviewing: boolean;
   colliderFormReset: number;
   onColliderDraftChange: (draft: Omit<ColliderPreviewDraft, "sceneRevision"> | null) => void;
   onColliderSave: (changes: ColliderChanges) => void;
@@ -1605,7 +1647,7 @@ function Inspector({
             {viewportHidden ? "Hiện trên màn hình" : "Ẩn trên màn hình"}
           </Button>
         )}
-        {object.state === "CONFIRMED" && !removed && (
+        {object.state === "CONFIRMED" && !removed && !reviewing && (
           <Button size="sm" variant="secondary" disabled={busy} onClick={() => onAct("hide", { active: !object.active })}>
             {object.active ? "Tắt trong mô phỏng" : "Bật trong mô phỏng"}
           </Button>
@@ -1613,12 +1655,17 @@ function Inspector({
         {object.state === "CANDIDATE" && !isIgnored(object) && (
           <>
             <Button size="sm" disabled={busy} onClick={() => onAct("confirm")}>
-              <Check aria-hidden /> Xác nhận
+              <Check aria-hidden /> {reviewing ? "Tách thành vật để chỉnh sửa" : "Xác nhận"}
             </Button>
-            <Button size="sm" variant="secondary" disabled={busy} onClick={() => onAct("ignore")} className="border-line-dark bg-viewport-deep/80 text-on-dark hover:bg-viewport-deep">
+            {!reviewing && <Button size="sm" variant="secondary" disabled={busy} onClick={() => onAct("ignore")} className="border-line-dark bg-viewport-deep/80 text-on-dark hover:bg-viewport-deep">
               <X aria-hidden /> Loại
-            </Button>
+            </Button>}
           </>
+        )}
+        {reviewing && !removed && (
+          <Button size="sm" variant="secondary" disabled={busy} onClick={() => onAct("ignore")}>
+            Giữ trong nền cố định
+          </Button>
         )}
         {(removed || viewportHidden || (object.state === "CONFIRMED" && !object.active)) && (
           <Button size="sm" variant="secondary" disabled={busy} onClick={onRestore} className="border-line-dark bg-viewport-deep/80 text-on-dark hover:bg-viewport-deep">

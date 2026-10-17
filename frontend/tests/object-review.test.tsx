@@ -3,7 +3,7 @@
  * thị revision backend trả về. Canvas 3D được thay bằng stub (jsdom không có WebGL).
  */
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ObjectReviewView, type SaveState } from "@/features/studio/ObjectReviewView";
@@ -275,6 +275,95 @@ describe("ObjectReviewView", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     global.fetch = vi.fn();
+  });
+
+  it("lets an already confirmed Draft object remain in the fixed background", async () => {
+    const initial = { ...scene("rev-061", "CONFIRMED", "CONFIRMED"), provenance: { object_geometry: "awaiting_review" } };
+    const fixed = { ...scene("rev-062", "CANDIDATE", "IGNORED"), provenance: { object_geometry: "awaiting_review" } };
+    routeFetch({
+      "/objects/candidate-001/ignore": [reply({ scene: fixed })],
+      "/scene": [reply({ scene: initial })],
+    });
+    render(<ObjectReviewView jobId="job-a" sceneStateControls={<p>Trạng thái đã lưu</p>} />);
+    fireEvent.mouseDown(await screen.findByRole("tab", { name: "Vật thể" }), { button: 0, ctrlKey: false });
+    const checkbox = await screen.findByRole("checkbox", { name: "Đánh dấu Vật thể 1 để làm nền" });
+    expect(checkbox).not.toBeChecked();
+    fireEvent.click(checkbox);
+    expect(calls("/objects/candidate-001/ignore")).toHaveLength(0);
+    expect(screen.getByRole("button", { name: "Tạo mesh cho 1 vật đã chọn" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Cho 1 vật đã chọn làm nền" }));
+    await waitFor(() => expect(calls("/objects/candidate-001/ignore")).toHaveLength(1));
+    expect(JSON.parse(calls("/objects/candidate-001/ignore")[0][1]!.body as string).expected_scene_revision).toBe("rev-061");
+    expect(await screen.findByRole("button", { name: "Tạo mesh cho 0 vật đã chọn" })).toBeEnabled();
+    expect(screen.getByRole("checkbox", { name: "Đánh dấu Vật thể 1 để làm nền" })).not.toBeChecked();
+    const panel = screen.getByRole("complementary", { name: "Danh sách vật thể" });
+    expect(within(panel).getByRole("region", { name: "Tạo mesh vật thể" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Duyệt vật thể" })).not.toBeInTheDocument();
+  });
+
+  it("keeps marking local and excludes only marked objects using returned revisions", async () => {
+    const initial = { ...scene("rev-001", "CONFIRMED", "CONFIRMED"), provenance: { object_geometry: "awaiting_review" } };
+    const first = initial.objects[0];
+    initial.objects.push({ ...first, id: "candidate-002", name: "Vật thể 2" }, { ...first, id: "candidate-003", name: "Vật thể 3" });
+    const fixed = (object: typeof first) => ({ ...object, state: "CANDIDATE", active: false, provenance: { ...object.provenance, review: "IGNORED" } });
+    const afterFirst = { ...initial, scene_revision: "rev-002", objects: [fixed(first), ...initial.objects.slice(1)] };
+    const afterBoth = { ...afterFirst, scene_revision: "rev-003", objects: [fixed(first), fixed(initial.objects[1]), initial.objects[2]] };
+    routeFetch({
+      "/objects/candidate-001/ignore": [reply({ scene: afterFirst })],
+      "/objects/candidate-002/ignore": [reply({ scene: afterBoth })],
+      "/scene": [reply({ scene: initial })],
+    });
+    render(<ObjectReviewView jobId="job-a" />);
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Đánh dấu Vật thể 1 để làm nền" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Đánh dấu Vật thể 2 để làm nền" }));
+    expect(calls("/ignore")).toHaveLength(0);
+    expect(screen.getByRole("button", { name: "Tạo mesh cho 3 vật đã chọn" })).toBeEnabled();
+    expect(screen.queryByText("Mesh riêng")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cho 2 vật đã chọn làm nền" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Tạo mesh cho 1 vật đã chọn" })).toBeEnabled());
+    const revisions = ["candidate-001", "candidate-002"].map(id => JSON.parse(calls(`/objects/${id}/ignore`)[0][1]!.body as string).expected_scene_revision);
+    expect(revisions).toEqual(["rev-001", "rev-002"]);
+    expect(calls("/objects/candidate-003/ignore")).toHaveLength(0);
+    expect(calls("/scene/geometry/build")).toHaveLength(0);
+    expect(screen.getByRole("button", { name: "Cho 0 vật đã chọn làm nền" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /Tách riêng các vật/ })).not.toBeInTheDocument();
+  });
+
+  it("retains unfinished background selections after a partial failure and retries from the saved revision", async () => {
+    const initial = { ...scene("rev-001", "CONFIRMED", "CONFIRMED"), provenance: { object_geometry: "awaiting_review" } };
+    initial.objects.push({ ...initial.objects[0], id: "candidate-002", name: "Vật thể 2" });
+    const fixed = (object: typeof initial.objects[0]) => ({ ...object, state: "CANDIDATE", active: false, provenance: { ...object.provenance, review: "IGNORED" } });
+    const afterFirst = { ...initial, scene_revision: "rev-002", objects: [fixed(initial.objects[0]), initial.objects[1]] };
+    const afterBoth = { ...initial, scene_revision: "rev-003", objects: initial.objects.map(fixed) };
+    routeFetch({
+      "/objects/candidate-001/ignore": [reply({ scene: afterFirst })],
+      "/objects/candidate-002/ignore": [reply({ detail: "Lưu vật thất bại" }, 500), reply({ scene: afterBoth })],
+      "/scene": [reply({ scene: initial })],
+    });
+    const onSaveState = vi.fn();
+    render(<ObjectReviewView jobId="job-a" onSaveState={onSaveState} />);
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Đánh dấu Vật thể 1 để làm nền" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Đánh dấu Vật thể 2 để làm nền" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cho 2 vật đã chọn làm nền" }));
+    await waitFor(() => expect(onSaveState).toHaveBeenLastCalledWith(expect.objectContaining({ status: "error" })));
+    expect(screen.getByRole("checkbox", { name: "Đánh dấu Vật thể 1 để làm nền" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Đánh dấu Vật thể 2 để làm nền" })).toBeChecked();
+    expect(screen.getByRole("button", { name: "Tạo mesh cho 1 vật đã chọn" })).toBeEnabled();
+    onSaveState.mock.calls.at(-1)![0].retry();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Tạo mesh cho 0 vật đã chọn" })).toBeEnabled());
+    expect(calls("/objects/candidate-001/ignore")).toHaveLength(1);
+    expect(calls("/objects/candidate-002/ignore").map(([, init]) => JSON.parse(init!.body as string).expected_scene_revision)).toEqual(["rev-002", "rev-002"]);
+  });
+
+  it("can keep remaining undecided objects as background without starting a mesh job", async () => {
+    const initial = { ...scene("rev-001", "CANDIDATE"), provenance: { object_geometry: "awaiting_review" } };
+    const fixed = { ...scene("rev-002", "CANDIDATE", "IGNORED"), provenance: { object_geometry: "awaiting_review" } };
+    routeFetch({ "/objects/candidate-001/ignore": [reply({ scene: fixed })], "/scene": [reply({ scene: initial })] });
+    render(<ObjectReviewView jobId="job-a" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Giữ vật chưa chọn làm nền" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Tạo mesh cho 0 vật đã chọn" })).toBeEnabled());
+    expect(screen.getByRole("checkbox", { name: "Đánh dấu Vật thể 1 để làm nền" })).not.toBeChecked();
+    expect(calls("/scene/geometry/build")).toHaveLength(0);
   });
 
   it("orders scene-state before objects and preserves the viewer and selection across panel tabs", async () => {
@@ -1242,8 +1331,9 @@ describe("ObjectReviewView", () => {
     routeFetch({ "/scene": [reply({ scene: { ...base, provenance: { ...base.provenance, object_geometry: "awaiting_review" } }, representations: [policy] })] });
     render(<ObjectReviewView jobId="job-a" />);
 
-    const banner = await screen.findByRole("region", { name: "Duyệt tách vật" });
-    expect(banner).toHaveTextContent("Đang duyệt tách vật · 1 vật · chưa có collider");
+    const banner = await screen.findByRole("region", { name: "Tạo mesh vật thể" });
+    expect(banner).toHaveTextContent("Tạo mesh cho 1 vật đã chọn");
+    expect(screen.queryByText(/Đang duyệt tách vật/)).not.toBeInTheDocument();
     expect(screen.getByTestId("locked")).toHaveTextContent("Cần tạo mesh trước");
     fireEvent.click(screen.getByRole("button", { name: "Chọn Vật thể 1" }));
     fireEvent.click(screen.getByRole("button", { name: "Dịch" }));

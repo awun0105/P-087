@@ -100,14 +100,17 @@ function StageLayer({ jobId, view, views }: { jobId: string; view: StageView; vi
   const mesh = views.find((item) => item.kind === "mesh");
   if (metric?.refs[0] && (view === metric || view === mesh)) {
     return (
-      <MetricSceneView
+      <><p className="absolute bottom-3 left-3 z-20 rounded-md bg-viewport-deep/90 px-3 py-1 text-xs text-on-dark">
+        Kết quả tái dựng trước khi chỉnh sửa vật thể
+      </p><MetricSceneView
         jobId={jobId}
         visual={metric.refs[0]}
         collision={mesh?.refs[0]}
+        reconstruction
         cameras={metric.cameras}
         defaultLayers={{ splat: true, collision: view === mesh, boxes: false }}
         lidarOverlay={metric.lidar_overlay ?? null}
-      />
+      /></>
     );
   }
   if (view.kind === "gaussian") {

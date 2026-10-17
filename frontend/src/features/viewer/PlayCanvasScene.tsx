@@ -258,7 +258,11 @@ export function PlayCanvasScene({
     collisionError.current?.(null);
     if (collisionUrl) {
       void fetch(collisionUrl, { signal: controller.signal }).then(async (response) => {
-        if (!response.ok) throw new Error(`Collision HTTP ${response.status}`);
+        if (!response.ok) {
+          const body: unknown = await response.json().catch(() => null);
+          const detail = body && typeof body === "object" && "detail" in body ? body.detail : null;
+          throw new Error(typeof detail === "string" ? detail : `Không tải được lưới va chạm (HTTP ${response.status}).`);
+        }
         const mesh = parseGlbMesh(await response.arrayBuffer());
         if (!controller.signal.aborted) collisionViewer.setCollisionMesh(mesh.positions, mesh.indices);
       }).catch((error: unknown) => {

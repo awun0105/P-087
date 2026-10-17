@@ -33,7 +33,7 @@ function draft(objects: { id: string; name: string; review?: string; shellError?
   return {
     scene_revision: "rev-001",
     provenance: geometry === null ? {} : { object_geometry: geometry },
-    // Mỗi vật có một nhãn trong membership: builder dựng vỏ cho tất cả, kể cả vật đã loại.
+    // Mỗi vật có một nhãn nguồn; lựa chọn duyệt quyết định vật nào được dựng mesh.
     environment: {
       membership: { label_to_object_id: Object.fromEntries(objects.map((item, index) => [String(index), item.id])) },
     },
@@ -81,8 +81,8 @@ describe("trạng thái hình học của scene", () => {
   });
 });
 
-describe("banner Duyệt tách vật", () => {
-  it("scene Draft: đếm vật còn giữ và cảnh báo vật có lỗi vỏ", async () => {
+describe("nút Tạo mesh", () => {
+  it("scene Draft: giữ nút tạo mesh và bỏ khung thông tin tách vật", async () => {
     render(
       <GeometryReviewBanner
         jobId="job-1"
@@ -94,13 +94,14 @@ describe("banner Duyệt tách vật", () => {
         onRevision={vi.fn()}
       />,
     );
-    const region = await screen.findByRole("region", { name: "Duyệt tách vật" });
-    expect(within(region).getByText("Đang duyệt tách vật · 2 vật · chưa có collider")).toBeInTheDocument();
-    expect(within(region).getByText("Vỏ của Kệ chưa dựng được — sửa vùng trước khi Tạo mesh")).toBeInTheDocument();
-    expect(within(region).getByRole("button", { name: "Tạo mesh" })).toBeEnabled();
+    const region = await screen.findByRole("region", { name: "Tạo mesh vật thể" });
+    expect(screen.queryByText(/Đang duyệt tách vật/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/đã chọn để chỉnh sửa/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Vỏ của Kệ/)).not.toBeInTheDocument();
+    expect(within(region).getByRole("button", { name: "Tạo mesh cho 2 vật đã chọn" })).toBeEnabled();
   });
 
-  it("vật đã loại có lỗi vỏ vẫn được nêu kèm hướng khắc phục, vì Tạo mesh vẫn dựng vật đó", async () => {
+  it("vật giữ làm nền không còn bị lỗi vỏ chặn tạo mesh", async () => {
     render(
       <GeometryReviewBanner
         jobId="job-1"
@@ -111,41 +112,34 @@ describe("banner Duyệt tách vật", () => {
         onRevision={vi.fn()}
       />,
     );
-    const region = await screen.findByRole("region", { name: "Duyệt tách vật" });
-    expect(within(region).getByText("Đang duyệt tách vật · 1 vật · chưa có collider")).toBeInTheDocument();
+    const region = await screen.findByRole("region", { name: "Tạo mesh vật thể" });
+    expect(within(region).getByRole("button", { name: "Tạo mesh cho 1 vật đã chọn" })).toBeEnabled();
     expect(
-      within(region).getByText("Vỏ của Ghế (đã loại) chưa dựng được — Khôi phục, sửa vùng, rồi Tạo mesh"),
-    ).toBeInTheDocument();
+      within(region).queryByText(/Vỏ của Ghế/),
+    ).not.toBeInTheDocument();
   });
 
-  it("vật có lỗi vỏ nhưng không còn nhãn trong membership thì không được nêu", async () => {
-    const orphan = {
-      ...draft([
-        { id: "pallet", name: "Pallet" },
-        { id: "ghost", name: "Đã mất", shellError: "vỏ rỗng" },
-      ]),
-      environment: { membership: { label_to_object_id: { "0": "pallet" } } },
-    } as unknown as SceneIR;
-    render(<GeometryReviewBanner jobId="job-1" scene={orphan} onRevision={vi.fn()} />);
-    const region = await screen.findByRole("region", { name: "Duyệt tách vật" });
-    expect(within(region).queryByText(/Đã mất/)).not.toBeInTheDocument();
+  it("khoá tạo mesh trong lúc đang lưu lựa chọn vật thể", async () => {
+    render(<GeometryReviewBanner jobId="job-1" scene={draft([{ id: "pallet", name: "Pallet" }])} busy onRevision={vi.fn()} />);
+    expect(await screen.findByRole("button", { name: "Tạo mesh cho 1 vật đã chọn" })).toBeDisabled();
+    expect(buildObjectGeometry).not.toHaveBeenCalled();
   });
 
   it("bấm Tạo mesh gửi đúng revision đang hiển thị, rồi khoá nút khi yêu cầu đang chạy", async () => {
     vi.mocked(buildObjectGeometry).mockResolvedValue(objectify({ status: "queued", mode: "geometry", operation_id: "op-1" }));
     render(<GeometryReviewBanner jobId="job-1" scene={draft([{ id: "pallet", name: "Pallet" }])} onRevision={vi.fn()} />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Tạo mesh" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Tạo mesh cho/ }));
 
     await waitFor(() => expect(buildObjectGeometry).toHaveBeenCalledWith("job-1", "rev-001"));
-    expect(await screen.findByRole("button", { name: "Tạo mesh" })).toBeDisabled();
+    expect(await screen.findByRole("button", { name: /Tạo mesh cho/ })).toBeDisabled();
   });
 
   it("khi scene đang có việc objectify chạy thì nút Tạo mesh bị khoá ngay", async () => {
     vi.mocked(getObjectifyState).mockResolvedValue(objectify({ status: "running", mode: "geometry", phase: "shell", operation_id: "op-1" }));
     render(<GeometryReviewBanner jobId="job-1" scene={draft([{ id: "pallet", name: "Pallet" }])} onRevision={vi.fn()} />);
 
-    await waitFor(() => expect(screen.getByRole("button", { name: "Tạo mesh" })).toBeDisabled());
+    await waitFor(() => expect(screen.getByRole("button", { name: /Tạo mesh cho/ })).toBeDisabled());
     expect(buildObjectGeometry).not.toHaveBeenCalled();
   });
 
@@ -157,4 +151,14 @@ describe("banner Duyệt tách vật", () => {
     const legacy = render(<GeometryReviewBanner jobId="job-1" scene={draft([{ id: "pallet", name: "Pallet" }], null)} onRevision={vi.fn()} />);
     expect(legacy.container).toBeEmptyDOMElement();
   });
+});
+
+it("requires a choice for every candidate before starting geometry", async () => {
+  const pending = draft([{ id: "window", name: "Cửa sổ" }]);
+  pending.objects[0].state = "CANDIDATE";
+  pending.objects[0].active = false;
+  render(<GeometryReviewBanner jobId="job-1" scene={pending} onRevision={vi.fn()} />);
+  expect(await screen.findByRole("button", { name: "Tạo mesh cho 0 vật đã chọn" })).toBeDisabled();
+  expect(screen.getByText("Duyệt các vật còn lại trước khi tạo mesh.")).toBeInTheDocument();
+  expect(buildObjectGeometry).not.toHaveBeenCalled();
 });

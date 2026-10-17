@@ -144,12 +144,15 @@ def ignore_object(scene: SceneIR, object_id: str) -> SceneIR:
     """Loại ứng viên: SceneIR chỉ có CANDIDATE/CONFIRMED nên giữ CANDIDATE, tắt active, ghi IGNORED.
 
     Không xoá khỏi revision để còn audit và khôi phục (PRD: confirm/ignore/correct là metric vận hành).
+    Trong Draft, vật đã xác nhận cũng có thể đổi lại thành phần nền cố định trước khi dựng mesh.
     """
     target = _find_object(scene, object_id)
-    if target.state == SceneObjectState.CONFIRMED:
+    if target.state == SceneObjectState.CONFIRMED and scene.provenance.get("object_geometry") != "awaiting_review":
         raise ValueError("vật thể đã xác nhận; ẩn/xoá thay vì loại ứng viên")
     review = {**target.provenance, "review": "IGNORED"}
-    updated = target.model_copy(update={"active": False, "provenance": review}, deep=True)
+    updated = target.model_copy(
+        update={"state": SceneObjectState.CANDIDATE, "active": False, "provenance": review}, deep=True
+    )
     return _replace_object(scene, updated, "ignore")
 
 
@@ -238,6 +241,15 @@ def _find_object(scene: SceneIR, object_id: str) -> SceneObject:
 
 
 def _replace_object(scene: SceneIR, updated: SceneObject, operation: str) -> SceneIR:
+    # A retained source object has no separate collider. Selecting it again reopens review, never a broken Ready scene.
+    if (
+        operation in {"confirm", "restore"}
+        and scene.provenance.get("object_geometry") == "ready"
+        and scene.environment.membership is not None
+        and updated.collider is None
+        and _find_object(scene, updated.id).provenance.get("review") == "IGNORED"
+    ):
+        scene = scene.model_copy(update={"provenance": {**scene.provenance, "object_geometry": "awaiting_review"}})
     objects = [updated if item.id == updated.id else item for item in scene.objects]
     return _replace_objects(scene, objects, operation)
 

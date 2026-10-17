@@ -55,6 +55,53 @@ def fixture(tmp_path: Path, registry_job=None):
     return scene, compose, ref, payload, blobs
 
 
+def test_reconstruction_walk_uses_only_sealed_source_even_while_scene_is_draft(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+
+    from fastapi import HTTPException
+
+    from src.api.product import artifacts
+
+    scene, _, ref, payload, _ = fixture(tmp_path)
+    scene = scene.model_copy(update={"provenance": {**scene.provenance, "object_geometry": "awaiting_review"}})
+    path = tmp_path / "collision.glb"
+    path.write_bytes(payload)
+    registry = SimpleNamespace(
+        scene=SimpleNamespace(current=lambda _: SimpleNamespace(scene=scene)),
+        get_job=lambda _: object(),
+        resolve_artifact=lambda *_: path,
+    )
+    monkeypatch.setattr(artifacts.deps, "registry", lambda: registry)
+    monkeypatch.setattr(artifacts.deps, "job_or_404", lambda _: None)
+    monkeypatch.setattr(artifacts, "job_bundle", lambda *_: SimpleNamespace(canonical_geometry_ref=ref))
+    args = dict(
+        job_id=ref.job_id,
+        filename="collision.glb",
+        artifact_uri=ref.artifact_uri,
+        artifact_checksum=ref.artifact_checksum,
+        dynamic=[],
+        scene_revision=None,
+        preview=False,
+        frame="display",
+    )
+    with pytest.raises(HTTPException) as blocked:
+        artifacts.get_walk_collision(**args)
+    assert blocked.value.status_code == 409 and "Cần tạo mesh" in blocked.value.detail
+    result = artifacts.get_walk_collision(**args, reconstruction=True)
+    assert result.status_code == 200 and result.headers["X-Collision-Mode"] == "reconstruction"
+    for patch in [
+        {"scene_revision": "rev-001"},
+        {"artifact_checksum": "sha256:" + "0" * 64},
+        {"preview": True},
+        {"dynamic": ["A"]},
+    ]:
+        with pytest.raises(HTTPException) as invalid:
+            artifacts.get_walk_collision(**{**args, **patch}, reconstruction=True)
+        assert invalid.value.status_code == 409
+
+
 def test_floor_wall_other_object_and_lifecycle_masks(tmp_path: Path) -> None:
     scene, compose, *_ = fixture(tmp_path)
     original = compose(scene)

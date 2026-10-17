@@ -123,3 +123,15 @@ it("replaces collision without recreating the viewer or reloading 3DGS and rejec
     expect(viewer.destroy).toHaveBeenCalledOnce();
   } finally { vi.unstubAllGlobals(); }
 });
+
+it("shows the backend collision reason and keeps the viewer alive", async () => {
+  const viewer = fixture();
+  const onCollisionError = vi.fn();
+  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 409, json: async () => ({ detail: "Cần tạo mesh trước khi Walk." }) })));
+  try {
+    const { unmount } = render(<PlayCanvasScene contentUrl="/scene.sog" collisionUrl="/collision.glb" capability="ready" mode="VISUAL" onFailed={vi.fn()} onCollisionError={onCollisionError} />);
+    await waitFor(() => expect(onCollisionError).toHaveBeenCalledWith("Cần tạo mesh trước khi Walk."));
+    expect(viewer.destroy).not.toHaveBeenCalled();
+    unmount();
+  } finally { vi.unstubAllGlobals(); }
+});

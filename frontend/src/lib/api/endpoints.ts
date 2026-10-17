@@ -85,6 +85,7 @@ export function jobWalkCollisionUrl(
   sceneRevision?: string,
   frame: "canonical" | "display" = "display",
   preview = false,
+  reconstruction = false,
 ): string {
   const filename = ref.artifact_uri.split("/").pop();
   return apiUrl(`/api/v1/jobs/${encodeURIComponent(jobId)}/walk-collision/${encodeURIComponent(filename ?? "collision.glb")}`, {
@@ -92,5 +93,6 @@ export function jobWalkCollisionUrl(
     artifact_checksum: ref.artifact_checksum,
     ...(sceneRevision ? { scene_revision: sceneRevision, frame, ...(preview ? { preview: "true" } : {}) } : {}),
     ...(dynamic.length ? { dynamic: [...dynamic].sort() } : {}),
+    ...(reconstruction ? { reconstruction: "true" } : {}),
   });
 }

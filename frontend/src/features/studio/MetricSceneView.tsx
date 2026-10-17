@@ -75,6 +75,7 @@ export function MetricSceneView({
   collision,
   sceneRevision,
   collisionPreview = false,
+  reconstruction = false,
   cameras,
   boxes = [],
   objects = EMPTY_OBJECTS,
@@ -113,6 +114,8 @@ export function MetricSceneView({
   collision?: Ref;
   sceneRevision?: string;
   collisionPreview?: boolean;
+  /** Kết quả tái dựng gốc của stage, độc lập với revision đang chỉnh vật. */
+  reconstruction?: boolean;
   cameras: readonly CameraMarkerLike[];
   boxes?: readonly OverlayBox[];
   /** Scene theo vật (pipeline v2): mỗi vật một khối Gaussian riêng, transform lấy từ SceneIR. */
@@ -203,7 +206,7 @@ export function MetricSceneView({
   const contentUrl = jobArtifactContentUrl(jobId, visual);
   // Draft: lưới va chạm theo vật chưa có, máy chủ sẽ từ chối; không gọi để khỏi báo lỗi thừa.
   const collisionUrl = collision && !lockedReason ? (sceneRevision ? jobWalkCollisionUrl(jobId, collision, [], sceneRevision, "canonical", collisionPreview) : jobArtifactContentUrl(jobId, collision)) : null;
-  const walkCollisionUrl = collision && !lockedReason ? jobWalkCollisionUrl(jobId, collision, [], sceneRevision, "display", collisionPreview) : null;
+  const walkCollisionUrl = collision && !lockedReason ? jobWalkCollisionUrl(jobId, collision, [], sceneRevision, "display", collisionPreview, reconstruction) : null;
   const colliderBoxes = useMemo<OverlayBox[]>(() => physicsObjects.flatMap((item) => {
     if (!item.dimensions && !item.colliderUrl) return [];
     const local = item.colliderLocalTransform;

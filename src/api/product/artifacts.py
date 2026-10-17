@@ -13,6 +13,7 @@ from src.models.contracts.artifacts import ArtifactRef, Checksum
 from src.models.contracts.preview import ReconstructionPreview
 from src.services.orchestration.artifacts import ArtifactNotFoundError, ArtifactStoreError
 from src.services.orchestration.jobs.display_glb import display_space_glb
+from src.services.orchestration.jobs.stage_views import job_bundle
 from src.services.orchestration.projects import JobNotFoundError, ProjectRegistry
 from src.services.orchestration.scene.errors import (
     ObjectGeometryNotReadyError,
@@ -135,6 +136,7 @@ def get_walk_collision(
     scene_revision: str | None = Query(default=None),
     frame: Literal["display", "canonical"] = Query(default="display"),
     preview: bool = Query(default=False),
+    reconstruction: bool = False,
 ) -> Response:
     """Shared effective environment for SceneIR consumers; raw preview only before scene review.
 
@@ -154,7 +156,15 @@ def get_walk_collision(
             job_id=job_id,
         )
         registry = deps.registry()
-        _require_walk_allowed(registry, job_id)
+        if reconstruction:
+            if scene_revision is not None or dynamic or preview is True:
+                raise ValueError("Bản tái dựng gốc không dùng trạng thái vật thể đang chỉnh sửa.")
+            bundle = job_bundle(registry, registry.get_job(job_id))
+            source = bundle.canonical_geometry_ref if bundle is not None else None
+            if source is None or (artifact_uri, artifact_checksum) != (source.artifact_uri, source.artifact_checksum):
+                raise ValueError("Walk bản tái dựng cần đúng collision gốc của job.")
+        else:
+            _require_walk_allowed(registry, job_id)
         # Resolve allow-list before composition; never accept an arbitrary source URI.
         source_path = registry.resolve_artifact(job_id, reference)
         identity = artifact_checksum
@@ -201,7 +211,9 @@ def get_walk_collision(
             "X-Retained-Shared-Triangles": str(shared),
             "X-Protected-Surface-Triangles": str(floor),
             "X-Repaired-Surface-Triangles": str(repaired),
-            "X-Collision-Mode": "studio-preview"
+            "X-Collision-Mode": "reconstruction"
+            if reconstruction
+            else "studio-preview"
             if preview is True
             else "confirmed"
             if scene_revision

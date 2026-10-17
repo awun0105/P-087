@@ -17,7 +17,14 @@ from src.models.contracts.coordinates import Transform
 from src.models.contracts.manifests import StageId
 from src.models.contracts.object_geometry import ObjectShellManifest, ObjectSurfaceManifest
 from src.models.contracts.object_membership import ObjectMembershipArtifact
-from src.models.contracts.scene import ColliderSpec, ColliderType, SceneEnvironment, SceneIR, SceneObject
+from src.models.contracts.scene import (
+    ColliderSpec,
+    ColliderType,
+    SceneEnvironment,
+    SceneIR,
+    SceneObject,
+    SceneObjectState,
+)
 from src.services.orchestration.artifacts import ArtifactStoreError, FilesystemArtifactStore, sha256_bytes
 from src.services.orchestration.jobs.database import RuntimeTransaction
 from src.services.orchestration.jobs.stage_views import job_bundle
@@ -201,6 +208,23 @@ def _objectgs_surfaces(
 ) -> dict[str, _Surface]:
     """Chạy ObjectGS trên quan sát với mask dựng từ nhãn hiện tại. Lỗi toàn cục làm build thất bại, không có fallback."""
     resolve = registry.runtime_resolver.require
+    selected_ids = {item.id for item in selected}
+    if selected_ids != set(membership.label_to_object_id.values()):
+        labels = decode_gaussian_membership_labels(resolve(membership.labels_ref).read_bytes(), membership).copy()
+        mapping = {key: owner for key, owner in membership.label_to_object_id.items() if owner in selected_ids}
+        labels[~np.isin(labels, [int(key) for key in mapping])] = -1
+        payload = labels.astype("<i4").tobytes()
+        labels_ref = publish(
+            _reference(
+                job_id,
+                "objectgs/selected-labels/{digest}.i32le",
+                "ObjectMembershipLabels",
+                StageId.SCENE_DECOMPOSE,
+                payload,
+            ),
+            payload,
+        )
+        membership = membership.model_copy(update={"labels_ref": labels_ref, "label_to_object_id": mapping})
     try:
         # The store verifies the declared checksum on read; a mismatch or missing file never reaches ObjectGS.
         payload = resolve(observations_ref).read_bytes()
@@ -562,8 +586,16 @@ def _build_environment(
     xyz = positions(rows)
     floor_model = fit_canonical_floor_model(xyz, point_cloud_checksum(xyz))
     floor_ref, evidence = publish_floor_fit_evidence(job_id, membership.source_visual_ref, floor_model, publish)
+    # Ignored objects keep their source visuals separately and their source occupancy in the background.
+    ignored = {
+        item.id
+        for item in scene.objects
+        if item.provenance.get("review") == "IGNORED"
+        and (object_geometry_state(scene) == "awaiting_review" or item.collider is None)
+    }
+    separated = {key: owner for key, owner in membership.label_to_object_id.items() if owner not in ignored}
     footprints = []
-    for owner in sorted(set(membership.label_to_object_id.values())):
+    for owner in sorted(set(separated.values())):
         keys = [int(key) for key, value in membership.label_to_object_id.items() if value == owner]
         anchors = xyz[np.isin(labels, keys)]
         if len(anchors):
@@ -571,7 +603,7 @@ def _build_environment(
     collision, manifest = build_environment_collision(
         source_points=xyz,
         membership_labels=labels,
-        label_to_object_id=membership.label_to_object_id,
+        label_to_object_id=separated,
         footprints=footprints,
         floor_model=floor_model,
         floor_fit=scene_floor_fit_summary(floor_ref, evidence),
@@ -621,6 +653,17 @@ def build_object_geometry(
         raise ObjectGeometryBuildError("Membership rebuild requires a Ready scene and affected object_ids")
     if membership_override is None and object_ids is None and object_geometry_state(scene) != "awaiting_review":
         raise ObjectGeometryBuildError("Scene phải đang duyệt tách vật trước khi tạo mesh.")
+    if object_ids is None:
+        pending = [
+            item
+            for item in scene.objects
+            if item.state == SceneObjectState.CANDIDATE
+            and item.provenance.get("review") not in {"IGNORED", "DELETED", "MERGED"}
+        ]
+        if pending:
+            raise ObjectGeometryBuildError(
+                f"Còn {len(pending)} vật chưa duyệt. Chọn vật để chỉnh sửa hoặc giữ trong nền cố định trước khi tạo mesh."
+            )
     membership = scene.environment.membership
     if membership.labels_ref.job_id != job_id or membership.source_geometry_ref != scene.environment.geometry_ref:
         raise ObjectGeometryBuildError("Geometry build source membership does not match the scene")
@@ -672,7 +715,11 @@ def build_object_geometry(
         groups[group][name] = value
     config = ObjectifyConfig.model_validate(groups)
     objectgs_mode = config.scene.geometry_method == "objectgs"
-    run_objectgs = objectgs_mode and object_ids is None
+    run_objectgs = (
+        objectgs_mode
+        and object_ids is None
+        and any(item.provenance.get("review") != "IGNORED" for item in scene.objects)
+    )
     objectgs_runtime = _objectgs_runtime(settings, config) if run_objectgs else None
     observations_ref = _observations_ref(scene) if run_objectgs else None
     mapped = set(membership.label_to_object_id.values())
@@ -704,8 +751,14 @@ def build_object_geometry(
     selected = [
         item
         for item in scene.objects
-        if item.id in membership.label_to_object_id.values() and (object_ids is None or item.id in object_ids)
+        if item.id in membership.label_to_object_id.values()
+        and (object_ids is None or item.id in object_ids)
+        and (object_ids is not None or item.provenance.get("review") != "IGNORED")
     ]
+    if object_ids is not None and any(
+        item.provenance.get("review") == "IGNORED" and item.collider is None for item in selected
+    ):
+        raise ObjectGeometryBuildError("Vật giữ trong nền cố định không cần dựng mesh riêng.")
     if membership_override is not None:
         for item in selected:
             keys = [int(key) for key, owner in membership.label_to_object_id.items() if owner == item.id]
@@ -739,7 +792,7 @@ def build_object_geometry(
             provenance.pop("shell_error", None)
             shell_item = item.model_copy(update={"provenance": provenance})
         shells[item.id] = _build_shell(shell_item, rows[np.isin(labels, keys)], membership, workspace, publish)
-    if run_objectgs:
+    if run_objectgs and selected:
         # ObjectGS chạy trước mọi collider: nếu nó lỗi toàn cục thì không có collider nào được dựng từ vỏ.
         phase("objectgs")
         surfaces = _objectgs_surfaces(
@@ -793,6 +846,12 @@ def build_object_geometry(
     objects = []
     for item in scene.objects:
         if item.id not in colliders:
+            if item.id in mapped and item.provenance.get("review") == "IGNORED" and item.source_collision is None:
+                source_item = item.model_copy(update={"transform": _source_pose(item)})
+                (bound,) = bind_source_collision_ownership(
+                    [source_item], membership.source_geometry_ref, membership.extraction_revision
+                )
+                item = item.model_copy(update={"source_collision": bound.source_collision})
             objects.append(item)
             continue
         geometry, collider = colliders[item.id]

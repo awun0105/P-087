@@ -123,6 +123,23 @@ def _confirm_then_move(fixture: SimpleNamespace) -> SimpleNamespace:
     """Confirm candidate-001 (it leaves the background), record the background, then move and turn it."""
     registry, job_id = fixture.registry, fixture.job_id
     ready = registry.scene.current(job_id).scene
+    # Also cover old Ready scenes where an ignored source object already has a separate collider.
+    from src.models.contracts.scene import SceneObjectState
+
+    other = ready.objects[1]
+    fixed = other.model_copy(
+        update={
+            "state": SceneObjectState.CANDIDATE,
+            "active": False,
+            "provenance": {**other.provenance, "review": "IGNORED"},
+        }
+    )
+    ready = registry.scene.publish_next(
+        job_id,
+        ready.scene_revision,
+        ready.model_copy(update={"objects": [ready.objects[0], fixed]}),
+        "fixture-legacy-fixed",
+    ).revision.scene
     target = ready.objects[0].id
     confirmed = apply_object_action(registry.scene, job_id, target, "confirm", ready.scene_revision).revision.scene
     _, before = effective_collision_for_revision(registry, job_id, confirmed.scene_revision)

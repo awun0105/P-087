@@ -40,6 +40,20 @@ def test_ignore_refuses_confirmed_object() -> None:
         ignore_object(scene, scene.objects[1].id)
 
 
+def test_draft_confirmed_object_can_return_to_fixed_background() -> None:
+    scene = _candidate_scene()
+    scene = scene.model_copy(update={"provenance": {**scene.provenance, "object_geometry": "awaiting_review"}})
+    confirmed = confirm_object(scene, scene.objects[0].id)
+    updated = ignore_object(confirmed, scene.objects[0].id)
+    item = updated.objects[0]
+    assert item.state == SceneObjectState.CANDIDATE and not item.active
+    assert item.provenance["review"] == "IGNORED"
+    assert item.visual_ref == scene.objects[0].visual_ref
+    assert item.transform == scene.objects[0].transform
+    selected = confirm_object(updated, item.id).objects[0]
+    assert selected.state == SceneObjectState.CONFIRMED and selected.active
+
+
 def test_simulation_activation_is_distinct_from_viewport_hide_and_delete() -> None:
     from src.models.contracts.identity import verify_content_checksum
     from src.services.scene.editing.commands import set_object_active

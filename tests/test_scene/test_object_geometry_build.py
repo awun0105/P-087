@@ -113,7 +113,7 @@ def draft_scene(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamesp
             SceneObject(
                 id=object_id,
                 name=f"Object {index}",
-                state=SceneObjectState.CANDIDATE,
+                state=SceneObjectState.CONFIRMED,
                 origin=SceneObjectOrigin.RECONSTRUCTED,
                 active=False,
                 local_frame=object_id,
@@ -313,6 +313,97 @@ def build(fixture: SimpleNamespace, **kwargs: object) -> str:
     )
 
 
+def test_full_build_requires_explicit_object_review(draft_scene: SimpleNamespace) -> None:
+    from src.models.contracts.scene import SceneObjectState
+    from src.services.orchestration.scene.object_geometry_build import ObjectGeometryBuildError
+
+    scene = draft_scene.scene
+    pending = scene.objects[0].model_copy(update={"state": SceneObjectState.CANDIDATE})
+    draft_scene.scene = draft_scene.registry.scene.publish_next(
+        draft_scene.job_id,
+        scene.scene_revision,
+        scene.model_copy(update={"objects": [pending, scene.objects[1]]}),
+        "fixture-pending",
+    ).revision.scene
+
+    with pytest.raises(ObjectGeometryBuildError, match="duyệt"):
+        build(draft_scene)
+    assert draft_scene.registry.scene.current(draft_scene.job_id).scene == draft_scene.scene
+
+
+@pytest.mark.parametrize("missing_ownership", [False, True])
+def test_fixed_background_skips_bad_shell_and_keeps_source_collision(
+    draft_scene: SimpleNamespace, cpu_providers: SimpleNamespace, missing_ownership: bool
+) -> None:
+    from src.models.contracts.object_geometry import ObjectAwareEnvironmentManifest
+    from src.models.contracts.scene import SceneObjectState
+    from src.services.orchestration.scene.physics_collision import effective_collision_for_revision
+    from src.services.scene.editing.commands import confirm_object, ignore_object
+
+    scene = confirm_object(draft_scene.scene, "candidate-002")
+    scene = ignore_object(scene, "candidate-001")
+    first = scene.objects[0]
+    broken = first.model_copy(update={"provenance": {**first.provenance, "shell_error": "window is open"}})
+    if missing_ownership:
+        broken = broken.model_copy(
+            update={
+                "source_collision": None,
+                "transform": broken.transform.model_copy(update={"translation_xyz": (20, 30, 40)}),
+            }
+        )
+    scene = scene.model_copy(update={"objects": [broken, scene.objects[1]]})
+    draft_scene.scene = draft_scene.registry.scene.publish_next(
+        draft_scene.job_id, draft_scene.scene.scene_revision, scene, "fixture-reviewed"
+    ).revision.scene
+    revision = build(draft_scene)
+    ready = draft_scene.registry.scene.current(draft_scene.job_id).scene
+    assert ready.objects[0].state == SceneObjectState.CANDIDATE
+    assert ready.objects[0].collider is None
+    assert ready.objects[0].visual_ref == broken.visual_ref
+    assert ready.objects[1].collider is not None
+    assert ready.provenance["geometry_build"]["built_object_ids"] == ["candidate-002"]
+    manifest = ObjectAwareEnvironmentManifest.model_validate_json(
+        draft_scene.registry.runtime_resolver.require(ready.environment.object_aware_collision_ref).read_bytes()
+    )
+    assert manifest.removed_object_ids == ["candidate-002"]
+    _, background = effective_collision_for_revision(draft_scene.registry, draft_scene.job_id, revision)
+    assert len(background.faces) > 0
+    # The window's immutable source region stays occupied without an individual shell/collider.
+    import numpy as np
+
+    assert np.any(np.linalg.norm(background.vertices - np.array([1, 1, 0.2]), axis=1) < 0.4)
+    from src.services.scene.editing.commands import restore_object
+    from src.services.scene.representation_integrity import representation_issues
+
+    assert representation_issues(ready, draft_scene.registry.runtime_resolver.require) == []
+    reopened = restore_object(ready, "candidate-001")
+    assert reopened.provenance["object_geometry"] == "awaiting_review"
+    assert reopened.objects[0].state == SceneObjectState.CANDIDATE
+    assert "review" not in reopened.objects[0].provenance
+
+
+def test_all_objects_can_remain_in_fixed_background(
+    draft_scene: SimpleNamespace, cpu_providers: SimpleNamespace
+) -> None:
+    from src.services.orchestration.scene.physics_collision import effective_collision_for_revision
+    from src.services.scene.editing.commands import ignore_object
+    from src.services.scene.representation_integrity import representation_issues
+
+    scene = draft_scene.scene
+    for item in scene.objects:
+        scene = ignore_object(scene, item.id)
+    draft_scene.scene = draft_scene.registry.scene.publish_next(
+        draft_scene.job_id, draft_scene.scene.scene_revision, scene, "fixture-all-fixed"
+    ).revision.scene
+    revision = build(draft_scene)
+    ready = draft_scene.registry.scene.current(draft_scene.job_id).scene
+    assert ready.provenance["geometry_build"]["built_object_ids"] == []
+    assert all(item.collider is None for item in ready.objects)
+    assert representation_issues(ready, draft_scene.registry.runtime_resolver.require) == []
+    _, background = effective_collision_for_revision(draft_scene.registry, draft_scene.job_id, revision)
+    assert len(background.faces) > 0
+
+
 def test_draft_build_publishes_ready_and_preserves_user_state(
     draft_scene: SimpleNamespace, cpu_providers: SimpleNamespace
 ) -> None:
@@ -397,7 +488,7 @@ def test_shell_failure_keeps_draft_without_obb(
     assert all(item.collider is None for item in draft_scene.scene.objects)
 
 
-@pytest.mark.parametrize("review", ["IGNORED", "DELETED", "MERGED"])
+@pytest.mark.parametrize("review", ["DELETED", "MERGED"])
 def test_review_tombstones_keep_review_and_receive_colliders(
     draft_scene: SimpleNamespace, cpu_providers: SimpleNamespace, review: str
 ) -> None:
@@ -647,7 +738,7 @@ def test_missing_source_ownership_is_bound_to_extraction_pose(
     )
 
 
-@pytest.mark.parametrize("review", ["IGNORED", "DELETED"])
+@pytest.mark.parametrize("review", ["DELETED"])
 def test_reviewed_build_composes_source_collision_and_restores_deleted_object(
     draft_scene: SimpleNamespace, cpu_providers: SimpleNamespace, review: str
 ) -> None:
@@ -662,6 +753,7 @@ def test_reviewed_build_composes_source_collision_and_restores_deleted_object(
     reviewed = first.model_copy(
         update={
             "provenance": {**first.provenance, "review": review},
+            "state": SceneObjectState.CANDIDATE,
             "transform": first.transform.model_copy(update={"translation_xyz": (20, 30, 40)}),
         }
     )
@@ -742,13 +834,10 @@ def test_explicit_object_ids_build_only_requested_reviewed_objects(
         return build_shell(item, *args, **kwargs)
 
     monkeypatch.setattr(module, "_build_shell", shell)
-    build(draft_scene, object_ids={first.id})
-    current = draft_scene.registry.scene.current(draft_scene.job_id).scene
-    assert seen == [first.id]
-    assert current.provenance["geometry_build"]["built_object_ids"] == [first.id]
-    assert current.objects[0].provenance["review"] == "IGNORED"
-    assert current.objects[0].collider is not None
-    assert current.objects[1] == draft_scene.scene.objects[1]
+    with pytest.raises(module.ObjectGeometryBuildError, match="nền cố định"):
+        build(draft_scene, object_ids={first.id})
+    assert seen == []
+    assert draft_scene.registry.scene.current(draft_scene.job_id).scene == draft_scene.scene
 
 
 def _ready_override(fixture):
@@ -1048,10 +1137,14 @@ def test_reassign_correction_carries_the_rebuilt_count(
 def test_tampered_background_count_still_fails_the_validator(
     draft_scene: SimpleNamespace, cpu_providers: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from src.services.scene.editing.commands import ignore_object
     from src.services.scene.representation_integrity import representation_issues
 
     install_background_fill(monkeypatch, cpu_providers, 3)
     fixture = draft_scene
+    fixture.scene = fixture.registry.scene.publish_next(
+        fixture.job_id, fixture.scene.scene_revision, ignore_object(fixture.scene, "candidate-001"), "fixture-fixed"
+    ).revision.scene
     build(fixture)
     ready = fixture.registry.scene.current(fixture.job_id).scene
     tampered = fixture.registry.scene.publish_next(
@@ -1077,7 +1170,7 @@ def test_invalid_inpaint_count_fails_before_publication(
     assert fixture.registry.scene.current(fixture.job_id).scene == fixture.scene
 
 
-@pytest.mark.parametrize("review", ["IGNORED", "DELETED", "MERGED"])
+@pytest.mark.parametrize("review", ["DELETED", "MERGED"])
 def test_archived_member_with_shell_error_blocks_build_and_is_named(
     draft_scene: SimpleNamespace, cpu_providers: SimpleNamespace, review: str
 ) -> None:
