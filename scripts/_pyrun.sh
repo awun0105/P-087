@@ -8,7 +8,12 @@
 # Exits 0 silently if no Python is found — hooks must never block the AI tool.
 set -u
 
-if command -v python3 >/dev/null 2>&1; then
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+# Prefer the project venv: it has python-dotenv, so hooks can read AI_LOG_SERVER from .env.
+if [ -x "$ROOT/.venv/bin/python" ]; then
+  PY="$ROOT/.venv/bin/python"
+elif command -v python3 >/dev/null 2>&1; then
   PY=python3
 elif command -v python >/dev/null 2>&1; then
   PY=python
