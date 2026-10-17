@@ -4,17 +4,20 @@ Branch: `mvp-pipeline-v2`. Không tạo branch mới, không push/merge/PR.
 
 ## 1. Bối cảnh: vì sao đổi
 
-Pipeline hiện tại (stage `OBJECT_EXTRACT`, hàm `objectify()` trong
-`src/services/orchestration/scene/objectify.py`) chạy liền một mạch:
+(Đính chính 2026-10-17: bản đầu của mục này mô tả sai pipeline cũ là "train ObjectGS". ObjectGS chỉ được thêm làm **tuỳ chọn** từ
+15/10, commit `128d24ee`, `253ed34f`; chưa từng là đường mặc định.)
+
+Pipeline cũ (stage `OBJECT_EXTRACT`, hàm `objectify()` trong `src/services/orchestration/scene/objectify.py`, phương pháp
+`objectify_v1(sampro3d_sam2+render_lift+coacd+seed_inpaint)`, từ commit `5e9cc11b` ngày 1/10) chạy liền một mạch:
 
 ```
-SAM2 + multiview → membership Gaussian → train ObjectGS (hàng giờ GPU) → TSDF mesh
-→ cleanup/repair/QA → CoACD → collision môi trường → publish SceneIR
+SAM2 nhiều góc nhìn → gán Gaussian cho từng vật theo đóng góp render → collider CoACD
+→ vá nền (LaMa) → collision môi trường → publish SceneIR (đã có collider)
 ```
 
-Người dùng chỉ thấy kết quả tách **sau khi** đã train xong. Sửa membership phải train lại
-(`membership_regeneration.py`). Ngoài ra mesh TSDF từ ObjectGS hay bị **hở** ở mặt camera không
-thấy (đáy, mặt sát tường): Room 8.000 vòng có 275 cạnh biên nên quality gate chặn, vật không có collider.
+Người dùng chỉ thấy kết quả tách **sau khi** cả chuỗi chạy xong; muốn sửa vùng vật thì phải tạo lại membership và chạy lại
+(`membership_regeneration.py`), không có công cụ chỉnh vùng trực quan. Nhánh ObjectGS tuỳ chọn (thêm 15/10) còn gặp mesh TSDF
+**hở** ở mặt camera không thấy: Room 8.000 vòng có 275 cạnh biên nên quality gate chặn.
 
 ## 2. Mục tiêu
 
