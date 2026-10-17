@@ -184,7 +184,8 @@ function GaussianLayer({ jobId, view, cameras }: { jobId: string; view: StageVie
   const handleApp = useCallback((_app: unknown, controls?: ViewerControls) => {
     setViewerControls(controls ?? null);
   }, []);
-  const initialCamera = useMemo(() => recordingCameraPose(sourceFrame, cameras), [sourceFrame, cameras]);
+  const displayRotation = view.unit === "arbitrary" ? view.display_rotation_xyzw ?? undefined : undefined;
+  const initialCamera = useMemo(() => recordingCameraPose(sourceFrame, cameras, 60, displayRotation), [sourceFrame, cameras, displayRotation]);
   const ref = view.refs[0];
   if (!ref) return <Notice>Bước này chưa có file 3DGS.</Notice>;
   if (capability === "failed" || capability === "unavailable") {
@@ -201,6 +202,7 @@ function GaussianLayer({ jobId, view, cameras }: { jobId: string; view: StageVie
       onFailed={fail}
       onRuntime={setRuntime}
       sourceFrame={sourceFrame}
+      displayRotation={displayRotation}
       cameras={cameras}
       wheelFactor={wheelFactor}
       initialCamera={initialCamera}

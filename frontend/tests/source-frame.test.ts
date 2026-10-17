@@ -12,6 +12,25 @@ import { playCanvasErrorMessage } from "@/features/viewer/PlayCanvasScene";
 const clean = (v: number[]) => v.map((x) => x + 0);
 
 describe("source frame", () => {
+  it("căn cùng một hướng cho scene, camera ban đầu và replay mà không đổi dữ liệu gốc", () => {
+    // SfM đã xác nhận Z-up: chỉ còn phép đổi Z-up → display Y-up.
+    const displayRotation: [number, number, number, number] = [-Math.SQRT1_2, 0, 0, Math.SQRT1_2];
+    const cameras = [
+      { center: [1, 2, 3] as [number, number, number], rotation_xyzw: [0, 0, 0, 1] as [number, number, number, number] },
+      { center: [4, 2, 3] as [number, number, number], rotation_xyzw: [0, 0, 0, 1] as [number, number, number, number] },
+    ];
+    const before = JSON.stringify(cameras);
+    const pose = recordingCameraPose("colmap", cameras, 60, displayRotation)!;
+    const track = buildTrajectoryAnimTrack("colmap", cameras, { displayRotation })!;
+    const point = toDisplay("colmap", cameras[0].center, displayRotation);
+    point.forEach((value, axis) => expect(value).toBeCloseTo([1, 3, -2][axis]));
+    expect(pose.position).toEqual(point);
+    expect(track.keyframes.values.position.slice(0, 3)).toEqual(point);
+    expect(track.keyframes.values.target.slice(0, 3)).toEqual(pose.target);
+    expect(pose.target[1] - pose.position[1]).toBeCloseTo(2);
+    expect(JSON.stringify(cameras)).toBe(before);
+  });
+
   it("Z-up hệ mét: trục lên z thành y của viewer, không soi gương", () => {
     expect(clean(toDisplay("z_up", [0, 0, 1]))).toEqual([0, 1, 0]);
     expect(clean(toDisplay("z_up", [1, 0, 0]))).toEqual([1, 0, 0]);

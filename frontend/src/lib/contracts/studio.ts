@@ -708,6 +708,8 @@ export interface StageView {
   title: string;
   note: string;
   unit: "meter" | "arbitrary";
+  /** Source→display Y-up, chỉ hướng hiển thị; không đổi đơn vị hoặc artifact. */
+  display_rotation_xyzw?: [number, number, number, number] | null;
   refs: { artifact_uri: string; artifact_checksum: string; artifact_type: string }[];
   cameras: { frame_id: number; center: [number, number, number]; rotation_xyzw: [number, number, number, number] }[];
   /** Khoá của lớp LiDAR đã căn chỉnh chồng lên scene; null/thiếu = scene không có lớp này. */
@@ -720,6 +722,11 @@ const VIEW_KINDS: readonly StageView["kind"][] = ["frames", "cameras", "gaussian
 export function parseStageViews(value: unknown): StageView[] {
   if (!isRecord(value) || !Array.isArray(value.views)) throw new Error("Danh sách kết quả từng bước không hợp lệ");
   for (const view of value.views) {
+    const rotation = isRecord(view) ? view.display_rotation_xyzw : undefined;
+    if (rotation != null && !(Array.isArray(rotation) && rotation.length === 4 &&
+        rotation.every(isFiniteNumber) && Math.abs(Math.hypot(...rotation) - 1) < 1e-6)) {
+      throw new Error("Hướng hiển thị của lớp xem không hợp lệ");
+    }
     if (!isRecord(view) || !VIEW_KINDS.includes(view.kind as StageView["kind"]) || typeof view.title !== "string" ||
         !Array.isArray(view.refs) || !Array.isArray(view.cameras) ||
         !view.refs.every((ref) => isRecord(ref) && typeof ref.artifact_uri === "string" && typeof ref.artifact_checksum === "string") ||

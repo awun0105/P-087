@@ -2,15 +2,17 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import { recordingCameraPose, type CameraMarkerLike, type DisplayCameraPose } from "@/features/viewer/source-frame";
+import { recordingCameraPose, type CameraMarkerLike, type DisplayCameraPose, type DisplayRotation } from "@/features/viewer/source-frame";
 import { getStageViews } from "@/lib/api/studio";
 
 interface Loaded {
   jobId: string;
   cameras: readonly CameraMarkerLike[] | undefined;
+  displayRotation?: DisplayRotation;
 }
 
 export interface JobCameras {
+  displayRotation?: DisplayRotation;
   /** Quỹ đạo camera COLMAP của job (hệ SfM, cùng hệ với bản xem 3DGS); undefined nếu job chưa có hoặc đọc lỗi. */
   cameras: readonly CameraMarkerLike[] | undefined;
   /** Camera đặt tại frame quay đầu tiên, bên trong scene; undefined khi không có quỹ đạo. */
@@ -36,7 +38,7 @@ export function useJobCameras(jobId: string | undefined): JobCameras {
         // 3DGS Brush ở hệ SfM: dùng camera của lớp 3DGS không có đơn vị mét nếu có, không thì của bước ước lượng camera.
         const sfm = views.find((view) => view.kind === "gaussian" && view.unit === "arbitrary" && view.cameras.length > 0)
           ?? views.find((view) => view.kind === "cameras" && view.cameras.length > 0);
-        setLoaded({ jobId, cameras: sfm?.cameras });
+        setLoaded({ jobId, cameras: sfm?.cameras, displayRotation: sfm?.display_rotation_xyzw ?? undefined });
       },
       () => {
         if (!controller.signal.aborted) setLoaded({ jobId, cameras: undefined });
@@ -48,5 +50,6 @@ export function useJobCameras(jobId: string | undefined): JobCameras {
   const settled = jobId === undefined || loaded?.jobId === jobId;
   const cameras = jobId !== undefined && loaded?.jobId === jobId ? loaded.cameras : undefined;
   const initialCamera = useMemo(() => (cameras ? recordingCameraPose("colmap", cameras) : undefined), [cameras]);
-  return { cameras, initialCamera, settled };
+  const displayRotation = jobId !== undefined && loaded?.jobId === jobId ? loaded.displayRotation : undefined;
+  return { cameras, initialCamera, settled, displayRotation };
 }

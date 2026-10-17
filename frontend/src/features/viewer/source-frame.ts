@@ -14,6 +14,7 @@
 export type SourceFrame = "colmap" | "z_up" | "identity";
 
 export type Vec3 = [number, number, number];
+export type DisplayRotation = [number, number, number, number];
 
 /** Euler XYZ (độ) của entity nội dung trong không gian hiển thị Y-up. */
 export const DISPLAY_EULER: Record<SourceFrame, Vec3> = {
@@ -23,7 +24,8 @@ export const DISPLAY_EULER: Record<SourceFrame, Vec3> = {
 };
 
 /** Điểm hệ nguồn → không gian hiển thị (cùng phép xoay với `DISPLAY_EULER`). */
-export function toDisplay(frame: SourceFrame, [x, y, z]: Vec3): Vec3 {
+export function toDisplay(frame: SourceFrame, [x, y, z]: Vec3, displayRotation?: DisplayRotation): Vec3 {
+  if (displayRotation) return rotate(displayRotation, [x, y, z]);
   if (frame === "colmap") return [-x, -y, z];
   if (frame === "z_up") return [x, z, -y];
   return [x, y, z];
@@ -77,6 +79,7 @@ export function recordingCameraPose(
   frame: SourceFrame,
   cameras: readonly CameraMarkerLike[],
   fov = 60,
+  displayRotation?: DisplayRotation,
 ): DisplayCameraPose | undefined {
   const first = cameras[0];
   if (!first) return undefined;
@@ -90,7 +93,7 @@ export function recordingCameraPose(
     first.center[1] + forward[1] * distance,
     first.center[2] + forward[2] * distance,
   ];
-  return { position: toDisplay(frame, first.center), target: toDisplay(frame, target), fov };
+  return { position: toDisplay(frame, first.center, displayRotation), target: toDisplay(frame, target, displayRotation), fov };
 }
 
 /**
@@ -209,6 +212,7 @@ export function buildTrajectoryAnimTrack(
     frameRate?: number;
     maxKeyframes?: number;
     fov?: number;
+    displayRotation?: DisplayRotation;
   },
 ): TrajectoryAnimTrack | undefined {
   if (!cameras || cameras.length < 2) return undefined;
@@ -247,8 +251,8 @@ export function buildTrajectoryAnimTrack(
       cam.center[2] + forward[2] * lookDistance,
     ];
 
-    const displayPos = toDisplay(frame, cam.center);
-    const displayTarget = toDisplay(frame, targetPoint);
+    const displayPos = toDisplay(frame, cam.center, options?.displayRotation);
+    const displayTarget = toDisplay(frame, targetPoint, options?.displayRotation);
 
     times.push(idx);
     positions.push(...displayPos);

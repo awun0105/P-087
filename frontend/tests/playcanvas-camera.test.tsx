@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { EventHandler } from "playcanvas";
+import { Entity, EventHandler } from "playcanvas";
 import { defaultSettings } from "@playcanvas/supersplat-viewer/settings";
 
 import { PlayCanvasScene, type ViewerControls } from "@/features/viewer/PlayCanvasScene";
@@ -44,6 +44,31 @@ function fixture() {
 beforeEach(() => { vi.clearAllMocks(); });
 
 describe("PlayCanvas camera bridge", () => {
+  it("xoay entity Gaussian và replay bằng cùng quaternion, rồi gỡ listener", async () => {
+    const viewer = fixture();
+    const appEvents = new EventHandler();
+    const splat = new Entity("gsplat", {} as ConstructorParameters<typeof Entity>[1]);
+    const on = vi.fn(appEvents.on.bind(appEvents));
+    const off = vi.fn(appEvents.off.bind(appEvents));
+    Object.assign(viewer.app, { on, off });
+    Object.assign(viewer.app.root, { findByName: () => splat });
+    const rotation: [number, number, number, number] = [-Math.SQRT1_2, 0, 0, Math.SQRT1_2];
+    const cameras = [0, 1].map((x) => ({ center: [x, 2, 3] as [number, number, number], rotation_xyzw: [0, 0, 0, 1] as [number, number, number, number] }));
+    const failed = vi.fn();
+    const { unmount } = render(<PlayCanvasScene contentUrl="/scene.sog" capability="ready" mode="VISUAL" displayRotation={rotation} cameras={cameras} onFailed={failed} />);
+    await waitFor(() => expect(on).toHaveBeenCalledWith("update", expect.any(Function)));
+    act(() => { appEvents.fire("update"); });
+    const actual = splat.getLocalRotation();
+    [actual.x, actual.y, actual.z, actual.w].forEach((value, axis) => expect(value).toBeCloseTo(rotation[axis]));
+    const track = mocks.createViewer.mock.calls[0][0].settings.animTracks[0];
+    track.keyframes.values.position.slice(0, 3).forEach((value: number, axis: number) => expect(value).toBeCloseTo([0, 3, -2][axis]));
+    expect(off).toHaveBeenCalledWith("update", expect.any(Function));
+    expect(failed).not.toHaveBeenCalled();
+    unmount();
+    expect(viewer.destroy).toHaveBeenCalledOnce();
+    splat.destroy();
+  });
+
   it("retains the upstream inside environment camera and FOV when no camera was supplied", async () => {
     fixture();
     render(<PlayCanvasScene contentUrl="/scene.sog" capability="ready" mode="VISUAL" onFailed={vi.fn()} />);

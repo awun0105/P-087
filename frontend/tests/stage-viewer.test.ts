@@ -6,6 +6,16 @@ import { parseModeComparison, parseStageViews, type StageView } from "@/lib/cont
 const camera = (center: [number, number, number]) => ({ frame_id: 0, center, rotation_xyzw: [0, 0, 0, 1] as [number, number, number, number] });
 
 describe("stage viewer", () => {
+  it("chỉ nhận quaternion hiển thị hữu hạn, đủ bốn phần tử và có độ dài một", () => {
+    const view = { stage_id: "x", kind: "gaussian", title: "t", note: "", unit: "arbitrary", refs: [], cameras: [] };
+    for (const rotation of [undefined, null, [0, 0, 0, 1]]) {
+      expect(parseStageViews({ views: [{ ...view, display_rotation_xyzw: rotation }] })).toHaveLength(1);
+    }
+    for (const rotation of [[0, 0, 1], [0, 0, 0, 0], [0, 0, 0, 2], [0, 0, Number.NaN, 1], [0, 0, Infinity, 1]]) {
+      expect(() => parseStageViews({ views: [{ ...view, display_rotation_xyzw: rotation }] })).toThrow();
+    }
+  });
+
   it("uses x/y in meters and the two widest axes for arbitrary SfM units", () => {
     const base: StageView = { stage_id: "ST-CAMERA-POSE", kind: "cameras", title: "", note: "", unit: "meter", refs: [], cameras: [] };
     expect(topDownAxes(base)).toEqual([0, 1]);

@@ -10,6 +10,7 @@ const viewer = vi.hoisted(() => ({
   props: [] as {
     initialCamera?: { position: number[]; target: number[] };
     cameras?: unknown[];
+    displayRotation?: number[];
     extraControls?: import("react").ReactNode;
   }[],
 }));
@@ -60,6 +61,23 @@ beforeEach(() => {
 });
 
 describe("PreviewScene mở đầu bên trong scene", () => {
+  it("dùng hướng xác nhận của preview cho cả camera và nội dung; không lấy camera hệ mét", async () => {
+    const rotation: [number, number, number, number] = [-Math.SQRT1_2, 0, 0, Math.SQRT1_2];
+    vi.mocked(getStageViews).mockResolvedValue([
+      cameraView,
+      { ...cameraView, kind: "gaussian", stage_id: "ST-VISUAL-RECON", display_rotation_xyzw: rotation },
+      { ...cameraView, kind: "gaussian", unit: "meter", cameras: [{ ...sfmCameras[0], center: [100, 200, 300] }] },
+    ]);
+    const { rerender } = render(<PreviewScene jobId="job-a" contentUrl="/scene.sog" filename="scene.sog" />);
+    await screen.findByTestId("viewer");
+    expect(viewer.props.at(-1)?.displayRotation).toEqual(rotation);
+    viewer.props.at(-1)!.initialCamera!.position.forEach((value, axis) => expect(value).toBeCloseTo([1, 3, -2][axis]));
+    // Caller cung cấp camera hệ mét: không áp hướng SfM lên nó lần nữa.
+    rerender(<PreviewScene jobId="job-a" sourceFrame="z_up" cameras={sfmCameras} contentUrl="/metric.sog" filename="metric.sog" />);
+    expect(viewer.props.at(-1)?.displayRotation).toBeUndefined();
+    expect(viewer.props.at(-1)?.initialCamera?.position).toEqual([1, 3, -2]);
+  });
+
   it("chờ quỹ đạo camera của job rồi mới dựng viewer, đặt camera tại frame quay đầu tiên", async () => {
     let resolve!: (views: StageView[]) => void;
     vi.mocked(getStageViews).mockReturnValue(new Promise((done) => { resolve = done; }));

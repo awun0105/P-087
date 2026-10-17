@@ -94,11 +94,12 @@ export function PreviewScene({
   const supplied = initialCamera !== undefined || (cameras?.length ?? 0) > 0;
   const fetched = useJobCameras(supplied ? undefined : jobId);
   const effectiveCameras = cameras ?? fetched.cameras;
+  const displayRotation = !supplied && sourceFrame === "colmap" ? fetched.displayRotation : undefined;
   const resolvedCamera = useMemo(() => {
     if (initialCamera) return initialCamera;
-    if (effectiveCameras && effectiveCameras.length > 0) return recordingCameraPose(sourceFrame, effectiveCameras);
+    if (effectiveCameras && effectiveCameras.length > 0) return recordingCameraPose(sourceFrame, effectiveCameras, 60, displayRotation);
     return undefined;
-  }, [initialCamera, effectiveCameras, sourceFrame]);
+  }, [initialCamera, effectiveCameras, sourceFrame, displayRotation]);
 
   return (
     <div
@@ -135,6 +136,7 @@ export function PreviewScene({
               onFailed={fail}
               onRuntime={setRuntime}
               sourceFrame={sourceFrame}
+              displayRotation={displayRotation}
               cameras={effectiveCameras}
               wheelFactor={wheelFactor}
               initialCamera={resolvedCamera}

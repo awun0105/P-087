@@ -32,6 +32,7 @@ import {
   buildTrajectoryAnimTrack,
   type CameraMarkerLike,
   type DisplayCameraPose,
+  type DisplayRotation,
   type SourceFrame,
 } from "@/features/viewer/source-frame";
 import type { SplatInspection } from "./splat-inspection";
@@ -166,6 +167,8 @@ export interface PlayCanvasSceneProps {
   onInspectionState?: (state: InspectionState) => void;
   /** Hệ trục của nội dung; mặc định `colmap` (output Brush). Artifact hệ mét REC-06 là `z_up`. */
   sourceFrame?: SourceFrame;
+  /** Rotation source→display dùng chung cho Gaussian và quỹ đạo camera. */
+  displayRotation?: DisplayRotation;
   /** Chuỗi camera quay của scene để sinh quỹ đạo replay mượt mà khớp video gốc. */
   cameras?: readonly CameraMarkerLike[];
   /** Camera khởi đầu trong không gian hiển thị (vd camera quay đầu tiên); caller memo hoá. */
@@ -240,6 +243,7 @@ export function PlayCanvasScene({
   onInspectionReady,
   onInspectionState,
   sourceFrame = "colmap",
+  displayRotation,
   cameras,
   initialCamera,
   initialCameraMode,
@@ -330,7 +334,7 @@ export function PlayCanvasScene({
       .then(async ([module, settingsModule]) => {
         if (disposed) return;
         const trajectoryTrack =
-          cameras && cameras.length >= 2 ? buildTrajectoryAnimTrack(sourceFrame, cameras) : undefined;
+          cameras && cameras.length >= 2 ? buildTrajectoryAnimTrack(sourceFrame, cameras, { displayRotation }) : undefined;
         const settings = settingsModule.defaultSettings("environment");
         if (initialCamera) settings.cameras = [{ initial: initialCamera }];
         settings.annotations = toViewerAnnotations(annotationsRef.current);
@@ -368,12 +372,13 @@ export function PlayCanvasScene({
         // Upstream tạo entity `gsplat` khi asset nạp xong, với phép xoay COLMAP cố định. Đặt lại
         // phép xoay theo hệ nguồn ở frame đầu tiên có entity (trước khi render), rồi bỏ listener.
         const app = viewer.app as unknown as ViewerAppLike | undefined;
-        if (app && sourceFrame !== "colmap") {
+        if (app && (sourceFrame !== "colmap" || displayRotation)) {
           const [ex, ey, ez] = DISPLAY_EULER[sourceFrame];
           orient = () => {
             const entity = app.root?.findByName("gsplat");
             if (!entity) return;
-            entity.setLocalEulerAngles(ex, ey, ez);
+            if (displayRotation) entity.setLocalRotation(...displayRotation);
+            else entity.setLocalEulerAngles(ex, ey, ez);
             app.off("update", orient!);
             orient = null;
           };
@@ -573,7 +578,7 @@ export function PlayCanvasScene({
       liveAnnotations.current = null;
     };
   }, [capability, contentUrl, contentFile, contentFilename, showControls, mode, onFailed, publish,
-    enableInspection, inspectionMaxPoints, onInspectionReady, onInspectionState, renderer, sourceFrame, cameras, initialCamera, initialCameraMode]);
+    enableInspection, inspectionMaxPoints, onInspectionReady, onInspectionState, renderer, sourceFrame, displayRotation, cameras, initialCamera, initialCameraMode]);
 
   return (
     <div
@@ -597,7 +602,7 @@ export function PlayCanvasScene({
 /** Phần của `pc.AppBase` mà host dùng (tìm entity, sự kiện frame, gắn lớp phủ). */
 export interface ViewerAppLike {
   readonly root: {
-    findByName(name: string): { setLocalEulerAngles(x: number, y: number, z: number): void; enabled: boolean } | null;
+    findByName(name: string): { setLocalEulerAngles(x: number, y: number, z: number): void; setLocalRotation(x: number, y: number, z: number, w: number): void; enabled: boolean } | null;
   };
   on(event: "update", handler: () => void): unknown;
   off(event: "update", handler: () => void): unknown;
