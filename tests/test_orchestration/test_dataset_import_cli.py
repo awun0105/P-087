@@ -25,11 +25,11 @@ def test_ordered_images_rejects_dataset_sidecars_in_input_directory(tmp_path: Pa
 @pytest.mark.parametrize(
     ("name", "expected"),
     [
-        ("drjohnson", "video_indoor_walkthrough"),
-        ("bonsai", "video_indoor_walkthrough"),
-        ("bicycle", "video_single_object"),
-        ("garden", "video_outdoor_forward"),
-        ("stump", "video_outdoor_forward"),
+        ("drjohnson", "photo_collection_indoor"),
+        ("bonsai", "photo_collection_indoor"),
+        ("bicycle", "photo_collection_outdoor"),
+        ("garden", "photo_collection_outdoor"),
+        ("stump", "photo_collection_outdoor"),
     ],
 )
 def test_scene_uses_planned_processing_preset(name: str, expected: str) -> None:

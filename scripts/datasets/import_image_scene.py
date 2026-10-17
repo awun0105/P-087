@@ -33,14 +33,12 @@ def ordered_images(directory: Path) -> tuple[Path, ...]:
 
 
 def preset_for_scene(name: str) -> str:
-    """Select the task's indoor, single-object, or outdoor capture preset."""
+    """Dataset images are unordered photo collections: match every pair instead of video neighbours."""
     key = name.strip().lower()
     if key in {"drjohnson", "playroom", "bonsai", "counter", "kitchen", "room"}:
-        return "video_indoor_walkthrough"
-    if key == "bicycle":
-        return "video_single_object"
-    if key in {"garden", "stump"}:
-        return "video_outdoor_forward"
+        return "photo_collection_indoor"
+    if key in {"bicycle", "garden", "stump"}:
+        return "photo_collection_outdoor"
     raise ValueError(f"no T-045 capture preset is defined for scene: {name}")
 
 
