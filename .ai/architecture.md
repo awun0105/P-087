@@ -4,8 +4,10 @@ Branch: `mvp-pipeline-v2`. Không tạo branch mới, không push/merge/PR.
 
 ## 1. Bối cảnh: vì sao đổi
 
-(Đính chính 2026-10-17: bản đầu của mục này mô tả sai pipeline cũ là "train ObjectGS". ObjectGS chỉ được thêm làm **tuỳ chọn** từ
-15/10, commit `128d24ee`, `253ed34f`; chưa từng là đường mặc định.)
+(Đính chính 2026-10-17: bản đầu của mục này mô tả sai pipeline cũ là "train ObjectGS". Lịch sử: 1/10 `objectify_v1` không có
+ObjectGS (`5e9cc11b`); 15/10 02:38 thêm ObjectGS tuỳ chọn (`253ed34f`); 15/10 18:34 đặt ObjectGS làm mặc định preset
+(`3d487da1`); 15/10 22:34 chuyển mặc định sang `shell` + `geometry_review=required` (`07ecbfcd`). Hiện cả 8 preset trong
+`configs/product/processing_presets_v1.json` dùng `shell`; `objectgs` là lựa chọn.)
 
 Pipeline cũ (stage `OBJECT_EXTRACT`, hàm `objectify()` trong `src/services/orchestration/scene/objectify.py`, phương pháp
 `objectify_v1(sampro3d_sam2+render_lift+coacd+seed_inpaint)`, từ commit `5e9cc11b` ngày 1/10) chạy liền một mạch:
