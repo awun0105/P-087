@@ -1,10 +1,12 @@
 """Video mẫu đã xử lý sẵn: danh sách, manifest và file (allow-list + checksum)."""
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict
 
+from src.api import auth
 from src.api.studio import deps
+from src.services.orchestration.auth import UserRecord
 from src.services.orchestration.samples import DemoManifest, DemoUnavailableError, SampleSummary
 
 router = APIRouter()
@@ -45,3 +47,18 @@ def get_sample_file(sample_id: str, name: str) -> FileResponse:
         media_type=entry.media_type,
         headers={"Cache-Control": "private, max-age=3600", "X-Content-Type-Options": "nosniff"},
     )
+
+
+@router.delete("/samples/{sample_id}")
+def remove_sample(sample_id: str, user: UserRecord | None = Depends(auth.require_reviewer)) -> dict[str, str]:
+    """Reviewer gỡ mẫu khỏi thư viện công khai; không xoá dự án hay artifact."""
+    if user is None:
+        raise HTTPException(status_code=401, detail="Đăng nhập tài khoản Reviewer để bỏ mẫu khỏi demo")
+    try:
+        deps.sample_library().unpublish(sample_id)
+    except DemoUnavailableError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except OSError as error:
+        raise HTTPException(status_code=503, detail="Không cập nhật được thư viện demo; thử lại sau") from error
+    auth.auth_service().audit(user.user_id, "demo.unpublish", sample_id, {})
+    return {"sample_id": sample_id}

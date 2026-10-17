@@ -47,6 +47,8 @@ from src.services.orchestration.scene.models import (
     TransformEdit,
     VisualBinding,
 )
+from src.services.orchestration.value.events import operation_origin, record_event
+from src.services.scene.geometry_state import require_geometry_ready
 
 _REVISION_PATTERN = re.compile(r"^(?P<prefix>.*?)(?P<number>\d+)$")
 _SCHEMA_VERSION = "1.0"
@@ -238,9 +240,22 @@ class SceneEditor:
         không thể xuất hiện ở đây — contract đã chặn từ lúc dựng SceneIR.
         """
         references = [scene.environment.geometry_ref]
+        correction = scene.provenance.get("membership_correction")
+        if isinstance(correction, dict) and isinstance(correction.get("evidence_ref"), dict):
+            reference = ProductArtifactRef.model_validate(correction["evidence_ref"])
+            if (
+                reference.artifact_type not in {"ObjectMembershipCorrection", "ObjectRegionEdit"}
+                or reference.job_id != scene.environment.geometry_ref.job_id
+            ):
+                raise SceneEditRejectedError("membership correction evidence does not belong to this scene")
+            references.append(reference)
         if scene.environment.collider_ref is not None:
             references.append(scene.environment.collider_ref)
-        for reference in (scene.environment.collision_source_ref, scene.environment.collision_selection_ref):
+        for reference in (
+            scene.environment.collision_source_ref,
+            scene.environment.collision_selection_ref,
+            scene.environment.object_aware_collision_ref,
+        ):
             if reference is not None and reference not in references:
                 references.append(reference)
         if scene.environment.visual_ref is not None:
@@ -257,6 +272,8 @@ class SceneEditor:
                     references.append(reference)
         for item in scene.objects:
             references.append(item.geometry_ref)
+            if item.surface_mesh_ref is not None:
+                references.append(item.surface_mesh_ref)
             # Scene theo vật (pipeline v2): Gaussian riêng của từng vật cho viewer.
             if item.visual_ref is not None:
                 references.append(item.visual_ref)
@@ -276,6 +293,7 @@ class SceneEditor:
                 f"scene đã đổi: client đang giữ {command.expected_scene_revision}, "
                 f"revision hiện tại là {scene.scene_revision}"
             )
+        require_geometry_ready(scene, "di chuyển/xoay vật")
         self.require_known_objects(scene, command)
         updated = self._build_revision(scene, command)
         if self.head_repository is not None:
@@ -288,6 +306,7 @@ class SceneEditor:
                 supersedes=scene.scene_revision,
                 record_operation=False,
             )
+            self._record_scene_edit(job_id, "transform_edit", revision, scene.scene_revision)
         else:
             revision = self._publish(job_id, updated, supersedes=scene.scene_revision)
         self._revisions[job_id] = revision
@@ -398,6 +417,7 @@ class SceneEditor:
                 record_operation=True,
                 commit_guard=commit_guard,
             )
+            self._record_scene_edit(job_id, operation, revision, current.scene_revision)
         else:
             if commit_guard is not None:
                 raise SceneEditRejectedError("Fenced scene operations require a database-backed scene head")
@@ -618,6 +638,21 @@ class SceneEditor:
             if isinstance(error, RuntimeStateConflictError):
                 raise SceneRevisionConflictError(str(error)) from error
             raise
+
+    def _record_scene_edit(self, job_id: str, operation: str, revision: SceneRevision, previous_revision: str) -> None:
+        """Ghi `scene_edit` sau khi publish thành công; chỉ có khi scene đi qua DB head (có persistence)."""
+        assert self.head_repository is not None
+        record_event(
+            self.head_repository.database,
+            job_id,
+            "scene_edit",
+            {
+                "operation": operation,
+                "origin": operation_origin(operation),
+                "scene_revision": revision.scene.scene_revision,
+                "previous_revision": previous_revision,
+            },
+        )
 
     def _publish(self, job_id: str, scene: SceneIR, supersedes: str | None) -> SceneRevision:
         """Ghi revision thành artifact bất biến và trả ref đã verify.

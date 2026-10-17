@@ -3,11 +3,13 @@
  * thị revision backend trả về. Canvas 3D được thay bằng stub (jsdom không có WebGL).
  */
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ObjectReviewView, type SaveState } from "@/features/studio/ObjectReviewView";
 import { SimulationPackagePanel } from "@/features/studio/SimulationPackagePanel";
+import { ObjectifyContext, type ObjectifyHandle } from "@/features/studio/scene/objectifyContext";
+import { jobArtifactContentUrl } from "@/lib/api/endpoints";
 
 vi.mock("@/features/studio/StageViewer", () => ({
   CollisionMeshCanvas: () => <div data-testid="mesh" />,
@@ -16,10 +18,13 @@ vi.mock("@/features/studio/MetricSceneView", () => ({
   MetricSceneView: ({
     boxes,
     objects = [],
+    shells = [],
     physicsObjects = [],
     gizmo,
     onTool,
     onDelete,
+    onTransform,
+    lockedReason,
   }: {
     boxes: {
       id: string;
@@ -29,6 +34,7 @@ vi.mock("@/features/studio/MetricSceneView", () => ({
       dimensions: [number, number, number];
     }[];
     objects?: { id: string; url: string | null; visible: boolean }[];
+    shells?: { id: string; url: string; style: string }[];
     physicsObjects?: {
       id: string;
       position: [number, number, number];
@@ -38,13 +44,17 @@ vi.mock("@/features/studio/MetricSceneView", () => ({
     gizmo?: { id: string; mode: string } | null;
     onTool?: (tool: "translate" | "rotate" | "none") => void;
     onDelete?: () => void;
+    onTransform?: (id: string, position: [number, number, number], rotation: [number, number, number, number]) => void;
+    lockedReason?: string | null;
   }) => (
-    <div data-testid="metric-scene" data-boxes={JSON.stringify(boxes)} data-physics-objects={JSON.stringify(physicsObjects)}>
+    <div data-testid="metric-scene" data-objects={JSON.stringify(objects)} data-boxes={JSON.stringify(boxes)} data-physics-objects={JSON.stringify(physicsObjects)} data-shells={JSON.stringify(shells)}>
       {boxes.map((box) => `${box.id}:${box.color}`).join(",")}
       <span data-testid="splats">{objects.map((item) => `${item.id}:${item.url ? "ply" : "none"}:${item.visible}`).join(",")}</span>
       <span data-testid="gizmo">{gizmo ? `${gizmo.id}:${gizmo.mode}` : "none"}</span>
+      <span data-testid="locked">{lockedReason ?? "none"}</span>
       {onTool && <button type="button" onClick={() => onTool("translate")}>Dịch</button>}
       {onDelete && <button type="button" onClick={onDelete}>Xoá</button>}
+      {onTransform && gizmo && <button type="button" onClick={() => onTransform(gizmo.id, [7, 8, 9], [0, 0, Math.SQRT1_2, Math.SQRT1_2])}>Áp pose kiểm tra</button>}
     </div>
   ),
 }));
@@ -238,6 +248,11 @@ function routeFetch(routes: Record<string, Response[]>) {
       const queued = routes["/scene/objectify"];
       return queued?.length ? queued.shift()! : reply(objectify({ object_centric: true }));
     }
+    // Box ban đầu của Chỉnh vùng (T-023): mặc định trả box đã tính; test có thể xếp hàng phản hồi riêng.
+    if (url.includes("/region/fit")) {
+      const queued = routes["/region/fit"];
+      return queued?.length ? queued.shift()! : reply(regionFit);
+    }
     const key = Object.keys(routes).find((pattern) => url.includes(pattern));
     if (key && routes[key].length) return routes[key].shift()!;
     if (url.includes("/simulation-package")) return reply(null);
@@ -262,18 +277,111 @@ describe("ObjectReviewView", () => {
     global.fetch = vi.fn();
   });
 
+  it("lets an already confirmed Draft object remain in the fixed background", async () => {
+    const initial = { ...scene("rev-061", "CONFIRMED", "CONFIRMED"), provenance: { object_geometry: "awaiting_review" } };
+    const fixed = { ...scene("rev-062", "CANDIDATE", "IGNORED"), provenance: { object_geometry: "awaiting_review" } };
+    routeFetch({
+      "/objects/candidate-001/ignore": [reply({ scene: fixed })],
+      "/scene": [reply({ scene: initial })],
+    });
+    render(<ObjectReviewView jobId="job-a" sceneStateControls={<p>Trạng thái đã lưu</p>} />);
+    fireEvent.mouseDown(await screen.findByRole("tab", { name: "Vật thể" }), { button: 0, ctrlKey: false });
+    const checkbox = await screen.findByRole("checkbox", { name: "Đánh dấu Vật thể 1 để làm nền" });
+    expect(checkbox).not.toBeChecked();
+    fireEvent.click(checkbox);
+    expect(calls("/objects/candidate-001/ignore")).toHaveLength(0);
+    expect(screen.getByRole("button", { name: "Tạo mesh cho 1 vật đã chọn" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Cho 1 vật đã chọn làm nền" }));
+    await waitFor(() => expect(calls("/objects/candidate-001/ignore")).toHaveLength(1));
+    expect(JSON.parse(calls("/objects/candidate-001/ignore")[0][1]!.body as string).expected_scene_revision).toBe("rev-061");
+    expect(await screen.findByRole("button", { name: "Tạo mesh cho 0 vật đã chọn" })).toBeEnabled();
+    expect(screen.getByRole("checkbox", { name: "Đánh dấu Vật thể 1 để làm nền" })).not.toBeChecked();
+    const panel = screen.getByRole("complementary", { name: "Danh sách vật thể" });
+    expect(within(panel).getByRole("region", { name: "Tạo mesh vật thể" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Duyệt vật thể" })).not.toBeInTheDocument();
+  });
+
+  it("keeps marking local and excludes only marked objects using returned revisions", async () => {
+    const initial = { ...scene("rev-001", "CONFIRMED", "CONFIRMED"), provenance: { object_geometry: "awaiting_review" } };
+    const first = initial.objects[0];
+    initial.objects.push({ ...first, id: "candidate-002", name: "Vật thể 2" }, { ...first, id: "candidate-003", name: "Vật thể 3" });
+    const fixed = (object: typeof first) => ({ ...object, state: "CANDIDATE", active: false, provenance: { ...object.provenance, review: "IGNORED" } });
+    const afterFirst = { ...initial, scene_revision: "rev-002", objects: [fixed(first), ...initial.objects.slice(1)] };
+    const afterBoth = { ...afterFirst, scene_revision: "rev-003", objects: [fixed(first), fixed(initial.objects[1]), initial.objects[2]] };
+    routeFetch({
+      "/objects/candidate-001/ignore": [reply({ scene: afterFirst })],
+      "/objects/candidate-002/ignore": [reply({ scene: afterBoth })],
+      "/scene": [reply({ scene: initial })],
+    });
+    render(<ObjectReviewView jobId="job-a" />);
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Đánh dấu Vật thể 1 để làm nền" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Đánh dấu Vật thể 2 để làm nền" }));
+    expect(calls("/ignore")).toHaveLength(0);
+    expect(screen.getByRole("button", { name: "Tạo mesh cho 3 vật đã chọn" })).toBeEnabled();
+    expect(screen.queryByText("Mesh riêng")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cho 2 vật đã chọn làm nền" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Tạo mesh cho 1 vật đã chọn" })).toBeEnabled());
+    const revisions = ["candidate-001", "candidate-002"].map(id => JSON.parse(calls(`/objects/${id}/ignore`)[0][1]!.body as string).expected_scene_revision);
+    expect(revisions).toEqual(["rev-001", "rev-002"]);
+    expect(calls("/objects/candidate-003/ignore")).toHaveLength(0);
+    expect(calls("/scene/geometry/build")).toHaveLength(0);
+    expect(screen.getByRole("button", { name: "Cho 0 vật đã chọn làm nền" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /Tách riêng các vật/ })).not.toBeInTheDocument();
+  });
+
+  it("retains unfinished background selections after a partial failure and retries from the saved revision", async () => {
+    const initial = { ...scene("rev-001", "CONFIRMED", "CONFIRMED"), provenance: { object_geometry: "awaiting_review" } };
+    initial.objects.push({ ...initial.objects[0], id: "candidate-002", name: "Vật thể 2" });
+    const fixed = (object: typeof initial.objects[0]) => ({ ...object, state: "CANDIDATE", active: false, provenance: { ...object.provenance, review: "IGNORED" } });
+    const afterFirst = { ...initial, scene_revision: "rev-002", objects: [fixed(initial.objects[0]), initial.objects[1]] };
+    const afterBoth = { ...initial, scene_revision: "rev-003", objects: initial.objects.map(fixed) };
+    routeFetch({
+      "/objects/candidate-001/ignore": [reply({ scene: afterFirst })],
+      "/objects/candidate-002/ignore": [reply({ detail: "Lưu vật thất bại" }, 500), reply({ scene: afterBoth })],
+      "/scene": [reply({ scene: initial })],
+    });
+    const onSaveState = vi.fn();
+    render(<ObjectReviewView jobId="job-a" onSaveState={onSaveState} />);
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Đánh dấu Vật thể 1 để làm nền" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Đánh dấu Vật thể 2 để làm nền" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cho 2 vật đã chọn làm nền" }));
+    await waitFor(() => expect(onSaveState).toHaveBeenLastCalledWith(expect.objectContaining({ status: "error" })));
+    expect(screen.getByRole("checkbox", { name: "Đánh dấu Vật thể 1 để làm nền" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Đánh dấu Vật thể 2 để làm nền" })).toBeChecked();
+    expect(screen.getByRole("button", { name: "Tạo mesh cho 1 vật đã chọn" })).toBeEnabled();
+    onSaveState.mock.calls.at(-1)![0].retry();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Tạo mesh cho 0 vật đã chọn" })).toBeEnabled());
+    expect(calls("/objects/candidate-001/ignore")).toHaveLength(1);
+    expect(calls("/objects/candidate-002/ignore").map(([, init]) => JSON.parse(init!.body as string).expected_scene_revision)).toEqual(["rev-002", "rev-002"]);
+  });
+
+  it("can keep remaining undecided objects as background without starting a mesh job", async () => {
+    const initial = { ...scene("rev-001", "CANDIDATE"), provenance: { object_geometry: "awaiting_review" } };
+    const fixed = { ...scene("rev-002", "CANDIDATE", "IGNORED"), provenance: { object_geometry: "awaiting_review" } };
+    routeFetch({ "/objects/candidate-001/ignore": [reply({ scene: fixed })], "/scene": [reply({ scene: initial })] });
+    render(<ObjectReviewView jobId="job-a" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Giữ vật chưa chọn làm nền" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Tạo mesh cho 0 vật đã chọn" })).toBeEnabled());
+    expect(screen.getByRole("checkbox", { name: "Đánh dấu Vật thể 1 để làm nền" })).not.toBeChecked();
+    expect(calls("/scene/geometry/build")).toHaveLength(0);
+  });
+
   it("orders scene-state before objects and preserves the viewer and selection across panel tabs", async () => {
     routeFetch({ "/scene": [reply({ scene: scene("rev-001", "CANDIDATE") })] });
     render(<ObjectReviewView jobId="job-a" sceneStateControls={<p>Thao tác trạng thái</p>} />);
     const viewer = await screen.findByTestId("metric-scene");
+    expect(screen.getByRole("heading", {name: "Quản lý scene"})).toBeInTheDocument();
     const stateTab = screen.getByRole("tab", { name: "Trạng thái scene" });
     const objectsTab = screen.getByRole("tab", { name: "Vật thể" });
-    expect(screen.getAllByRole("tab").map(tab => tab.textContent)).toEqual(["Trạng thái scene", "Vật thể"]);
+    expect(screen.getAllByRole("tab").map(tab => tab.textContent)).toEqual(["Trạng thái scene", "Vật thể", "Sàn & tường"]);
     expect(stateTab).toHaveAttribute("aria-selected", "true");
     fireEvent.mouseDown(objectsTab, { button: 0, ctrlKey: false });
     const object = await screen.findByRole("button", { name: "Chọn Vật thể 1" });
     fireEvent.click(object);
     expect(object).toHaveAttribute("aria-pressed", "true");
+    fireEvent.mouseDown(screen.getByRole("tab", {name: "Sàn & tường"}), { button: 0, ctrlKey: false });
+    expect(screen.getByRole("tab", {name: "Sàn & tường"})).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("metric-scene")).toBe(viewer);
     fireEvent.mouseDown(stateTab, { button: 0, ctrlKey: false });
     expect(screen.getByTestId("metric-scene")).toBe(viewer);
     fireEvent.mouseDown(objectsTab, { button: 0, ctrlKey: false });
@@ -444,7 +552,7 @@ describe("ObjectReviewView", () => {
     render(<ObjectReviewView jobId="job-a" />);
     expect(await screen.findByText("1 vật thể · 0 chờ xác nhận")).toBeInTheDocument();
     expect(screen.queryByText("Vật thể 1")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Đã loại/xoá/gộp · 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Đã loại/xoá/gộp/ẩn · 1" }));
     expect(screen.getByText("Vật thể 1")).toBeInTheDocument();
     expect(screen.getByText("Đã loại")).toBeInTheDocument();
   });
@@ -744,11 +852,11 @@ describe("ObjectReviewView", () => {
     render(<ObjectReviewView jobId="job-a" />);
 
     expect(await screen.findByText("1 vật thể · 0 chờ xác nhận")).toBeInTheDocument();
-    fireEvent.click(await screen.findByRole("button", { name: "Đã loại/xoá/gộp · 1" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Đã loại/xoá/gộp/ẩn · 1" }));
     fireEvent.click(screen.getByRole("button", { name: "Chọn Vật thể 1" }));
 
     expect(screen.getAllByText("Đã gộp vào candidate-002").length).toBeGreaterThan(0);
-    expect(screen.queryByRole("button", { name: "Khôi phục Vật thể 1" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Khôi phục Vật thể 1" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Đổi tên" })).toBeNull();
   });
 
@@ -946,9 +1054,9 @@ describe("ObjectReviewView", () => {
     expect(await screen.findByText("1 vật thể · 1 chờ xác nhận")).toBeInTheDocument();
 
     // Thu gọn panel trái
-    fireEvent.click(screen.getByRole("button", { name: "Thu gọn danh sách vật thể" }));
+    fireEvent.click(screen.getByRole("button", { name: "Thu gọn panel quản lý scene" }));
     expect(screen.queryByText("1 vật thể · 1 chờ xác nhận")).toBeNull();
-    const openLeft = screen.getByRole("button", { name: "Mở danh sách vật thể" });
+    const openLeft = screen.getByRole("button", { name: "Mở panel quản lý scene" });
     expect(openLeft).toBeInTheDocument();
 
     // Xổ xuống panel trái
@@ -963,5 +1071,625 @@ describe("ObjectReviewView", () => {
     // Xổ xuống panel phải
     fireEvent.click(openRight);
     expect(screen.getByText("Chọn một vật")).toBeInTheDocument();
+  });
+  it("Ẩn/Hiện Candidate chỉ đổi viewport, giữ revision và không gọi backend", async () => {
+    const base = scene("rev-001", "CANDIDATE");
+    const gaussians = { ...ref, artifact_type: "ObjectGaussians", artifact_uri: "artifact://jobs/job-a/scene/objects/x.ply" };
+    base.objects[0] = { ...base.objects[0], visual_ref: gaussians } as (typeof base.objects)[0];
+    base.objects.push({ ...base.objects[0], id: "candidate-002", name: "Vật thể 2" });
+    routeFetch({ "/scene": [reply({ scene: base, representations: base.objects.map((item) => ({ object_id: item.id, visual_policy: "source", source_visual_required: true, source_transform: item.transform, readiness_blockers: [] })) })] });
+    const onSave = vi.fn();
+    render(<ObjectReviewView jobId="job-a" onSaveState={onSave} />);
+    fireEvent.click(await screen.findByText("Vật thể 1"));
+    const requests = vi.mocked(fetch).mock.calls.length;
+    const saves = onSave.mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: "Ẩn trên màn hình" }));
+    expect(screen.getByTestId("splats")).toHaveTextContent("candidate-001:ply:false");
+    expect(screen.getByTestId("splats")).toHaveTextContent("candidate-002:ply:true");
+    expect(JSON.parse(screen.getByTestId("metric-scene").dataset.boxes!)).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "Bật trong mô phỏng" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Hiện trên màn hình" }));
+    expect(screen.getByTestId("splats")).toHaveTextContent("candidate-001:ply:true");
+    expect(JSON.parse(screen.getByTestId("metric-scene").dataset.boxes!)).toHaveLength(2);
+    expect(vi.mocked(fetch).mock.calls).toHaveLength(requests);
+    expect(onSave.mock.calls).toHaveLength(saves);
+  });
+
+  it("Tắt mô phỏng là lệnh backend riêng, không dùng nút Ẩn viewport", async () => {
+    const base = scene("rev-001", "CONFIRMED", "CONFIRMED");
+    const disabled = scene("rev-002", "CONFIRMED", "CONFIRMED");
+    disabled.objects[0].active = false;
+    routeFetch({ "/objects/candidate-001/hide": [reply({ scene: disabled })], "/scene": [reply({ scene: base })] });
+    render(<ObjectReviewView jobId="job-a" />);
+    fireEvent.click(await screen.findByText("Vật thể 1"));
+    fireEvent.click(screen.getByRole("button", { name: "Tắt trong mô phỏng" }));
+    expect(await screen.findByRole("button", { name: "Bật trong mô phỏng" })).toBeInTheDocument();
+    const call = vi.mocked(fetch).mock.calls.find(([url]) => String(url).includes("/objects/candidate-001/hide"));
+    expect(JSON.parse(call![1]!.body as string)).toMatchObject({ active: false, expected_scene_revision: "rev-001" });
+  });
+
+  it("đổi job reset viewport hide dù object ID trùng nhau", async () => {
+    const base = scene("rev-001", "CANDIDATE");
+    base.objects[0] = { ...base.objects[0], visual_ref: { ...ref, artifact_type: "ObjectGaussians" } } as (typeof base.objects)[0];
+    const response = { scene: base, representations: [{ object_id: "candidate-001", visual_policy: "source", source_visual_required: true, source_transform: base.objects[0].transform, readiness_blockers: [] }] };
+    routeFetch({ "/scene": [reply(response), reply(response)] });
+    const view = render(<ObjectReviewView jobId="job-a" />);
+    fireEvent.click(await screen.findByText("Vật thể 1"));
+    fireEvent.click(screen.getByRole("button", { name: "Ẩn trên màn hình" }));
+    expect(screen.getByTestId("splats")).toHaveTextContent("candidate-001:ply:false");
+    view.rerender(<ObjectReviewView jobId="job-b" />);
+    await waitFor(() => expect(screen.getByTestId("splats")).toHaveTextContent("candidate-001:ply:true"));
+  });
+
+  it("Pending preview binds Gaussian and static Studio collision to the editable object at B without confirming it", async () => {
+    const base = scene("rev-001", "CANDIDATE");
+    base.objects[0] = { ...base.objects[0], visual_ref: { ...ref, artifact_type: "ObjectGaussians" } } as (typeof base.objects)[0];
+    const pose = { ...base.objects[0].transform, translation_xyz: [8, 9, 10] };
+    routeFetch({ "/scene": [reply({ scene: base, representations: [{ object_id: "candidate-001", visual_policy: "source", source_visual_required: true, source_transform: pose, readiness_blockers: [] }] })] });
+    render(<ObjectReviewView jobId="job-a" />);
+    const view = await screen.findByTestId("metric-scene");
+    const objects = JSON.parse(view.dataset.objects!);
+    expect(objects.filter((item: { url: string | null }) => item.url)).toHaveLength(1);
+    expect(objects).toHaveLength(1);
+    expect(objects[0]).toMatchObject({ id: "candidate-001", position: base.objects[0].transform.translation_xyz, visible: true });
+    expect(JSON.parse(view.dataset.physicsObjects!)).toMatchObject([{id: "candidate-001", dynamic: false}]);
+    fireEvent.click(screen.getByText("Vật thể 1"));
+    fireEvent.click(screen.getByRole("button", { name: "Ẩn trên màn hình" }));
+    expect(JSON.parse(view.dataset.objects!)[0].visible).toBe(false);
+  });
+
+  it("missing SOURCE metadata cannot silently place a moved Candidate at current pose", async () => {
+    const base = scene("rev-001", "CANDIDATE");
+    base.objects[0] = { ...base.objects[0], visual_ref: { ...ref, artifact_type: "ObjectGaussians" } } as (typeof base.objects)[0];
+    routeFetch({ "/scene": [reply({ scene: base })] });
+    render(<ObjectReviewView jobId="job-a" />);
+    expect(await screen.findByText(/SOURCE_POLICY_MISSING/)).toBeInTheDocument();
+    const objects = JSON.parse(screen.getByTestId("metric-scene").dataset.objects!);
+    expect(objects.every((item: { url: string | null }) => item.url === null)).toBe(true);
+  });
+
+  it("archive separates Ignore, Delete, Merge, viewport Hide and simulation disable", async () => {
+    const base = scene("rev-001", "CANDIDATE");
+    base.objects = [
+      scene("rev-001", "CANDIDATE", "IGNORED").objects[0],
+      scene("rev-001", "CANDIDATE", "DELETED").objects[0],
+      scene("rev-001", "CANDIDATE", "MERGED", "candidate-005").objects[0],
+      { ...scene("rev-001", "CONFIRMED", "CONFIRMED").objects[0], active: false },
+      base.objects[0],
+    ].map((object, index) => ({ ...object, id: `candidate-00${index + 1}`, name: `Vật thể ${index + 1}` }));
+    routeFetch({ "/scene": [reply({ scene: base })] });
+    render(<ObjectReviewView jobId="job-a" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Chọn Vật thể 5" }));
+    const requests = vi.mocked(fetch).mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: "Ẩn trên màn hình" }));
+    expect(screen.getByRole("button", { name: "Đã loại/xoá/gộp/ẩn · 5" })).toHaveAttribute("aria-pressed", "true");
+    for (const name of ["Đã loại · 1", "Đã xoá · 1", "Đã gộp · 1", "Ẩn trên màn hình · 1", "Tắt trong mô phỏng · 1"]) {
+      expect(screen.getByRole("heading", { name })).toBeInTheDocument();
+    }
+    for (let index = 1; index <= 5; index += 1) expect(screen.getByRole("button", { name: `Khôi phục Vật thể ${index}` })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Khôi phục Vật thể 5" }));
+    expect(screen.getByRole("button", { name: "Chưa loại · 1" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Chọn Vật thể 5" })).toBeInTheDocument();
+    expect(vi.mocked(fetch).mock.calls).toHaveLength(requests);
+  });
+
+  it.each(["IGNORED", "DELETED"])("restore %s returns Candidate without implicitly confirming it", async (review) => {
+    routeFetch({
+      "/objects/candidate-001/restore": [reply({ scene: scene("rev-002", "CANDIDATE") })],
+      "/scene": [reply({ scene: scene("rev-001", "CANDIDATE", review) })],
+    });
+    render(<ObjectReviewView jobId="job-a" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Đã loại/xoá/gộp/ẩn · 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Khôi phục Vật thể 1" }));
+    expect(await screen.findByRole("button", { name: "Xác nhận Vật thể 1" })).toBeInTheDocument();
+    const request = calls("/objects/candidate-001/restore")[0][1] as RequestInit;
+    expect(JSON.parse(request.body as string)).toEqual({ expected_scene_revision: "rev-001" });
+    expect(JSON.parse(screen.getByTestId("metric-scene").dataset.physicsObjects!)).toMatchObject([{id: "candidate-001", dynamic: false}]);
+  });
+
+  it("restore simulation-disabled object sends active=true while viewport restore stays local", async () => {
+    const base = scene("rev-001", "CONFIRMED", "CONFIRMED");
+    base.objects[0].active = false;
+    routeFetch({
+      "/objects/candidate-001/hide": [reply({ scene: scene("rev-002", "CONFIRMED", "CONFIRMED") })],
+      "/scene": [reply({ scene: base })],
+    });
+    render(<ObjectReviewView jobId="job-a" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Đã loại/xoá/gộp/ẩn · 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Khôi phục Vật thể 1" }));
+    expect(await screen.findByRole("button", { name: "Chưa loại · 1" })).toHaveAttribute("aria-pressed", "true");
+    expect(JSON.parse((calls("/objects/candidate-001/hide")[0][1] as RequestInit).body as string)).toEqual({ expected_scene_revision: "rev-001", active: true });
+  });
+
+  it("merged restore explains group restoration and requires explicit confirmation", async () => {
+    routeFetch({
+      "/objects/candidate-001/restore": [reply({ scene: scene("rev-002", "CANDIDATE") })],
+      "/scene": [reply({ scene: scene("rev-001", "CANDIDATE", "MERGED", "candidate-002") })],
+    });
+    render(<ObjectReviewView jobId="job-a" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Đã loại/xoá/gộp/ẩn · 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Khôi phục Vật thể 1" }));
+    expect(screen.getByRole("alertdialog")).toHaveTextContent("Khôi phục nhóm trước khi gộp?");
+    expect(calls("/objects/candidate-001/restore")).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Hủy" }));
+    expect(calls("/objects/candidate-001/restore")).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Khôi phục Vật thể 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Khôi phục cả nhóm" }));
+    expect(await screen.findByRole("button", { name: "Xác nhận Vật thể 1" })).toBeInTheDocument();
+    expect(calls("/objects/candidate-001/restore")).toHaveLength(1);
+  });
+
+  it("legacy INVALID_OBJECT_ACTIVATION offers a Candidate repair instead of automatic confirmation", async () => {
+    const base = scene("rev-001", "CANDIDATE");
+    base.objects[0].active = true;
+    const policy = { object_id: "candidate-001", visual_policy: "source", source_visual_required: false, source_transform: null, readiness_blockers: ["INVALID_OBJECT_ACTIVATION"] };
+    routeFetch({
+      "/objects/candidate-001/restore": [reply({ scene: scene("rev-002", "CANDIDATE"), representations: [{ ...policy, readiness_blockers: [] }] })],
+      "/scene": [reply({ scene: base, representations: [policy] })],
+    });
+    render(<ObjectReviewView jobId="job-a" />);
+    const repair = await screen.findByRole("button", { name: "Khôi phục trạng thái candidate-001" });
+    expect(calls("/objects/candidate-001/restore")).toHaveLength(0);
+    fireEvent.click(repair);
+    await waitFor(() => expect(screen.queryByText(/INVALID_OBJECT_ACTIVATION/)).toBeNull());
+    expect(screen.getByRole("button", { name: "Xác nhận Vật thể 1" })).toBeInTheDocument();
+    expect(calls("/objects/candidate-001/confirm")).toHaveLength(0);
+  });
+
+  it("Candidate inspector exposes Merge and explains that it joins parts of one object", async () => {
+    routeFetch({ "/scene": [reply({ scene: membershipScene() })] });
+    render(<ObjectReviewView jobId="job-a" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Chọn Vật thể 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Gộp với ứng viên khác" }));
+    expect(screen.getByRole("button", { name: /Gộp ứng viên \/ Sửa nhóm Gaussian/ })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText(/một vật bị tách nhầm thành nhiều ứng viên/)).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Chọn để gộp Vật thể 1" })).toBeChecked();
+  });
+
+  it("Candidate Move/Rotate, Hide/Show, Delete/Restore keep Gaussian, collider and gizmo bound to one object", async () => {
+    const initial = scene("rev-001", "CANDIDATE");
+    const gaussian = { ...ref, artifact_type: "ObjectGaussians", artifact_uri: "artifact://jobs/job-a/scene/object.ply" };
+    initial.objects[0] = { ...initial.objects[0], visual_ref: gaussian } as (typeof initial.objects)[0];
+    const rotation = [0, 0, Math.SQRT1_2, Math.SQRT1_2];
+    const moved = { ...initial, scene_revision: "rev-002", objects: [{ ...initial.objects[0], transform: { ...initial.objects[0].transform, translation_xyz: [7, 8, 9], rotation_quaternion_xyzw: rotation } }] };
+    const deleted = { ...moved, scene_revision: "rev-003", objects: [{ ...moved.objects[0], provenance: { review: "DELETED" } }] };
+    const restored = { ...moved, scene_revision: "rev-004" };
+    const policy = { object_id: "candidate-001", visual_policy: "source", source_visual_required: true, source_transform: initial.objects[0].transform, readiness_blockers: [] };
+    routeFetch({
+      "/scene/edits": [reply({ scene: moved, representations: [policy] })],
+      "/objects/candidate-001/delete": [reply({ scene: deleted, representations: [{ ...policy, visual_policy: "omit", source_visual_required: false }] })],
+      "/objects/candidate-001/restore": [reply({ scene: restored, representations: [policy] })],
+      "/scene": [reply({ scene: initial, representations: [policy] })],
+    });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<ObjectReviewView jobId="job-a" />);
+    const canvas = await screen.findByTestId("metric-scene");
+    const objects = () => JSON.parse(canvas.dataset.objects!);
+    const boxes = () => JSON.parse(canvas.dataset.boxes!);
+    expect(objects()).toHaveLength(1);
+    expect(objects()[0]).toMatchObject({ id: "candidate-001", visible: true });
+    expect(objects()[0].url).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Chọn Vật thể 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Dịch" }));
+    expect(screen.getByTestId("gizmo")).toHaveTextContent("candidate-001:translate");
+    fireEvent.click(screen.getByRole("button", { name: "Áp pose kiểm tra" }));
+    await waitFor(() => expect(objects()[0].position).toEqual([7, 8, 9]));
+    expect(objects()[0].rotation_xyzw).toEqual(rotation);
+    expect(boxes()[0]).toMatchObject({ id: "candidate-001", center: [7, 8, 9], rotation_xyzw: rotation });
+    expect(objects().some((item: { id: string }) => item.id.startsWith("source:"))).toBe(false);
+    expect(JSON.parse(canvas.dataset.physicsObjects!)).toMatchObject([{id: "candidate-001", position: [7,8,9], dynamic: false}]);
+    const transformRequest = JSON.parse((calls("/scene/edits")[0][1] as RequestInit).body as string);
+    expect(transformRequest).toMatchObject({ expected_scene_revision: "rev-001", edits: [{ object_id: "candidate-001", translation_xyz: [7, 8, 9], rotation_quaternion_xyzw: rotation }] });
+    const requests = vi.mocked(fetch).mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: "Ẩn trên màn hình" }));
+    expect(objects()[0].visible).toBe(false);
+    expect(boxes()).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Khôi phục Vật thể 1" }));
+    expect(objects()[0]).toMatchObject({ id: "candidate-001", position: [7, 8, 9], rotation_xyzw: rotation, visible: true });
+    expect(vi.mocked(fetch).mock.calls).toHaveLength(requests);
+    fireEvent.click(screen.getByRole("button", { name: "Xoá" }));
+    await waitFor(() => expect(objects()[0].visible).toBe(false));
+    expect(boxes()).toHaveLength(0);
+    expect(objects()).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Đã loại/xoá/gộp/ẩn · 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Khôi phục Vật thể 1" }));
+    await waitFor(() => expect(objects()[0].visible).toBe(true));
+    expect(objects()[0]).toMatchObject({ id: "candidate-001", position: [7, 8, 9], rotation_xyzw: rotation });
+    expect(boxes()[0]).toMatchObject({ id: "candidate-001", center: [7, 8, 9], rotation_xyzw: rotation });
+    expect(calls("/objects/candidate-001/delete")).toHaveLength(1);
+    expect(calls("/objects/candidate-001/restore")).toHaveLength(1);
+  });
+
+  it("Ignore retains only the source observation at A; Restore rebinds the editable visual at B", async () => {
+    const base = scene("rev-001", "CANDIDATE");
+    const gaussian = { ...ref, artifact_type: "ObjectGaussians" };
+    base.objects[0] = { ...base.objects[0], visual_ref: gaussian } as (typeof base.objects)[0];
+    const policy = { object_id: "candidate-001", visual_policy: "source", source_visual_required: true, source_transform: { ...base.objects[0].transform, translation_xyz: [8, 9, 10] }, readiness_blockers: [] };
+    const ignored = { ...base, scene_revision: "rev-002", objects: [{ ...base.objects[0], provenance: { review: "IGNORED" } }] };
+    routeFetch({
+      "/objects/candidate-001/ignore": [reply({ scene: ignored, representations: [policy] })],
+      "/objects/candidate-001/restore": [reply({ scene: { ...base, scene_revision: "rev-003" }, representations: [policy] })],
+      "/scene": [reply({ scene: base, representations: [policy] })],
+    });
+    render(<ObjectReviewView jobId="job-a" />);
+    const canvas = await screen.findByTestId("metric-scene");
+    const objects = () => JSON.parse(canvas.dataset.objects!);
+    fireEvent.click(screen.getByRole("button", { name: "Loại Vật thể 1" }));
+    await waitFor(() => expect(objects()[0].position).toEqual([8, 9, 10]));
+    expect(objects()).toHaveLength(1);
+    expect(objects()[0]).toMatchObject({ id: "candidate-001", visible: true });
+    expect(JSON.parse(canvas.dataset.boxes!)).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Đã loại/xoá/gộp/ẩn · 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Khôi phục Vật thể 1" }));
+    await waitFor(() => expect(objects()[0].position).toEqual(base.objects[0].transform.translation_xyz));
+    expect(JSON.parse(canvas.dataset.boxes!)).toHaveLength(1);
+  });
+
+  it("scene Draft: hiện banner Tạo mesh, khoá Dịch/Xoay bằng lý do, và gizmo không mở", async () => {
+    const policy = { object_id: "candidate-001", visual_policy: "source", source_visual_required: false, source_transform: null, readiness_blockers: [] };
+    const base = scene("rev-001", "CONFIRMED");
+    routeFetch({ "/scene": [reply({ scene: { ...base, provenance: { ...base.provenance, object_geometry: "awaiting_review" } }, representations: [policy] })] });
+    render(<ObjectReviewView jobId="job-a" />);
+
+    const banner = await screen.findByRole("region", { name: "Tạo mesh vật thể" });
+    expect(banner).toHaveTextContent("Tạo mesh cho 1 vật đã chọn");
+    expect(screen.queryByText(/Đang duyệt tách vật/)).not.toBeInTheDocument();
+    expect(screen.getByTestId("locked")).toHaveTextContent("Cần tạo mesh trước");
+    fireEvent.click(screen.getByRole("button", { name: "Chọn Vật thể 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Dịch" }));
+    expect(screen.getByTestId("gizmo")).toHaveTextContent("none");
+  });
+
+  it("khoá Tạo gói mô phỏng khi scene chưa có mesh: nút vô hiệu, tooltip nêu lý do, không gửi POST", async () => {
+    routeFetch({});
+    render(<SimulationPackagePanel jobId="job-a" sceneRevision="rev-001" lockedReason="Cần tạo mesh trước" onSceneChanged={() => {}} />);
+
+    const create = await screen.findByRole("button", { name: "Tạo gói mô phỏng" });
+    expect(create).toBeDisabled();
+    expect(create).toHaveAttribute("title", "Cần tạo mesh trước");
+    expect(calls("/simulation-package").some(([, init]) => (init as RequestInit | undefined)?.method === "POST")).toBe(false);
+  });
+
+  it("vật đã dựng hiện nguồn collider là vỏ Gaussian, kèm lý do máy chủ ghi", async () => {
+    const policy = { object_id: "candidate-001", visual_policy: "source", source_visual_required: false, source_transform: null, readiness_blockers: [] };
+    const base = scene("rev-001", "CONFIRMED", undefined, undefined, [0.1, 0, 0]);
+    const built = {
+      ...base,
+      objects: base.objects.map((item) => ({
+        ...item,
+        provenance: { ...item.provenance, surface_selection: { chosen: "gaussian_shell", reason: "ObjectGS không đạt QA" } },
+      })),
+    };
+    routeFetch({ "/scene": [reply({ scene: built, representations: [policy] })] });
+    render(<ObjectReviewView jobId="job-a" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Chọn Vật thể 1" }));
+    expect(screen.getByText("Collider: Vỏ Gaussian")).toBeInTheDocument();
+    expect(screen.getByText("ObjectGS không đạt QA")).toBeInTheDocument();
+  });
+
+  it("scene Draft: khoá Thêm vật cản hộp và Thêm từ thư viện; scene sẵn sàng vẫn bấm được", async () => {
+    const policy = { object_id: "candidate-001", visual_policy: "source", source_visual_required: false, source_transform: null, readiness_blockers: [] };
+    const base = scene("rev-001", "CONFIRMED");
+    routeFetch({ "/scene": [reply({ scene: { ...base, provenance: { ...base.provenance, object_geometry: "awaiting_review" } }, representations: [policy] })] });
+    const { unmount } = render(<ObjectReviewView jobId="job-a" />);
+
+    const catalogButton = await screen.findByRole("button", { name: "Thêm từ thư viện" });
+    const obstacleButton = screen.getByRole("button", { name: "Thêm vật cản hộp" });
+    expect(catalogButton).toBeDisabled();
+    expect(catalogButton).toHaveAttribute("title", "Cần tạo mesh trước");
+    expect(obstacleButton).toBeDisabled();
+    expect(obstacleButton).toHaveAttribute("title", "Cần tạo mesh trước");
+    unmount();
+
+    routeFetch({ "/scene": [reply({ scene: base, representations: [policy] })] });
+    render(<ObjectReviewView jobId="job-a" />);
+    expect(await screen.findByRole("button", { name: "Thêm từ thư viện" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Thêm vật cản hộp" })).toBeEnabled();
+  });
+});
+
+/** Scene theo vật có membership, collision theo vật và khoá object_geometry: nút Chỉnh vùng hiện khi chọn vật. */
+function regionScene(revision = "rev-001") {
+  const result = membershipScene(revision);
+  return {
+    ...result,
+    environment: { ...result.environment, object_aware_collision_ref: ref },
+    provenance: { ...result.provenance, object_geometry: "ready" },
+  };
+}
+
+/** Scene Draft thật: `object_geometry` đang chờ duyệt, có membership, không có collision theo vật. */
+function draftRegionScene(revision = "rev-001") {
+  const result = membershipScene(revision);
+  return { ...result, provenance: { ...result.provenance, object_geometry: "awaiting_review" } };
+}
+
+const regionPreview = {
+  scene_revision: "rev-001",
+  membership_checksum: `sha256:${"b".repeat(64)}`,
+  object_id: "candidate-001",
+  added_count: 3,
+  removed_count: 0,
+  object_gaussian_count: 120,
+  protected_floor_count: 0,
+  overlaps: {},
+  claimed: {},
+  added_sample_m: [],
+  removed_sample_m: [],
+  shell_glb_base64: null,
+  shell_error: null,
+};
+
+/** Box ban đầu máy chủ trả về: lệch tâm so với gốc để chứng minh panel dùng đúng box này (T-023). */
+const regionFit = {
+  scene_revision: "rev-001",
+  membership_checksum: `sha256:${"b".repeat(64)}`,
+  object_id: "candidate-001",
+  center_m: [0.12, -0.05, 0.3],
+  half_extents_m: [0.3, 0.2, 0.15],
+  yaw_rad: 0,
+  rows: 120,
+};
+
+describe("ObjectReviewView chỉnh vùng (T-016)", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    global.fetch = vi.fn();
+  });
+
+  it("scene có object_geometry: Chỉnh vùng mở panel của vật đang chọn; Brush/Lasso vẫn là trình sửa chi tiết", async () => {
+    routeFetch({
+      "/region/preview": Array.from({ length: 4 }, () => reply(regionPreview)),
+      "/scene": [reply({ scene: regionScene() })],
+    });
+    render(<ObjectReviewView jobId="job-a" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Chọn Vật thể 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Chỉnh vùng" }));
+
+    expect(await screen.findByRole("region", { name: "Chỉnh vùng" })).toHaveTextContent("Chỉnh vùng · Vật thể 1");
+    expect(screen.getByRole("list", { name: "Box vùng" })).toHaveTextContent("Cộng #1");
+
+    expect(screen.getByRole("button", { name: "Chỉnh chi tiết (Brush/Lasso)" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Chỉnh chi tiết (Brush/Lasso)" }));
+    expect(screen.queryByRole("region", { name: "Chỉnh vùng" })).not.toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Chỉnh vùng Gaussian nguồn" })).toBeInTheDocument();
+  });
+
+  it("Draft (object_geometry đang duyệt, không có collision theo vật): Chỉnh vùng vẫn mở panel; Brush/Lasso bị khoá kèm lý do", async () => {
+    routeFetch({
+      "/region/preview": Array.from({ length: 4 }, () => reply(regionPreview)),
+      "/scene": [reply({ scene: draftRegionScene() })],
+    });
+    render(<ObjectReviewView jobId="job-a" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Chọn Vật thể 1" }));
+
+    const brush = screen.getByRole("button", { name: "Chỉnh chi tiết (Brush/Lasso)" });
+    expect(brush).toBeDisabled();
+    expect(brush).toHaveAttribute("title", "Dùng Chỉnh vùng khi đang duyệt; Brush/Lasso dùng được sau khi Tạo mesh");
+
+    fireEvent.click(screen.getByRole("button", { name: "Chỉnh vùng" }));
+    expect(await screen.findByRole("region", { name: "Chỉnh vùng" })).toHaveTextContent("Chỉnh vùng · Vật thể 1");
+  });
+
+  it("scene cũ chưa có object_geometry giữ nút Chỉnh vùng Gaussian cũ", async () => {
+    const legacy = membershipScene();
+    routeFetch({
+      "/scene": [reply({ scene: { ...legacy, environment: { ...legacy.environment, object_aware_collision_ref: ref } } })],
+    });
+    render(<ObjectReviewView jobId="job-a" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Chọn Vật thể 1" }));
+
+    expect(screen.getByRole("button", { name: "Chỉnh vùng Gaussian · Box / Brush / Lasso" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Chỉnh vùng" })).not.toBeInTheDocument();
+  });
+
+  it("Apply trên Draft (201) gửi revision và membership, đóng panel rồi tải lại scene", async () => {
+    const routes = {
+      "/region/preview": Array.from({ length: 4 }, () => reply(regionPreview)),
+      "/region/apply": [reply({ job_id: "job-a", previous_scene_revision: "rev-001", scene_revision: "rev-002", scene: {} }, 201)],
+      "/scene": [reply({ scene: regionScene() }), reply({ scene: regionScene("rev-002") })],
+    };
+    routeFetch(routes);
+    render(<ObjectReviewView jobId="job-a" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Chọn Vật thể 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Chỉnh vùng" }));
+    expect(await screen.findByText("+3 / −0 · tổng 120")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Chỉnh vùng" })).not.toBeInTheDocument());
+    await waitFor(() => expect(routes["/scene"]).toHaveLength(0));
+    const apply = vi.mocked(global.fetch).mock.calls.find(([url]) => String(url).includes("/region/apply"));
+    expect(JSON.parse((apply![1] as RequestInit).body as string)).toMatchObject({
+      expected_scene_revision: "rev-001",
+      membership_checksum: `sha256:${"b".repeat(64)}`,
+      claim_from: [],
+    });
+  });
+
+  it("Apply trên Ready (202) đóng panel và yêu cầu đọc lại tiến độ qua trạng thái tách vật chung", async () => {
+    const refresh = vi.fn();
+    const handle = { state: null, error: null, sending: false, pending: false, send: vi.fn(), cancel: vi.fn(), refresh };
+    routeFetch({
+      "/region/preview": Array.from({ length: 4 }, () => reply(regionPreview)),
+      "/region/apply": [reply({ status: "queued", mode: "region", scene_revision: "rev-001", operation_id: "op-1" }, 202)],
+      "/scene": [reply({ scene: regionScene() })],
+    });
+    render(
+      <ObjectifyContext.Provider value={handle as unknown as ObjectifyHandle}>
+        <ObjectReviewView jobId="job-a" />
+      </ObjectifyContext.Provider>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Chọn Vật thể 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Chỉnh vùng" }));
+    expect(await screen.findByText("+3 / −0 · tổng 120")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Chỉnh vùng" })).not.toBeInTheDocument());
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("chọn vật khác thì panel chỉnh vùng của vật cũ đóng", async () => {
+    routeFetch({
+      "/region/preview": Array.from({ length: 4 }, () => reply(regionPreview)),
+      "/scene": [reply({ scene: regionScene() })],
+    });
+    render(<ObjectReviewView jobId="job-a" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Chọn Vật thể 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Chỉnh vùng" }));
+    expect(await screen.findByRole("region", { name: "Chỉnh vùng" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Chọn Vật thể 2" }));
+    expect(screen.queryByRole("region", { name: "Chỉnh vùng" })).not.toBeInTheDocument();
+  });
+});
+
+/** Vật thứ hai đã xác nhận có Gaussian riêng: Draft không được vẽ Gaussian của nó (tránh chồng với môi trường). */
+function shellScene(objectGeometry: "awaiting_review" | "ready") {
+  const result = membershipScene();
+  return {
+    ...result,
+    provenance: { ...result.provenance, object_geometry: objectGeometry },
+    objects: result.objects.map((object) => ({
+      ...object,
+      visual_ref: { ...ref, artifact_type: "ObjectGaussians" },
+      ...((object as unknown as { id: string }).id === "candidate-002" ? { state: "CONFIRMED", active: true } : {}),
+    })),
+  };
+}
+
+describe("ObjectReviewView vỏ và Gaussian theo Draft/Ready (T-017)", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    global.fetch = vi.fn();
+  });
+
+  it("Draft: không nạp Gaussian của vật nào; mọi vật có vỏ, vật đang chọn là selected", async () => {
+    routeFetch({ "/scene": [reply({ scene: shellScene("awaiting_review") })] });
+    render(<ObjectReviewView jobId="job-a" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Chọn Vật thể 1" }));
+
+    const stage = screen.getByTestId("metric-scene");
+    const objects = JSON.parse(stage.getAttribute("data-objects") ?? "[]") as { url: string | null }[];
+    expect(objects.every((item) => item.url === null)).toBe(true);
+    const shells = JSON.parse(stage.getAttribute("data-shells") ?? "[]") as { id: string; url: string; style: string }[];
+    expect(shells.map((shell) => [shell.id, shell.style])).toEqual([
+      ["candidate-001", "selected"],
+      ["candidate-002", "idle"],
+    ]);
+    expect(shells[0].url).toBe(jobArtifactContentUrl("job-a", ref));
+  });
+
+  it("Ready: vật đã xác nhận nạp Gaussian như trước và không có vỏ vẽ riêng", async () => {
+    routeFetch({ "/scene": [reply({ scene: shellScene("ready") })] });
+    render(<ObjectReviewView jobId="job-a" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Chọn Vật thể 1" }));
+
+    const stage = screen.getByTestId("metric-scene");
+    const objects = JSON.parse(stage.getAttribute("data-objects") ?? "[]") as { id: string; url: string | null }[];
+    const visual = { ...ref, artifact_type: "ObjectGaussians" } as never;
+    expect(objects.find((item) => item.id === "candidate-002")?.url).toBe(jobArtifactContentUrl("job-a", visual));
+    expect(stage.getAttribute("data-shells")).toBe("[]");
+  });
+
+  it("mở panel gọi fit đúng một lần và panel hiện box của máy chủ, không dựng từ kích thước", async () => {
+    routeFetch({
+      "/region/preview": Array.from({ length: 4 }, () => reply(regionPreview)),
+      "/scene": [reply({ scene: regionScene() })],
+    });
+    render(<ObjectReviewView jobId="job-a" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Chọn Vật thể 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Chỉnh vùng" }));
+    expect(await screen.findByRole("region", { name: "Chỉnh vùng" })).toBeInTheDocument();
+
+    const fits = vi.mocked(global.fetch).mock.calls.filter(([url]) => String(url).includes("/region/fit"));
+    expect(fits).toHaveLength(1);
+    expect(String(fits[0][0])).toContain("expected_scene_revision=rev-001");
+    expect(await screen.findByText("+3 / −0 · tổng 120")).toBeInTheDocument();
+    const previews = vi.mocked(global.fetch).mock.calls.filter(([url]) => String(url).includes("/region/preview"));
+    expect(JSON.parse(previews[0][1]!.body as string).boxes[0]).toMatchObject({
+      center_m: [0.12, -0.05, 0.3],
+      half_extents_m: [0.3, 0.2, 0.15],
+    });
+  });
+
+  it("fit lỗi: không có box và không có Apply; Thử lại gọi lại máy chủ rồi mới mở panel", async () => {
+    routeFetch({
+      "/region/fit": [reply({ detail: "vật còn 10 Gaussian (tối thiểu 50) nên không lấy được vùng hiện tại" }, 422), reply(regionFit)],
+      "/region/preview": Array.from({ length: 4 }, () => reply(regionPreview)),
+      "/scene": [reply({ scene: regionScene() })],
+    });
+    render(<ObjectReviewView jobId="job-a" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Chọn Vật thể 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Chỉnh vùng" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("tối thiểu 50");
+    expect(screen.queryByRole("list", { name: "Box vùng" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Apply" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Thử lại" }));
+    expect(await screen.findByRole("region", { name: "Chỉnh vùng" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cộng #1" })).toBeInTheDocument();
+    const fits = vi.mocked(global.fetch).mock.calls.filter(([url]) => String(url).includes("/region/fit"));
+    expect(fits).toHaveLength(2);
+  });
+
+  it("Chỉnh vùng không cần kích thước primitive: vật không có kích thước vẫn mở được", async () => {
+    const scene = regionScene();
+    routeFetch({
+      "/region/preview": Array.from({ length: 4 }, () => reply(regionPreview)),
+      "/scene": [reply({ scene: { ...scene, objects: scene.objects.map((item) => ({ ...item, primitive_dimensions_xyz_m: null })) } })],
+    });
+    render(<ObjectReviewView jobId="job-a" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Chọn Vật thể 1" }));
+    const open = screen.getByRole("button", { name: "Chỉnh vùng" });
+    expect(open).toBeEnabled();
+    fireEvent.click(open);
+    expect(await screen.findByRole("region", { name: "Chỉnh vùng" })).toBeInTheDocument();
+  });
+});
+
+describe("ObjectReviewView Benchmark theo quyền sửa job (T-033)", () => {
+  const emptyTruth = {
+    schema_version: "1.0",
+    include_in_benchmark: false,
+    data_source: "self_capture",
+    robot: null,
+    distances: [],
+    gaps: [],
+    key_obstacle_ids: [],
+    layouts: {},
+    manual_baseline_minutes: null,
+    l4: null,
+    notes: "",
+  };
+
+  beforeEach(() => {
+    vi.mocked(global.fetch).mockReset();
+  });
+
+  it("canMutateJob=false: panel Benchmark chỉ đọc, không có nút Lưu hoạt động", async () => {
+    routeFetch({
+      "/scene": [reply({ scene: scene("rev-001", "CANDIDATE") })],
+      "/benchmark-truth": [reply({ version: 0, truth: emptyTruth, updated_at: null })],
+    });
+    render(<ObjectReviewView jobId="job-a" canMutateJob={false} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Benchmark" }));
+    expect((await screen.findByLabelText("Bề rộng (m)")) as HTMLInputElement).toBeDisabled();
+    expect((screen.getByRole("button", { name: "Lưu" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/chỉ có quyền xem/)).toBeInTheDocument();
+  });
+
+  it("canMutateJob=true: panel Benchmark sửa được và Lưu khi có thay đổi", async () => {
+    routeFetch({
+      "/scene": [reply({ scene: scene("rev-001", "CANDIDATE") })],
+      "/benchmark-truth": [reply({ version: 0, truth: emptyTruth, updated_at: null })],
+    });
+    render(<ObjectReviewView jobId="job-a" canMutateJob />);
+    fireEvent.click(await screen.findByRole("button", { name: "Benchmark" }));
+    const width = (await screen.findByLabelText("Bề rộng (m)")) as HTMLInputElement;
+    expect(width).toBeEnabled();
+    fireEvent.change(width, { target: { value: "0.8" } });
+    expect((screen.getByRole("button", { name: "Lưu" }) as HTMLButtonElement).disabled).toBe(false);
   });
 });

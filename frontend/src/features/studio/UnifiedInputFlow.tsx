@@ -23,7 +23,7 @@ import {
 } from "@/lib/api/inputAssemblies";
 import { uploadPreparedVideo } from "@/lib/api/studio";
 import { temporaryUploads } from "@/lib/api/temporaryUploads";
-import type { DataOrigin, SourceRightsAttestation } from "@/lib/contracts/studio";
+import type { DataOrigin, ParameterSpec, ParamValue, SourceRightsAttestation } from "@/lib/contracts/studio";
 import type {
   CandidateState,
   AssemblyUploadResponse,
@@ -46,6 +46,7 @@ import { errorMessage } from "@/lib/ui-error";
 import { formatBytes } from "@/lib/format";
 import { ProcessingSettings, scenarioLabel } from "@/features/studio/ProcessingSettings";
 import { useProcessingForm } from "@/features/studio/useProcessingForm";
+import { CaptureGuide } from "@/features/studio/CaptureGuide";
 import { FlowStepper } from "@/features/studio/FlowStepper";
 
 const INPUT_STEPS = [
@@ -245,6 +246,12 @@ const UNUSABLE_FORMATS = new Set(["unknown", "calibration_kalibr_camchain"]);
 function unusableStaged(staged: AssemblyUploadResponse | null): { unusable: number; total: number } {
   const files = staged?.staged_files ?? [];
   return { unusable: files.filter((item) => UNUSABLE_FORMATS.has(item.observed_format)).length, total: files.length };
+}
+
+/** Giá trị trong tóm tắt thông số: tham số kiểu choice hiện nhãn của lựa chọn, không hiện mã kỹ thuật như "shell". */
+function summaryValue(parameter: ParameterSpec, value: ParamValue | undefined): string {
+  if (parameter.kind === "choice") return parameter.choices?.find((choice) => choice.value === value)?.label ?? String(value ?? "");
+  return String(value ?? "");
 }
 
 function formatLabel(format: string): string {
@@ -1128,7 +1135,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
 
   return (
     <main className="mx-auto max-w-5xl px-4 pt-10 pb-20 sm:px-6">
-      <PageHeader title="Tạo scene từ video" description="Thả video, LiDAR, calibration, quỹ đạo, thời điểm frame, PLY/SOG hoặc ZIP vào cùng một khung. Hệ thống đọc nội dung rồi tự chọn cách xử lý phù hợp." />
+      <PageHeader action={<CaptureGuide />} title="Tạo scene từ video" description="Thả video, LiDAR, calibration, quỹ đạo, thời điểm frame, PLY/SOG hoặc ZIP vào cùng một khung. Hệ thống đọc nội dung rồi tự chọn cách xử lý phù hợp." />
       <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-ink-muted">Tải lên và phân tích chưa tạo job hay trừ quota.</p>
         <a className="text-sm font-medium text-ember-strong hover:underline" href="/new/try-demo">Xem scene mẫu đã xử lý</a>
@@ -1476,7 +1483,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
                   {processing.options?.parameters.map((parameter) => (
                     <div key={parameter.key}>
                       <dt className="text-ink-muted">{parameter.label}</dt>
-                      <dd>{String(processing.values?.[parameter.key] ?? "")} {parameter.unit}</dd>
+                      <dd>{summaryValue(parameter, processing.values?.[parameter.key])} {parameter.unit}</dd>
                     </div>
                   ))}
                 </dl>

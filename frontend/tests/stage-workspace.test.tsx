@@ -36,7 +36,7 @@ describe("workspace scene 5–8", () => {
     // Có jobId thì viewer mới lấy được quỹ đạo camera: mở đầu trong scene và có replay.
     expect(editor).toHaveAttribute("data-job", "job-a");
     expect(screen.getByRole("link", { name: "Về tiến trình editor" })).toHaveAttribute("href", "/scenes/job-a?tab=progress");
-    expect(screen.getByText(/chưa quy đổi mét/)).toBeInTheDocument();
+    expect(screen.queryByText(/chưa quy đổi mét/)).toBeNull();
   });
 
   it("5 lỗi preview không mount editor, có thể thử lại", async () => {
@@ -64,13 +64,14 @@ describe("workspace scene 5–8", () => {
     render(<StageSceneWorkspace jobId="job-a" stageId="ST-RGB-GEOMETRY" title="Kho A" />);
     expect(await screen.findByText("Viewer: ST-RGB-GEOMETRY")).toBeInTheDocument();
     expect(screen.getByText("Fallback: none")).toBeInTheDocument();
+    expect(screen.queryByText(/Scene hệ mét \+ collision/)).toBeNull();
     expect(screen.queryByRole("group", { name: "Công cụ hệ mét" })).toBeNull();
   });
 
-  it("8 tái sử dụng công cụ SceneObject hiện tại và nói rõ tạo revision mới", async () => {
+  it("8 tái sử dụng công cụ SceneObject, bỏ dòng hướng dẫn dư thừa", async () => {
     render(<StageSceneWorkspace jobId="job-a" stageId="ST-OBJECT-EXTRACT" title="Kho A" />);
     expect(await screen.findByText("Objects: job-a")).toBeInTheDocument();
-    expect(screen.getByText(/SceneObject hiện tại.*revision mới/)).toBeInTheDocument();
+    expect(screen.queryByText(/SceneObject hiện tại.*revision mới/)).toBeNull();
     expect(getPreview).not.toHaveBeenCalled();
   });
 });

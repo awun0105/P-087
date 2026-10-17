@@ -1,0 +1,4 @@
+# Prefix Python của ObjectGS: `micromamba create -p <đích>/python -c conda-forge python=3.8.19 wheel=0.45.1`
+# Lịch sử cài trên laptop: conda create --prefix .../python python=3.8.19 wheel=0.45.1
+python=3.8.19
+wheel=0.45.1

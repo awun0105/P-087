@@ -1,0 +1,5 @@
+{"stage": "fixture", "rows": 2000000, "sh_degree": 3, "seconds": 2.836}
+{"stage": "cold", "boxes": 16, "seconds": 5.0735, "rss_mib": 1142.8, "object_gaussian_count": 1200000, "shell_ok": true}
+{"stage": "warm", "boxes": 16, "run": 0, "seconds": 1.1659, "rss_mib": 1142.9}
+{"stage": "warm", "boxes": 16, "run": 1, "seconds": 1.1256, "rss_mib": 1142.9}
+{"stage": "summary", "boxes": 16, "cold_s": 5.0735, "warm_p50_s": 1.1458, "warm_p95_s": 1.1659, "rss_mib": 1143.7}

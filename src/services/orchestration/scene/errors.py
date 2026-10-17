@@ -35,3 +35,9 @@ class SceneRevisionConflictError(SceneError):
 
 class SceneEditRejectedError(SceneError):
     """Raised when a command is well-formed but cannot be applied to the revision."""
+
+
+class ObjectGeometryNotReadyError(SceneEditRejectedError):
+    """Scene đang chờ duyệt tách vật: thao tác cần hình học theo vật phải chờ bước tạo mesh."""
+
+    code = "OBJECT_GEOMETRY_NOT_READY"

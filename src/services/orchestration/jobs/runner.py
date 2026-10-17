@@ -25,7 +25,7 @@ import time
 import zipfile
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import Event
@@ -88,8 +88,10 @@ from src.services.orchestration.jobs.dispatch import (
     require_profile,
     resolve_job_processing,
 )
+from src.services.orchestration.jobs.lease import lease_lost
 from src.services.orchestration.jobs.log_context import configure_worker_logging, job_log_context
 from src.services.orchestration.jobs.models import PreparedInputReceipt, TransitionRequest
+from src.services.orchestration.jobs.profile import machine_runtime_checksum
 from src.services.orchestration.jobs.progress import (
     awaiting_anonymization_review,
     awaiting_finalize,
@@ -97,11 +99,17 @@ from src.services.orchestration.jobs.progress import (
     metric_confirmation_stage,
 )
 from src.services.orchestration.jobs.workspace import attempt_lease, cleanup_attempt_workspace, cleanup_finished_job
-from src.services.orchestration.processing import is_presets_file, load_presets
 from src.services.orchestration.processing.capability import latest as latest_capability
-from src.services.orchestration.processing.capability import measure_capacity
 from src.services.orchestration.processing.config import load_job_config
-from src.services.orchestration.processing.observed import load_usages
+from src.services.orchestration.processing.expected_duration import Estimate, deadline_seconds, expected_seconds
+from src.services.orchestration.processing.gpu_budget import (
+    GPU_TOOLS,
+    GpuBudgetExceededError,
+    running_message,
+    spent_gpu_hours,
+    start_message,
+)
+from src.services.orchestration.processing.observed import load_usages, pipeline_usages
 from src.services.orchestration.processing.telemetry import (
     Outcome,
     ResourceContext,
@@ -109,6 +117,7 @@ from src.services.orchestration.processing.telemetry import (
     ResourceUsage,
     sampled_section,
 )
+from src.services.orchestration.processing.usage_recording import build_sampler, record_usage
 from src.services.orchestration.projects.models import LidarPackageMember, ProjectRecord
 from src.services.orchestration.projects.registry import ProjectRegistry, get_project_registry
 from src.services.reconstruction import (
@@ -201,6 +210,69 @@ class _StageProgress:
                 )
 
 
+class ExpectedDurationError(TimeoutError):
+    """Công cụ vượt hạn tự tính theo số đo của chính máy này (T-043), không phải giới hạn cố định."""
+
+    code = "EXPECTED_DURATION_EXCEEDED"
+
+
+def _expected_limit(attempt: _Attempt, name: str, fixed_timeout: float) -> tuple[float, Estimate | None]:
+    """Hạn của một lượt công cụ: theo số đo khi có đủ; không thì giữ giới hạn cố định như trước."""
+    registry = attempt.registry
+    if registry.persistence is None:
+        return fixed_timeout, None
+    try:
+        capability = latest_capability(registry.persistence.database)
+        params = job_drivers(registry, attempt.settings, attempt.job)
+        if capability is None or params is None:
+            return fixed_timeout, None
+        estimate = expected_seconds(
+            name,
+            params,
+            capability.gpu_name,
+            attempt.job.runtime_manifest_checksum,
+            load_usages(registry.persistence.database),
+        )
+    except Exception as error:  # noqa: BLE001 - ước lượng chỉ là phụ; lỗi đọc số đo không được làm hỏng lượt chạy
+        logger.warning("Không tính được hạn theo số đo tool=%s cause=%s", name, type(error).__name__)
+        return fixed_timeout, None
+    if estimate is None:
+        return fixed_timeout, None
+    return deadline_seconds(estimate, fixed_timeout), estimate
+
+
+def _gpu_budget_at_start(attempt: _Attempt, name: str, estimate: Estimate | None) -> tuple[float, float] | None:
+    """(giờ GPU đã dùng, trần) khi job có trần và công cụ dùng GPU; chưa đủ ước thì chỉ kiểm phần đã dùng."""
+    # Settings giả trong test có thể thiếu trường mới: coi như không đặt trần (cùng mẫu với api/studio/deps.py).
+    cap = getattr(attempt.settings, "product_job_gpu_hours_max", None)
+    if cap is None or name not in GPU_TOOLS or attempt.registry.persistence is None:
+        return None
+    spent = spent_gpu_hours(load_usages(attempt.registry.persistence.database), attempt.job.job_id)
+    planned = estimate.seconds / 3600 if estimate is not None else 0.0
+    if spent + planned > cap:
+        raise GpuBudgetExceededError(start_message(spent, planned, cap, name))
+    return spent, cap
+
+
+def _write_expectation(path: Path, fixed_timeout: float, deadline: float, estimate: Estimate | None) -> None:
+    """Ghi hạn đã dùng và ước lượng vào workspace: lượt sau đọc lại được vì sao hạn là bao nhiêu."""
+    record = {
+        "fixed_limit_seconds": fixed_timeout,
+        "deadline_seconds": deadline,
+        "estimate": asdict(estimate) if estimate is not None else None,
+    }
+    path.write_text(json.dumps(record, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+
+
+def _expected_message(name: str, estimate: Estimate, elapsed: float) -> str:
+    minutes = max(1, round(elapsed / 60))
+    times = round(elapsed / estimate.seconds, 1)
+    return (
+        f"{name} chạy quá {minutes} phút, gấp {times} lần thời gian thường thấy trên {estimate.gpu_name} "
+        "cho scene cỡ này; đã dừng."
+    )
+
+
 def _run_tool(
     attempt: _Attempt,
     name: str,
@@ -211,6 +283,9 @@ def _run_tool(
     """Chạy một REC CLI trong process group riêng, hủy khi job revision đổi (cancel)."""
     stdout_path = attempt.workspace / f"{name}.stdout.json"
     sampler = _resource_sampler(attempt, name)
+    deadline_limit, estimate = _expected_limit(attempt, name, timeout)
+    _write_expectation(attempt.workspace / f"{name}.expected.json", timeout, deadline_limit, estimate)
+    gpu_budget = _gpu_budget_at_start(attempt, name, estimate)
     outcome: Outcome = "failed"
     exit_code: int | None = None
     try:
@@ -218,7 +293,8 @@ def _run_tool(
             process = subprocess.Popen(
                 command, stdout=output, stderr=errors, stdin=subprocess.DEVNULL, start_new_session=True
             )
-            deadline = time.monotonic() + timeout
+            started = time.monotonic()
+            deadline = started + deadline_limit
             last_heartbeat = 0.0
             pause = Event()
             try:
@@ -233,8 +309,16 @@ def _run_tool(
                     current = attempt.registry.get_job(attempt.job.job_id)
                     if current.job_manifest_checksum != attempt.job.job_manifest_checksum:
                         raise PreviewCancelledError("Job revision đã thay đổi trong khi worker chạy")
+                    if lease_lost(attempt.job.job_id):
+                        raise PreviewCancelledError("Mất lease job; máy khác đã nhận việc, dừng tiến trình con")
+                    if gpu_budget is not None:
+                        spent_now = gpu_budget[0] + (time.monotonic() - started) / 3600
+                        if spent_now > gpu_budget[1]:
+                            raise GpuBudgetExceededError(running_message(spent_now, gpu_budget[1], name))
                     if time.monotonic() >= deadline:
-                        raise TimeoutError(f"{name} worker quá thời gian cấu hình")
+                        if estimate is None:
+                            raise TimeoutError(f"{name} worker quá thời gian cấu hình")
+                        raise ExpectedDurationError(_expected_message(name, estimate, time.monotonic() - started))
                     _sample_resources(sampler, process.pid)
                     pause.wait(1)
             finally:
@@ -279,18 +363,11 @@ def _finish_resources(
 
 
 def _persist_usage(attempt: _Attempt, usage: ResourceUsage) -> None:
-    """Lưu bản ghi vào runtime DB: đĩa của máy GPU thuê mất khi trả máy, DB thì không."""
+    """Lưu bản ghi vào runtime DB khi job có persistence."""
     persistence = attempt.registry.persistence
     if persistence is None:
         return
-    try:
-        with persistence.database.transaction(write=True) as tx:
-            tx.execute(
-                "INSERT INTO r2s_resource_usage(usage_id,job_id,recorded_at,payload) VALUES (?,?,?,?)",
-                (uuid4().hex, usage.job_id, usage.completed_at.isoformat(), usage.model_dump_json()),
-            )
-    except Exception as error:  # noqa: BLE001 - ranh giới DB của số đo: không đổi kết quả job
-        logger.warning("Không lưu được resource telemetry vào DB cause=%s", type(error).__name__)
+    record_usage(persistence.database, usage)
 
 
 @contextmanager
@@ -324,24 +401,16 @@ def _resource_sampler(attempt: _Attempt, tool: str) -> ResourceSampler | None:
             attempt_id=attempt.workspace.name,
             tool=tool,
             config_checksum=attempt.job.config_checksum,
-            runtime_manifest_checksum=attempt.job.runtime_manifest_checksum,
+            runtime_manifest_checksum=machine_runtime_checksum(
+                registry.execution_profile, attempt.job.runtime_manifest_checksum
+            ),
             params=job_drivers(registry, settings, attempt.job),
             shared_gpu=shared,
-        )
-        ratio: float | None = None
-        path = settings.product_processing_config
-        if path is not None and is_presets_file(path):
-            ratio = load_presets(path)[0].resource_model.danger_ratio
-        return ResourceSampler(
-            context,
-            workspace=attempt.workspace,
-            worker_root=settings.product_worker_root,
-            exhaustion_ratio=ratio,
-            ram_total_gb=measure_capacity(settings.product_worker_root)["ram"],
         )
     except Exception as error:  # noqa: BLE001 - measurement boundary must not change job execution
         logger.warning("Không tạo được resource sampler cause=%s", type(error).__name__)
         return None
+    return build_sampler(settings, context, attempt.workspace)
 
 
 def _requeue_if_exhausted(attempt: _Attempt) -> JobManifest | None:
@@ -359,7 +428,9 @@ def _requeue_if_exhausted(attempt: _Attempt) -> JobManifest | None:
         if current.status != JobStatus.FAILED:
             return None
         earlier = sum(
-            1 for usage in load_usages(persistence.database) if usage.job_id == current.job_id and usage.exhausted
+            1
+            for usage in pipeline_usages(load_usages(persistence.database))
+            if usage.job_id == current.job_id and usage.exhausted
         )
         if earlier > 1:
             logger.warning("Job %s hết bộ nhớ cả khi chạy một mình; giữ FAILED", current.job_id)
@@ -392,6 +463,10 @@ def _record_runner_failure(attempt: _Attempt, error: BaseException) -> None:
             _record_benchmark(attempt)
         return
     details = {"exception_type": type(error).__name__}
+    if isinstance(error, ExpectedDurationError | GpuBudgetExceededError):
+        code, message = error.code, str(error)
+    else:
+        code, message = "PREVIEW_RUNNER_FAILED", "Worker dừng trước checkpoint hợp lệ; kiểm log attempt và runtime"
     try:
         attempt.job = attempt.registry.transition_job(
             attempt.job.job_id,
@@ -399,9 +474,9 @@ def _record_runner_failure(attempt: _Attempt, error: BaseException) -> None:
                 target_status=JobStatus.FAILED,
                 error=ExecutionError(
                     stage_id=current.current_stage,
-                    error_code="PREVIEW_RUNNER_FAILED",
-                    human_message="Worker dừng trước checkpoint hợp lệ; kiểm log attempt và runtime",
-                    retryable=classify_retryability("PREVIEW_RUNNER_FAILED", details),
+                    error_code=code,
+                    human_message=message,
+                    retryable=classify_retryability(code, details),
                     details=details,
                 ),
             ),
@@ -1576,7 +1651,7 @@ def run_reviewed_preview_job(job_id: str, *, expected_checksum: str | None = Non
     execution = registry.execution_profile
     if profile_path is None or execution is None:
         raise ValueError("Worker cần execution profile đã cấu hình")
-    if job.runtime_manifest_checksum != execution.runtime_manifest_checksum or job.seed != execution.seed:
+    if not execution.accepts_runtime(job.runtime_manifest_checksum) or job.seed != execution.seed:
         raise RuntimeStateConflictError("Job cần worker có execution profile tương ứng")
     profile = resolve_job_processing(
         job, execution, profile_path, registry.runtime_resolver, settings.product_target_frame_count

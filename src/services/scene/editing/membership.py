@@ -117,16 +117,79 @@ def validate_object_membership_command(scene: SceneIR, command: MembershipComman
         item = scene_objects[object_id]
         ownership = item.source_collision
         if (
-            item.state != SceneObjectState.CANDIDATE
+            (
+                item.state != SceneObjectState.CANDIDATE
+                and not (
+                    scene.environment.object_aware_collision_ref is not None
+                    and item.state == SceneObjectState.CONFIRMED
+                )
+            )
             or item.provenance.get("review") in {"IGNORED", "DELETED", "MERGED"}
             or item.origin != SceneObjectOrigin.RECONSTRUCTED
             or item.asset_ref is not None
             or ownership is None
             or ownership.source_geometry_ref != scene.environment.geometry_ref
             or ownership.extraction_revision != manifest.extraction_revision
-            or ownership.source_transform != item.transform
+            or (scene.environment.object_aware_collision_ref is None and ownership.source_transform != item.transform)
         ):
             raise ObjectMembershipValidationError(
                 f"object {object_id} is confirmed, moved, asset-backed, or lacks matching source ownership"
             )
     return manifest
+
+
+def select_source_gaussians(
+    positions: np.ndarray,
+    labels: np.ndarray,
+    manifest: ObjectMembershipArtifact,
+    command: ObjectMembershipReassignCommand,
+    *,
+    protected: np.ndarray | None = None,
+) -> tuple[np.ndarray, dict[str, object]]:
+    """Resolve an immutable source-row selection; current object poses are never inputs."""
+    if positions.shape != (manifest.gaussian_count, 3) or not np.isfinite(positions).all():
+        raise ObjectMembershipValidationError("source Gaussian positions do not match membership")
+    _int32_labels(labels, gaussian_count=manifest.gaussian_count)
+    if command.source_gaussian_indices is not None:
+        if command.source_visual_checksum != manifest.source_visual_ref.artifact_checksum:
+            raise ObjectMembershipValidationError("source Gaussian selection checksum mismatch")
+        if command.source_gaussian_indices[-1] >= len(labels):
+            raise ObjectMembershipValidationError("source Gaussian index is outside source PLY")
+        selected = np.zeros(len(labels), dtype=bool)
+        selected[command.source_gaussian_indices] = True
+    else:
+        assert command.region is not None
+        selected = np.all(
+            (positions >= np.asarray(command.region.min_xyz_m) - 1e-6)
+            & (positions <= np.asarray(command.region.max_xyz_m) + 1e-6),
+            axis=1,
+        )
+    source_labels = [
+        int(label) for label, owner in manifest.label_to_object_id.items() if owner == command.source_object_id
+    ]
+    owned = labels == -1 if command.source_object_id is None else np.isin(labels, source_labels)
+    wrong_owner = int(np.count_nonzero(selected & ~owned))
+    selected &= owned
+    protected_count = 0
+    if protected is not None and command.target_object_id is not None:
+        protected_count = int(np.count_nonzero(selected & protected))
+        selected &= ~protected
+    indices = np.flatnonzero(selected)
+    if len(indices) > 250_000:
+        raise ObjectMembershipValidationError("select at most 250000 source Gaussians per preview")
+    if not len(indices):
+        raise ObjectMembershipValidationError("selection contains no transferable source Gaussian rows")
+    return selected, {
+        "scene_revision": command.expected_scene_revision,
+        "membership_checksum": command.membership_checksum,
+        "source_visual_checksum": manifest.source_visual_ref.artifact_checksum,
+        "source_object_id": command.source_object_id,
+        "target_object_id": command.target_object_id,
+        "affected_object_ids": list(
+            dict.fromkeys(owner for owner in (command.source_object_id, command.target_object_id) if owner)
+        ),
+        "gaussian_count": len(indices),
+        "wrong_owner_count": wrong_owner,
+        "protected_count": protected_count,
+        "source_gaussian_indices": indices.tolist(),
+    }

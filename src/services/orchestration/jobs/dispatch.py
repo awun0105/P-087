@@ -79,7 +79,7 @@ def require_profile(job: JobManifest, profile: ExecutionProfile) -> None:
     """
     if job.status != JobStatus.QUEUED:
         raise RuntimeStateConflictError("Chỉ claim job QUEUED; không tự chạy lại attempt đang RUNNING")
-    if job.runtime_manifest_checksum != profile.runtime_manifest_checksum or job.seed != profile.seed:
+    if not profile.accepts_runtime(job.runtime_manifest_checksum) or job.seed != profile.seed:
         raise RuntimeStateConflictError("Job cần worker có execution profile tương ứng")
 
 

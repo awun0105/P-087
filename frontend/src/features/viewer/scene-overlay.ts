@@ -17,8 +17,10 @@ import {
   Mesh,
   MeshInstance as PcMeshInstance,
   PRIMITIVE_POINTS,
+  PRIMITIVE_TRIANGLES,
   Quat,
   RENDERSTYLE_WIREFRAME,
+  RENDERSTYLE_SOLID,
   RotateGizmo,
   StandardMaterial,
   TranslateGizmo,
@@ -30,7 +32,9 @@ import {
   type MeshInstance,
 } from "playcanvas";
 
-import { DISPLAY_EULER, type Vec3 } from "@/features/viewer/source-frame";
+import type { CollisionSurfacePlane } from "@/lib/api/studio";
+import { rotateVector, multiplyQuaternions } from "@/features/viewer/layers";
+import { DISPLAY_EULER, type DisplayCameraPose, type Vec3 } from "@/features/viewer/source-frame";
 import { themeColor } from "@/lib/theme";
 import type { ViewerAppLike } from "@/features/viewer/PlayCanvasScene";
 
@@ -101,6 +105,145 @@ export function rayTriangles(
   return nearest;
 }
 
+/** Cử chỉ kéo bắt bằng pointer trên canvas, xem `isolatePointerGesture`. */
+export interface PointerGesture {
+  /** Bấm chuột trái có trúng điều khiển này không; trúng thì sự kiện bị nuốt để camera không thấy. */
+  hit(e: PointerEvent): boolean;
+  press(e: PointerEvent): void;
+  /** Di chuyển lúc đang kéo; sự kiện đã bị nuốt. */
+  move(e: PointerEvent): void;
+  /** Di chuyển khi không kéo (hover); sự kiện không bị nuốt. */
+  hover?(e: PointerEvent): void;
+  release(e: PointerEvent): void;
+  /** Huỷ giữa chừng: kết thúc cử chỉ mà không xác nhận thay đổi. `last` là sự kiện gần nhất, hoặc null. */
+  abort?(last: PointerEvent | null): void;
+}
+
+export interface PointerIsolation {
+  /** Gỡ mọi listener và trả pointer capture. */
+  dispose(): void;
+  /** Kết thúc cử chỉ đang kéo ngay (gọi `abort`) và trả quyền điều khiển cho camera. */
+  cancel(): void;
+}
+
+/**
+ * Cô lập cử chỉ kéo khỏi Camera Controller của supersplat-viewer. Controller nghe pointer ở pha bubble trên canvas
+ * và đổi dịch chuyển chuột thành xoay/di chuyển camera. Listener ở pha CAPTURE chạy trước nên:
+ * - Bấm trúng điều khiển: `stopImmediatePropagation()` để camera không thấy cử chỉ; move/up của cử chỉ đó cũng bị nuốt.
+ * - Bấm ngoài điều khiển: sự kiện lan bình thường để xoay camera hoặc chọn vật.
+ */
+export function isolatePointerGesture(canvas: HTMLCanvasElement, gesture: PointerGesture): PointerIsolation {
+  let dragging = false;
+  let activePointerId: number | null = null;
+  let lastEvent: PointerEvent | null = null;
+
+  const releaseCapture = () => {
+    if (activePointerId === null) return;
+    try {
+      if (canvas.hasPointerCapture?.(activePointerId)) {
+        canvas.releasePointerCapture(activePointerId);
+      }
+    } catch {
+      // Không lỗi nếu browser đã giải phóng trước
+    }
+  };
+
+  const onCapturePointerDown = (e: PointerEvent) => {
+    if (e.target !== canvas) return;
+    if (typeof document !== "undefined" && document.pointerLockElement) return;
+    if (e.button !== 0) return;
+    if (!gesture.hit(e)) return;
+    dragging = true;
+    activePointerId = e.pointerId;
+    lastEvent = e;
+    e.stopImmediatePropagation();
+    e.preventDefault();
+    gesture.press(e);
+  };
+
+  const onCapturePointerMove = (e: PointerEvent) => {
+    if (dragging && e.pointerId === activePointerId) {
+      lastEvent = e;
+      e.stopImmediatePropagation();
+      e.preventDefault();
+      gesture.move(e);
+    } else if (!dragging) {
+      gesture.hover?.(e);
+    }
+  };
+
+  const onCapturePointerUp = (e: PointerEvent) => {
+    if (dragging && (activePointerId === null || e.pointerId === activePointerId)) {
+      dragging = false;
+      activePointerId = null;
+      e.stopImmediatePropagation();
+      e.preventDefault();
+      gesture.release(e);
+    }
+  };
+
+  const onLostPointerCapture = (e: PointerEvent) => {
+    if (dragging && (activePointerId === null || e.pointerId === activePointerId)) {
+      dragging = false;
+      activePointerId = null;
+      gesture.release(e);
+    }
+  };
+
+  canvas.addEventListener("pointerdown", onCapturePointerDown, { capture: true });
+  canvas.addEventListener("pointermove", onCapturePointerMove, { capture: true });
+  canvas.addEventListener("pointerup", onCapturePointerUp, { capture: true });
+  canvas.addEventListener("pointercancel", onCapturePointerUp, { capture: true });
+  canvas.addEventListener("lostpointercapture", onLostPointerCapture);
+
+  return {
+    dispose() {
+      releaseCapture();
+      dragging = false;
+      activePointerId = null;
+      canvas.removeEventListener("pointerdown", onCapturePointerDown, { capture: true });
+      canvas.removeEventListener("pointermove", onCapturePointerMove, { capture: true });
+      canvas.removeEventListener("pointerup", onCapturePointerUp, { capture: true });
+      canvas.removeEventListener("pointercancel", onCapturePointerUp, { capture: true });
+      canvas.removeEventListener("lostpointercapture", onLostPointerCapture);
+    },
+    cancel() {
+      if (!dragging) return;
+      releaseCapture();
+      dragging = false;
+      activePointerId = null;
+      gesture.abort?.(lastEvent);
+    },
+  };
+}
+
+/**
+ * Cô lập một Gizmo PlayCanvas khỏi Camera Controller. Gizmo tự nghe `pointerdown/move/up` ở pha bubble, nên gỡ các
+ * listener đó rồi nối lại qua `isolatePointerGesture`: chỉ khi bấm trúng trục mới chuyển cử chỉ cho gizmo.
+ */
+export function isolateGizmoPointer(gizmo: TranslateGizmo | RotateGizmo, canvas: HTMLCanvasElement): PointerIsolation {
+  type GizmoInternal = {
+    _onPointerDown: (e: PointerEvent) => void;
+    _onPointerMove: (e: PointerEvent) => void;
+    _onPointerUp: (e: PointerEvent) => void;
+    _getSelection: (x: number, y: number) => unknown[];
+  };
+  const internal = gizmo as unknown as GizmoInternal;
+  canvas.removeEventListener("pointerdown", internal._onPointerDown);
+  canvas.removeEventListener("pointermove", internal._onPointerMove);
+  canvas.removeEventListener("pointerup", internal._onPointerUp);
+  return isolatePointerGesture(canvas, {
+    hit: (e) => gizmo.enabled && (internal._getSelection?.(e.offsetX, e.offsetY)?.length ?? 0) > 0,
+    press: (e) => internal._onPointerDown(e),
+    move: (e) => internal._onPointerMove(e),
+    hover: (e) => internal._onPointerMove(e),
+    release: (e) => internal._onPointerUp(e),
+    abort: (last) => {
+      if (last) internal._onPointerUp(last);
+    },
+  });
+}
+
 export interface OverlayBox {
   id: string;
   center: Vec3;
@@ -110,10 +253,11 @@ export interface OverlayBox {
   color: string;
   emphasized: boolean;
   /**
-   * GLB hình dáng của vật trong khung cục bộ của vật (collider phân rã lồi). Có thì vật được vẽ và
-   * bắt chọn theo đúng hình này; hộp chỉ hiện trong lúc GLB đang tải hoặc khi tải lỗi.
+   * GLB trong collider-local frame. Vẽ và bắt chọn khung theo hình vật,
+   * đồng thời cung cấp hình học cho lớp collider độc lập.
    */
   shapeUrl?: string | null;
+  colliderLocalTransform?: { translation_xyz: Vec3; rotation_quaternion_xyzw: [number, number, number, number] } | null;
 }
 
 /** Lưới của một hình dáng vật trong khung cục bộ của vật, dùng cho bắt chọn. */
@@ -130,6 +274,7 @@ interface ShapeRecord {
 
 /** Một vật đang vẽ: `root` mang transform của vật; `box` là hộp lùi (đã scale) khi chưa có hình. */
 interface Outline {
+  localTransform?: OverlayBox["colliderLocalTransform"];
   id: string;
   root: Entity;
   box: Entity | null;
@@ -143,10 +288,8 @@ function paint(entity: Entity, fill: StandardMaterial, wire: boolean): void {
   for (const render of entity.findComponents("render") as unknown as RenderLike[]) {
     for (const instance of render.meshInstances) {
       instance.material = fill;
-      if (wire) {
-        instance.mesh.generateWireframe();
-        instance.renderStyle = RENDERSTYLE_WIREFRAME;
-      }
+      if (wire && !instance.mesh.primitive[RENDERSTYLE_WIREFRAME]) instance.mesh.generateWireframe();
+      instance.renderStyle = wire ? RENDERSTYLE_WIREFRAME : RENDERSTYLE_SOLID;
     }
   }
 }
@@ -155,8 +298,8 @@ function paint(entity: Entity, fill: StandardMaterial, wire: boolean): void {
  * Gộp mọi mesh của GLB thành một lưới trong khung gốc của GLB (đã áp transform của node), để tia
  * chọn vật thử trên đúng hình đang vẽ. Null khi GLB không có tam giác.
  */
-function shapeGeometry(container: ContainerResource): ShapeGeometry | null {
-  const entity = container.instantiateRenderEntity();
+function shapeGeometry(container: ContainerResource, rendered?: Entity): ShapeGeometry | null {
+  const entity = rendered ?? container.instantiateRenderEntity();
   const positions: number[] = [];
   const indices: number[] = [];
   const point = new PcVec3();
@@ -175,7 +318,7 @@ function shapeGeometry(container: ContainerResource): ShapeGeometry | null {
       for (const index of order) indices.push(index + base);
     }
   }
-  entity.destroy();
+  if (!rendered) entity.destroy();
   return indices.length >= 3 ? { positions: new Float32Array(positions), indices: new Uint32Array(indices) } : null;
 }
 
@@ -208,6 +351,7 @@ export interface OverlayObject {
 export type GizmoMode = "translate" | "rotate";
 
 export interface GizmoHandlers {
+  onMove?(id: string, position: Vec3, rotation_xyzw: [number, number, number, number]): void;
   onStart(): void;
   /** Transform cục bộ của vật (hệ canonical Z-up, mét) khi người dùng thả gizmo. */
   onEnd(id: string, position: Vec3, rotation_xyzw: [number, number, number, number]): void;
@@ -218,8 +362,20 @@ export class SceneOverlay {
   private readonly root: Entity;
   private readonly boxRoot: Entity;
   private readonly materials: StandardMaterial[] = [];
+  private readonly surfaceRoot: Entity;
+  private readonly surfaceMeshes: Mesh[] = [];
+  private readonly surfaceMaterials: StandardMaterial[] = [];
+  private surfaceInputs: readonly CollisionSurfacePlane[] | null = null;
+  private readonly colliderRoot: Entity;
+  private readonly colliderMaterials: StandardMaterial[] = [];
+  private colliderOutlines: Outline[] = [];
+  private colliderWire = false;
+  private colliderInputs: readonly OverlayBox[] | null = null;
+  private collisionGeneration = 0;
   private collisionAsset: Asset | null = null;
   private collisionEntity: Entity | null = null;
+  private collisionGeometry: ShapeGeometry | null = null;
+  private collisionGeometryUrl: string | null = null;
   private collisionMaterial: StandardMaterial | null = null;
   private outlines: Outline[] = [];
   private readonly shapes = new Map<string, ShapeRecord>();
@@ -231,6 +387,7 @@ export class SceneOverlay {
   private gizmoLayer: Layer | null = null;
   private gizmo: TranslateGizmo | RotateGizmo | null = null;
   private gizmoCleanup: (() => void) | null = null;
+  private viewerGotoPose: ((pose: DisplayCameraPose) => boolean) | null = null;
   private destroyed = false;
 
   /**
@@ -248,6 +405,10 @@ export class SceneOverlay {
     this.root.setLocalEulerAngles(x, y, z);
     this.boxRoot = new Entity("r2s-boxes", this.app);
     this.root.addChild(this.boxRoot);
+    this.colliderRoot = new Entity("r2s-colliders", this.app);
+    this.root.addChild(this.colliderRoot);
+    this.surfaceRoot = new Entity("r2s-surface-marks", this.app);
+    this.root.addChild(this.surfaceRoot);
     this.objectRoot = new Entity("r2s-objects", this.app);
     this.root.addChild(this.objectRoot);
     // Splat không cần đèn; đèn này chỉ để mesh collision có khối (bóng theo mặt) khi nhìn.
@@ -260,11 +421,13 @@ export class SceneOverlay {
 
   /** Nạp collision GLB (một lần); `opacity` < 1 để vẫn thấy 3DGS phía sau. */
   loadCollision(url: string, opacity: number): Promise<number> {
+    this.releaseCollision();
+    const generation = this.collisionGeneration;
     return new Promise((resolve, reject) => {
-      const asset = new Asset(`r2s-collision-${url}`, "container", { url });
+      const asset = new Asset(`r2s-collision-${url}`, "container", { url, filename: "collision.glb" });
       this.collisionAsset = asset;
       asset.once("load", () => {
-        if (this.destroyed) return resolve(0);
+        if (this.destroyed || generation !== this.collisionGeneration) return resolve(0);
         const entity = (asset.resource as ContainerResource).instantiateRenderEntity();
         this.collisionMaterial = material(themeColor("--studio-geometry", "#2f7ea8"), opacity, true);
         let triangles = 0;
@@ -274,15 +437,35 @@ export class SceneOverlay {
             triangles += (instance.mesh.primitive[0]?.count ?? 0) / 3;
           }
         }
+        this.collisionGeometry = shapeGeometry(asset.resource as ContainerResource, entity);
+        this.collisionGeometryUrl = url;
         this.collisionEntity = entity;
         this.root.addChild(entity);
         this.redraw();
         resolve(triangles);
       });
-      asset.once("error", (error: unknown) => reject(new Error(String(error))));
+      asset.once("error", (error: unknown) => {
+        if (generation === this.collisionGeneration) this.releaseCollision();
+        reject(new Error(String(error)));
+      });
       this.app.assets.add(asset);
       this.app.assets.load(asset);
     });
+  }
+
+  private releaseCollision(): void {
+    this.collisionGeneration += 1;
+    this.collisionEntity?.destroy();
+    this.collisionEntity = null;
+    this.collisionGeometry = null;
+    this.collisionGeometryUrl = null;
+    this.collisionMaterial?.destroy();
+    this.collisionMaterial = null;
+    if (this.collisionAsset) {
+      this.app.assets?.remove(this.collisionAsset);
+      this.collisionAsset.unload();
+      this.collisionAsset = null;
+    }
   }
 
   /**
@@ -341,14 +524,15 @@ export class SceneOverlay {
     return result.length ? new Float32Array(result) : null;
   }
 
-  setCollision(visible: boolean, opacity: number): void {
+  setCollision(visible: boolean, opacity: number, wire = false): void {
     if (!this.alive) return;
     if (this.collisionEntity) this.collisionEntity.enabled = visible;
     const current = this.collisionMaterial;
     if (!current) return this.redraw();
-    current.opacity = opacity;
-    current.blendType = opacity < 1 ? BLEND_NORMAL : BLEND_NONE;
-    current.depthWrite = opacity >= 1;
+    if (this.collisionEntity) paint(this.collisionEntity, current, wire);
+    current.opacity = wire ? 1 : opacity;
+    current.blendType = current.opacity < 1 ? BLEND_NORMAL : BLEND_NONE;
+    current.depthWrite = current.opacity >= 1;
     current.update();
     this.redraw();
   }
@@ -362,8 +546,7 @@ export class SceneOverlay {
   }
 
   /**
-   * Vẽ lại khung của mọi vật; vật được nhấn mạnh đậm hơn và có thêm nét viền. Vật có `shapeUrl` hiện
-   * theo đúng hình dáng (collider) của nó, hộp chỉ là hình lùi trong lúc chờ tải.
+   * Vẽ khung theo hình GLB của vật; dùng hộp khi không có GLB hoặc đang chờ tải.
    */
   setBoxes(boxes: readonly OverlayBox[]): void {
     if (!this.alive) return;
@@ -376,10 +559,16 @@ export class SceneOverlay {
       root.setLocalPosition(...box.center);
       root.setLocalRotation(new Quat(...box.rotation_xyzw));
       this.boxRoot.addChild(root);
-      const outline: Outline = { id: box.id, root, box: null, shape: null };
+      const outline: Outline = { localTransform: box.colliderLocalTransform, id: box.id, root, box: null, shape: null };
+      const current = this.objects.get(box.id)?.entity;
+      if (current) {
+        const position = current.getLocalPosition();
+        const rotation = current.getLocalRotation();
+        this.setOutlinePose(outline, [position.x, position.y, position.z], [rotation.x, rotation.y, rotation.z, rotation.w]);
+      }
       const record = box.shapeUrl ? this.shape(box.shapeUrl) : null;
       if (record?.geometry) {
-        this.showShape(outline, record, fill, box.emphasized);
+        this.showSelectionShape(outline, record, fill, box.emphasized);
       } else {
         const fallback = new Entity(`r2s-box-fill-${box.id}`, this.app);
         fallback.addComponent("render", { type: "box", material: fill });
@@ -392,10 +581,98 @@ export class SceneOverlay {
             if (!this.alive || !this.outlines.includes(outline) || !record.geometry) return;
             fallback.destroy();
             outline.box = null;
-            this.showShape(outline, record, fill, box.emphasized);
+            this.showSelectionShape(outline, record, fill, box.emphasized);
             this.redraw();
           });
         }
+      }
+      return outline;
+    });
+    this.redraw();
+  }
+
+  /** Show the selected source triangle: green floor, purple wall, fixed in canonical world. */
+  setSurfaceMarkers(planes: readonly CollisionSurfacePlane[], visible: boolean): void {
+    if (!this.alive) return;
+    this.surfaceRoot.enabled = visible;
+    if (planes === this.surfaceInputs) { this.redraw(); return; }
+    this.surfaceInputs = planes;
+    this.releaseSurfaceMarkers();
+    for (const plane of planes) {
+      const mesh = new Mesh(this.app.graphicsDevice);
+      this.surfaceMeshes.push(mesh);
+      mesh.setPositions(plane.points.flat());
+      mesh.setIndices([0,1,2]);
+      mesh.update(PRIMITIVE_TRIANGLES);
+      const fill = material(plane.kind === "floor" ? themeColor("--studio-marker-floor", "#66e666") : themeColor("--studio-marker-check", "#e666e6"), 1, false);
+      this.surfaceMaterials.push(fill);
+      fill.depthTest = false;
+      fill.depthWrite = false;
+      fill.update();
+      const entity = new Entity(`r2s-surface-${plane.id}`, this.app);
+      entity.addComponent("render", {meshInstances:[new PcMeshInstance(mesh,fill)],castShadows:false});
+      paint(entity,fill,true);
+      this.surfaceRoot.addChild(entity);
+    }
+    this.redraw();
+  }
+
+  private releaseSurfaceMarkers(): void {
+    for (const child of [...this.surfaceRoot.children]) child.destroy();
+    for (const mesh of this.surfaceMeshes.splice(0)) mesh.destroy();
+    for (const fill of this.surfaceMaterials.splice(0)) fill.destroy();
+  }
+
+  /** Active physics colliders are independent of selection frames and viewport Gaussian visibility. */
+  setColliders(boxes: readonly OverlayBox[], visible: boolean, wire = false): void {
+    if (!this.alive) return;
+    this.colliderWire = wire;
+    this.colliderRoot.enabled = visible;
+    // Display toggles must preserve the pose currently supplied by the Walk simulation.
+    if (this.colliderInputs === boxes) {
+      this.colliderOutlines.forEach((outline, index) => {
+        const fill = this.colliderMaterials[index];
+        fill.opacity = wire ? 1 : 0.3;
+        fill.blendType = wire ? BLEND_NONE : BLEND_NORMAL;
+        fill.depthWrite = wire;
+        fill.update();
+        paint(outline.root, fill, wire);
+      });
+      this.redraw();
+      return;
+    }
+    this.colliderInputs = boxes;
+    for (const child of [...this.colliderRoot.children]) child.destroy();
+    for (const fill of this.colliderMaterials.splice(0)) fill.destroy();
+    this.colliderOutlines = boxes.map((box) => {
+      const fill = material(themeColor("--studio-geometry", "#2f7ea8"), wire ? 1 : 0.3, false);
+      this.colliderMaterials.push(fill);
+      const root = new Entity(`r2s-collider-${box.id}`, this.app);
+      root.setLocalPosition(...box.center);
+      root.setLocalRotation(new Quat(...box.rotation_xyzw));
+      this.colliderRoot.addChild(root);
+      const outline: Outline = { localTransform: box.colliderLocalTransform, id: box.id, root, box: null, shape: null };
+      const current = this.objects.get(box.id)?.entity;
+      if (current) {
+        const position = current.getLocalPosition();
+        const rotation = current.getLocalRotation();
+        this.setOutlinePose(outline, [position.x, position.y, position.z], [rotation.x, rotation.y, rotation.z, rotation.w]);
+      }
+      if (box.shapeUrl) {
+        const record = this.shape(box.shapeUrl);
+        if (record.geometry) this.showShape(outline, record, fill);
+        else if (!record.failed) record.asset.once("load", () => {
+          if (!this.alive || !this.colliderOutlines.includes(outline) || !record.geometry) return;
+          this.showShape(outline, record, fill);
+          this.redraw();
+        });
+      } else {
+        const entity = new Entity(`r2s-collider-fill-${box.id}`, this.app);
+        entity.addComponent("render", { type: "box", material: fill });
+        entity.setLocalScale(...box.dimensions);
+        paint(entity, fill, wire);
+        root.addChild(entity);
+        outline.box = entity;
       }
       return outline;
     });
@@ -415,14 +692,14 @@ export class SceneOverlay {
       record.failed = record.geometry === null;
     });
     asset.once("error", () => {
-      record.failed = true; // Giữ hộp lùi; không làm hỏng lớp phủ vì một collider tải lỗi.
+      record.failed = true; // Selection keeps its box; do not render a substitute for failed collider geometry.
     });
     this.app.assets.add(asset);
     this.app.assets.load(asset);
     return record;
   }
 
-  private showShape(outline: Outline, record: ShapeRecord, fill: StandardMaterial, emphasized: boolean): void {
+  private showSelectionShape(outline: Outline, record: ShapeRecord, fill: StandardMaterial, emphasized: boolean): void {
     const container = record.asset.resource as ContainerResource;
     const solid = container.instantiateRenderEntity();
     paint(solid, fill, false);
@@ -434,6 +711,14 @@ export class SceneOverlay {
       paint(wire, edge, true);
       outline.root.addChild(wire);
     }
+    outline.shape = record.geometry;
+  }
+
+  private showShape(outline: Outline, record: ShapeRecord, fill: StandardMaterial): void {
+    const container = record.asset.resource as ContainerResource;
+    const solid = container.instantiateRenderEntity();
+    paint(solid, fill, this.colliderWire);
+    outline.root.addChild(solid);
     outline.shape = record.geometry;
   }
 
@@ -474,8 +759,7 @@ export class SceneOverlay {
           this.app.assets.load(asset);
         }
       }
-      record.entity.setLocalPosition(...item.position);
-      record.entity.setLocalRotation(new Quat(...item.rotation_xyzw));
+      this.setObjectPose(item.id, item.position, item.rotation_xyzw);
       record.entity.enabled = item.visible;
     }
     this.redraw();
@@ -484,15 +768,21 @@ export class SceneOverlay {
   /** Đặt pose (hệ canonical, như SceneIR) cho một vật đang vẽ — dùng khi vật lý phía trình duyệt dời vật. */
   setObjectPose(id: string, position: Vec3, rotation_xyzw: [number, number, number, number]): void {
     const record = this.alive ? this.objects.get(id) : undefined;
-    if (!record) return;
-    record.entity.setLocalPosition(...position);
-    record.entity.setLocalRotation(new Quat(...rotation_xyzw));
-    const outline = this.outlines.find((item) => item.id === id);
-    if (outline) {
-      outline.root.setLocalPosition(...position);
-      outline.root.setLocalRotation(new Quat(...rotation_xyzw));
+    if (record) {
+      record.entity.setLocalPosition(...position);
+      record.entity.setLocalRotation(new Quat(...rotation_xyzw));
+    }
+    for (const outline of [...this.outlines, ...this.colliderOutlines]) {
+      if (outline.id === id) this.setOutlinePose(outline, position, rotation_xyzw);
     }
     this.redraw();
+  }
+
+  private setOutlinePose(outline: Outline, position: Vec3, rotation: [number, number, number, number]): void {
+    const local = outline.localTransform;
+    const offset = local ? rotateVector(rotation, local.translation_xyz) : [0, 0, 0];
+    outline.root.setLocalPosition(position[0] + offset[0], position[1] + offset[1], position[2] + offset[2]);
+    outline.root.setLocalRotation(new Quat(...(local ? multiplyQuaternions(rotation, local.rotation_quaternion_xyzw) : rotation)));
   }
 
   private gizmoTarget: string | null = null;
@@ -510,11 +800,15 @@ export class SceneOverlay {
     gizmo.on("transform:start", () => handlers.onStart());
     gizmo.on("transform:move", () => {
       // Khung của vật đi theo trong lúc kéo để người dùng thấy collider sẽ nằm ở đâu.
-      for (const outline of this.outlines) {
+      for (const outline of [...this.outlines, ...this.colliderOutlines]) {
         if (outline.id !== id) continue;
-        outline.root.setLocalPosition(target.getLocalPosition());
-        outline.root.setLocalRotation(target.getLocalRotation());
+        const p = target.getLocalPosition();
+        const q = target.getLocalRotation();
+        this.setOutlinePose(outline, [p.x, p.y, p.z], [q.x, q.y, q.z, q.w]);
       }
+      const p = target.getLocalPosition();
+      const q = target.getLocalRotation();
+      handlers.onMove?.(id, [p.x, p.y, p.z], [q.x, q.y, q.z, q.w]);
       this.redraw();
     });
     gizmo.on("transform:end", () => {
@@ -526,100 +820,57 @@ export class SceneOverlay {
     this.gizmo = gizmo;
     this.gizmoTarget = id;
 
-    // Cô lập cử chỉ kéo của Gizmo khỏi Camera Controller của supersplat-viewer:
-    // Mặc định PlayCanvas Gizmo nghe `pointerdown` ở pha bubbling trên canvas. Cùng lúc đó,
-    // KeyboardMouseSource của supersplat cũng nhận sự kiện và ghi nhận dịch chuyển chuột làm xoay/di
-    // chuyển camera.
-    // Bằng cách gỡ listener bubble mặc định và chặn ở pha CAPTURE:
-    // - Khi người dùng bấm trúng trục/mặt điều khiển của Gizmo: gọi `stopImmediatePropagation()` để
-    //   Camera Controller hoàn toàn không thấy sự kiện bắt đầu kéo, chỉ Gizmo xử lý biến đổi vật.
-    // - Khi bấm ngoài Gizmo: sự kiện lan truyền bình thường để xoay camera hoặc chọn vật.
     const canvas = (gizmo as unknown as { _device?: { canvas?: HTMLCanvasElement } })._device?.canvas
       ?? (this.app as unknown as { graphicsDevice?: { canvas?: HTMLCanvasElement } }).graphicsDevice?.canvas;
 
     if (canvas) {
-      type GizmoInternal = {
-        _onPointerDown: (e: PointerEvent) => void;
-        _onPointerMove: (e: PointerEvent) => void;
-        _onPointerUp: (e: PointerEvent) => void;
-        _getSelection: (x: number, y: number) => unknown[];
-      };
-      const gizmoInternal = gizmo as unknown as GizmoInternal;
-      canvas.removeEventListener("pointerdown", gizmoInternal._onPointerDown);
-      canvas.removeEventListener("pointermove", gizmoInternal._onPointerMove);
-      canvas.removeEventListener("pointerup", gizmoInternal._onPointerUp);
-
-      let dragging = false;
-      let activePointerId: number | null = null;
-
-      const onCapturePointerDown = (e: PointerEvent) => {
-        if (e.target !== canvas || !gizmo.enabled) return;
-        if (typeof document !== "undefined" && document.pointerLockElement) return;
-        if (e.button !== 0) return;
-
-        const selection = gizmoInternal._getSelection?.(e.offsetX, e.offsetY);
-        if (selection && selection.length > 0) {
-          dragging = true;
-          activePointerId = e.pointerId;
-          e.stopImmediatePropagation();
-          e.preventDefault();
-          gizmoInternal._onPointerDown(e);
-        }
-      };
-
-      const onCapturePointerMove = (e: PointerEvent) => {
-        if (dragging && e.pointerId === activePointerId) {
-          e.stopImmediatePropagation();
-          e.preventDefault();
-          gizmoInternal._onPointerMove(e);
-        } else if (!dragging) {
-          gizmoInternal._onPointerMove(e);
-        }
-      };
-
-      const onCapturePointerUp = (e: PointerEvent) => {
-        if (dragging && (activePointerId === null || e.pointerId === activePointerId)) {
-          dragging = false;
-          activePointerId = null;
-          e.stopImmediatePropagation();
-          e.preventDefault();
-          gizmoInternal._onPointerUp(e);
-        }
-      };
-
-      const onLostPointerCapture = (e: PointerEvent) => {
-        if (dragging && (activePointerId === null || e.pointerId === activePointerId)) {
-          dragging = false;
-          activePointerId = null;
-          gizmoInternal._onPointerUp(e);
-        }
-      };
-
-      canvas.addEventListener("pointerdown", onCapturePointerDown, { capture: true });
-      canvas.addEventListener("pointermove", onCapturePointerMove, { capture: true });
-      canvas.addEventListener("pointerup", onCapturePointerUp, { capture: true });
-      canvas.addEventListener("pointercancel", onCapturePointerUp, { capture: true });
-      canvas.addEventListener("lostpointercapture", onLostPointerCapture);
-
-      this.gizmoCleanup = () => {
-        if (activePointerId !== null) {
-          try {
-            if (canvas.hasPointerCapture?.(activePointerId)) {
-              canvas.releasePointerCapture(activePointerId);
-            }
-          } catch {
-            // Không lỗi nếu browser đã giải phóng trước
-          }
-        }
-        canvas.removeEventListener("pointerdown", onCapturePointerDown, { capture: true });
-        canvas.removeEventListener("pointermove", onCapturePointerMove, { capture: true });
-        canvas.removeEventListener("pointerup", onCapturePointerUp, { capture: true });
-        canvas.removeEventListener("pointercancel", onCapturePointerUp, { capture: true });
-        canvas.removeEventListener("lostpointercapture", onLostPointerCapture);
-      };
+      const isolation = isolateGizmoPointer(gizmo, canvas);
+      this.gizmoCleanup = () => isolation.dispose();
     }
 
     this.redraw();
+  }
+
+  /** App PlayCanvas còn dùng được: chưa `destroy()` và PlayCanvas chưa huỷ app. Lớp phủ con kiểm trước khi chạm scene. */
+  isAlive(): boolean {
+    return this.alive;
+  }
+
+  /** App PlayCanvas của viewer; chỉ gọi khi `isAlive()`. */
+  application(): AppBase {
+    return this.app;
+  }
+
+  /** Camera đang render của viewer, hoặc null khi app đã huỷ. */
+  activeCamera(): CameraComponent | null {
+    if (!this.alive) return null;
+    return (this.app.root.findComponents("camera")[0] as CameraComponent | undefined) ?? null;
+  }
+
+  /** Entity gốc của một vật đang vẽ (đã mang pose hiện tại của vật); null nếu chưa có vật này. */
+  objectEntity(id: string): Entity | null {
+    return (this.alive ? this.objects.get(id)?.entity : undefined) ?? null;
+  }
+
+  /** Layer gizmo dùng chung, tạo khi cần. Mỗi gizmo thêm layer của nó vào camera nên không tạo layer riêng từng lớp. */
+  sharedGizmoLayer(): Layer {
+    this.gizmoLayer ??= Gizmo.createLayer(this.app);
+    return this.gizmoLayer;
+  }
+
+  /** Yêu cầu render ở frame kế tiếp (viewer render theo yêu cầu). */
+  requestFrame(): void {
+    this.redraw();
+  }
+
+  /** Nối lệnh chuyển camera của viewer (`ViewerControls.gotoPose`); `null` để gỡ. */
+  bindViewerGotoPose(goto: ((pose: DisplayCameraPose) => boolean) | null): void {
+    this.viewerGotoPose = goto;
+  }
+
+  /** Đưa camera viewer tới một pose (hệ hiển thị). False khi chưa nối hoặc viewer chưa sẵn sàng. */
+  gotoPose(pose: DisplayCameraPose): boolean {
+    return this.alive && (this.viewerGotoPose?.(pose) ?? false);
   }
 
   detachGizmo(): void {
@@ -688,6 +939,29 @@ export class SceneOverlay {
    * `CameraComponent.screenToWorld`). Chỉ xét khung đang vẽ; vật đã có hình dáng thì thử theo lưới
    * của nó (bấm vào khoảng trống trong hộp bao không chọn vật), còn lại thử theo hộp.
    */
+  /** Pick a rendered environment triangle in canonical coordinates for a user-authored plane. */
+  pickCollisionTriangle(x: number, y: number, expectedUrl?: string): [Vec3, Vec3, Vec3] | null {
+    if (!this.alive || !this.collisionGeometry || (expectedUrl && this.collisionGeometryUrl !== expectedUrl)) return null;
+    const camera = this.app.root.findComponents("camera")[0] as CameraComponent | undefined;
+    if (!camera) return null;
+    const worldOrigin = camera.entity.getPosition().clone();
+    const worldDirection = camera.screenToWorld(x, y, camera.farClip, new PcVec3()).sub(worldOrigin).normalize();
+    const inverse = this.root.getWorldTransform().clone().invert();
+    const origin = inverse.transformPoint(worldOrigin, new PcVec3());
+    const direction = inverse.transformVector(worldDirection, new PcVec3());
+    const {positions,indices} = this.collisionGeometry;
+    let best = -1, nearest = Infinity;
+    for (let i = 0; i < indices.length; i += 3) {
+      const hit = rayTriangles([origin.x,origin.y,origin.z], [direction.x,direction.y,direction.z], positions, indices.subarray(i,i+3));
+      if (hit !== null && hit < nearest) {nearest=hit;best=i;}
+    }
+    if (best < 0) return null;
+    return [0,1,2].map(corner => {
+      const index = indices[best+corner]*3;
+      return [positions[index],positions[index+1],positions[index+2]] as Vec3;
+    }) as [Vec3,Vec3,Vec3];
+  }
+
   pick(x: number, y: number): string | null {
     if (!this.alive) return null;
     const camera = this.app.root.findComponents("camera")[0] as CameraComponent | undefined;
@@ -722,7 +996,11 @@ export class SceneOverlay {
     for (const record of this.objects.values()) this.releaseObject(record);
     this.objects.clear();
     this.outlines = [];
+    this.colliderOutlines = [];
+    for (const fill of this.colliderMaterials.splice(0)) fill.destroy();
     this.releasePoints();
+    this.releaseSurfaceMarkers();
+    this.releaseCollision();
     this.root.destroy();
     for (const record of this.shapes.values()) {
       this.app.assets?.remove(record.asset);
@@ -730,11 +1008,6 @@ export class SceneOverlay {
     }
     this.shapes.clear();
     this.releaseMaterials();
-    this.collisionMaterial?.destroy();
-    if (this.collisionAsset) {
-      this.app.assets?.remove(this.collisionAsset);
-      this.collisionAsset.unload();
-    }
   }
 
   /**

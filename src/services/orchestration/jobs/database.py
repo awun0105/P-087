@@ -390,6 +390,59 @@ MIGRATIONS += (
         ),
     ),
 )
+MIGRATIONS += (
+    (
+        20,
+        (
+            "CREATE TABLE r2s_value_events (event_id TEXT PRIMARY KEY, job_id TEXT NOT NULL, at TEXT NOT NULL, "
+            "kind TEXT NOT NULL, actor_id TEXT, payload TEXT NOT NULL)",
+            "CREATE INDEX r2s_value_events_by_job ON r2s_value_events(job_id, at)",
+        ),
+    ),
+)
+MIGRATIONS += (
+    (
+        21,
+        (
+            "CREATE TABLE r2s_benchmark_truth (job_id TEXT PRIMARY KEY, version INTEGER NOT NULL, payload TEXT NOT NULL)",
+        ),
+    ),
+)
+MIGRATIONS += (
+    (
+        22,
+        (
+            """CREATE TABLE r2s_worker_runtimes (
+                software_runtime_checksum TEXT NOT NULL,
+                config_checksum TEXT NOT NULL,
+                seed INTEGER,
+                seed_key INTEGER NOT NULL,
+                runtime_manifest_checksum TEXT NOT NULL,
+                gpu_name TEXT,
+                hardware TEXT NOT NULL,
+                manifest TEXT NOT NULL,
+                first_seen_at TEXT NOT NULL,
+                last_seen_at TEXT NOT NULL,
+                PRIMARY KEY (software_runtime_checksum, config_checksum, seed_key)
+            )""",
+            "CREATE INDEX r2s_worker_runtimes_by_config ON r2s_worker_runtimes(config_checksum, last_seen_at)",
+        ),
+    ),
+)
+MIGRATIONS += (
+    (
+        23,
+        (
+            """CREATE TABLE r2s_job_leases (
+                job_id TEXT PRIMARY KEY,
+                lease_token TEXT NOT NULL,
+                worker_id TEXT NOT NULL,
+                lease_expires_at TEXT NOT NULL
+            )""",
+            "CREATE INDEX r2s_job_leases_by_expiry ON r2s_job_leases(lease_expires_at)",
+        ),
+    ),
+)
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
 #: DB đã kiểm/chạy migration trong tiến trình này. API tạo RuntimeDatabase mỗi request;

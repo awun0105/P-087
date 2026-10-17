@@ -73,8 +73,8 @@ def test_filled_template_passes_and_unfilled_template_lists_what_is_missing() ->
         ({"OPENAI_API_KEY=operator-key": "OPENAI_API_KEY="}, "OPENAI_API_KEY trống"),
         ({"ARTIFACT_ROOT=/data/artifacts": "ARTIFACT_ROOT=./data/artifacts"}, "[worker] ARTIFACT_ROOT"),
         (
-            {"PRODUCT_RUNTIME_MANIFEST=/app/data/studio_local/runtime_manifest.json": "# no manifest"},
-            "[api] PRODUCT_RUNTIME_MANIFEST",
+            {"PRODUCT_RUNTIME_FROM_WORKERS=true": "PRODUCT_RUNTIME_FROM_WORKERS=false"},
+            "[api] cần PRODUCT_RUNTIME_MANIFEST",
         ),
         (
             {"PRODUCT_ANONYMIZE_REMOTE_WORKER=false": "PRODUCT_ANONYMIZE_REMOTE_WORKER=true"},
@@ -89,6 +89,27 @@ def test_filled_template_passes_and_unfilled_template_lists_what_is_missing() ->
 def test_check_rejects_known_broken_configurations(changes: dict[str, str], expected: str) -> None:
     errors = _messages(_filled(**changes), "error")
     assert any(expected in message for message in errors), errors
+
+
+def test_api_needs_no_manifest_when_the_runtime_comes_from_workers() -> None:
+    text = _filled()
+    api_section = text.split("# [worker]")[0].split("# [api]")[1]
+    assert not any(line.startswith("PRODUCT_RUNTIME_MANIFEST=") for line in api_section.splitlines())
+    assert _messages(text, "error") == []
+
+
+def test_api_pinned_manifest_pairs_with_processing_config() -> None:
+    pinned = _filled(
+        **{
+            "PRODUCT_RUNTIME_FROM_WORKERS=true": "PRODUCT_RUNTIME_FROM_WORKERS=false\n"
+            "PRODUCT_RUNTIME_MANIFEST=/app/data/studio_local/runtime_manifest.json",
+        }
+    )
+    assert _messages(pinned, "error") == []
+    no_config = pinned.replace(
+        "PRODUCT_PROCESSING_CONFIG=/app/configs/product/processing_presets_v1.json", "PRODUCT_PROCESSING_CONFIG="
+    )
+    assert any("PRODUCT_PROCESSING_CONFIG" in message for message in _messages(no_config, "error"))
 
 
 def test_anonymizer_wiring_between_api_and_worker() -> None:

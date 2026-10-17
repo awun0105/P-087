@@ -24,51 +24,39 @@ import subprocess
 import tempfile
 import zipfile
 from collections.abc import Sequence
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-import numpy as np
 import trimesh
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.config import get_settings
 from src.models.contracts.artifacts import ArtifactDataClass, ProductArtifactRef
-from src.models.contracts.collision_quality import (
-    CollisionInputMode,
-    CollisionSourceMode,
-    CollisionSourceSelection,
-)
 from src.models.contracts.manifests import StageId
 from src.models.contracts.scene import (
     ColliderType,
     SceneIR,
     SceneObject,
-    SceneObjectOrigin,
     SceneObjectState,
-    SourceCollisionRegion,
 )
 from src.models.contracts.validation import CandidatePackage, PreflightReport, RuleResult
 from src.services.orchestration.artifacts.errors import ArtifactStoreError
-from src.services.orchestration.processing.config import job_config_reference
 from src.services.orchestration.projects.registry import ProjectRegistry
-from src.services.reconstruction.adapters.lidar_collision import LidarCollisionBuildReport
-from src.services.reconstruction.lidar.collision_candidate_publisher import (
-    LidarCollisionCandidateManifest,
-    load_lidar_collision_eligibility_inputs,
+from src.services.orchestration.scene.effective_collision import (
+    _job_simulation_config,
+    _recover_legacy_source_ownership,
 )
-from src.services.reconstruction.lidar.collision_eligibility import evaluate_lidar_collision_eligibility
-from src.services.scene.collision_ownership import (
-    SourceCollisionOwnershipError,
-    bind_source_collision_ownership,
-    read_triangle_memberships,
+from src.services.orchestration.scene.effective_collision import (
+    effective_environment as _carved_environment,
 )
+from src.services.scene.effective_collision import CarvedBackground
+from src.services.scene.effective_collision import _source_region_removed as _source_region_removed
+from src.services.scene.geometry_state import require_geometry_ready
+from src.services.scene.representation_composition import VisualPolicy, scene_representations
+from src.services.scene.representation_integrity import representation_issues
 from src.services.simulation.colliders.carve import (
     COLLISION_CARVE_MARGIN_M,
-    CarveBox,
-    carve_triangle_mask,
-    triangle_mask_in_box,
 )
 from src.services.simulation.enrichment.service import enrich_scene_physics
 from src.services.simulation.preflight.engine import run_preflight
@@ -98,7 +86,7 @@ ENVIRONMENT_LAYER = "environment_collision.usda"
 BUILD_CONFIG = {
     **physics_build_config({}),
     "builder": "real2sim-studio-simulation-package-v6-physics-config",
-    "capability_contract": "usd-export-capabilities-v2",
+    "capability_contract": "usd-export-capabilities-v3",
     "requested_mode": "auto",
     "effective_mode": "legacy_box",
     "runtime_usd_version": None,
@@ -111,7 +99,7 @@ BUILD_CONFIG = {
 HYBRID_BUILD_CONFIG = {
     **physics_build_config({}),
     "builder": "real2sim-studio-simulation-package-v6-physics-config-hybrid",
-    "capability_contract": "usd-export-capabilities-v2",
+    "capability_contract": "usd-export-capabilities-v3",
     "requested_mode": "auto",
     "effective_mode": "hybrid",
     "runtime_probe": "hybrid-runner-probe-v2",
@@ -126,20 +114,6 @@ HYBRID_BUILD_CONFIG = {
     "object_physics": "authored_object_physics_with_global_material_fallback",
 }
 HYBRID_RUNNER = Path(__file__).resolve().parents[3] / "services/simulation/usd/hybrid_runner.py"
-
-
-@dataclass(frozen=True)
-class CarvedBackground:
-    """Verified source collision mesh shared by all package builders."""
-
-    vertices: np.ndarray
-    faces: np.ndarray
-    carved_triangles: int
-    identity: str
-    #: Triangles claimed by both a carved and a kept source region; they stay in the background.
-    retained_shared_triangles: int = 0
-    #: Kept objects whose region shares triangles with a carved one (the user can resolve them).
-    retained_shared_object_ids: tuple[str, ...] = ()
 
 
 class SimulationPackage(BaseModel):
@@ -189,24 +163,6 @@ def _publish(registry: ProjectRegistry, reference: ProductArtifactRef, payload: 
     return registry.scene.store.publish(reference, payload)
 
 
-def _job_simulation_config(registry: ProjectRegistry, job_id: str) -> dict[str, bool | float]:
-    """Read checksum-bound job controls; legacy jobs without an artifact retain defaults."""
-    job = registry.get_job(job_id)
-    reference = job_config_reference(job_id, job.config_checksum)
-    if registry.runtime_resolver.locate(reference.artifact_uri) is None:
-        return physics_build_config({})
-    payload = json.loads(registry.runtime_resolver.require(reference).read_bytes())
-    values = payload.get("simulation", {})
-    if not isinstance(values, dict):
-        raise ValueError("job simulation config must be an object")
-    ground = values.get("ground_plane")
-    if isinstance(ground, str):
-        if ground not in {"enabled", "disabled"}:
-            raise ValueError("job ground_plane must be enabled or disabled")
-        values["ground_plane"] = ground == "enabled"
-    return physics_build_config(values)
-
-
 def current_package(
     registry: ProjectRegistry, job_id: str, *, simulation_config: dict[str, object] | None = None
 ) -> SimulationPackage | None:
@@ -233,343 +189,6 @@ def current_package(
         controls,
     )
     return package if _cache_matches(package, scene, build_config, export_requirements(scene)) else None
-
-
-def _source_region_removed(item: SceneObject, objects_by_id: dict[str, SceneObject]) -> bool:
-    """Whether this immutable source region leaves the background after review/merge."""
-    visited: set[str] = set()
-    while item.provenance.get("review") == "MERGED":
-        if item.id in visited:
-            return False
-        visited.add(item.id)
-        merged_into = item.provenance.get("merged_into")
-        if not isinstance(merged_into, str) or merged_into not in objects_by_id:
-            return False
-        item = objects_by_id[merged_into]
-    if item.provenance.get("duplicated_from") is not None:
-        return False
-    review = item.provenance.get("review")
-    return review == "DELETED" or (review != "IGNORED" and item.state == SceneObjectState.CONFIRMED)
-
-
-#: Operations that replace the whole reconstructed object set. Their revision still holds each object at
-#: the pose it was extracted with, so it is the original artifact ownership can be recovered from.
-_EXTRACTION_OPERATIONS = frozenset({"objectify", "use_boxes"})
-
-
-def _recover_legacy_source_ownership(
-    registry: ProjectRegistry, job_id: str, scene: SceneIR
-) -> tuple[SceneIR, dict[str, str]]:
-    """Recover omitted ownership without ever using an edited pose.
-
-    1. An earlier checksum-validated revision of the same object (same id and geometry artifact) that
-       already carries ownership wins.
-    2. Otherwise the object's unbroken run of revisions must start at an extraction output: the root
-       revision, or the first revision of a re-extraction. That revision still has the pose the object
-       was extracted with, which is exactly what `bind_source_collision_ownership` records.
-    Anything else stays unrecovered and the carve fails closed.
-    """
-    current_objects = {item.id: item for item in scene.objects}
-    # A duplicate never owns a source region, so it must not send recovery through the whole history.
-    missing = {
-        item.id
-        for item in scene.objects
-        if item.origin == SceneObjectOrigin.RECONSTRUCTED
-        and item.source_collision is None
-        and item.provenance.get("duplicated_from") is None
-    }
-    selected_source_ref = scene.environment.collision_source_ref
-    if selected_source_ref is not None:
-        incomplete = [
-            item.id
-            for item in scene.objects
-            if item.origin == SceneObjectOrigin.RECONSTRUCTED
-            and item.provenance.get("duplicated_from") is None
-            and (
-                item.source_collision is None
-                or item.source_collision.source_geometry_ref != selected_source_ref
-                or item.source_collision.region_kind != "triangle_indices"
-            )
-        ]
-        if incomplete:
-            raise SourceCollisionOwnershipError(
-                "selected collision source cannot recover ownership from RGB history; remap exact LiDAR regions for: "
-                + ", ".join(sorted(incomplete))
-            )
-        return scene, {}
-    if not missing:
-        return scene, {}
-
-    recovered: dict[str, tuple[SourceCollisionRegion, str]] = {}
-    run_start: dict[str, SceneIR] = {object_id: scene for object_id in missing}
-    open_runs, introduced = set(missing), set[str]()
-    seen = {scene.scene_revision}
-    cursor = scene
-    while missing:
-        # A restore republishes the objects of `restored_from` verbatim, so their history continues there
-        # rather than in the revision that happened to be current when the restore was requested.
-        restored_from = cursor.provenance.get("restored_from")
-        previous_revision = restored_from if cursor.provenance.get("operation") == "restore_revision" else None
-        if not isinstance(previous_revision, str):
-            previous_revision = cursor.provenance.get("edited_from")
-        if not isinstance(previous_revision, str):
-            previous_revision = cursor.provenance.get("previous_revision")
-        if not isinstance(previous_revision, str) or previous_revision in seen:
-            break
-        seen.add(previous_revision)
-        prior_record = registry.scene.revision(job_id, previous_revision)
-        if prior_record is None:
-            break
-        prior = prior_record.scene
-        if prior.scene_id != scene.scene_id or prior.environment.geometry_ref != scene.environment.geometry_ref:
-            break
-        prior_objects = {item.id: item for item in prior.objects}
-        for object_id in tuple(missing):
-            prior_object = prior_objects.get(object_id)
-            # A re-extraction reuses ids (candidate-001...) for different objects; only the same
-            # immutable geometry artifact proves an earlier revision describes this object.
-            same_object = (
-                prior_object is not None
-                and prior_object.origin == SceneObjectOrigin.RECONSTRUCTED
-                and prior_object.geometry_ref == current_objects[object_id].geometry_ref
-            )
-            owner = prior_object.source_collision if same_object and prior_object is not None else None
-            if (
-                owner is not None
-                and owner.object_id == object_id
-                and owner.source_geometry_ref == scene.environment.geometry_ref
-            ):
-                recovered[object_id] = owner, previous_revision
-                missing.remove(object_id)
-            elif object_id in open_runs:
-                if same_object:
-                    run_start[object_id] = prior
-                else:
-                    open_runs.discard(object_id)
-                    introduced.add(object_id)
-        cursor = prior
-
-    for object_id in tuple(missing):
-        start = run_start[object_id]
-        is_root = start.provenance.get("edited_from") is None and start.provenance.get("previous_revision") is None
-        extracted_here = object_id in introduced and start.provenance.get("operation") in _EXTRACTION_OPERATIONS
-        if not (is_root or extracted_here) or start.environment.geometry_ref != scene.environment.geometry_ref:
-            continue
-        start_object = next(item for item in start.objects if item.id == object_id)
-        try:
-            (bound,) = bind_source_collision_ownership(
-                [start_object], start.environment.geometry_ref, start.scene_revision
-            )
-        except ValueError:
-            continue
-        if bound.source_collision is not None:
-            recovered[object_id] = bound.source_collision, start.scene_revision
-
-    if not recovered:
-        return scene, {}
-    owners = {object_id: entry[0] for object_id, entry in recovered.items()}
-    recovery_sources = {object_id: entry[1] for object_id, entry in sorted(recovered.items())}
-    objects = [
-        item.model_copy(update={"source_collision": owners[item.id]}, deep=True) if item.id in owners else item
-        for item in scene.objects
-    ]
-    recovered_scene = scene.model_copy(
-        update={
-            "objects": objects,
-            "provenance": {
-                **scene.provenance,
-                "source_collision_ownership_recovered": recovery_sources,
-            },
-        },
-        deep=True,
-    )
-    return recovered_scene, recovery_sources
-
-
-def _selected_collision_source(registry: ProjectRegistry, scene: SceneIR) -> tuple[ProductArtifactRef, bytes]:
-    """Resolve and revalidate a selected sensor-package candidate before any export use."""
-    environment = scene.environment
-    source_ref = environment.collision_source_ref
-    selection_ref = environment.collision_selection_ref
-    if source_ref is None and selection_ref is None:
-        return environment.geometry_ref, registry.runtime_resolver.require(environment.geometry_ref).read_bytes()
-    if source_ref is None or selection_ref is None:
-        raise SourceCollisionOwnershipError("selected collision source refs are incomplete; refusing RGB fallback")
-
-    try:
-        selection = CollisionSourceSelection.model_validate_json(
-            registry.runtime_resolver.require(selection_ref).read_bytes()
-        )
-        if (
-            selection.mode != CollisionSourceMode.LIDAR_DERIVED
-            or selection.input_mode != CollisionInputMode.LIDAR_SENSOR_PACKAGE
-            or selection.output_collision_ref != source_ref
-            or selection.source_qa_ref.artifact_type != "LidarCalibrationQAReport"
-            or selection.alignment_qa_ref is None
-            or selection.alignment_qa_ref.artifact_type != "LidarCalibrationProjectionEvidence"
-        ):
-            raise ValueError("selection mode, QA, or output does not match the selected LiDAR source")
-        raw_manifest_ref = selection_ref.source_provenance.get("candidate_manifest_ref")
-        if not isinstance(raw_manifest_ref, dict):
-            raise ValueError("selection ref does not bind a candidate manifest")
-        manifest_ref = ProductArtifactRef.model_validate(raw_manifest_ref)
-        if manifest_ref.artifact_type != "LidarCollisionCandidateManifest" or manifest_ref.job_id != source_ref.job_id:
-            raise ValueError("candidate manifest ref belongs to another artifact contract or job")
-        manifest = LidarCollisionCandidateManifest.model_validate_json(
-            registry.runtime_resolver.require(manifest_ref).read_bytes()
-        )
-        evidence_refs = {reference.artifact_type: reference for reference in manifest.eligibility_evidence_refs}
-        if (
-            manifest.candidate_ref != source_ref
-            or manifest.source_geometry_ref != selection.source_geometry_ref
-            or evidence_refs.get("LidarCalibrationQAReport") != selection.source_qa_ref
-            or evidence_refs.get("LidarCalibrationProjectionEvidence") != selection.alignment_qa_ref
-            or manifest.profile_checksum != selection.profile_checksum
-            or manifest.profile_checksum != selection.config_checksum
-        ):
-            raise ValueError("selection does not bind the manifest source, QA, profile, or output")
-        eligibility_inputs = load_lidar_collision_eligibility_inputs(manifest, registry.runtime_resolver)
-        eligibility = evaluate_lidar_collision_eligibility(eligibility_inputs)
-        if eligibility.state != "eligible" or eligibility != manifest.eligibility:
-            raise ValueError("candidate eligibility is no longer valid")
-        report = LidarCollisionBuildReport.model_validate_json(
-            registry.runtime_resolver.require(manifest.build_report_ref).read_bytes()
-        )
-        if (
-            report.output_collision_checksum != manifest.output_collision_checksum
-            or report.profile_checksum != manifest.profile_checksum
-            or report.profile_id != manifest.profile.profile_id
-            or report.voxel_m != manifest.profile.voxel_m
-            or report.source_point_checksum != manifest.source_point_checksum
-            or report.self_mask_evidence_ref != manifest.self_mask_evidence_ref
-            or report.self_mask_binding_checksum != manifest.self_mask_binding_checksum
-        ):
-            raise ValueError("candidate build report differs from its immutable manifest")
-        return source_ref, registry.runtime_resolver.require(source_ref).read_bytes()
-    except (ArtifactStoreError, TypeError, ValueError) as error:
-        raise SourceCollisionOwnershipError(
-            f"selected LiDAR source could not be revalidated; refusing to fall back to canonical RGB geometry: {error}"
-        ) from error
-
-
-def _carved_environment(
-    registry: ProjectRegistry, scene: SceneIR, *, margin_m: float = COLLISION_CARVE_MARGIN_M
-) -> CarvedBackground:
-    """Resolve the selected collision source; edited object transforms never define carve regions."""
-    source_ref, glb = _selected_collision_source(registry, scene)
-    margin_m = physics_build_config({"carve_margin_m": margin_m})["carve_margin_m"]
-    source_checksum = f"sha256:{hashlib.sha256(glb).hexdigest()}"
-    if source_checksum != source_ref.artifact_checksum:
-        raise SourceCollisionOwnershipError("source collision bytes differ from selected geometry checksum")
-
-    mesh = trimesh.load(io.BytesIO(glb), file_type="glb", force="mesh", process=False)
-    vertices = np.asarray(mesh.vertices, dtype=float)
-    faces = np.asarray(mesh.faces)
-    if not len(faces):
-        raise SourceCollisionOwnershipError("source collision mesh has no triangles")
-
-    reconstructed = [item for item in scene.objects if item.origin == SceneObjectOrigin.RECONSTRUCTED]
-    objects_by_id = {item.id: item for item in reconstructed}
-    selected_source = scene.environment.collision_source_ref is not None
-    missing = [
-        item.id
-        for item in reconstructed
-        if item.provenance.get("duplicated_from") is None
-        and (
-            (
-                selected_source
-                and (
-                    item.source_collision is None
-                    or item.source_collision.source_geometry_ref != source_ref
-                    or item.source_collision.region_kind != "triangle_indices"
-                )
-            )
-            or (not selected_source and _source_region_removed(item, objects_by_id) and item.source_collision is None)
-        )
-    ]
-    if missing:
-        ids = ", ".join(sorted(missing))
-        raise SourceCollisionOwnershipError(
-            f"reconstructed objects require source collision ownership before rebuilding background: {ids}"
-        )
-
-    owned = sorted((item for item in reconstructed if item.source_collision is not None), key=lambda item: item.id)
-    source_owners = [item.source_collision for item in owned]
-    if any(owner is None for owner in source_owners):  # narrowed below for static type checkers
-        raise SourceCollisionOwnershipError("source collision ownership is incomplete")
-    owners = [owner for owner in source_owners if owner is not None]
-    for item, owner in zip(owned, owners, strict=True):
-        if owner.object_id != item.id or owner.source_geometry_ref != source_ref:
-            raise SourceCollisionOwnershipError(
-                f"{item.id}: source collision ownership is not bound to this environment"
-            )
-
-    exact_owners = [owner for owner in owners if owner.region_kind == "triangle_indices"]
-    memberships = read_triangle_memberships(
-        exact_owners,
-        glb,
-        len(faces),
-        lambda reference: registry.runtime_resolver.require(reference).read_bytes(),
-    )
-
-    centroids = vertices[faces].mean(axis=1)
-    triangle_count = len(faces)
-    regions: list[tuple[SceneObject, np.ndarray, bool]] = []
-    exact_claim = np.zeros(triangle_count, dtype=bool)
-    for item, owner in zip(owned, owners, strict=True):
-        if owner.region_kind == "triangle_indices":
-            indices = np.asarray(memberships[owner.object_id], dtype=np.intp)
-            exact_claim[indices] = True
-            regions.append((item, indices, True))
-            continue
-        dimensions = owner.source_obb_dimensions_xyz_m
-        if dimensions is None:
-            raise SourceCollisionOwnershipError(f"{owner.object_id}: source OBB dimensions are missing")
-        box = CarveBox.from_transform(owner.source_transform, dimensions)
-        indices = np.flatnonzero(triangle_mask_in_box(centroids, box, margin_m))
-        regions.append((item, indices, False))
-
-    carve_claim = np.zeros(triangle_count, dtype=bool)
-    keep_claim = np.zeros(triangle_count, dtype=bool)
-    kept_regions: list[tuple[str, np.ndarray]] = []
-    for item, indices, exact in regions:
-        if not exact:
-            # Exact triangle membership is authoritative: an approximate box never takes a triangle from it.
-            indices = indices[~exact_claim[indices]]
-        if _source_region_removed(item, objects_by_id):
-            carve_claim[indices] = True
-        else:
-            keep_claim[indices] = True
-            kept_regions.append((item.id, indices))
-    # Whoever owns a triangle claimed only by carved regions (or only by kept ones), the result is the same.
-    # A triangle shared by a carved box and a kept box cannot be attributed: carving it could delete collision
-    # of an object that stays, keeping it leaves at most that shared sliver. Keep it, never guess, and report it.
-    shared = carve_claim & keep_claim
-    remove_mask = carve_claim & ~keep_claim
-    shared_object_ids = tuple(sorted(object_id for object_id, indices in kept_regions if shared[indices].any()))
-
-    background_hash = hashlib.sha256()
-    identity_header = json.dumps(
-        {
-            "algorithm": "source_geometry_checksum+removed_triangle_mask_v1",
-            "source_geometry_checksum": source_checksum,
-            "source_triangle_count": len(faces),
-            "carve_margin_m": margin_m,
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    background_hash.update(identity_header)
-    background_hash.update(np.packbits(remove_mask, bitorder="little").tobytes())
-    carved_vertices, carved_faces, carved = carve_triangle_mask(vertices, faces, remove_mask)
-    return CarvedBackground(
-        carved_vertices,
-        carved_faces,
-        carved,
-        f"sha256:{background_hash.hexdigest()}",
-        retained_shared_triangles=int(np.count_nonzero(shared)),
-        retained_shared_object_ids=shared_object_ids,
-    )
 
 
 def _prim_name(object_id: str) -> str:
@@ -605,16 +224,22 @@ def _hybrid_layers(
     resolve = registry.runtime_resolver.require
     collision = output / "environment_collision.ply"
     trimesh.Trimesh(background.vertices, background.faces, process=False).export(collision)
+    issues = representation_issues(scene, resolve)
+    if issues:
+        raise ValueError(f"visual representation incomplete: {issues}")
+    dispositions = {item.object_id: item for item in scene_representations(scene)}
     objects, extra = [], []
     for item in scene.objects:
-        if not item.active:
-            continue
+        disposition = dispositions[item.id]
         gaussians = item.visual_ref if item.visual_ref and item.visual_ref.artifact_type == "ObjectGaussians" else None
-        if _is_pending(item):
-            if gaussians is not None:
-                extra.append({"ply": str(resolve(gaussians)), "translation": list(item.transform.translation_xyz)})
+        if disposition.visual_policy == VisualPolicy.SOURCE:
+            if disposition.source_visual_required and gaussians is not None:
+                pose = disposition.source_transform
+                if pose is None:
+                    raise ValueError(f"source pose missing for {item.id}")
+                extra.append({"ply": str(resolve(gaussians)), "translation": list(pose.translation_xyz)})
             continue
-        if not (item.active and item.state == SceneObjectState.CONFIRMED):
+        if not disposition.export_as_object:
             continue
         collider = item.collider
         if collider is None:
@@ -820,7 +445,7 @@ def _cache_matches(
     capability = package.export_capability
     if capability is None or capability.status != ExportCapabilityStatus.SUPPORTED:
         return False
-    if capability.builder_version != "usd-export-capabilities-v2" or capability.blockers:
+    if capability.builder_version != "usd-export-capabilities-v3" or capability.blockers:
         return False
     if package.preflight.blocking_result != RuleResult.PASS:
         return False
@@ -847,6 +472,8 @@ def build_simulation_package(
 ) -> SimulationPackage:
     """Tạo (hoặc trả lại) gói mô phỏng của revision SceneIR hiện tại."""
     current = registry.scene.current(job_id)
+    # Refuse before ownership recovery can publish: an awaiting-review scene has no per-object geometry yet.
+    require_geometry_ready(current.scene, "xuất USD")
     scene, recovered_ownership = _recover_legacy_source_ownership(registry, job_id, current.scene)
     job = registry.get_job(job_id)
     controls = (

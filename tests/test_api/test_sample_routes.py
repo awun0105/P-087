@@ -148,7 +148,7 @@ def test_stage_durations_follow_completed_chain() -> None:
         JobAttemptRecord(attempt=1, status=JobStatus.RUNNING, current_stage=StageId.INPUT_VALIDATE, recorded_at=t0),
     ]
     durations = [stage.duration_seconds for stage in stage_durations(job, attempts)]
-    assert durations == [10.0, 1.0, 29.0, 300.0, None, None, None, None]
+    assert durations == [40.0, None, None, 300.0, None, None, None, None]
     assert [stage.state for stage in stage_durations(job, attempts)] == ["succeeded"] * 4 + ["pending"] * 4
 
 
@@ -262,3 +262,84 @@ def test_stage_assets_are_served_through_the_allow_list_and_validated() -> None:
                 DemoStage(stage_id=StageId.RGB_GEOMETRY, assets=[DemoStageAsset(kind="image", file=image)]),
             ]
         )  # trùng tên file
+
+
+@pytest.fixture
+def sample_reviewer(monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201
+    from src.api import auth
+    from src.main import app
+
+    user = SimpleNamespace(user_id="reviewer-1")
+    monkeypatch.setitem(app.dependency_overrides, auth.require_reviewer, lambda: user)
+    monkeypatch.setattr(auth, "auth_service", lambda: SimpleNamespace(audit=lambda *args: None))
+    return user
+
+
+@pytest.mark.asyncio
+async def test_remove_sample_persists_and_stops_serving_files_without_deleting_them(
+    client: AsyncClient, library: Path, sample_reviewer: SimpleNamespace
+) -> None:
+    original = (library / "aisle" / "manifest.json").read_bytes()
+    response = await client.delete("/api/v1/samples/aisle")
+    assert response.status_code == 200
+    assert [item["sample_id"] for item in (await client.get("/api/v1/samples")).json()["samples"]] == ["loop"]
+    assert (await client.get("/api/v1/samples/aisle")).status_code == 404
+    assert (await client.get("/api/v1/samples/aisle/files/scene.sog")).status_code == 404
+    assert (library / "aisle" / "manifest.json").read_bytes() == original
+    assert (library / "aisle" / "files" / "scene.sog").read_bytes() == b"sog-bytes"
+
+
+@pytest.mark.asyncio
+async def test_remove_sample_requires_a_real_reviewer_even_without_auth(
+    client: AsyncClient, library: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from src.api import auth
+    from src.main import app
+
+    monkeypatch.setitem(app.dependency_overrides, auth.require_reviewer, lambda: None)
+    assert (await client.delete("/api/v1/samples/aisle")).status_code == 401
+    assert (await client.get("/api/v1/samples/aisle")).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_remove_legacy_single_bundle(
+    client: AsyncClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sample_reviewer: SimpleNamespace
+) -> None:
+    from src.api.studio import deps
+
+    _write_bundle(tmp_path / "single", "legacy", [1.0, 2.0])
+    monkeypatch.setattr(deps, "get_settings", lambda: SimpleNamespace(product_demo_dir=tmp_path / "single"))
+    assert (await client.delete("/api/v1/samples/legacy")).status_code == 200
+    assert (await client.get("/api/v1/samples")).json()["samples"] == []
+    assert (tmp_path / "single" / "manifest.json").is_file()
+
+
+@pytest.mark.asyncio
+async def test_remove_sample_reports_missing_or_unwritable_library(
+    client: AsyncClient, library: Path, sample_reviewer: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from src.services.orchestration.samples import DemoLibrary
+
+    assert (await client.delete("/api/v1/samples/missing")).status_code == 404
+
+    def unavailable(self: DemoLibrary, sample_id: str) -> None:
+        raise PermissionError("internal path must stay private")
+
+    monkeypatch.setattr(DemoLibrary, "unpublish", unavailable)
+    response = await client.delete("/api/v1/samples/aisle")
+    assert response.status_code == 503
+    assert "internal path" not in response.text
+    assert (await client.get("/api/v1/samples/aisle")).status_code == 200
+
+
+def test_remove_sample_does_not_write_through_a_symlink_outside_the_library(tmp_path: Path) -> None:
+    from src.services.orchestration.samples import DemoLibrary, DemoUnavailableError
+
+    outside = tmp_path / "outside"
+    _write_bundle(outside, "external", [1.0, 2.0])
+    root = tmp_path / "library"
+    root.mkdir()
+    (root / "external").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(DemoUnavailableError):
+        DemoLibrary(root).unpublish("external")
+    assert sorted(item.name for item in outside.iterdir()) == ["files", "manifest.json"]

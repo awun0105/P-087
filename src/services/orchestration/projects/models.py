@@ -164,11 +164,12 @@ class ProjectRecord(BaseModel):
     input_manifest_checksum: Checksum
     source_rights_attestation: JsonObject
     privacy_report: PrivacyValidationReport
-    #: `self_attested` chỉ gán cho project tạo từ upload khi deployment bật chế độ
-    #: MVP (Settings.product_privacy_mode); project cũ/fixture giữ cổng QA.
+    #: `self_attested` dành cho upload hoặc dataset batch có lời khai nguồn; project mặc định/fixture giữ cổng QA.
     privacy_mode: Literal["qa_verified", "self_attested"] = "qa_verified"
     #: InputManifest đã publish (bytes checksum) để worker chuẩn bị input video.
     input_manifest_ref: ProductArtifactRef | None = None
+    #: Video ghép chỉ để phát lại; worker không đọc ref này.
+    display_video_ref: ProductArtifactRef | None = Field(default=None, exclude_if=lambda value: value is None)
     #: New grouped-input evidence is omitted for legacy projects to preserve old JSON/CAS bytes.
     input_assembly_ref: ProductArtifactRef | None = Field(default=None, exclude_if=lambda value: value is None)
     input_resolution_ref: ProductArtifactRef | None = Field(default=None, exclude_if=lambda value: value is None)

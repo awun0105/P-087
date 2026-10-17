@@ -54,6 +54,15 @@ describe("khung xem trước phát lại", () => {
     expect(screen.getByLabelText("Khung hình đã tách").querySelectorAll("img")).toHaveLength(2);
     expect(screen.getByText(/40 khung hình được giữ lại/)).toBeInTheDocument();
   });
+
+  it("video ghép từ ảnh được ghi rõ là chỉ để xem lại", () => {
+    const demo = manifest([stage("ST-INPUT-VALIDATE")]);
+    demo.video = { ...file("display.mp4"), media_type: "video/mp4" };
+    demo.video_caption = "Video ghép từ ảnh gốc, chỉ để xem lại";
+    render(<DemoShowcase demo={demo} stage="ST-INPUT-VALIDATE" fraction={1} fileUrl={fileUrl} />);
+    expect(screen.getByLabelText("Video ghép từ ảnh gốc, chỉ để xem lại")).toHaveAttribute("src", "/files/display.mp4");
+    expect(screen.getByText("Video ghép từ ảnh gốc, chỉ để xem lại")).toBeInTheDocument();
+  });
 });
 
 describe("parseDemoManifest với asset", () => {
@@ -84,4 +93,51 @@ describe("parseDemoManifest với asset", () => {
     const parsed = parseDemoManifest(value);
     expect(parsed.stages[0].assets).toEqual([{ kind: "facts", facts: [{ label: "a", value: "b" }] }]);
   });
+});
+
+describe("thẻ ba bước cuối", () => {
+  for (const id of ["ST-METRIC-CANONICALIZE", "ST-RGB-GEOMETRY", "ST-OBJECT-EXTRACT"] as const) {
+    it(id, () => {
+      const demo = manifest([stage(id, { assets: [{kind: "facts", facts: [{label: "Kết quả thật", value: "42"}]}] })]);
+      render(<DemoShowcase demo={demo} stage={id} fraction={1} fileUrl={fileUrl} />);
+      expect(screen.getByText("42")).toBeInTheDocument();
+      expect(screen.queryByRole("status")).toBeNull();
+    });
+  }
+});
+
+describe("kết quả duyệt vật của mẫu", () => {
+  it("chỉ thêm bước khi manifest có mục object_geometry, phát lại và hiện số liệu", async () => {
+    const { demoReplayStages, demoStageList } = await import("@/features/studio/demoStages");
+    const { replayPlan, replayState } = await import("@/features/studio/useDemoReplay");
+    const demo = manifest([stage("ST-OBJECT-EXTRACT")]);
+    expect(demoStageList(demo).some((row) => row.id === "UI-GEOMETRY-REVIEW")).toBe(false);
+    demo.object_geometry = { state: "succeeded", duration_seconds: 10, objectgs_count: 2, shell_count: 3, collider_count: 5 };
+    const parsed = parseDemoManifest(demo);
+    const rows = demoReplayStages(parsed);
+    const list = demoStageList(parsed);
+    expect(list.at(-1)?.id).toBe("UI-GEOMETRY-REVIEW");
+    expect(replayState(rows, replayPlan(rows, list), 999999, list).at(-1)?.state).toBe("succeeded");
+    render(<DemoShowcase demo={parsed} stage="UI-GEOMETRY-REVIEW" fraction={1} fileUrl={fileUrl} />);
+    expect(screen.getByText("Bề mặt từ ObjectGS")).toBeInTheDocument();
+    expect(screen.getByText("5")).toBeInTheDocument();
+  });
+  it("từ chối số đếm hoặc thời lượng tạo mesh sai", () => {
+    const demo = manifest([]);
+    for (const extra of [{objectgs_count: -1}, {duration_seconds: 0}, {shell_count: "2"}]) {
+      expect(() => parseDemoManifest({...demo, object_geometry: {state: "succeeded", duration_seconds: null, objectgs_count: null, shell_count: null, collider_count: null, ...extra}})).toThrow();
+    }
+  });
+});
+
+it("thời gian không đo được hiển thị chưa đo trên timeline", async () => {
+  const { demoReplayStages, demoStageList } = await import("@/features/studio/demoStages");
+  const { replayPlan, replayState } = await import("@/features/studio/useDemoReplay");
+  const { PipelineTimeline } = await import("@/features/studio/PipelineTimeline");
+  const demo = manifest([stage("ST-INPUT-VALIDATE", {duration_seconds: 12, summary: "gộp chung 3 bước"}), stage("ST-FRAME-EXTRACT", {duration_seconds: null})]);
+  const rows = demoReplayStages(demo), list = demoStageList(demo);
+  render(<PipelineTimeline stages={replayState(rows, replayPlan(rows, list), 999999, list)} stageList={list} />);
+  expect(screen.getByText("gộp chung 3 bước")).toBeInTheDocument();
+  expect(screen.getByText("Thời gian: chưa đo")).toBeInTheDocument();
+  expect(screen.queryByText("0 giây")).toBeNull();
 });

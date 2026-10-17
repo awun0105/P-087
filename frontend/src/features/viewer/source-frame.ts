@@ -29,6 +29,20 @@ export function toDisplay(frame: SourceFrame, [x, y, z]: Vec3): Vec3 {
   return [x, y, z];
 }
 
+/** Nghịch đảo của `toDisplay("z_up", …)`: không gian hiển thị Y-up → canonical Z-up (mét, sàn z = 0). */
+export function displayToZUp([x, y, z]: Vec3): Vec3 {
+  return [x, -z, y];
+}
+
+/**
+ * Điểm trong hệ nguồn của splat → hệ canonical (mét, Z-up) để lưu ground truth. Chỉ khung `z_up` là canonical;
+ * với khung khác hàm ném lỗi thay vì lưu toạ độ sai hệ.
+ */
+export function sourceToCanonical(frame: SourceFrame, point: Vec3): Vec3 {
+  if (frame !== "z_up") throw new Error(`Khung ${frame} không phải hệ canonical; không lưu được toạ độ`);
+  return [point[0], point[1], point[2]];
+}
+
 /** Xoay vector bằng quaternion xyzw. */
 export function rotate([qx, qy, qz, qw]: readonly [number, number, number, number], [x, y, z]: Vec3): Vec3 {
   // v' = v + 2w(q×v) + 2 q×(q×v)

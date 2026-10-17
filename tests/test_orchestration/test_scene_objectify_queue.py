@@ -20,6 +20,8 @@ from src.models.contracts.artifacts import ArtifactDataClass, ProductArtifactRef
 from src.models.contracts.manifests import StageId
 from src.models.contracts.reconstruction import ReconstructionBundle
 from src.services.orchestration.artifacts import FilesystemArtifactStore, sha256_bytes
+from src.services.orchestration.processing.observed import processing_seconds
+from src.services.orchestration.processing.telemetry import ResourceSampler, ResourceUsage
 from src.services.orchestration.scene import extraction as scene_extraction
 from src.services.orchestration.scene import objectify as scene_objectify
 from src.services.orchestration.scene import objectify_queue as scene_objectify_queue
@@ -734,3 +736,676 @@ def test_reobjectify_binds_source_collision_ownership_to_the_new_objects(world, 
     assert ownership.extraction_revision == "rev-001"
     assert ownership.source_geometry_ref == scene.environment.geometry_ref
     assert ownership.source_transform.translation_xyz == new_object.transform.translation_xyz
+
+
+@pytest.mark.parametrize("finish", ["success", "quality_failure", "queued_cancel", "running_cancel", "stale"])
+def test_membership_queue_reuses_admission_revision_fence_and_cancellation(world, monkeypatch, tmp_path, finish):
+    from src.models.contracts.object_membership import ObjectMembershipReassignCommand
+    from src.services.process_control import ProcessCancelledError
+
+    registry, job, bundle, settings = world
+    monkeypatch.setattr(scene_extraction, "objectify_with_retry", _always_fail)
+    extract_scene(registry, job, bundle, settings, tmp_path / "work")
+    initial = registry.scene.current(job.job_id).scene
+    reference = initial.environment.geometry_ref.model_copy(update={"artifact_type": "ObjectAwareEnvironmentManifest"})
+    from src.models.contracts.coordinates import CoordinateSystem
+    from src.models.contracts.object_membership import ObjectMembershipArtifact
+
+    membership = ObjectMembershipArtifact(
+        source_visual_ref=initial.environment.geometry_ref.model_copy(update={"artifact_type": "GaussianPLY"}),
+        source_geometry_ref=initial.environment.geometry_ref,
+        labels_ref=initial.environment.geometry_ref.model_copy(update={"artifact_type": "ObjectMembershipLabels"}),
+        gaussian_count=5,
+        label_to_object_id={"0": "object-a", "1": "object-b"},
+        coordinate_system=CoordinateSystem(),
+        extraction_revision=initial.scene_revision,
+    )
+    draft = initial.model_copy(
+        update={
+            "environment": initial.environment.model_copy(
+                update={
+                    "object_aware_collision_ref": reference,
+                    "membership": membership,
+                    "collider_ref": initial.environment.geometry_ref,
+                }
+            )
+        }
+    )
+    base = registry.scene.publish_next(job.job_id, initial.scene_revision, draft, "fixture").revision.scene
+    command = ObjectMembershipReassignCommand(
+        expected_scene_revision=base.scene_revision,
+        membership_checksum="sha256:" + "a" * 64,
+        source_visual_checksum="sha256:" + "b" * 64,
+        source_gaussian_indices=[1, 3],
+        source_object_id="object-a",
+        target_object_id="object-b",
+    )
+    monkeypatch.setattr(scene_objectify_queue, "preview_correction", lambda *a: {})
+    calls = []
+
+    def operation(
+        registry,
+        job_id,
+        settings,
+        workspace,
+        *,
+        command,
+        actor_id,
+        expected_revision,
+        commit_guard,
+        cancel_event,
+        progress,
+    ):
+        calls.append(command)
+        assert actor_id == "fixture-user"
+        progress("surface_quality")
+        assert scene_objectify_queue.state(registry, settings, job_id).phase == "surface_quality"
+        if finish == "quality_failure":
+            raise ValueError("surface quality gate failed")
+        if finish == "running_cancel":
+            scene_objectify_queue.cancel(registry, settings, job_id)
+            # The CAS guard must reject even before the polling thread notices.
+            with pytest.raises(SceneRevisionConflictError):
+                registry.scene.publish_next(job_id, expected_revision, base, "correction", commit_guard=commit_guard)
+            raise ProcessCancelledError("cancelled")
+        return registry.scene.publish_next(
+            job_id, expected_revision, base, "correction", commit_guard=commit_guard
+        ).revision.scene.scene_revision
+
+    monkeypatch.setattr(scene_objectify_queue, "regenerate_membership", operation)
+    accepted = scene_objectify_queue.request(
+        registry, settings, job.job_id, base.scene_revision, "membership", correction=command, actor_id="fixture-user"
+    )
+    assert accepted.mode == "membership" and accepted.status == "queued"
+    with pytest.raises(ObjectifyRequestError, match="operation changed"):
+        scene_objectify_queue.cancel(registry, settings, job.job_id, expected_operation_id="old-operation")
+    assert scene_objectify_queue.state(registry, settings, job.job_id).status == "queued"
+
+    with pytest.raises(ObjectifyRequestError):
+        scene_objectify_queue.request(
+            registry,
+            settings,
+            job.job_id,
+            base.scene_revision,
+            "membership",
+            correction=command,
+            actor_id="fixture-user",
+        )
+    if finish == "queued_cancel":
+        scene_objectify_queue.cancel(registry, settings, job.job_id)
+    elif finish == "stale":
+        registry.scene.publish_next(job.job_id, base.scene_revision, base, "concurrent-edit")
+    scene_objectify_queue.process_next(registry, settings)
+    state = scene_objectify_queue.state(registry, settings, job.job_id)
+    if finish == "success":
+        assert state.status == "done" and state.result_revision != base.scene_revision
+    else:
+        assert state.status == ("cancelled" if "cancel" in finish else "failed")
+        assert state.result_revision is None
+        assert registry.scene.current(job.job_id).scene.environment == base.environment
+    assert len(calls) == (0 if finish in {"queued_cancel", "stale"} else 1)
+    # Repeating a failed or cancelled correction uses a new durable operation.
+    if finish in {"quality_failure", "queued_cancel", "running_cancel"}:
+        assert (
+            scene_objectify_queue.request(
+                registry,
+                settings,
+                job.job_id,
+                base.scene_revision,
+                "membership",
+                correction=command,
+                actor_id="fixture-user",
+            ).status
+            == "queued"
+        )
+
+
+def _geometry_draft(world, monkeypatch, tmp_path):  # noqa: ANN001, ANN202
+    registry, job, bundle, settings = world
+    monkeypatch.setattr(scene_extraction, "objectify_with_retry", _always_fail)
+    extract_scene(registry, job, bundle, settings, tmp_path / "geometry-source")
+    current = registry.scene.current(job.job_id).scene
+    draft = current.model_copy(
+        update={"provenance": {**current.provenance, "object_geometry": "awaiting_review", "geometry_method": "shell"}}
+    )
+    return registry.scene.publish_next(job.job_id, current.scene_revision, draft, "fixture-draft").revision.scene
+
+
+def test_geometry_request_freezes_draft_and_excludes_other_modes(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    registry, job, _, settings = world
+    base = _geometry_draft(world, monkeypatch, tmp_path)
+    # Geometry needs no SAM2 checkpoint; it uses the existing scene membership.
+    settings = settings.model_copy(update={"product_sam2_checkpoint": None})
+    queued = scene_objectify_queue.request(
+        registry, settings, job.job_id, base.scene_revision, "geometry", actor_id="local"
+    )
+    assert queued.status == "queued" and queued.mode == "geometry"
+    assert queued.base_revision == base.scene_revision and queued.operation_id
+    assert queued.phase is None
+    with pytest.raises(ObjectifyRequestError):
+        scene_objectify_queue.request(registry, settings, job.job_id, base.scene_revision, "boxes")
+    with pytest.raises(SceneRevisionConflictError):
+        scene_objectify_queue.request(registry, settings, job.job_id, "rev-stale", "geometry")
+
+
+def test_geometry_request_rejects_ready_scene(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    registry, job, bundle, settings = world
+    monkeypatch.setattr(scene_extraction, "objectify_with_retry", _always_fail)
+    extract_scene(registry, job, bundle, settings, tmp_path / "ready")
+    current = registry.scene.current(job.job_id).scene
+    with pytest.raises(ObjectifyRequestError, match="Scene đã có hình học; dùng chỉnh vùng để dựng lại vật."):
+        scene_objectify_queue.request(registry, settings, job.job_id, current.scene_revision, "geometry")
+
+
+@pytest.mark.parametrize(
+    "finish", ["success", "failure", "queued_cancel", "running_cancel", "stale", "lease_lost", "resource_wait"]
+)
+def test_geometry_worker_reuses_progress_cancellation_and_fences(world, monkeypatch, tmp_path, finish) -> None:  # noqa: ANN001
+    registry, job, _, settings = world
+    base = _geometry_draft(world, monkeypatch, tmp_path)
+    phases = []
+    calls = []
+    profiles = []
+    previous_profile = scene_objectify_queue.ResourceAdmission.operation_profile_for_job
+
+    def profile(self, current_job, *, gpu_required):  # noqa: ANN001, ANN202
+        profiles.append(gpu_required)
+        return previous_profile(self, current_job, gpu_required=gpu_required)
+
+    monkeypatch.setattr(scene_objectify_queue.ResourceAdmission, "operation_profile_for_job", profile)
+    monkeypatch.setattr(scene_objectify_queue, "box_candidates_require_gpu", lambda _: False)
+
+    def operation(registry, settings, job_id, *, expected_revision, workspace, commit_guard, cancel_event, progress):  # noqa: ANN001, ANN202
+        from src.services.orchestration.scene.object_geometry_build import ObjectGeometryBuildError
+        from src.services.process_control import ProcessCancelledError
+
+        calls.append(expected_revision)
+        assert isinstance(cancel_event, Event)
+        for phase in ["shell", "quality", "collider", "environment", "publish"]:
+            progress(phase)
+            phases.append(scene_objectify_queue.state(registry, settings, job_id).phase)
+        if finish == "failure":
+            raise ObjectGeometryBuildError(
+                "Vỏ của Ghế 1 không dựng được: QA failed", object_id="chair", retryable=False
+            )
+        if finish == "running_cancel":
+            scene_objectify_queue.cancel(registry, settings, job_id, expected_operation_id=accepted.operation_id)
+            with pytest.raises(SceneRevisionConflictError):
+                registry.scene.publish_next(job_id, expected_revision, base, "geometry", commit_guard=commit_guard)
+            # The polling thread also forwards durable cancellation to the service event.
+            assert cancel_event.wait(3)
+            raise ProcessCancelledError("cancelled")
+        if finish == "lease_lost":
+            with scene_objectify_queue._database(settings).transaction(write=True) as tx:
+                record = scene_objectify_queue._read(tx, job_id)
+                scene_objectify_queue._write(
+                    tx, job_id, record.model_copy(update={"lease_expires_at": datetime.now(UTC) - timedelta(seconds=1)})
+                )
+            with pytest.raises(SceneRevisionConflictError):
+                registry.scene.publish_next(job_id, expected_revision, base, "geometry", commit_guard=commit_guard)
+            raise ProcessCancelledError("lease lost")
+        ready = base.model_copy(update={"provenance": {**base.provenance, "object_geometry": "ready"}})
+        return registry.scene.publish_next(
+            job_id, expected_revision, ready, "geometry", commit_guard=commit_guard
+        ).revision.scene.scene_revision
+
+    monkeypatch.setattr(scene_objectify_queue, "build_object_geometry", operation, raising=False)
+    accepted = scene_objectify_queue.request(
+        registry, settings, job.job_id, base.scene_revision, "geometry", actor_id="fixture-user"
+    )
+    if finish == "queued_cancel":
+        scene_objectify_queue.cancel(registry, settings, job.job_id, expected_operation_id=accepted.operation_id)
+    elif finish == "stale":
+        registry.scene.publish_next(job.job_id, base.scene_revision, base, "concurrent-edit")
+    elif finish == "resource_wait":
+        monkeypatch.setattr(
+            scene_objectify_queue.ResourceAdmission,
+            "_resource_snapshot",
+            lambda _: ({"vram": 0.0, "ram": 64.0, "disk": 1000.0}, {"vram": 8.0, "ram": 64.0, "disk": 1000.0}),
+        )
+    scene_objectify_queue.process_next(registry, settings)
+    if finish == "lease_lost":
+        scene_objectify_queue.recover_interrupted(settings)
+    state = scene_objectify_queue.state(registry, settings, job.job_id)
+    current = registry.scene.current(job.job_id).scene
+    if finish == "success":
+        assert state.status == "done" and state.result_revision == current.scene_revision != base.scene_revision
+        assert current.provenance["object_geometry"] == "ready"
+        assert phases == ["shell", "quality", "collider", "environment", "publish"]
+    elif finish == "resource_wait":
+        assert state.status == "queued" and state.resource_wait is not None
+        assert state.operation_id == accepted.operation_id
+        assert not calls
+    elif finish in {"queued_cancel", "running_cancel"}:
+        assert state.status == "cancelled" and state.result_revision is None
+        assert current.scene_revision == base.scene_revision
+    else:
+        assert state.status == "failed" and state.result_revision is None
+        if finish == "failure":
+            assert "Ghế 1" in state.error and state.retryable is False
+            assert current == base
+            # A new request can run after the user has corrected the input.
+            monkeypatch.setattr(
+                scene_objectify_queue,
+                "build_object_geometry",
+                lambda registry, settings, job_id, **kwargs: (
+                    registry.scene.publish_next(
+                        job_id,
+                        kwargs["expected_revision"],
+                        base.model_copy(update={"provenance": {**base.provenance, "object_geometry": "ready"}}),
+                        "retry",
+                        commit_guard=kwargs["commit_guard"],
+                    ).revision.scene.scene_revision
+                ),
+            )
+            retry = scene_objectify_queue.request(registry, settings, job.job_id, base.scene_revision, "geometry")
+            assert retry.operation_id != accepted.operation_id
+            scene_objectify_queue.process_next(registry, settings)
+            assert scene_objectify_queue.state(registry, settings, job.job_id).status == "done"
+    if finish not in {"queued_cancel", "stale"}:
+        assert profiles and all(profiles)
+
+
+def _ready_region_request(world, monkeypatch, tmp_path):
+    from src.models.contracts.object_membership import ObjectRegionCommand
+
+    registry, job, _, settings = world
+    base = _geometry_draft(world, monkeypatch, tmp_path)
+    base = registry.scene.publish_next(
+        job.job_id,
+        base.scene_revision,
+        base.model_copy(update={"provenance": {**base.provenance, "object_geometry": "ready"}}),
+        "fixture-ready",
+    ).revision.scene
+    command = ObjectRegionCommand(
+        expected_scene_revision=base.scene_revision,
+        membership_checksum="sha256:" + "a" * 64,
+        boxes=[{"op": "add", "center_m": [0, 0, 0], "half_extents_m": [1, 1, 1], "yaw_rad": 0}],
+    )
+    monkeypatch.setattr(scene_objectify_queue, "validate_region_rebuild", lambda *a: None)
+    return base, command
+
+
+@pytest.mark.parametrize(
+    "finish",
+    ["success", "queued_cancel", "running_cancel", "stale", "failure", "tampered", "resource_wait", "lease_lost"],
+)
+def test_region_queue_durable_command_progress_and_fencing(world, monkeypatch, tmp_path, finish):
+    from src.services.orchestration.scene.object_geometry_build import ObjectGeometryBuildError
+    from src.services.process_control import ProcessCancelledError
+
+    registry, job, _, settings = world
+    base, command = _ready_region_request(world, monkeypatch, tmp_path)
+    calls = []
+    profiles = []
+    profile = scene_objectify_queue.ResourceAdmission.operation_profile_for_job
+
+    def resources(self, job, *, gpu_required):
+        profiles.append(gpu_required)
+        return profile(self, job, gpu_required=gpu_required)
+
+    monkeypatch.setattr(scene_objectify_queue.ResourceAdmission, "operation_profile_for_job", resources)
+
+    def operation(
+        registry_arg,
+        settings_arg,
+        job_id,
+        workspace,
+        *,
+        object_id,
+        command,
+        actor_id,
+        expected_revision,
+        progress,
+        commit_guard,
+        cancel_event,
+    ):
+        calls.append(command)
+        assert object_id == "object-a" and actor_id == "reviewer"
+        for phase in ("shell", "quality", "collider", "environment", "publish"):
+            progress(phase)
+            assert scene_objectify_queue.state(registry, settings, job_id).phase == phase
+        if finish == "failure":
+            raise ObjectGeometryBuildError("Object A: shell failed", object_id=object_id, retryable=False)
+        if finish == "running_cancel":
+            scene_objectify_queue.cancel(registry, settings, job_id)
+            with pytest.raises(SceneRevisionConflictError):
+                registry.scene.publish_next(job_id, expected_revision, base, "region", commit_guard=commit_guard)
+            assert cancel_event.wait(3)
+            raise ProcessCancelledError("cancelled")
+        if finish == "lease_lost":
+            with scene_objectify_queue._database(settings).transaction(write=True) as tx:
+                record = scene_objectify_queue._read(tx, job_id)
+                scene_objectify_queue._write(
+                    tx, job_id, record.model_copy(update={"lease_expires_at": datetime.now(UTC) - timedelta(seconds=1)})
+                )
+            with pytest.raises(SceneRevisionConflictError):
+                registry.scene.publish_next(job_id, expected_revision, base, "region", commit_guard=commit_guard)
+            raise ProcessCancelledError("lost lease")
+        return registry.scene.publish_next(
+            job_id, expected_revision, base, "region", commit_guard=commit_guard
+        ).revision.scene.scene_revision
+
+    monkeypatch.setattr(scene_objectify_queue, "rebuild_region_ready", operation)
+    queued = scene_objectify_queue.request(
+        registry, settings, job.job_id, base.scene_revision, "region", region=("object-a", command), actor_id="reviewer"
+    )
+    assert queued.mode == "region" and queued.status == "queued"
+    with scene_objectify_queue._database(settings).transaction() as tx:
+        record = scene_objectify_queue._read(tx, job.job_id)
+        assert record.region_command == command and record.region_object_id == "object-a"
+        assert record.actor_id == "reviewer"
+    with pytest.raises(ObjectifyRequestError):
+        scene_objectify_queue.request(registry, settings, job.job_id, base.scene_revision, "boxes")
+    if finish == "queued_cancel":
+        scene_objectify_queue.cancel(registry, settings, job.job_id, expected_operation_id=queued.operation_id)
+    elif finish == "stale":
+        registry.scene.publish_next(job.job_id, base.scene_revision, base, "concurrent")
+    elif finish == "tampered":
+        with scene_objectify_queue._database(settings).transaction(write=True) as tx:
+            record = scene_objectify_queue._read(tx, job.job_id)
+            scene_objectify_queue._write(tx, job.job_id, record.model_copy(update={"region_object_id": "object-b"}))
+    elif finish == "resource_wait":
+        monkeypatch.setattr(
+            scene_objectify_queue.ResourceAdmission,
+            "_resource_snapshot",
+            lambda _: ({"vram": 0.0, "ram": 64.0, "disk": 1000.0}, {"vram": 8.0, "ram": 64.0, "disk": 1000.0}),
+        )
+    scene_objectify_queue.process_next(registry, settings)
+    if finish == "lease_lost":
+        scene_objectify_queue.recover_interrupted(settings)
+    state = scene_objectify_queue.state(registry, settings, job.job_id)
+    if finish == "success":
+        assert state.status == "done" and state.result_revision != base.scene_revision
+    elif finish == "resource_wait":
+        assert state.status == "queued" and state.resource_wait is not None and not calls
+    else:
+        assert state.status == ("cancelled" if "cancel" in finish else "failed")
+        assert state.result_revision is None
+        if finish != "stale":
+            assert registry.scene.current(job.job_id).scene == base
+        if finish == "failure":
+            assert state.retryable is False and "shell failed" in state.error
+    assert len(calls) == (0 if finish in {"queued_cancel", "stale", "tampered", "resource_wait"} else 1)
+    if calls:
+        assert calls == [command] and profiles == [True]
+
+
+def test_membership_queue_accepts_ready_shell_without_objectgs_marker(world, monkeypatch, tmp_path):
+    from src.models.contracts.object_membership import ObjectMembershipReassignCommand
+
+    registry, job, _, settings = world
+    base, _ = _ready_region_request(world, monkeypatch, tmp_path)
+    assert base.environment.object_aware_collision_ref is None
+    command = ObjectMembershipReassignCommand(
+        expected_scene_revision=base.scene_revision,
+        membership_checksum="sha256:" + "a" * 64,
+        source_visual_checksum="sha256:" + "b" * 64,
+        source_gaussian_indices=[0],
+        source_object_id="a",
+        target_object_id="b",
+    )
+    monkeypatch.setattr(scene_objectify_queue, "preview_correction", lambda *a: {})
+    queued = scene_objectify_queue.request(
+        registry, settings, job.job_id, base.scene_revision, "membership", correction=command, actor_id="reviewer"
+    )
+    assert queued.status == "queued" and queued.mode == "membership"
+
+
+def test_state_reports_object_geometry_for_the_ui(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    """T-021: ready, awaiting_review; a missing key is the legacy flow (None); an unknown value re-locks as awaiting_review."""
+    registry, job, _, settings = world
+    _geometry_draft(world, monkeypatch, tmp_path)
+    assert scene_objectify_queue.state(registry, settings, job.job_id).object_geometry == "awaiting_review"
+    for extra, expected in [
+        ({"object_geometry": "ready"}, "ready"),
+        ({"object_geometry": "building"}, "awaiting_review"),
+    ]:
+        current = registry.scene.current(job.job_id).scene
+        provenance = {**current.provenance, **extra}
+        registry.scene.publish_next(
+            job.job_id, current.scene_revision, current.model_copy(update={"provenance": provenance}), "fixture-state"
+        )
+        assert scene_objectify_queue.state(registry, settings, job.job_id).object_geometry == expected
+    current = registry.scene.current(job.job_id).scene
+    provenance = {k: v for k, v in current.provenance.items() if k != "object_geometry"}
+    registry.scene.publish_next(
+        job.job_id, current.scene_revision, current.model_copy(update={"provenance": provenance}), "fixture-legacy"
+    )
+    assert scene_objectify_queue.state(registry, settings, job.job_id).object_geometry is None
+
+
+@pytest.mark.parametrize(
+    ("geometry", "record", "expected"),
+    [
+        (None, None, None),
+        (None, ("running", "geometry", "rev-001"), None),
+        ("awaiting_review", None, "waiting"),
+        ("awaiting_review", ("queued", "geometry", "rev-001"), "running"),
+        ("awaiting_review", ("running", "geometry", "rev-001"), "running"),
+        ("awaiting_review", ("failed", "geometry", "rev-001"), "failed"),
+        ("awaiting_review", ("cancelled", "geometry", "rev-001"), "failed"),
+        ("awaiting_review", ("failed", "geometry", "rev-000"), "waiting"),
+        ("awaiting_review", ("running", "objectify", "rev-001"), "waiting"),
+        ("ready", None, None),
+        ("ready", ("running", "region", "rev-001"), "running"),
+        ("ready", ("running", "membership", "rev-001"), "running"),
+        ("ready", ("failed", "region", "rev-001"), None),
+    ],
+)
+def test_geometry_review_for_the_scene_list(world, geometry, record, expected) -> None:  # noqa: ANN001
+    """Danh sách scene dùng cùng quy tắc với hàng "Duyệt vật & Tạo mesh": Draft chờ/lỗi, đang dựng; Ready và scene cũ: None."""
+    _, job, _, settings = world
+    if record is not None:
+        status, mode, base = record
+        with scene_objectify_queue._database(settings).transaction(write=True) as tx:
+            scene_objectify_queue._write(
+                tx,
+                job.job_id,
+                scene_objectify_queue._Record(
+                    status=status, mode=mode, base_revision=base, requested_at=datetime.now(UTC)
+                ),
+            )
+    assert scene_objectify_queue.geometry_review(settings, job.job_id, geometry, "rev-001") == expected
+
+
+def _scene_usages(settings: Settings) -> list[ResourceUsage]:
+    with scene_objectify_queue._database(settings).transaction() as tx:
+        rows = tx.execute("SELECT payload FROM r2s_resource_usage").fetchall()
+    return [ResourceUsage.model_validate_json(row[0]) for row in rows]
+
+
+def _region_stub(registry, base, finish):  # noqa: ANN001, ANN202
+    from src.services.orchestration.scene.object_geometry_build import ObjectGeometryBuildError
+    from src.services.process_control import ProcessCancelledError
+
+    def operation(  # noqa: ANN202
+        registry_arg,
+        settings_arg,
+        job_id,
+        workspace,
+        *,
+        object_id,
+        command,
+        actor_id,
+        expected_revision,
+        progress,
+        commit_guard,
+        cancel_event,
+    ):
+        time.sleep(0.05)  # bảo đảm duration_seconds > 0 với sampler thật
+        if finish == "failure":
+            raise ObjectGeometryBuildError("Object A: shell failed", object_id=object_id, retryable=False)
+        if finish == "cancelled":
+            raise ProcessCancelledError("cancelled")
+        return registry.scene.publish_next(
+            job_id, expected_revision, base, "region", commit_guard=commit_guard
+        ).revision.scene.scene_revision
+
+    return operation
+
+
+@pytest.mark.parametrize(
+    ("finish", "expected"), [("success", "completed"), ("failure", "failed"), ("cancelled", "cancelled")]
+)
+def test_region_run_records_one_scene_usage_with_its_outcome(world, monkeypatch, tmp_path, finish, expected) -> None:  # noqa: ANN001
+    registry, job, _, settings = world
+    base, command = _ready_region_request(world, monkeypatch, tmp_path)
+    monkeypatch.setattr(scene_objectify_queue, "rebuild_region_ready", _region_stub(registry, base, finish))
+    queued = scene_objectify_queue.request(
+        registry, settings, job.job_id, base.scene_revision, "region", region=("object-a", command), actor_id="reviewer"
+    )
+    assert scene_objectify_queue.process_next(registry, settings) is True
+    usages = _scene_usages(settings)
+    assert [(u.tool, u.outcome, u.attempt_id, u.job_id) for u in usages] == [
+        ("scene.region", expected, queued.operation_id, job.job_id)
+    ]
+    assert usages[0].duration_seconds > 0
+    expected_seconds = {job.job_id: usages[0].duration_seconds} if expected == "completed" else {}
+    assert processing_seconds(usages) == expected_seconds
+
+
+def test_sampler_failures_never_change_the_region_result(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    registry, job, _, settings = world
+    base, command = _ready_region_request(world, monkeypatch, tmp_path)
+    monkeypatch.setattr(scene_objectify_queue, "rebuild_region_ready", _region_stub(registry, base, "success"))
+
+    def broken_sample(self, root):  # noqa: ANN001, ANN202
+        raise RuntimeError("probe unavailable")
+
+    monkeypatch.setattr(ResourceSampler, "sample", broken_sample)
+    scene_objectify_queue.request(
+        registry, settings, job.job_id, base.scene_revision, "region", region=("object-a", command), actor_id="reviewer"
+    )
+    scene_objectify_queue.process_next(registry, settings)
+    state = scene_objectify_queue.state(registry, settings, job.job_id)
+    assert state.status == "done" and state.result_revision is not None
+
+
+def test_geometry_build_records_one_scene_geometry_usage(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    registry, job, _, settings = world
+    base = _geometry_draft(world, monkeypatch, tmp_path)
+    monkeypatch.setattr(scene_objectify_queue, "box_candidates_require_gpu", lambda _: False)
+
+    def operation(
+        registry_arg, settings_arg, job_id, *, expected_revision, workspace, commit_guard, cancel_event, progress
+    ):  # noqa: ANN001, ANN202
+        time.sleep(0.05)  # bảo đảm duration_seconds > 0 với sampler thật
+        ready = base.model_copy(update={"provenance": {**base.provenance, "object_geometry": "ready"}})
+        return registry.scene.publish_next(
+            job_id, expected_revision, ready, "geometry", commit_guard=commit_guard
+        ).revision.scene.scene_revision
+
+    monkeypatch.setattr(scene_objectify_queue, "build_object_geometry", operation, raising=False)
+    accepted = scene_objectify_queue.request(
+        registry, settings, job.job_id, base.scene_revision, "geometry", actor_id="fixture-user"
+    )
+    assert scene_objectify_queue.process_next(registry, settings) is True
+    usages = _scene_usages(settings)
+    assert [(u.tool, u.outcome, u.attempt_id) for u in usages] == [
+        ("scene.geometry", "completed", accepted.operation_id)
+    ]
+    assert usages[0].duration_seconds > 0
+
+
+def test_missing_sampler_still_publishes_and_records_nothing(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    registry, job, _, settings = world
+    base, command = _ready_region_request(world, monkeypatch, tmp_path)
+    monkeypatch.setattr(scene_objectify_queue, "rebuild_region_ready", _region_stub(registry, base, "success"))
+    monkeypatch.setattr(scene_objectify_queue, "build_sampler", lambda *args: None)
+    scene_objectify_queue.request(
+        registry, settings, job.job_id, base.scene_revision, "region", region=("object-a", command), actor_id="reviewer"
+    )
+    scene_objectify_queue.process_next(registry, settings)
+    assert scene_objectify_queue.state(registry, settings, job.job_id).status == "done"
+    assert _scene_usages(settings) == []
+
+
+def _scene_requests(settings: Settings, job_id: str) -> list:
+    from src.services.orchestration.jobs.database import RuntimeDatabase
+    from src.services.orchestration.value import list_events
+
+    return list_events(RuntimeDatabase(settings.database_url), job_id, {"scene_request"})
+
+
+def test_geometry_request_records_one_human_scene_request(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    registry, job, _, settings = world
+    base = _geometry_draft(world, monkeypatch, tmp_path)
+    settings = settings.model_copy(update={"product_sam2_checkpoint": None})
+
+    queued = scene_objectify_queue.request(
+        registry, settings, job.job_id, base.scene_revision, "geometry", actor_id="local"
+    )
+
+    (event,) = _scene_requests(settings, job.job_id)
+    assert event.actor_id == "local"
+    assert event.payload == {
+        "mode": "geometry",
+        "base_revision": base.scene_revision,
+        "operation_id": queued.operation_id,
+        "origin": "human",
+    }
+
+
+def test_boxes_request_records_one_human_scene_request(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    registry, job, bundle, settings = world
+    monkeypatch.setattr(scene_extraction, "objectify_with_retry", _always_fail)
+    extract_scene(registry, job, bundle, settings, tmp_path / "boxes")
+    current = registry.scene.current(job.job_id).scene
+
+    scene_objectify_queue.request(registry, settings, job.job_id, current.scene_revision, "boxes")
+
+    (event,) = _scene_requests(settings, job.job_id)
+    assert event.payload["mode"] == "boxes" and event.payload["origin"] == "human"
+
+
+def test_region_request_records_one_human_scene_request(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    registry, job, _, settings = world
+    base, command = _ready_region_request(world, monkeypatch, tmp_path)
+
+    scene_objectify_queue.request(
+        registry, settings, job.job_id, base.scene_revision, "region", region=("object-a", command), actor_id="reviewer"
+    )
+
+    (event,) = _scene_requests(settings, job.job_id)
+    assert event.actor_id == "reviewer"
+    assert event.payload["mode"] == "region"
+    assert event.payload["region_object_id"] == "object-a"
+    assert event.payload["origin"] == "human"
+
+
+def test_membership_request_records_one_human_scene_request(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    from src.models.contracts.object_membership import ObjectMembershipReassignCommand
+
+    registry, job, _, settings = world
+    base, _ = _ready_region_request(world, monkeypatch, tmp_path)
+    command = ObjectMembershipReassignCommand(
+        expected_scene_revision=base.scene_revision,
+        membership_checksum="sha256:" + "a" * 64,
+        source_visual_checksum="sha256:" + "b" * 64,
+        source_gaussian_indices=[0],
+        source_object_id="a",
+        target_object_id="b",
+    )
+    monkeypatch.setattr(scene_objectify_queue, "preview_correction", lambda *a: {})
+
+    scene_objectify_queue.request(
+        registry, settings, job.job_id, base.scene_revision, "membership", correction=command, actor_id="reviewer"
+    )
+
+    (event,) = _scene_requests(settings, job.job_id)
+    assert event.payload["mode"] == "membership" and event.payload["origin"] == "human"
+
+
+def test_rejected_request_records_no_scene_request(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    registry, job, _, settings = world
+    base = _geometry_draft(world, monkeypatch, tmp_path)
+    settings = settings.model_copy(update={"product_sam2_checkpoint": None})
+    scene_objectify_queue.request(registry, settings, job.job_id, base.scene_revision, "geometry")
+
+    with pytest.raises(SceneRevisionConflictError):
+        scene_objectify_queue.request(registry, settings, job.job_id, "rev-stale", "boxes")
+    with pytest.raises(ObjectifyRequestError, match="Đang có một yêu cầu"):
+        scene_objectify_queue.request(registry, settings, job.job_id, base.scene_revision, "geometry")
+
+    assert len(_scene_requests(settings, job.job_id)) == 1

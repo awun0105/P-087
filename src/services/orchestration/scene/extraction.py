@@ -21,13 +21,21 @@ from src.models.contracts.floor_model import FloorModel
 from src.models.contracts.manifests import JobManifest, StageArtifact, StageId, StageStatus
 from src.models.contracts.reconstruction import ReconstructionBundle
 from src.models.contracts.scene import SceneObject
-from src.services.orchestration.artifacts import FilesystemArtifactStore
+from src.services.orchestration.artifacts import ArtifactStoreError, FilesystemArtifactStore
 from src.services.orchestration.jobs.database import RuntimeTransaction
 from src.services.orchestration.jobs.progress import metric_confirmation_stage
+from src.services.orchestration.processing.config import load_job_config
 from src.services.orchestration.projects.registry import ProjectRegistry
-from src.services.orchestration.scene.errors import SceneRevisionConflictError
+from src.services.orchestration.scene.errors import SceneError, SceneRevisionConflictError
 from src.services.orchestration.scene.floor_evidence import publish_floor_fit_evidence, scene_floor_fit_summary
-from src.services.orchestration.scene.objectify import AWAITING_CHOICE, ObjectifyError, Publish, objectify_with_retry
+from src.services.orchestration.scene.objectify import (
+    AWAITING_CHOICE,
+    ObjectifyConfig,
+    ObjectifyError,
+    Publish,
+    job_requires_strict_geometry,
+    objectify_with_retry,
+)
 from src.services.orchestration.scene.objectify import METHOD as OBJECTIFY_METHOD
 from src.services.process_control import ProcessCancelledError
 from src.services.reconstruction import camera_views, confirmation_summary, metric_gaussian_points
@@ -35,6 +43,7 @@ from src.services.scene.builder import scene_from_bundle
 from src.services.scene.collision_ownership import bind_source_collision_ownership
 from src.services.scene.floor_model import fit_canonical_floor_model, point_cloud_checksum
 from src.services.scene.geometric import GeometricConfig, candidate_objects, collision_vertices, objects_from_candidates
+from src.services.scene.geometry_state import object_geometry_state
 from src.services.scene.publisher import with_scene_checksum
 from src.services.scene.sampro3d.pipeline import METHOD as SAMPRO3D_METHOD
 from src.services.scene.sampro3d.pipeline import CameraFrame, Sam2Runtime, extract
@@ -179,12 +188,40 @@ def extract_scene(
     runtime = _sam2_runtime(settings)
     objects: list[SceneObject] = []
     environment, extra = None, {}
+    strict_geometry_required = job_requires_strict_geometry(registry, job)
+    auto_geometry = False
+    if strict_geometry_required and not (settings.product_objectify and runtime is not None and runtime.available()):
+        raise ObjectifyError(
+            "Job hình học nghiêm ngặt (shell/ObjectGS) cần runtime SAM2/objectify; không được lùi về legacy",
+            retryable=False,
+        )
     if settings.product_objectify and runtime is not None and runtime.available():
+        processing = load_job_config(job.job_id, job.config_checksum, registry.runtime_resolver)
+        auto_geometry = bool(
+            processing is not None
+            and processing.scene.get("geometry_review") == "auto"
+            and processing.scene.get("geometry_method") in {"shell", "objectgs"}
+        )
+        arguments = {}
+        if auto_geometry:
+            # Auto still extracts a Draft first; the sealed choice and all other controls remain intact.
+            groups: dict[str, dict] = {"scene": {}, "coacd": {}, "inpaint": {}}
+            for key, value in processing.scene.items():
+                group, name = key.split("_", 1) if key.startswith(("coacd_", "inpaint_")) else ("scene", key)
+                groups[group][name] = value
+            groups["scene"]["geometry_review"] = "required"
+            arguments["scene_config"] = ObjectifyConfig.model_validate(groups).model_dump(exclude_unset=True)
         try:
-            result = objectify_with_retry(registry, job, bundle, settings, workspace / "objectify", publish)
+            result = objectify_with_retry(
+                registry, job, bundle, settings, workspace / "objectify", publish, **arguments
+            )
             objects, environment, extra = result.objects, result.environment, result.provenance
+            if auto_geometry:
+                extra = {**extra, "geometry_review": "auto"}
             method, note = OBJECTIFY_METHOD, ""
         except ObjectifyError as error:
+            if strict_geometry_required:
+                raise
             # Không tự lùi về hộp (owner quyết 2026-10-01): scene chỉ có môi trường, chờ người dùng chọn.
             method, note = AWAITING_CHOICE, f"{error}; chọn chạy lại hoặc dùng hộp ứng viên"
             extra["objectify_retryable"] = error.retryable
@@ -198,6 +235,27 @@ def extract_scene(
     objects = bind_source_collision_ownership(objects, source_geometry_ref, "rev-001")
     scene = scene_from_bundle(bundle, objects, {"object_extraction": method, "note": note, **extra}, environment)
     revision = registry.scene.publish_initial(job.job_id, scene)
+    if auto_geometry and object_geometry_state(revision.scene) == "awaiting_review":
+        from src.services.orchestration.scene import objectify_queue
+
+        try:
+            queued = objectify_queue.state(registry, settings, job.job_id)
+            if not (
+                queued.mode == "geometry"
+                and queued.base_revision == revision.scene.scene_revision
+                and queued.status in {"queued", "running"}
+            ):
+                objectify_queue.request(
+                    registry,
+                    settings,
+                    job.job_id,
+                    revision.scene.scene_revision,
+                    "geometry",
+                    actor_id="system",
+                    origin="system",
+                )
+        except (objectify_queue.ObjectifyRequestError, SceneError, ArtifactStoreError) as error:
+            logger.warning("Could not queue automatic geometry build for job %s: %s", job.job_id, error)
     reference = revision.scene_reference
     return StageArtifact(
         stage_id=StageId.OBJECT_EXTRACT,

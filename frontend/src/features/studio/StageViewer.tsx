@@ -67,7 +67,7 @@ export function StageViewer({ jobId, stageId, fallbackStageId }: { jobId: string
   return (
     <div className="flex size-full flex-col">
       {fallback.length > 0 && <Notice tone="ochre" className="shrink-0 rounded-none">Bản xác nhận tỉ lệ đã có, nhưng API chưa cung cấp 3DGS hệ mét (bản dẫn xuất xuất hiện khi worker hoàn tất hình học). Đang xem lại Gaussian gốc, đơn vị SfM; số đo đã xác nhận xem trong “Xem số đo & so sánh”.</Notice>}
-      <div className="flex flex-wrap gap-1 border-b border-line bg-paper-raised px-3 py-2" role="tablist" aria-label="Kết quả từng bước">
+      {available.length > 1 && <div className="flex flex-wrap gap-1 border-b border-line bg-paper-raised px-3 py-2" role="tablist" aria-label="Kết quả từng bước">
         {available.map((item, index) => (
           <button
             key={`${item.stage_id}-${item.kind}`}
@@ -83,10 +83,7 @@ export function StageViewer({ jobId, stageId, fallbackStageId }: { jobId: string
             {item.title}
           </button>
         ))}
-      </div>
-      <p className="border-b border-line bg-paper px-4 py-2 text-xs text-ink-muted">
-        {view.note} {view.unit === "meter" ? "Đơn vị: mét." : "Đơn vị: tùy ý (SfM)."}
-      </p>
+      </div>}
       <div className="relative min-h-0 flex-1 bg-viewport" role="tabpanel">
         {/* `key` buộc unmount lớp cũ để giải phóng GPU/listener trước khi nạp lớp mới. */}
         <StageLayer key={`${view.stage_id}-${view.kind}`} jobId={jobId} view={view} views={views} />
@@ -103,14 +100,17 @@ function StageLayer({ jobId, view, views }: { jobId: string; view: StageView; vi
   const mesh = views.find((item) => item.kind === "mesh");
   if (metric?.refs[0] && (view === metric || view === mesh)) {
     return (
-      <MetricSceneView
+      <><p className="absolute bottom-3 left-3 z-20 rounded-md bg-viewport-deep/90 px-3 py-1 text-xs text-on-dark">
+        Kết quả tái dựng trước khi chỉnh sửa vật thể
+      </p><MetricSceneView
         jobId={jobId}
         visual={metric.refs[0]}
         collision={mesh?.refs[0]}
+        reconstruction
         cameras={metric.cameras}
         defaultLayers={{ splat: true, collision: view === mesh, boxes: false }}
         lidarOverlay={metric.lidar_overlay ?? null}
-      />
+      /></>
     );
   }
   if (view.kind === "gaussian") {

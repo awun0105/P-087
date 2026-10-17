@@ -11,28 +11,31 @@ from pathlib import Path
 from typing import TextIO
 
 from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import SettingsConfigDict
 
 from src.models.contracts.manifests import ExecutionError, StageArtifact, StageId, StageStatus
 from src.models.contracts.retryability import classify_retryability
+from src.runtime_env import RuntimeSettings
+from src.services.process_control import ProgressWatchdog, file_size_marker
 from src.services.reconstruction.resume import CHECKPOINT_NAME
 from src.services.reconstruction.rgb.splat.visual import BrushConfig
 
 
-class BrushRuntimeSettings(BaseSettings):
+class BrushRuntimeSettings(RuntimeSettings):
     """Executable paths ở composition root, không serialize vào published metadata."""
 
     command: tuple[str, ...] = ("brush",)
     expected_version: str = Field(min_length=1)
     runtime_identity: str = Field(min_length=1)
-    timeout_seconds: float = Field(default=1800, gt=0, allow_inf_nan=False)
+    #: Giới hạn cứng (lưới cuối, T-043 bước 6); treo và hạn tự tính chạy trước nó.
+    timeout_seconds: float = Field(default=21600, gt=0, allow_inf_nan=False)
     environment: dict[str, str] = Field(default_factory=dict)
     #: Khoảng cách mong muốn (số bước) giữa hai checkpoint khi có kho resume; 0 = không checkpoint.
     checkpoint_every: int = Field(default=2500, ge=0)
     #: Python của runtime có torch + gói `lpips` (thường là `data/scene_runtime`); None = không chấm LPIPS.
     lpips_python: Path | None = None
     hang_timeout_seconds: float = Field(default=180.0, ge=0)
-    model_config = SettingsConfigDict(env_prefix="REC04_BRUSH_", extra="forbid")
+    model_config = SettingsConfigDict(env_prefix="R2S_BRUSH_", extra="forbid")
 
 
 FATAL_LOG_PATTERNS: tuple[tuple[str, str, str], ...] = (
@@ -122,7 +125,12 @@ class VisualProcess:
             ) as process:
                 deadline = time.monotonic() + self.settings.timeout_seconds
                 last_log_offset = 0
-                last_progress_time = time.monotonic()
+                # Treo = log brush-train không tăng trong hang_timeout (lớp canh tiến độ dùng chung, T-043).
+                watchdog = (
+                    ProgressWatchdog(hang_timeout, [file_size_marker(log_path)])
+                    if invocation.name == "brush-train" and hang_timeout > 0
+                    else None
+                )
                 try:
                     while process.poll() is None:
                         now = time.monotonic()
@@ -139,7 +147,6 @@ class VisualProcess:
                                         reader.seek(last_log_offset)
                                         new_text = reader.read()
                                         last_log_offset = reader.tell()
-                                    last_progress_time = now
                                     for pattern, err_code, human_desc in FATAL_LOG_PATTERNS:
                                         if pattern in new_text:
                                             self._kill_group(process)
@@ -148,8 +155,9 @@ class VisualProcess:
                                 except (OSError, UnicodeDecodeError):
                                     pass
 
-                        if invocation.name == "brush-train" and hang_timeout > 0:
-                            if now - last_progress_time > hang_timeout:
+                        if watchdog is not None:
+                            watchdog.poll()
+                            if watchdog.stalled():
                                 self._kill_group(process)
                                 log.write("\nVISUAL_HANG_TIMEOUT\n")
                                 raise VisualError(

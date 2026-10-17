@@ -15,6 +15,7 @@ import numpy as np
 from scipy.spatial import cKDTree
 
 from src.models.contracts.floor_model import FloorModel
+from src.services.scene.association.refinement import object_point_mask
 from src.services.scene.floor_model import above_floor_mask
 
 _PLY_TYPES = {"float": "f4", "float32": "f4", "double": "f8", "uchar": "u1", "int": "i4", "uint": "u4"}
@@ -73,7 +74,9 @@ def positions(rows: np.ndarray) -> np.ndarray:
     return np.stack([rows["x"], rows["y"], rows["z"]], axis=1).astype(np.float64)
 
 
-def assign_floor_gaussians_to_background(rows: np.ndarray, labels: np.ndarray, floor_model: FloorModel) -> np.ndarray:
+def assign_floor_gaussians_to_background(
+    rows: np.ndarray, labels: np.ndarray, floor_model: FloorModel, *, refinement: bool = False
+) -> np.ndarray:
     """Return floor or unclassified source Gaussians to background without dropping rows."""
     source_labels = np.asarray(labels)
     if source_labels.ndim != 1 or len(source_labels) != len(rows):
@@ -84,7 +87,34 @@ def assign_floor_gaussians_to_background(rows: np.ndarray, labels: np.ndarray, f
     if source_labels.size and (source_labels.min() < limits.min or source_labels.max() > limits.max):
         raise ValueError("Gaussian labels exceed the signed 32-bit membership range")
     result = source_labels.astype(np.int32, copy=True)
-    result[~above_floor_mask(positions(rows), floor_model)] = BACKGROUND
+    xyz = positions(rows)
+    above = above_floor_mask(xyz, floor_model)
+    if refinement:
+        near = np.flatnonzero((result >= 0) & ~above & object_point_mask(xyz, floor_model))
+        # A flat Gaussian parallel to the floor is not rescued by its centre height alone.
+        # Compare variance along the plane normal against mean tangential variance.
+        from scipy.spatial.transform import Rotation
+
+        for start in range(0, len(near), 100_000):
+            chosen = near[start : start + 100_000]
+            quats = np.stack([rows[f"rot_{axis}"][chosen] for axis in (1, 2, 3, 0)], axis=1).astype(float)
+            scales = np.exp(np.stack([rows[f"scale_{axis}"][chosen] for axis in range(3)], axis=1).astype(float))
+            valid = (
+                np.isfinite(quats).all(axis=1) & (np.linalg.norm(quats, axis=1) > 0) & np.isfinite(scales).all(axis=1)
+            )
+            normal_local = (
+                Rotation.from_quat(quats[valid]).inv().apply(np.asarray(floor_model.plane_normal_world))
+                if valid.any()
+                else np.empty((0, 3))
+            )
+            variance = scales[valid] ** 2
+            normal_variance = (variance * normal_local**2).sum(axis=1)
+            tangent_variance = (variance.sum(axis=1) - normal_variance) / 2
+            keep = (normal_variance >= tangent_variance) | np.isclose(
+                normal_variance, tangent_variance, rtol=16 * np.finfo(float).eps, atol=0
+            )
+            above[chosen[valid][keep]] = True
+    result[~above] = BACKGROUND
     return result
 
 

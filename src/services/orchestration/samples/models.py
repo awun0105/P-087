@@ -106,6 +106,18 @@ class DemoStage(BaseModel):
     assets: list[DemoStageAsset] = Field(default_factory=list, max_length=8)
 
 
+class DemoObjectGeometry(BaseModel):
+    """Kết quả duyệt vật của đúng revision được xuất; thiếu số liệu thì để null."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    state: Literal["succeeded", "pending", "failed"]
+    duration_seconds: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    objectgs_count: int | None = Field(default=None, ge=0)
+    shell_count: int | None = Field(default=None, ge=0)
+    collider_count: int | None = Field(default=None, ge=0)
+
+
 class DemoSource(BaseModel):
     """Nguồn dữ liệu của demo (dataset công khai, traversal) để hiển thị trung thực."""
 
@@ -130,7 +142,9 @@ class DemoManifest(BaseModel):
     produced_at: datetime
     provenance: dict[str, str] = Field(default_factory=dict)
     stages: list[DemoStage]
+    object_geometry: DemoObjectGeometry | None = None
     video: DemoFile | None = None
+    video_caption: str | None = Field(default=None, exclude_if=lambda value: value is None)
     frames: list[DemoFile] = Field(default_factory=list, max_length=48)
     frame_count: int | None = Field(default=None, ge=0)
     splat: DemoFile

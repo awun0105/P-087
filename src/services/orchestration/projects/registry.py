@@ -50,6 +50,7 @@ from src.models.contracts.manifests import (
     PrivacyResult,
     PrivacyValidationReport,
     RuntimeManifest,
+    SourceType,
     StageArtifact,
     StageId,
     StageStatus,
@@ -74,8 +75,14 @@ from src.services.orchestration.inputs.assembly import InputResolutionRecord
 from src.services.orchestration.inputs.compatibility import INPUT_ASSEMBLY_RUNNABLE_RECIPE_GROUPS
 from src.services.orchestration.inputs.loose_package import LoosePackageError, verify_package_members
 from src.services.orchestration.inputs.runs import InputAssemblyRunCommit, InputAssemblyRunResult
+from src.services.orchestration.jobs import worker_runtimes
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
-from src.services.orchestration.jobs.models import JobAttemptRecord, PreparedInputReceipt, TransitionRequest
+from src.services.orchestration.jobs.models import (
+    JobAttemptRecord,
+    PreparedInputReceipt,
+    RuntimeRebound,
+    TransitionRequest,
+)
 from src.services.orchestration.jobs.profile import ExecutionProfile
 from src.services.orchestration.jobs.service import JobLifecycle
 from src.services.orchestration.processing import JobProcessingConfig, config_bytes, job_config_reference
@@ -133,6 +140,9 @@ class ProjectRegistry:
         database: RuntimeDatabase | None = None,
         execution_profile: ExecutionProfile | None = None,
         remote: ArtifactRemote | None = None,
+        runtime_from_workers: bool = False,
+        processing_config_checksum: Checksum | None = None,
+        job_seed: int | None = None,
     ) -> None:
         self.fixture_root = fixture_root
         self.job_fixture_dir = fixture_root / "mock_job"
@@ -144,6 +154,10 @@ class ProjectRegistry:
         self.runtime_resolver = ArtifactResolver(runtime_root, remote)
         self.persistence = ProjectPersistence(database, self.runtime_resolver) if database else None
         self.execution_profile = execution_profile
+        #: T-040: runtime cho job mới lấy từ worker đã công bố khi không có profile ghim.
+        self.runtime_from_workers = runtime_from_workers
+        self.processing_config_checksum = processing_config_checksum
+        self.job_seed = job_seed
         self.store = FilesystemArtifactStore(self.resolver)
         self.lifecycle = JobLifecycle(self.runtime_resolver, self.resolver)
         self.scene = SceneEditor(
@@ -282,6 +296,148 @@ class ProjectRegistry:
             input_manifest_checksum=request.input_manifest_checksum,
             source_rights_attestation=attestation,
             privacy_report=self._preliminary_privacy_report(request.input_manifest_checksum),
+            created_by=created_by,
+        )
+        if self.persistence is not None:
+            self.persistence.save_project(record)
+        else:
+            self._projects[project_id] = record
+            self._project_jobs[project_id] = []
+        return record
+
+    def create_project_from_dataset_images(
+        self,
+        *,
+        name: str,
+        dataset_owner: str,
+        images: tuple[Path, ...],
+        display_video: Path,
+        created_by: Actor | None = None,
+    ) -> ProjectRecord:
+        """Publish a composed video and its pre-extracted source frames as dataset input."""
+        if len(images) < 2 or any(path.suffix.lower() not in {".png", ".jpg", ".jpeg"} for path in images):
+            raise ValueError("dataset input requires at least two PNG/JPG/JPEG images")
+        if not display_video.is_file() or display_video.suffix.lower() != ".mp4":
+            raise ValueError("display video must be an existing MP4")
+        project_id = f"project-{uuid4().hex[:12]}"
+        attestation: JsonObject = {
+            "attested": True,
+            "data_origin": "public_or_synthetic",
+            "declared_owner": dataset_owner,
+            "declared_purpose": "kiểm thử nội bộ",
+            "rights_to_use_confirmed": True,
+            "anonymization_confirmed": True,
+            "retention_acknowledged": True,
+        }
+        files: list[InputFile] = []
+        inventory: list[dict[str, str | int]] = []
+        for index, image in enumerate(images):
+            if not image.is_file():
+                raise ValueError(f"dataset image is missing: {image.name}")
+            payload = image.read_bytes()
+            checksum = sha256_bytes(payload)
+            media_type = "image/png" if image.suffix.lower() == ".png" else "image/jpeg"
+            uri = f"artifact://jobs/{project_id}/input/frames/{image.name}"
+            reference = ProductArtifactRef(
+                artifact_type="RGBFrame",
+                schema_version="1.0",
+                artifact_uri=uri,
+                artifact_checksum=checksum,
+                data_class=ArtifactDataClass.PRODUCT_INPUT,
+                producer_stage=StageId.INPUT_VALIDATE,
+                job_id=project_id,
+            )
+            FilesystemArtifactStore(self.runtime_resolver).publish(reference, payload)
+            files.append(
+                InputFile(
+                    original_name=image.name,
+                    media_type=media_type,
+                    size_bytes=len(payload),
+                    checksum=checksum,
+                    artifact_uri=uri,
+                    data_class=ArtifactDataClass.PRODUCT_INPUT,
+                )
+            )
+            inventory.append({"frame_id": index, "name": image.name, "checksum": checksum})
+        video_payload = display_video.read_bytes()
+        video_checksum = sha256_bytes(video_payload)
+        video_uri = f"artifact://jobs/{project_id}/input/video/scene.mp4"
+        video_input_ref = ProductArtifactRef(
+            artifact_type="RGBVideo",
+            schema_version="1.0",
+            artifact_uri=video_uri,
+            artifact_checksum=video_checksum,
+            data_class=ArtifactDataClass.PRODUCT_INPUT,
+            producer_stage=StageId.INPUT_VALIDATE,
+            job_id=project_id,
+        )
+        FilesystemArtifactStore(self.runtime_resolver).publish(video_input_ref, video_payload)
+        files.append(
+            InputFile(
+                original_name=display_video.name,
+                media_type="video/mp4",
+                size_bytes=len(video_payload),
+                checksum=video_checksum,
+                artifact_uri=video_uri,
+                data_class=ArtifactDataClass.PRODUCT_INPUT,
+            )
+        )
+        display_video_ref = ProductArtifactRef(
+            artifact_type="DisplayVideo",
+            schema_version="1.0",
+            artifact_uri=f"artifact://jobs/{project_id}/display/scene.mp4",
+            artifact_checksum=video_checksum,
+            data_class=ArtifactDataClass.PRODUCT_INPUT,
+            producer_stage=StageId.INPUT_VALIDATE,
+            job_id=project_id,
+        )
+        FilesystemArtifactStore(self.runtime_resolver).publish(display_video_ref, video_payload)
+        dataset_checksum = canonical_content_checksum(
+            {"frames": inventory, "dataset_manifest_checksum": "sha256:" + "0" * 64},
+            "dataset_manifest_checksum",
+        )
+        draft = InputManifest(
+            schema_version="1.0",
+            source_type=SourceType.DATASET,
+            received_at=datetime.now(UTC),
+            files=files,
+            input_configuration=InputConfiguration(rgb_present=True, registered_lidar_present=False),
+            source_rights_attestation=attestation,
+            dataset_manifest_checksum=dataset_checksum,
+            preparation_provenance={
+                "input_mode": "video_with_preextracted_image_refs",
+                "video_decode_skipped": True,
+            },
+            input_manifest_checksum="sha256:" + "0" * 64,
+        )
+        manifest = with_canonical_checksum(draft, "input_manifest_checksum")
+        body = manifest.model_dump_json(indent=2).encode("utf-8") + b"\n"
+        manifest_ref = ProductArtifactRef(
+            artifact_type="InputManifest",
+            schema_version="1.0",
+            artifact_uri=f"artifact://jobs/{project_id}/input/input_manifest.json",
+            artifact_checksum=sha256_bytes(body),
+            data_class=ArtifactDataClass.PRODUCT_INPUT,
+            producer_stage=StageId.INPUT_VALIDATE,
+            job_id=project_id,
+        )
+        FilesystemArtifactStore(self.runtime_resolver).publish(manifest_ref, body)
+        record = ProjectRecord(
+            project_id=project_id,
+            name=name,
+            source_type=SourceType.DATASET,
+            input_manifest_checksum=manifest.input_manifest_checksum,
+            source_rights_attestation=attestation,
+            privacy_report=self._preliminary_privacy_report(manifest.input_manifest_checksum),
+            privacy_mode="self_attested",
+            input_manifest_ref=manifest_ref,
+            display_video_ref=display_video_ref,
+            input_video=InputVideoSummary(
+                original_name=display_video.name,
+                media_type="video/mp4",
+                size_bytes=len(video_payload),
+            ),
+            created_at=datetime.now(UTC),
             created_by=created_by,
         )
         if self.persistence is not None:
@@ -869,6 +1025,31 @@ class ProjectRegistry:
         updated, reference = self.lifecycle.apply(current, request, sequence)
         self._jobs[job_id] = updated
         self._record_attempt(job_id, updated, request, reference, requested_by=requested_by)
+        return updated
+
+    def rebind_job_runtime(self, job: JobManifest, runtime_checksum: Checksum, *, reason: str) -> JobManifest:
+        """Gắn job QUEUED chưa có stage sang runtime của worker đang sống (T-040, Q1); CAS theo revision."""
+        if self.persistence is None:
+            raise RuntimeError("Gắn lại runtime cần durable registry")
+        history = self.persistence.list_attempts(job.job_id)
+        updated = with_canonical_checksum(
+            job.model_copy(update={"runtime_manifest_checksum": runtime_checksum}), "job_manifest_checksum"
+        )
+        reference = self.lifecycle.store.publish_manifest(updated)
+        event = JobAttemptRecord(
+            attempt=history[-1].attempt if history else 1,
+            status=JobStatus.QUEUED,
+            current_stage=job.current_stage,
+            recorded_at=datetime.now(UTC),
+            job_manifest_uri=reference.artifact_uri,
+            job_manifest_checksum=reference.artifact_checksum,
+            runtime_rebound=RuntimeRebound(
+                from_checksum=job.runtime_manifest_checksum,
+                to_checksum=runtime_checksum,
+                reason=reason,
+            ),
+        )
+        self.persistence.save_job(updated, reference, event, expected=job, runtime_rebind=True)
         return updated
 
     def _record_attempt(
@@ -1693,15 +1874,33 @@ class ProjectRegistry:
         self.persistence.save_job(updated, reference, event, expected=expected)
         return updated
 
+    def job_profile(self, now: datetime | None = None) -> ExecutionProfile | None:
+        """Runtime gắn vào job mới: profile ghim tay nếu có, không thì runtime worker công bố gần nhất.
+
+        Không có worker nào từng công bố thì None; worker đã mất (quá TTL) vẫn được chọn để job không bị từ chối.
+        """
+        if self.execution_profile is not None:
+            return self.execution_profile
+        if not self.runtime_from_workers or self.persistence is None or self.processing_config_checksum is None:
+            return None
+        runtime = worker_runtimes.select(
+            self.persistence.database,
+            config_checksum=self.processing_config_checksum,
+            seed=self.job_seed,
+            now=now,
+        )
+        return None if runtime is None else runtime.profile()
+
     def _build_queued_job(
         self, project: ProjectRecord, scene_revision: str, job_id: str, config_checksum: Checksum | None
     ) -> JobManifest:
         """Runtime job không được mang config/versions synthetic của fixture."""
-        profile = self.execution_profile
+        profile = self.job_profile()
         if profile is None:
             if self.persistence is not None and project.source_rights_attestation.get("fixture") is not True:
                 raise RuntimeStateConflictError(
-                    "Chưa cấu hình execution profile: cần PRODUCT_PROCESSING_CONFIG và PRODUCT_RUNTIME_MANIFEST"
+                    "Chưa có runtime cho job: cần PRODUCT_PROCESSING_CONFIG và PRODUCT_RUNTIME_MANIFEST, "
+                    "hoặc GPU worker đã công bố runtime (PRODUCT_RUNTIME_FROM_WORKERS=true)"
                 )
             profile = ExecutionProfile(
                 config_checksum=self._fixture_config_checksum(),
@@ -1716,7 +1915,7 @@ class ProjectRegistry:
             status=JobStatus.QUEUED,
             input_manifest_checksum=project.input_manifest_checksum,
             config_checksum=config_checksum or profile.config_checksum,
-            runtime_manifest_checksum=profile.runtime_manifest_checksum,
+            runtime_manifest_checksum=profile.job_runtime_checksum,
             seed=profile.seed,
             started_at=datetime.now(UTC),
             completed_at=None,
@@ -1746,7 +1945,7 @@ class ProjectRegistry:
 
     def get_preview(self, job_id: str) -> ReconstructionPreview:
         """Raw 3DGS preview trước SceneIR; không ngụ ý metric đã confirmed."""
-        return load_job_preview(self.get_job(job_id), self.runtime_resolver)
+        return load_job_preview(self.get_job(job_id), self.runtime_resolver, reuse_verified_dependencies=True)
 
     def list_job_artifacts(self, job_id: str) -> tuple[list[ProductArtifactRef], int]:
         """Ref artifact được phép hiện ra product, kèm số ref bị loại.
@@ -1933,6 +2132,11 @@ def get_project_registry() -> ProjectRegistry:
         database=RuntimeDatabase(settings.database_url),
         execution_profile=profile,
         remote=artifact_remote(settings),
+        runtime_from_workers=settings.product_runtime_from_workers,
+        processing_config_checksum=(
+            sha256_file(settings.product_processing_config) if settings.product_processing_config is not None else None
+        ),
+        job_seed=settings.product_seed,
     )
     if settings.product_fixture_mode:
         registry.seed_from_fixtures()

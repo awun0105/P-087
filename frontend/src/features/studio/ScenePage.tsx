@@ -6,7 +6,7 @@ import { errorMessage } from "@/lib/ui-error";
 
 import dynamic from "next/dynamic";
 import { ArrowLeft, Box, Package, Pencil, ShieldCheck, Workflow } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Badge } from "@/components/studio/primitives";
 import { usePageTitle } from "@/features/shell/Breadcrumbs";
@@ -16,9 +16,11 @@ import { DemoControls } from "@/features/studio/scene/DemoControls";
 import { SceneTabs, type SceneTabItem } from "@/features/studio/scene/SceneTabs";
 import { GAUSSIAN_EDIT_ENABLED, metricState, stageState, type Preview, type SceneInfo, type StudioMode, type Tab } from "@/features/studio/scene/state";
 import { ObjectifyContext } from "@/features/studio/scene/objectifyContext";
-import { useObjectifyState } from "@/features/studio/scene/useObjectify";
+import { geometryReviewStep, useObjectifyState } from "@/features/studio/scene/useObjectify";
 import { progressSceneStatus } from "@/features/studio/sceneStatus";
 import { usePolling } from "@/features/studio/usePolling";
+import { ValueTrackingContext } from "@/features/studio/value/tracking-context";
+import { useOperatorTime } from "@/features/studio/value/useOperatorTime";
 import { getJob, getPreview, getProject, jobArtifactContentUrl } from "@/lib/api/endpoints";
 import { cancelJob, getJobProgress, retryJob } from "@/lib/api/studio";
 import { cn } from "@/lib/cn";
@@ -28,6 +30,7 @@ import { useAuth } from "@/features/studio/AuthProvider";
 import { NextAction } from "@/features/studio/scene/NextAction";
 import { ErrorFeedback, notifySuccess } from "@/components/studio/feedback";
 import type { MetricDraft } from "@/features/studio/MetricConfirmView";
+import type { OperatorTimeSurface } from "@/lib/api/value";
 import type { JobProgress } from "@/lib/contracts/studio";
 
 interface RetrySync {
@@ -39,6 +42,15 @@ interface RetrySync {
 }
 
 const PROGRESS_STATUS_ORDER = { QUEUED: 0, RUNNING: 1, SUCCEEDED: 2, FAILED: 2, CANCELLED: 2 } as const;
+
+/** Bề mặt ghi trong §15.3: mỗi tab là một bề mặt riêng để thời gian của từng tab tách bạch. */
+export const OPERATOR_SURFACE: Record<Tab, OperatorTimeSurface> = {
+  progress: "progress",
+  studio: "studio",
+  // Bảng đánh giá (EvaluationCard) nằm ở tab Kiểm tra & duyệt; tab Kết quả là tải gói, không phải đánh giá.
+  review: "evaluation",
+  results: "other",
+};
 
 /**
  * Mỗi tab là một chunk riêng: three.js (kết quả từng bước) và PlayCanvas (Studio) chỉ tải khi mở
@@ -104,7 +116,7 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
       const project = await getProject(job.data.project_id);
       if (!project.ok || !alive) return;
       const video = project.data.input_video;
-      setInfo({ name: project.data.name, videoName: video?.original_name ?? null, videoSize: video?.size_bytes ?? null, createdBy: project.data.created_by?.display_name ?? null });
+      setInfo({ name: project.data.name, videoName: video?.original_name ?? null, videoSize: video?.size_bytes ?? null, displayVideoUrl: project.data.display_video_url ?? null, createdBy: project.data.created_by?.display_name ?? null });
     })();
     return () => {
       alive = false;
@@ -264,7 +276,9 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
     enabled: sceneReady,
     onRevision: (revision) => { setSave({ status: "saved", revision }); setPollingKey((k) => k + 1); },
   });
-  const status = progress ? progressSceneStatus(progress, objectify.state?.awaiting_choice === true && !objectify.pending) : null;
+  const status = progress
+    ? progressSceneStatus(progress, objectify.state?.awaiting_choice === true && !objectify.pending, geometryReviewStep(objectify.state))
+    : null;
   const studioMode: StudioMode = mode === "metric" && !waitingMetric ? "scene" : mode;
 
   const tabs: SceneTabItem[] = [
@@ -276,6 +290,13 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
 
   const locked = tabs.find((item) => item.id === selected)?.locked;
   const current: Tab = locked ? "progress" : selected;
+  // Chỉ người có quyền sửa job mới được đo; người xem không sửa được thì không gửi gì.
+  useOperatorTime({ jobId, surface: OPERATOR_SURFACE[current], enabled: canMutateJob });
+  // Phiên Walk chỉ ghi khi đang ở tab Studio: tab Studio vẫn được giữ mount khi người dùng sang tab khác.
+  const walkTracking = useMemo(
+    () => ({ jobId, enabled: canMutateJob && current === "studio" }),
+    [jobId, canMutateJob, current],
+  );
   function openTab(next: Tab, nextMode?: StudioMode) {
     const target = new URL(window.location.href);
     target.searchParams.set("tab", next);
@@ -291,6 +312,7 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
 
   return (
     <ObjectifyContext.Provider value={objectify}>
+    <ValueTrackingContext.Provider value={walkTracking}>
     <main aria-label={current === "studio" ? "Studio toàn màn hình" : undefined} className={cn("flex flex-col", current === "studio" ? "fixed inset-0 z-40 h-dvh bg-paper" : "h-[calc(100dvh-3rem)]")}>
       <div className="relative z-20 flex flex-wrap items-center gap-2 border-b border-line bg-paper-raised px-4 py-3 sm:px-6">
         {current === "studio" && <button type="button" aria-label="Thoát Studio, về Tiến trình" title="Về Tiến trình" onClick={() => openTab("progress")}
@@ -362,6 +384,7 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
             canCancel={canCancelJob}
             canAccept={canMutateJob}
             onConfirmMetric={canMutateJob && preview ? () => openTab("studio", "metric") : undefined}
+            onOpenStudio={canMutateJob ? () => openTab("studio", "scene") : undefined}
             onRetry={canRetryJob && !retryPending ? startRetry : undefined}
             retryDisabled={busy || guestQuotaExhausted}
             retryHint={guestQuotaExhausted ? "Đã hết lượt Guest hôm nay; lượt được đặt lại lúc 00:00." : undefined}
@@ -404,6 +427,7 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
         />}
       </div>
     </main>
+    </ValueTrackingContext.Provider>
     </ObjectifyContext.Provider>
   );
 }

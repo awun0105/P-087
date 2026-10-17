@@ -8,7 +8,11 @@ from pydantic import ValidationError
 
 from src.models.contracts.coordinates import Transform
 from src.models.contracts.scene import ColliderSpec, ColliderType, MassSource, ObjectPhysics, SceneIR, SceneObject
-from src.services.orchestration.scene.errors import SceneEditRejectedError, SceneRevisionConflictError
+from src.services.orchestration.scene.errors import (
+    ObjectGeometryNotReadyError,
+    SceneEditRejectedError,
+    SceneRevisionConflictError,
+)
 from src.services.orchestration.scene.models import ColliderEditCommand
 from src.services.orchestration.scene.objects import edit_collider_scene
 from src.services.scene.publisher import with_scene_checksum
@@ -262,3 +266,15 @@ def test_manual_collider_override_survives_later_physics_enrichment() -> None:
     assert current.collider is not None
     assert current.collider.dimensions_xyz_m == (1.4, 2.4, 3.4)
     assert current.collider.provenance["manual_override"]["operation"] == "collider_edit"
+
+
+def test_draft_scene_refuses_collider_edit_before_any_change() -> None:
+    scene = SceneIR.model_validate(json.loads(_FIXTURE.read_text(encoding="utf-8")))
+    draft = scene.model_copy(update={"provenance": {**scene.provenance, "object_geometry": "awaiting_review"}})
+    command = ColliderEditCommand(
+        expected_scene_revision=draft.scene_revision,
+        object_id="object-pallet-001",
+        dimensions_xyz_m=(1.0, 1.0, 1.0),
+    )
+    with pytest.raises(ObjectGeometryNotReadyError, match="Cần tạo mesh trước khi sửa collider"):
+        edit_collider_scene(draft, command)

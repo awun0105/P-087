@@ -55,6 +55,8 @@ class Settings(BaseSettings):
     #: Từ điển COLMAP chuẩn, tải bằng scripts/assets/download_vocab_tree.py; None dùng vị trí chuẩn trong repo.
     product_colmap_vocab_tree: Path | None = None
     product_runtime_manifest: Path | None = None
+    #: T-040: API không cần manifest; job mới lấy runtime mà GPU worker đã công bố vào DB (cần PRODUCT_PROCESSING_CONFIG).
+    product_runtime_from_workers: bool = False
     #: Runtime qualification registry for grouped input recipes; absent means no new recipe dispatch is enabled.
     product_input_runtime_registry: Path | None = None
     #: Server-owned policy/profile for durable Isaac validation; not accepted from request payloads.
@@ -67,15 +69,31 @@ class Settings(BaseSettings):
     product_worker_root: Path = Path("./data/product_workers")
     #: Giữ scratch để chẩn đoán; mặc định chỉ dọn attempt đã publish và commit thành công.
     product_worker_keep_scratch: bool = False
-    product_preview_timeout_seconds: float = Field(default=21600, gt=0, allow_inf_nan=False)
+    #: Giới hạn bao ngoài của bước preview (COLMAP 14400 + Brush 21600 chạy trong một lượt; T-043 round 2).
+    product_preview_timeout_seconds: float = Field(default=36000, gt=0, allow_inf_nan=False)
     #: Thông số REC-05 (voxel/capsule) cho bước hoàn tất sau xác nhận tỉ lệ (owner chốt 2026-09-29).
     product_geometry_config: Path = Path("configs/product/geometry_v1.json")
     product_evaluation_reference: Path = Path("configs/product/evaluation_reference_v1.json")
-    product_finalize_timeout_seconds: float = Field(default=7200, gt=0, allow_inf_nan=False)
+    #: Giới hạn bao ngoài của bước hoàn tất: splat-process (Brush 21600) + 6 lần voxel (T-043 round 2).
+    product_finalize_timeout_seconds: float = Field(default=36000, gt=0, allow_inf_nan=False)
     #: GPU adapter cho splat-transform, theo từng máy (`--list-gpus`); None = dùng giá trị trong profile.
     product_geometry_gpu_index: int | None = Field(default=None, ge=0)
     #: Runtime SAM2 cho tách vật thể (ADR 0006); thiếu thì dùng fallback hình học.
     product_scene_runtime_python: Path | None = None
+    #: ObjectGS runs in its own pinned runtime; never install its gsplat into scene/Brush environments.
+    product_objectgs_runtime_python: Path | None = None
+    product_objectgs_repository: Path | None = None
+    product_objectgs_gsplat_repository: Path | None = None
+    product_objectgs_timeout_seconds: float = Field(default=14400, gt=0, allow_inf_nan=False)
+    product_objectgs_stall_seconds: float = Field(default=1800, gt=0, allow_inf_nan=False)
+    #: Trần giờ GPU mỗi scene (T-043). Không đặt = không giới hạn; máy phòng thí nghiệm không đặt.
+    product_job_gpu_hours_max: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    product_objectgs_gpu_device: int = Field(default=0, ge=0)
+    product_objectgs_cuda_home: Path | None = None
+    product_objectgs_cxx: Path | None = None
+    product_objectgs_glm_repository: Path | None = None
+    #: Cache biên dịch dùng chung của gsplat-object (dựng sẵn bởi setup_objectgs_runtime.sh); None = biên dịch trong workspace.
+    product_objectgs_extension_cache_dir: Path | None = None
     #: Che khuôn mặt/biển số trên frame trước khi dựng 3D (AUD-18). Cần `product_scene_runtime_python` và
     #: `product_egoblur_weights`; bật mà thiếu thì job lỗi ở bước tách frame, không chạy trên frame gốc.
     product_anonymize_input: bool = False
@@ -85,6 +103,8 @@ class Settings(BaseSettings):
     product_anonymize_remote_worker: bool = False
     product_sam2_checkpoint: Path | None = None
     product_scene_timeout_seconds: float = Field(default=1800, gt=0, allow_inf_nan=False)
+    #: Ngân sách bộ nhớ cho Gaussian nguồn đã đọc của xem trước vùng (MiB); mục cũ nhất bị bỏ khi vượt (T-025).
+    product_region_source_cache_mib: int = Field(default=1024, ge=0)
     #: Pipeline v2 (ADR 0007): trọng số LaMa TorchScript cho vá nền; thiếu thì dùng cv2.inpaint.
     product_lama_checkpoint: Path | None = None
     #: Bật tách scene theo vật (Gaussian + collider từng vật, vá nền). Cần runtime có gsplat/coacd.
@@ -172,7 +192,13 @@ class Settings(BaseSettings):
             raise ValueError(f"Missing API key for LLM provider: {self.llm_provider}")
         if self.app_env in {"staging", "production"} and not self.artifact_root.is_absolute():
             raise ValueError("ARTIFACT_ROOT must be absolute outside development/test")
-        if (self.product_processing_config is None) != (self.product_runtime_manifest is None):
+        if self.product_runtime_manifest is not None and self.product_processing_config is None:
+            raise ValueError("PRODUCT_RUNTIME_MANIFEST cần PRODUCT_PROCESSING_CONFIG")
+        if self.product_runtime_from_workers and self.product_processing_config is None:
+            raise ValueError("PRODUCT_RUNTIME_FROM_WORKERS cần PRODUCT_PROCESSING_CONFIG")
+        if not self.product_runtime_from_workers and (self.product_processing_config is None) != (
+            self.product_runtime_manifest is None
+        ):
             raise ValueError("PRODUCT_PROCESSING_CONFIG và PRODUCT_RUNTIME_MANIFEST phải khai báo cùng nhau")
         if (self.product_isaac_validation_config is None) != (self.product_isaac_validation_profile is None):
             raise ValueError(

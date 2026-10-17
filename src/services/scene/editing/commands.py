@@ -116,9 +116,14 @@ def rename_object(scene: SceneIR, object_id: str, name: str) -> SceneIR:
 
 
 def set_object_active(scene: SceneIR, object_id: str, active: bool) -> SceneIR:
-    """Hide/show or logically delete an object from active consumers."""
-    updated = _find_object(scene, object_id).model_copy(update={"active": active}, deep=True)
-    operation = "show" if active else "delete"
+    """Bật/tắt mô phỏng của vật đã xác nhận, độc lập ẩn viewport và Delete."""
+    if not isinstance(active, bool):
+        raise ValueError("simulation activation requires an explicit boolean")
+    target = _find_object(scene, object_id)
+    if target.state != SceneObjectState.CONFIRMED or target.provenance.get("review") in {"IGNORED", "DELETED"}:
+        raise ValueError("simulation activation requires a confirmed object that has not been removed")
+    updated = target.model_copy(update={"active": active}, deep=True)
+    operation = "activate_simulation" if active else "deactivate_simulation"
     return _replace_object(scene, updated, operation)
 
 
@@ -139,24 +144,21 @@ def ignore_object(scene: SceneIR, object_id: str) -> SceneIR:
     """Loại ứng viên: SceneIR chỉ có CANDIDATE/CONFIRMED nên giữ CANDIDATE, tắt active, ghi IGNORED.
 
     Không xoá khỏi revision để còn audit và khôi phục (PRD: confirm/ignore/correct là metric vận hành).
+    Trong Draft, vật đã xác nhận cũng có thể đổi lại thành phần nền cố định trước khi dựng mesh.
     """
     target = _find_object(scene, object_id)
-    if target.state == SceneObjectState.CONFIRMED:
+    if target.state == SceneObjectState.CONFIRMED and scene.provenance.get("object_geometry") != "awaiting_review":
         raise ValueError("vật thể đã xác nhận; ẩn/xoá thay vì loại ứng viên")
     review = {**target.provenance, "review": "IGNORED"}
-    updated = target.model_copy(update={"active": False, "provenance": review}, deep=True)
+    updated = target.model_copy(
+        update={"state": SceneObjectState.CANDIDATE, "active": False, "provenance": review}, deep=True
+    )
     return _replace_object(scene, updated, "ignore")
 
 
 def delete_object(scene: SceneIR, object_id: str) -> SceneIR:
-    """Xoá vật khỏi scene.
-
-    Vật người dùng thêm bị gỡ hẳn. Vật tái dựng giữ lại trong revision (audit, khôi phục) nhưng tắt
-    active và ghi `review=DELETED` — khác "ẩn" ở chỗ UI xếp nó vào nhóm đã xoá, không hiện trong scene.
-    """
+    """Soft-delete every object so user-added assets remain auditable and restorable."""
     target = _find_object(scene, object_id)
-    if target.origin == SceneObjectOrigin.USER_ADDED:
-        return _replace_objects(scene, [item for item in scene.objects if item.id != object_id], "delete")
     review = {**target.provenance, "review": "DELETED"}
     updated = target.model_copy(update={"active": False, "provenance": review}, deep=True)
     return _replace_object(scene, updated, "delete")
@@ -239,6 +241,15 @@ def _find_object(scene: SceneIR, object_id: str) -> SceneObject:
 
 
 def _replace_object(scene: SceneIR, updated: SceneObject, operation: str) -> SceneIR:
+    # A retained source object has no separate collider. Selecting it again reopens review, never a broken Ready scene.
+    if (
+        operation in {"confirm", "restore"}
+        and scene.provenance.get("object_geometry") == "ready"
+        and scene.environment.membership is not None
+        and updated.collider is None
+        and _find_object(scene, updated.id).provenance.get("review") == "IGNORED"
+    ):
+        scene = scene.model_copy(update={"provenance": {**scene.provenance, "object_geometry": "awaiting_review"}})
     objects = [updated if item.id == updated.id else item for item in scene.objects]
     return _replace_objects(scene, objects, operation)
 

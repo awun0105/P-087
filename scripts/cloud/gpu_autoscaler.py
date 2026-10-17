@@ -6,7 +6,7 @@ Chạy thường trực ở nơi thấy được DB + kho file của deployment 
     python -m scripts.cloud.gpu_autoscaler --once --dry-run   # xem nó định làm gì, không gọi vast.ai
 
 Mỗi chu kỳ: đếm việc đang chờ GPU trong DB (job trong hàng đợi, job vừa được xác nhận hệ mét, yêu cầu dựng lại
-tập vật) và việc đang chạy; có việc chờ mà GPU chưa bật → bật; không còn việc quá `GPU_IDLE_MINUTES` → tắt.
+tập vật; job chỉ đếm khi GPU bật thêm chạy được, xem `runnable_waiting`) và việc đang chạy; có việc chờ mà GPU chưa bật → bật; không còn việc quá `GPU_IDLE_MINUTES` → tắt.
 Job đang **chờ người dùng** xác nhận hệ mét không tính là việc: GPU được tắt trong lúc chờ.
 
 Hai cách dùng vast.ai, chọn bằng `VAST_MODE`:
@@ -47,7 +47,10 @@ import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Literal, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
+
+if TYPE_CHECKING:
+    from src.models.contracts.manifests import JobManifest
 
 logger = logging.getLogger("gpu_autoscaler")
 
@@ -111,17 +114,28 @@ def decide(workload: Workload, state: GpuState, idle_for: timedelta, idle_limit:
 # --- đếm việc trong DB -------------------------------------------------------
 
 
+def runnable_waiting(job: "JobManifest", live: frozenset[str]) -> bool:
+    """Job chờ worker mà bật thêm GPU có thể chạy (T-040 Q6).
+
+    Đếm khi runtime của job đang có worker sống, hoặc job chưa có stage nên sẽ được gắn lại sang máy mới.
+    Job đã có stage trên runtime đã mất không đếm: GPU không chạy được, cần chạy lại từ đầu.
+    """
+    return job.runtime_manifest_checksum in live or not job.stage_artifacts
+
+
 def measure_workload() -> Workload:
     """Đọc hàng đợi job và yêu cầu dựng lại tập vật từ DB của deployment."""
     from src.config import get_settings
     from src.models.contracts.manifests import JobStatus, StageId
     from src.services.orchestration.jobs.database import RuntimeDatabase
     from src.services.orchestration.jobs.progress import awaiting_finalize, metric_confirmation_stage
+    from src.services.orchestration.jobs.worker_runtimes import live_runtime_checksums
     from src.services.orchestration.projects.registry import get_project_registry
 
     registry = get_project_registry()
     if registry.persistence is None:
         raise AutoscalerError("Autoscaler cần registry bền vững (DATABASE_URL)")
+    live = live_runtime_checksums(registry.persistence.database)
     waiting = running = 0
     cursor = ""
     while page := registry.persistence.job_ids_after(cursor):
@@ -131,7 +145,7 @@ def measure_workload() -> Workload:
             except Exception as error:  # noqa: BLE001 - một manifest hỏng không được làm autoscaler dừng
                 logger.warning("Bỏ qua job %s: %s", job_id, type(error).__name__)
                 continue
-            if job.status == JobStatus.QUEUED or awaiting_finalize(job):
+            if (job.status == JobStatus.QUEUED or awaiting_finalize(job)) and runnable_waiting(job, live):
                 waiting += 1
             elif job.status == JobStatus.RUNNING:
                 # RUNNING ở bước xác nhận mà chưa có bản xác nhận = đang chờ người dùng, không phải việc của GPU.

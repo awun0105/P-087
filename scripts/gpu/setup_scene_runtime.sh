@@ -125,7 +125,7 @@ Runtime sẵn sàng. Thêm vào file env của stack (vd scripts/gpu/studio.env)
   PRODUCT_SCENE_RUNTIME_PYTHON=$PY
   PRODUCT_SAM2_CHECKPOINT=$RUNTIME/checkpoints/sam2.1_hiera_tiny.pt
   PRODUCT_LAMA_CHECKPOINT=$RUNTIME/weights/big-lama.pt
-  REC06_MOGE_PYTHON=$PY
-  REC06_MOGE_MODEL=$RUNTIME/weights/moge-2-vitb-normal.pt
-  REC04_BRUSH_LPIPS_PYTHON=$PY
+  R2S_MOGE_PYTHON=$PY
+  R2S_MOGE_MODEL=$RUNTIME/weights/moge-2-vitb-normal.pt
+  R2S_BRUSH_LPIPS_PYTHON=$PY
 EOF

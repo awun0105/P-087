@@ -56,6 +56,8 @@ const acquire = (pool: ChunkDataPool, source: ChunkSource, layer: ChunkLayer, co
 class EditorSplatResource extends GSplatContainer {
     // the lazily-read static data. replaced only by rebind()
     source: ChunkSource;
+    sourceFileRows: Uint32Array | null = null;
+    membershipSourceChecksum: string | null = null;
     // the local files `source` lazily reads through, when it was loaded from
     // any. These must not be overwritten while in use (see scene.sourcesOf).
     fileSources: BlobReadSource[] = [];
@@ -378,6 +380,7 @@ class EditorSplatResource extends GSplatContainer {
                 const components = [4, 4, 4, ...shDefs.map(sh => sh.components)];
                 targets.forEach((target, i) => EditorSplatResource.permuteRows(target, components[i], inverse));
                 EditorSplatResource.permuteRows(this.initialState, 1, inverse);
+                this.sourceFileRows = order;
                 this.source = new PermutedChunkSource(source, order);
             }
         } catch (err) {

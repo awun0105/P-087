@@ -14,6 +14,8 @@ from src.models.contracts.artifacts import ContractModel, ProductArtifactRef
 from src.models.contracts.scene import ColliderType, SceneIR, SceneObject, SceneObjectState
 from src.services.orchestration.artifacts.checksum import verify_file_checksum
 from src.services.orchestration.artifacts.errors import ArtifactStoreError
+from src.services.scene.representation_composition import scene_representations
+from src.services.scene.representation_integrity import representation_issues
 from src.services.simulation.mesh_geometry import MeshValidationError, load_mesh_parts
 
 
@@ -124,14 +126,16 @@ def _resolve_usd_asset(ref: ProductArtifactRef, resolve_artifact: ResolveArtifac
 
 def export_requirements(scene: SceneIR) -> ExportRequirements:
     """Derive requirements from authored SceneIR fields, not builder availability."""
-    exported = [item for item in scene.objects if item.active]
+    dispositions = {item.object_id: item for item in scene_representations(scene)}
+    exported = [item for item in scene.objects if dispositions[item.id].export_as_object]
     collider_types = sorted({item.collider.collider_type for item in exported if item.collider is not None}, key=str)
     return ExportRequirements(
         collider_types=collider_types,
         static_physics=any(item.physics is not None and not item.physics.dynamic for item in exported),
         dynamic_physics=any(item.physics is not None and item.physics.dynamic for item in exported),
         local_collider_offsets=any(_has_non_identity_offset(item) for item in exported),
-        hybrid_visuals=scene.environment.visual_master_ref is not None
+        hybrid_visuals=any(item.source_visual_required for item in dispositions.values())
+        or scene.environment.visual_master_ref is not None
         or any(item.visual_ref is not None and item.visual_ref.artifact_type == "ObjectGaussians" for item in exported),
         external_assets=any(_uses_external_asset(item) for item in exported),
     )
@@ -201,8 +205,12 @@ def assess_export_capabilities(
     """
     requirements = export_requirements(scene)
     mode = select_export_mode(requirements)
-    blockers: list[ExportCapabilityBlocker] = []
-    exported = [item for item in scene.objects if item.active]
+    blockers: list[ExportCapabilityBlocker] = [
+        _blocker(code, "Visual representation cannot be reconstructed from verified source evidence.", [object_id])
+        for object_id, code in representation_issues(scene, resolve_artifact)
+    ]
+    dispositions = {item.object_id: item for item in scene_representations(scene)}
+    exported = [item for item in scene.objects if dispositions[item.id].export_as_object]
 
     if mode == EffectiveExportMode.HYBRID and not runtime_qualified:
         blockers.append(
@@ -362,7 +370,7 @@ def assess_export_capabilities(
         scene_ir_checksum=scene.scene_ir_checksum,
         status=ExportCapabilityStatus.BLOCKED if blockers else ExportCapabilityStatus.SUPPORTED,
         effective_mode=mode,
-        builder_version="usd-export-capabilities-v2",
+        builder_version="usd-export-capabilities-v3",
         runtime_qualification=(
             RuntimeQualificationStatus.NOT_REQUIRED
             if mode == EffectiveExportMode.LEGACY_BOX
@@ -379,6 +387,8 @@ def assess_export_capabilities(
 
 def validate_builder_mode(scene: SceneIR, mode: EffectiveExportMode) -> None:
     """Fail closed when a low-level CandidateBuildRequest bypasses orchestration."""
+    if any(item.readiness_blockers for item in scene_representations(scene)):
+        raise ValueError("visual representation policy has unresolved blockers")
     requirements = export_requirements(scene)
     inferred_mode = select_export_mode(requirements)
     if mode == EffectiveExportMode.LEGACY_BOX and inferred_mode != mode:

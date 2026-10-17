@@ -25,22 +25,30 @@ SOURCE = DemoSource(dataset="Studio", sequence="Kho thử")
 
 
 class _Resolver:
-    def __init__(self, splat: Path) -> None:
+    def __init__(self, splat: Path, display_video: Path | None = None) -> None:
         self.splat = splat
+        self.display_video = display_video
+
+    def require_uri(self, uri: str, checksum: str) -> Path:
+        raise ArtifactStoreError("không có artifact này")
 
     def require(self, reference: object) -> Path:
         if reference == "DELIVERY":
             return self.splat
         if reference == "RAW_VIDEO_MANIFEST":
             raise AssertionError("video gốc chưa che không được đọc để đưa vào thư viện công khai")
+        if getattr(reference, "artifact_type", None) == "DISPLAY_VIDEO" and self.display_video is not None:
+            return self.display_video
         raise ArtifactStoreError("không có artifact này")
 
 
-def _registry(tmp_path: Path, *, preview_ok: bool = True, raw_video: bool = False):  # noqa: ANN202
+def _registry(tmp_path: Path, *, preview_ok: bool = True, raw_video: bool = False, display_video: bool = False):  # noqa: ANN202
     real = ProjectRegistry(runtime_root=tmp_path / "artifacts")
     real.seed_from_fixtures()
     splat = tmp_path / "preview.sog"
     splat.write_bytes(b"sog-bytes" * 20)
+    display = tmp_path / "display.mp4"
+    display.write_bytes(b"replay-video")
     preview = SimpleNamespace(
         delivery_ref="DELIVERY", camera_pose_ref=None, attempt_id="attempt-1", producer_version="v1"
     )
@@ -52,11 +60,32 @@ def _registry(tmp_path: Path, *, preview_ok: bool = True, raw_video: bool = Fals
 
     return SimpleNamespace(
         get_job=real.get_job,
+        scene=real.scene,
+        persistence=None,
         get_preview=get_preview,
-        runtime_resolver=_Resolver(splat),
-        get_project=lambda project_id: SimpleNamespace(input_manifest_ref="RAW_VIDEO_MANIFEST" if raw_video else None),
+        runtime_resolver=_Resolver(splat, display if display_video else None),
+        get_project=lambda project_id: SimpleNamespace(
+            input_manifest_ref="RAW_VIDEO_MANIFEST" if raw_video else ("IMAGE_MANIFEST" if display_video else None),
+            input_video=None,
+            display_video_ref=(
+                SimpleNamespace(artifact_type="DISPLAY_VIDEO", artifact_checksum=sha256_file(display))
+                if display_video
+                else None
+            ),
+        ),
         list_job_attempts=lambda job_id: [],
     ), splat
+
+
+def test_dataset_sample_exports_replay_video_without_reading_it_as_input(tmp_path: Path) -> None:
+    registry, _ = _registry(tmp_path, display_video=True)
+    out = tmp_path / "sample"
+    manifest = export_job_bundle(
+        registry, JOB_ID, out, demo_id="dataset-video", title="Dataset", description="", source=SOURCE
+    )
+    assert manifest.video is not None and manifest.video.name == "display.mp4"
+    assert manifest.video_caption == "Video ghép từ ảnh gốc, chỉ để xem lại"
+    assert (out / "files" / manifest.video.name).read_bytes() == b"replay-video"
 
 
 def test_slugify_drops_vietnamese_marks() -> None:
@@ -302,3 +331,203 @@ def test_the_raw_video_is_not_published_when_the_job_masked_faces_and_plates(tmp
     monkeypatch.setattr(export_module, "sanitized_frame_stage", lambda job: None)
     with pytest.raises(AssertionError, match="video gốc"):
         export_job_bundle(registry, JOB_ID, tmp_path / "plain", demo_id="y", title="Gốc", description="", source=SOURCE)
+
+
+def test_removed_job_can_be_published_again_without_overwriting_the_old_bundle(tmp_path: Path) -> None:
+    registry, _ = _registry(tmp_path)
+    root = tmp_path / "library"
+    first = publish_job_bundle(registry, JOB_ID, root, title="Kho", description="", source=SOURCE)
+    original = (root / first.demo_id / "manifest.json").read_bytes()
+    DemoLibrary(root).unpublish(first.demo_id)
+    assert published_sample_id(root, JOB_ID) is None
+    second = publish_job_bundle(registry, JOB_ID, root, title="Kho", description="Mới", source=SOURCE)
+    assert second.demo_id != first.demo_id
+    assert published_sample_id(root, JOB_ID) == second.demo_id
+    assert (root / first.demo_id / "manifest.json").read_bytes() == original
+
+
+def test_sample_optional_object_geometry_is_validated(tmp_path: Path) -> None:
+    from pydantic import ValidationError
+
+    from src.services.orchestration.samples.models import DemoManifest, DemoObjectGeometry
+
+    registry, _ = _registry(tmp_path)
+    demo = export_job_bundle(
+        registry, JOB_ID, tmp_path / "bundle", demo_id="x", title="x", description="", source=SOURCE
+    )
+    assert DemoManifest.model_validate_json(demo.model_dump_json()).object_geometry is None
+    demo.object_geometry = DemoObjectGeometry(state="succeeded", objectgs_count=2, shell_count=3, collider_count=5)
+    assert DemoManifest.model_validate_json(demo.model_dump_json()).object_geometry.collider_count == 5
+    with pytest.raises(ValidationError):
+        DemoObjectGeometry(state="succeeded", objectgs_count=-1)
+
+
+@pytest.mark.parametrize("source", ["user_measured", "ai_estimated", "lidar_trajectory"])
+@pytest.mark.parametrize("objectgs", [False, True])
+@pytest.mark.parametrize("request_status", ["done", "failed", "stale"])
+def test_sample_exports_recorded_metric_collision_objects_and_geometry(
+    tmp_path: Path, source: str, objectgs: bool, request_status: str
+) -> None:
+    import json
+    from contextlib import contextmanager
+    from datetime import UTC, datetime
+
+    from src.models.contracts.artifacts import ArtifactDataClass, ProductArtifactRef
+    from src.models.contracts.manifests import StageArtifact, StageStatus
+
+    registry, _ = _registry(tmp_path)
+    refs = {}
+
+    def publish(name, payload):  # noqa: ANN001, ANN202
+        path = tmp_path / name
+        path.write_text(json.dumps(payload))
+        ref = ProductArtifactRef(
+            artifact_type="Evidence",
+            schema_version="1.0",
+            artifact_uri=f"artifact://jobs/{JOB_ID}/{name}",
+            artifact_checksum=sha256_file(path),
+            data_class=ArtifactDataClass.DERIVED,
+            producer_stage=StageId.METRIC_CANONICALIZE,
+            job_id=JOB_ID,
+        )
+        refs[ref.artifact_uri] = path
+        return ref
+
+    declaration = publish(
+        "declaration.json",
+        {
+            "job_id": JOB_ID,
+            "input": {"distance_source": source, "check_a": [0, 0, 0], "check_b": [1, 0, 0], "check_distance_m": 2},
+            "estimate": {
+                "method": "lidar_trajectory_alignment"
+                if source == "lidar_trajectory"
+                else "moge2_sparse_depth_scale_only"
+            },
+        },
+    )
+    confirmation = publish(
+        "confirmation.json",
+        {
+            "preview": {
+                "transform": {"scale_m_per_sfm_unit": 2},
+                "request": {"anchor": {"measurement_ref": declaration.model_dump(mode="json")}},
+            }
+        },
+    )
+    import trimesh
+
+    mesh_path = tmp_path / "collision.glb"
+    mesh_path.write_bytes(trimesh.creation.box().export(file_type="glb"))
+    geometry_ref = {
+        "artifact_type": "LidarCollisionCandidate" if source == "lidar_trajectory" else "GeometryArtifact",
+        "artifact_uri": f"artifact://jobs/{JOB_ID}/collision.glb",
+        "artifact_checksum": sha256_file(mesh_path),
+    }
+    refs[geometry_ref["artifact_uri"]] = mesh_path
+    bundle = publish(
+        "bundle.json",
+        {
+            "canonical_geometry_ref": geometry_ref,
+            "rgb_geometry_ref": None if source == "lidar_trajectory" else geometry_ref,
+        },
+    )
+    scene = publish(
+        "scene.json",
+        {
+            "scene_revision": "rev-002",
+            "provenance": {"object_geometry": "awaiting_review" if request_status == "failed" else "ready"},
+            "environment": {},
+            "objects": [
+                {
+                    "origin": "reconstructed",
+                    "collider": {},
+                    "provenance": {"surface_selection": {"chosen": "objectgs" if objectgs else "gaussian_shell"}},
+                },
+                {"origin": "user_added", "collider": {}, "provenance": {}},
+            ],
+        },
+    )
+    registry.runtime_resolver.require_uri = lambda uri, checksum: refs[uri]
+    registry.scene.head_repository = SimpleNamespace(get=lambda job_id: SimpleNamespace(scene_reference=scene))
+
+    @contextmanager
+    def transaction():  # noqa: ANN202
+        payload = {
+            "mode": "geometry",
+            "status": request_status if request_status != "stale" else "done",
+            "result_revision": "rev-001" if request_status == "stale" else "rev-002",
+            "base_revision": "rev-002",
+            "started_at": "2026-10-17T00:00:00Z",
+            "finished_at": "2026-10-17T00:00:12Z",
+        }
+        yield SimpleNamespace(execute=lambda *_: SimpleNamespace(fetchone=lambda: (json.dumps(payload),)))
+
+    registry.persistence = SimpleNamespace(database=SimpleNamespace(transaction=transaction))
+    job = registry.get_job(JOB_ID)
+    records = [
+        StageArtifact(
+            stage_id=stage_id,
+            status=StageStatus.SUCCEEDED,
+            artifact_type=kind,
+            artifact_uri=ref.artifact_uri,
+            artifact_checksum=ref.artifact_checksum,
+            data_class=ArtifactDataClass.DERIVED,
+            completed_at=datetime.now(UTC),
+        )
+        for stage_id, kind, ref in [
+            (StageId.METRIC_CANONICALIZE, "RGBMetricConfirmation", confirmation),
+            (StageId.METRIC_CANONICALIZE, "ReconstructionBundle", bundle),
+            (StageId.RGB_GEOMETRY, "GeometryArtifact", bundle),
+            (StageId.OBJECT_EXTRACT, "SceneIR", scene),
+        ]
+    ]
+    registry.get_job = lambda job_id: job.model_copy(update={"stage_artifacts": records})
+    demo = export_job_bundle(
+        registry, JOB_ID, tmp_path / "export", demo_id="x", title="x", description="", source=SOURCE
+    )
+    facts = {
+        stage.stage_id: {fact.label: fact.value for asset in stage.assets for fact in asset.facts}
+        for stage in demo.stages
+    }
+    assert facts[StageId.METRIC_CANONICALIZE]["Tỉ lệ"] == "2 m/đơn vị"
+    assert facts[StageId.METRIC_CANONICALIZE]["Sai số C–D"] == "0 m"
+    assert facts[StageId.RGB_GEOMETRY]["Nguồn lưới va chạm"] == ("LiDAR" if source == "lidar_trajectory" else "ảnh")
+    assert facts[StageId.RGB_GEOMETRY]["Số tam giác của lưới"] == "12"
+    assert facts[StageId.OBJECT_EXTRACT]["Số vật ứng viên"] == "1"
+    assert demo.object_geometry.objectgs_count == int(objectgs)
+    assert demo.object_geometry.shell_count == int(not objectgs)
+    assert demo.object_geometry.collider_count == 1
+    assert demo.object_geometry.duration_seconds == (12 if request_status == "done" else None)
+    assert demo.object_geometry.state == ("failed" if request_status == "failed" else "succeeded")
+
+
+def test_sample_prepare_timings_are_grouped_instead_of_fake_zero(tmp_path: Path) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from src.models.contracts.manifests import JobStatus, StageArtifact, StageStatus
+    from src.services.orchestration.samples.export import stage_durations
+
+    registry, _ = _registry(tmp_path)
+    job = registry.get_job(JOB_ID)
+    start = datetime(2026, 10, 17, tzinfo=UTC)
+    records = [
+        StageArtifact(
+            stage_id=stage_id,
+            status=StageStatus.SUCCEEDED,
+            artifact_type="Evidence",
+            artifact_uri=f"artifact://jobs/{JOB_ID}/{stage_id.value}",
+            artifact_checksum="sha256:" + "a" * 64,
+            data_class="derived",
+            completed_at=start + timedelta(seconds=12),
+        )
+        for stage_id in [StageId.INPUT_VALIDATE, StageId.PRIVACY_GATE, StageId.FRAME_EXTRACT]
+    ]
+    event = SimpleNamespace(
+        attempt=1, status=JobStatus.RUNNING, current_stage=StageId.INPUT_VALIDATE, recorded_at=start
+    )
+    stages = stage_durations(job.model_copy(update={"stage_artifacts": records}), [event])
+    assert [stage.duration_seconds for stage in stages[:3]] == [12, None, None]
+    assert "gộp chung 3 bước" in stages[0].summary
+    assert all(stage.duration_seconds != 0 for stage in stages)
+    stages = stage_durations(job.model_copy(update={"stage_artifacts": records}), [])
+    assert all(stage.duration_seconds is None for stage in stages[:3])

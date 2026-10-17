@@ -23,6 +23,9 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
+import { parseGlbMesh } from "@/features/viewer/glb-mesh";
+import { CombinedCollision } from "@/features/viewer/camera-collision";
+import type { CollisionQuery } from "@playcanvas/supersplat-viewer/viewer";
 import type { ViewMode } from "@/features/viewer/layers";
 import {
   DISPLAY_EULER,
@@ -150,6 +153,7 @@ export interface PlayCanvasSceneProps {
   showControls?: boolean;
   /** Collider GLB của cùng scene, để viewer nạp trong cùng app. */
   collisionUrl?: string | null;
+  onCollisionError?: (message: string | null) => void;
   mode: ViewMode;
   /** Đo một lần ở host, để degraded state của cả viewer chỉ có một nguồn sự thật. */
   capability: PlayCanvasCapability;
@@ -197,6 +201,7 @@ export interface ViewerControls {
   select(index: number): boolean;
   /** Bật/tắt điều khiển camera của viewer (tắt trong lúc kéo gizmo để hai bên không tranh con trỏ). */
   setInputEnabled(enabled: boolean): void;
+  setObjectCollision(collision: CollisionQuery | null): void;
   /**
    * Chuyển chế độ camera. `walk` chỉ được khi viewer báo `walkAllowed` (có dữ liệu va chạm và scene
    * đủ lớn). Trả false khi viewer chưa nạp xong hoặc chế độ không dùng được.
@@ -225,6 +230,7 @@ export function PlayCanvasScene({
   contentFilename,
   showControls = false,
   collisionUrl,
+  onCollisionError,
   mode,
   capability,
   onFailed,
@@ -242,6 +248,29 @@ export function PlayCanvasScene({
   wheelFactor = 1,
   extraControls,
 }: PlayCanvasSceneProps) {
+  const [collisionViewer, setCollisionViewer] = useState<ViewerHandleLike | null>(null);
+  const collisionError = useRef(onCollisionError);
+  useEffect(() => { collisionError.current = onCollisionError; }, [onCollisionError]);
+  useEffect(() => {
+    if (!collisionViewer) return;
+    const controller = new AbortController();
+    collisionViewer.setCollisionMesh(null, null);
+    collisionError.current?.(null);
+    if (collisionUrl) {
+      void fetch(collisionUrl, { signal: controller.signal }).then(async (response) => {
+        if (!response.ok) {
+          const body: unknown = await response.json().catch(() => null);
+          const detail = body && typeof body === "object" && "detail" in body ? body.detail : null;
+          throw new Error(typeof detail === "string" ? detail : `Không tải được lưới va chạm (HTTP ${response.status}).`);
+        }
+        const mesh = parseGlbMesh(await response.arrayBuffer());
+        if (!controller.signal.aborted) collisionViewer.setCollisionMesh(mesh.positions, mesh.indices);
+      }).catch((error: unknown) => {
+        if (!controller.signal.aborted) collisionError.current?.(error instanceof Error ? error.message : String(error));
+      });
+    }
+    return () => controller.abort();
+  }, [collisionViewer, collisionUrl]);
   const container = useRef<HTMLDivElement | null>(null);
   const [controlsContainer, setControlsContainer] = useState<Element | null>(null);
   const wheel = useRef(wheelFactor);
@@ -319,7 +348,6 @@ export function PlayCanvasScene({
           container: host,
           contentUrl: resolvedUrl,
           contentFilename: contentFile?.name ?? contentFilename ?? new URL(resolvedUrl, window.location.href).pathname.split("/").pop(),
-          collisionUrl: collisionUrl ?? undefined,
           // `{}` làm viewer 1.35.2 crash ("reading 'color'") khi chạy browser thật
           // (2026-09-29); dùng default chính thức của thư viện, camera khung môi trường.
           settings,
@@ -332,6 +360,7 @@ export function PlayCanvasScene({
           return;
         }
         handle = viewer;
+        setCollisionViewer(viewer);
         if (showControls) {
           const buttonsEl = host.querySelector(".sse-buttonsContainer");
           if (buttonsEl) setControlsContainer(buttonsEl);
@@ -398,6 +427,9 @@ export function PlayCanvasScene({
               if (disposed || !viewer.state.loaded) return false;
               viewer.selectAnnotation(index);
               return true;
+            },
+            setObjectCollision: (objectCollision) => {
+              if (!disposed) viewer.setCollisionProvider((environment) => environment ? new CombinedCollision(() => objectCollision ? [environment, objectCollision] : [environment], environment.voxelResolution) : null);
             },
             setInputEnabled: (enabled) => {
               if (!disposed) viewer.state.inputEnabled = enabled;
@@ -522,6 +554,7 @@ export function PlayCanvasScene({
       disposed = true;
       subscriptions.forEach((subscription) => subscription.off());
       if (orient && handle?.app) (handle.app as unknown as ViewerAppLike).off("update", orient);
+      setCollisionViewer(null);
       onAppRef.current?.(null);
       onInspectionReady?.(null);
       const activeHandle = handle;
@@ -539,7 +572,7 @@ export function PlayCanvasScene({
       handle = null;
       liveAnnotations.current = null;
     };
-  }, [capability, collisionUrl, contentUrl, contentFile, contentFilename, showControls, mode, onFailed, publish,
+  }, [capability, contentUrl, contentFile, contentFilename, showControls, mode, onFailed, publish,
     enableInspection, inspectionMaxPoints, onInspectionReady, onInspectionState, renderer, sourceFrame, cameras, initialCamera, initialCameraMode]);
 
   return (
@@ -602,6 +635,8 @@ interface ViewerHandleLike {
     animationTime: number;
   };
   readonly events: { on(key: string, handler: () => void): { off(): void } };
+  setCollisionProvider(provider: ((environment: CollisionQuery | null) => CollisionQuery | null) | null): void;
+  setCollisionMesh(positions: Float32Array | null, indices: Uint32Array | null): void;
   frameScene(): void;
   resetCamera(): void;
   toggleWalk(): void;

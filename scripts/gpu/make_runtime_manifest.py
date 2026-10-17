@@ -17,6 +17,7 @@ from pathlib import Path
 
 from src.models.contracts.identity import canonical_content_checksum
 from src.models.contracts.manifests import RuntimeManifest
+from src.runtime_env import runtime_env
 
 
 def _run(command: list[str]) -> str | None:
@@ -36,7 +37,7 @@ def _component(version: str | None, missing: str) -> dict[str, str]:
 def collect() -> dict[str, dict[str, str]]:
     """Đọc version từ tool thật theo cùng env mà worker dùng (REC03_/REC04_)."""
     ffmpeg = _run(["ffmpeg", "-version"])
-    raw_brush = (os.environ.get("REC04_BRUSH_COMMAND") or "").strip()
+    raw_brush = (runtime_env(os.environ, "R2S_BRUSH_COMMAND") or "").strip()
     brush_command = None
     if raw_brush:
         try:
@@ -45,7 +46,7 @@ def collect() -> dict[str, dict[str, str]]:
         except (json.JSONDecodeError, ValueError):
             brush_command = [raw_brush]
     brush = _run([*brush_command, "--version"]) if brush_command else None
-    splat_module = os.environ.get("REC04_SPLAT_MODULE_PATH")
+    splat_module = runtime_env(os.environ, "R2S_SPLAT_MODULE_PATH")
     splat = None
     if splat_module:
         package = Path(splat_module).resolve().parents[1] / "package.json"
@@ -55,9 +56,9 @@ def collect() -> dict[str, dict[str, str]]:
     return {
         "python": _component(sys.version.split()[0], "python không đọc được"),
         "ffmpeg": _component(ffmpeg.splitlines()[0] if ffmpeg else None, "ffmpeg không có trong PATH"),
-        "colmap": _component(os.environ.get("REC03_COLMAP_RUNTIME_IDENTITY"), "đặt REC03_COLMAP_RUNTIME_IDENTITY"),
-        "brush": _component(brush.splitlines()[0] if brush else None, "đặt REC04_BRUSH_COMMAND trỏ brush binary"),
-        "splat_transform": _component(splat, "đặt REC04_SPLAT_MODULE_PATH"),
+        "colmap": _component(runtime_env(os.environ, "R2S_COLMAP_RUNTIME_IDENTITY"), "đặt R2S_COLMAP_RUNTIME_IDENTITY"),
+        "brush": _component(brush.splitlines()[0] if brush else None, "đặt R2S_BRUSH_COMMAND trỏ brush binary"),
+        "splat_transform": _component(splat, "đặt R2S_SPLAT_MODULE_PATH"),
         "gpu_model": _component(gpu_fields[0] if gpu_fields else None, "không có nvidia-smi"),
         "vram": _component(gpu_fields[1] if len(gpu_fields) > 1 else None, "không có nvidia-smi"),
         "nvidia_driver": _component(gpu_fields[2] if len(gpu_fields) > 2 else None, "không có nvidia-smi"),

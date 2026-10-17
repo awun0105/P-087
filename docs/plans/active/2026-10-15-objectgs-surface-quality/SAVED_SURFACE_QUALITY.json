@@ -1,0 +1,177 @@
+{
+  "after": {
+    "metrics": {
+      "area_m2": 5.08273441080112,
+      "boundary_edges": 275,
+      "boundary_loops": 7,
+      "bounds_m": [
+        [
+          -0.5583255887031555,
+          -0.5586605072021484,
+          -0.4950000047683716
+        ],
+        [
+          0.5630873441696167,
+          0.5578485131263733,
+          0.675000011920929
+        ]
+      ],
+      "component_euler_characteristics": [
+        -4,
+        1,
+        2,
+        1,
+        2,
+        2,
+        2,
+        2,
+        1,
+        1,
+        1
+      ],
+      "component_genus": [
+        null,
+        null,
+        0.0,
+        null,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        null,
+        null,
+        null
+      ],
+      "component_triangles": [
+        14624,
+        4,
+        8,
+        4,
+        16,
+        8,
+        8,
+        8,
+        4,
+        12,
+        1
+      ],
+      "components": 11,
+      "degenerate_triangles": 0,
+      "dimensions_m": [
+        1.1214129328727722,
+        1.1165090203285217,
+        1.1700000166893005
+      ],
+      "euler_characteristic": 11,
+      "finite": true,
+      "intersection_check_complete": false,
+      "intersection_scope": "nonadjacent_non_shared_vertex_triangles",
+      "nonmanifold_edges": 0,
+      "simple_boundary": true,
+      "triangles": 14697,
+      "vertices": 7497,
+      "volume_m3": null,
+      "watertight": false,
+      "winding_consistent": true
+    },
+    "passed": false,
+    "reasons": [
+      "open_boundary",
+      "open_or_nonpositive_component"
+    ]
+  },
+  "algorithm": "strict_surface_quality_v1",
+  "before": {
+    "metrics": {
+      "area_m2": 5.08273441080112,
+      "boundary_edges": 275,
+      "boundary_loops": 7,
+      "bounds_m": [
+        [
+          -0.5583255887031555,
+          -0.5586605072021484,
+          -0.4950000047683716
+        ],
+        [
+          0.5630873441696167,
+          0.5578485131263733,
+          0.675000011920929
+        ]
+      ],
+      "component_euler_characteristics": [
+        -4,
+        1,
+        2,
+        1,
+        2,
+        2,
+        2,
+        2,
+        1,
+        1,
+        1
+      ],
+      "component_genus": [
+        null,
+        null,
+        0.0,
+        null,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        null,
+        null,
+        null
+      ],
+      "component_triangles": [
+        14624,
+        4,
+        8,
+        4,
+        16,
+        8,
+        8,
+        8,
+        4,
+        12,
+        1
+      ],
+      "components": 11,
+      "degenerate_triangles": 0,
+      "dimensions_m": [
+        1.1214129328727722,
+        1.1165090203285217,
+        1.1700000166893005
+      ],
+      "euler_characteristic": 11,
+      "finite": true,
+      "intersection_check_complete": false,
+      "intersection_scope": "nonadjacent_non_shared_vertex_triangles",
+      "nonmanifold_edges": 0,
+      "simple_boundary": true,
+      "triangles": 14697,
+      "vertices": 7497,
+      "volume_m3": null,
+      "watertight": false,
+      "winding_consistent": true
+    },
+    "passed": false,
+    "reasons": [
+      "open_boundary",
+      "open_or_nonpositive_component"
+    ]
+  },
+  "bounds_tolerance_m": 0.15,
+  "coordinate_frame": "object_local",
+  "distance_unit": "m",
+  "inferred_faces": 0,
+  "metric_scale_verified_against_anchors": false,
+  "passed": false,
+  "reasons": [
+    "open_boundary",
+    "open_or_nonpositive_component"
+  ],
+  "result_checksum": "sha256:2c5cfde6374b071f684765b48186595f3ba7ad61ec30ad1190a5a9e9f2fdb1e6",
+  "source_checksum": "sha256:369fbca13ab74b231f51df72cd2890c01835f376f0d67fb633200e3a8ba0769d"
+}

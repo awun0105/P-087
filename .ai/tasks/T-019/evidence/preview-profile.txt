@@ -1,0 +1,26 @@
+{"run": 0, "cache": "cold", "elapsed_s": 3.5151, "count": 2000000, "shell_sample_rows": 100000, "shell_ok": true, "peak_rss_mib": 477.7}
+{"run": 1, "cache": "warm", "elapsed_s": 2.133, "count": 2000000, "shell_sample_rows": 100000, "shell_ok": true, "peak_rss_mib": 486.3}
+{"run": 2, "cache": "warm", "elapsed_s": 1.574, "count": 2000000, "shell_sample_rows": 100000, "shell_ok": true, "peak_rss_mib": 486.4}
+         15553 function calls (15482 primitive calls) in 1.871 seconds
+
+   Ordered by: cumulative time
+   List reduced from 586 to 15 due to restriction <15>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1    0.021    0.021    1.871    1.871 object_region.py:108(preview_region)
+        1    0.000    0.000    1.119    1.119 object_region.py:99(_shell)
+        1    0.001    0.001    1.118    1.118 gaussian_shell.py:214(build_gaussian_shell)
+        1    0.940    0.940    0.955    0.955 gaussian_shell.py:68(_filter_gaussians)
+        1    0.001    0.001    0.725    0.725 object_region.py:59(_resolve)
+        1    0.000    0.000    0.325    0.325 membership_regeneration.py:73(load_membership_source)
+        1    0.176    0.176    0.323    0.323 region_box.py:69(resolve_region)
+        1    0.000    0.000    0.232    0.232 membership.py:70(decode_gaussian_membership_labels)
+        7    0.000    0.000    0.125    0.018 _arraysetops_impl.py:145(unique)
+        7    0.001    0.000    0.125    0.018 _arraysetops_impl.py:350(_unique1d)
+        1    0.003    0.003    0.119    0.119 region_box.py:38(boxes_contain)
+        3    0.116    0.039    0.116    0.039 {built-in method _hashlib.openssl_sha256}
+        1    0.116    0.116    0.116    0.116 region_box.py:21(_box_contains)
+        3    0.111    0.037    0.111    0.037 {built-in method numpy._core._multiarray_umath._unique_hash}
+        1    0.000    0.000    0.107    0.107 surface_mesh.py:122(assess_surface)
+
+

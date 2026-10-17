@@ -21,7 +21,7 @@ describe("mẫu cũ tại bước upload", () => {
     const onDone = vi.fn();
     render(<SampleProcessStep sampleId="old" sample={sample} onDone={onDone} />);
     expect(screen.getByText("Xác nhận tỉ lệ mét")).toBeInTheDocument();
-    expect(screen.getByText("Hình học & collision")).toBeInTheDocument();
+    expect(screen.getByText("Collision môi trường")).toBeInTheDocument();
     expect(screen.getByText("Tách vật thể")).toBeInTheDocument();
     expect(screen.getByText(/Mẫu cũ chưa ghi kết quả/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Bỏ qua" }));

@@ -17,10 +17,11 @@ import pytest
 from src.config import Settings
 from src.models.contracts.artifacts import ProductArtifactRef
 from src.models.contracts.reconstruction import ReconstructionBundle
-from src.models.contracts.scene import ColliderType
+from src.models.contracts.scene import ColliderType, SceneObjectState
 from src.models.contracts.validation import RuleResult
 from src.services.orchestration.review import simulation_package as simulation_package_service
 from src.services.orchestration.review.simulation_package import BUILD_CONFIG, build_simulation_package, current_package
+from src.services.orchestration.scene.errors import ObjectGeometryNotReadyError
 from src.services.orchestration.scene.extraction import extract_scene
 from src.services.orchestration.scene.objects import add_box_object, add_catalog_object, apply_object_action
 from src.services.scene.collision_ownership import SourceCollisionOwnershipError
@@ -109,7 +110,7 @@ def test_confirmed_objects_become_a_sealed_package(tmp_path: Path) -> None:
     } <= names
     capability = json.loads(archive.read("export_capability.json"))
     assert capability["status"] == "supported" and capability["effective_mode"] == "legacy_box"
-    assert capability["builder_version"] == "usd-export-capabilities-v2"
+    assert capability["builder_version"] == "usd-export-capabilities-v3"
     usda = archive.read("scene.usda").decode()
     assert "prepend references = @./environment_collision.usda@" in usda and "GroundPlane" in usda
     # Gọi lại trên cùng revision: trả gói cũ, không tạo revision mới.
@@ -117,6 +118,20 @@ def test_confirmed_objects_become_a_sealed_package(tmp_path: Path) -> None:
     assert again.package_ref == package.package_ref
     assert registry.scene.current(job.job_id).scene.scene_revision == "rev-003"
     assert current_package(registry, job.job_id) == package
+
+
+def test_draft_scene_refuses_usd_export_before_recovery_or_publication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registry, job = _scene_job(tmp_path)
+    current = registry.scene.current(job.job_id)
+    draft = current.scene.model_copy(
+        update={"provenance": {**current.scene.provenance, "object_geometry": "awaiting_review"}}
+    )
+    monkeypatch.setattr(registry.scene, "current", lambda job_id: current.model_copy(update={"scene": draft}))
+
+    with pytest.raises(ObjectGeometryNotReadyError, match="Cần tạo mesh trước khi xuất USD."):
+        build_simulation_package(registry, job.job_id)
 
 
 def _neighbour_candidate(item, new_id: str):  # noqa: ANN001, ANN202
@@ -194,7 +209,13 @@ def test_unsupported_convex_export_returns_capability_block_without_revision(
     collider = item.collider.model_copy(
         update={"collider_type": ColliderType.CONVEX_DECOMPOSITION, "geometry_ref": None, "dimensions_xyz_m": None}
     )
-    draft = enriched.model_copy(update={"objects": [item.model_copy(update={"active": True, "collider": collider})]})
+    draft = enriched.model_copy(
+        update={
+            "objects": [
+                item.model_copy(update={"active": True, "state": SceneObjectState.CONFIRMED, "collider": collider})
+            ]
+        }
+    )
     registry.scene.publish_next(job.job_id, scene.scene_revision, draft, "test_unsupported_convex")
     current_revision = registry.scene.current(job.job_id).scene.scene_revision
     monkeypatch.setattr(
@@ -231,7 +252,13 @@ def test_runner_failure_blocks_before_scene_revision_publication(
             "dimensions_xyz_m": None,
         }
     )
-    draft = enriched.model_copy(update={"objects": [item.model_copy(update={"active": True, "collider": collider})]})
+    draft = enriched.model_copy(
+        update={
+            "objects": [
+                item.model_copy(update={"active": True, "state": SceneObjectState.CONFIRMED, "collider": collider})
+            ]
+        }
+    )
     registry.scene.publish_next(job.job_id, scene.scene_revision, draft, "test_hybrid_runner_failure")
     edited = registry.scene.current(job.job_id).scene
     apply_object_action(registry.scene, job.job_id, edited.objects[0].id, "confirm", edited.scene_revision)

@@ -637,6 +637,59 @@ def test_system_resource_metrics(tmp_path: Path) -> None:
     assert all(metric.display == "Chưa đo — job này không có bản ghi tài nguyên" for metric in no_measurement)
 
 
+def test_scene_operations_leave_the_pipeline_resource_metrics_unchanged(tmp_path: Path) -> None:
+    """Tạo mesh và dựng lại vùng (`scene.*`) không đổi thẻ RAM/VRAM/cấu hình của lượt chạy pipeline."""
+    from src.services.orchestration.processing.telemetry import ResourceUsage
+
+    registry = ProjectRegistry(runtime_root=tmp_path / "artifacts")
+    registry.seed_from_fixtures()
+    job = registry.create_job(SimpleNamespace(project_id="project-fixture-001", scene_revision="rev-001"))
+    now = datetime(2026, 10, 5, 12, 0, tzinfo=UTC)
+    later = now + timedelta(minutes=30)
+
+    def usage(tool: str, ram: float, vram: float, **changes: object) -> ResourceUsage:
+        fields: dict[str, object] = {
+            "schema_version": "1.2",
+            "job_id": job.job_id,
+            "attempt_id": "att1",
+            "tool": tool,
+            "config_checksum": "c",
+            "runtime_manifest_checksum": "r",
+            "params": None,
+            "started_at": now,
+            "completed_at": now,
+            "outcome": "completed",
+            "exit_code": 0,
+            "duration_seconds": 10.0,
+            "sample_count": 1,
+            "ram_sample_count": 1,
+            "vram_sample_count": 1,
+            "gpu_sample_count": 1,
+            "scratch_sample_count": 1,
+            "peak_ram_gb": ram,
+            "peak_vram_gb": vram,
+            "headroom_before": {},
+        }
+        return ResourceUsage(**{**fields, **changes})
+
+    params = {"sampling.max_frames": 300.0, "brush.max_splats": 1000000.0, "brush.max_resolution": 1280.0}
+    pipeline = [
+        usage("preview", 2.0, 1.5, params=params),
+        usage("scene_extract", 5.1937, 3.42, params=params, completed_at=later, started_at=later),
+    ]
+    scene = [
+        usage("scene.geometry", 9.5, 7.9, completed_at=later + timedelta(minutes=5)),
+        usage("scene.region", 8.0, 6.0, outcome="failed", completed_at=later + timedelta(minutes=6)),
+    ]
+
+    def cards(usages: list[ResourceUsage]) -> list[tuple[str, object, str]]:
+        return [(m.key, m.value, m.display) for m in scorecard._system_metrics(registry, job, usages)]
+
+    baseline = cards(pipeline)
+    assert ("system.peak_ram", 5.19, "5,2 GB (bước scene_extract)") in baseline
+    assert cards(pipeline + scene) == baseline
+
+
 def _timed_stage(stage_id: StageId, started_at: datetime, completed_at: datetime) -> StageArtifact:
     return StageArtifact(
         stage_id=stage_id,

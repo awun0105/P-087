@@ -3,7 +3,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ApiError } from "@/lib/api/client";
-import { cancelObjectify, getObjectifyState, requestObjectify, type ObjectifyMode, type ObjectifyState } from "@/lib/api/studio";
+import {
+  buildObjectGeometry,
+  cancelObjectify,
+  getObjectifyState,
+  requestObjectify,
+  type ObjectifyMode,
+  type ObjectifyState,
+} from "@/lib/api/studio";
 import type { ExecutionError } from "@/lib/contracts/api";
 import type { StageState } from "@/lib/contracts/studio";
 
@@ -79,7 +86,8 @@ export function useObjectifyState({
     setSending(true);
     setError(null);
     try {
-      setState(await requestObjectify(jobId, expected, mode));
+      // Tạo mesh đi qua route riêng; các chế độ tách còn lại đi qua hàng đợi objectify.
+      setState(await (mode === "geometry" ? buildObjectGeometry(jobId, expected) : requestObjectify(jobId, expected, mode)));
     } catch (cause) {
       setError(cause instanceof ApiError ? cause.detail : "Không gửi được yêu cầu.");
       // 409: scene đã đổi (revision cũ) hoặc đã có yêu cầu khác; đọc lại trạng thái để màn hình khớp máy chủ.
@@ -89,19 +97,75 @@ export function useObjectifyState({
     }
   }, [jobId, revision, state?.scene_revision]);
 
+  // Huỷ đúng yêu cầu đang hiển thị (operation_id); không có thì huỷ theo job như trước.
+  const operationId = state?.operation_id;
   const cancel = useCallback(async () => {
     setSending(true);
     setError(null);
     try {
-      setState(await cancelObjectify(jobId));
+      setState(await (operationId ? cancelObjectify(jobId, operationId) : cancelObjectify(jobId)));
     } catch (cause) {
       setError(cause instanceof ApiError ? cause.detail : "Không hủy được yêu cầu.");
     } finally {
       setSending(false);
     }
-  }, [jobId]);
+  }, [jobId, operationId]);
 
-  return { state, error, sending, pending, send, cancel };
+  // Đọc lại trạng thái ngay, cho thao tác không đi qua `send` (ví dụ áp vùng nhận 202).
+  const refresh = useCallback(() => setTick((value) => value + 1), []);
+
+  return { state, error, sending, pending, send, cancel, refresh };
+}
+
+/** Các chế độ là việc dựng hình học, hiện ở hàng "Duyệt vật & Tạo mesh" (T-021). */
+const BUILD_MODES: readonly ObjectifyMode[] = ["geometry", "region", "membership"];
+
+/**
+ * Hàng ảo "Duyệt vật & Tạo mesh" (T-021): không có trong contracts/StageId, chỉ tồn tại ở giao diện. Trạng thái lấy từ
+ * `ObjectifyState` đã được chia sẻ. `null` khi scene không có khoá `object_geometry` (luồng cũ, không có hàng).
+ */
+export interface GeometryStep {
+  state: StageState;
+  /** Phase máy chủ đang chạy (shell, collider, ...); null khi đang xếp hàng hoặc chưa có. */
+  phase: string | null;
+  /** Lý do lỗi của lần yêu cầu gần nhất do máy chủ viết. */
+  error: string | null;
+  mode: ObjectifyMode | null;
+  /** Máy chủ đã nhận lệnh huỷ và đang dừng worker. */
+  cancelling: boolean;
+  /** Việc dựng đang xếp hàng hoặc chạy: có thể huỷ. */
+  busy: boolean;
+  /** Dựng lại vùng thất bại trên scene đã Ready: scene vẫn giữ bản trước. */
+  rebuildFailed: boolean;
+}
+
+/** Quy tắc trạng thái của hàng "Duyệt vật & Tạo mesh"; mỗi nhánh có một test trong `geometry-review-step.test.tsx`. */
+export function geometryReviewStep(state: ObjectifyState | null): GeometryStep | null {
+  if (!state || !state.object_geometry) return null;
+  const base = {
+    phase: state.phase ?? null,
+    error: state.error ?? null,
+    mode: state.mode,
+    cancelling: state.cancellation_requested,
+    busy: false,
+    rebuildFailed: false,
+  };
+  if ((state.status === "queued" || state.status === "running") && state.mode && BUILD_MODES.includes(state.mode)) {
+    return { ...base, state: "running", busy: true };
+  }
+  const failed = state.status === "failed" || state.status === "cancelled";
+  if (state.object_geometry === "awaiting_review") {
+    // Lỗi của revision khác không còn là lỗi của scene hiện tại: chỉ nêu khi cùng revision.
+    const sameRevision = state.base_revision !== null && state.base_revision === state.scene_revision;
+    if (failed && state.mode === "geometry" && sameRevision) return { ...base, state: "failed" };
+    return { ...base, state: "waiting" };
+  }
+  // Lỗi dựng lại vùng chỉ nêu cho đúng revision đã gửi yêu cầu; sau một lần sửa khác thì scene đã đổi, không nêu nữa.
+  if (failed && (state.mode === "region" || state.mode === "membership")) {
+    const sameRevision = state.base_revision !== null && state.base_revision === state.scene_revision;
+    return { ...base, state: "succeeded", rebuildFailed: sameRevision };
+  }
+  return { ...base, state: "succeeded" };
 }
 
 /**
@@ -111,7 +175,10 @@ export function useObjectifyState({
  */
 export function objectifyStageOverride(state: ObjectifyState | null): { state: StageState; error?: ExecutionError } | null {
   if (!state) return null;
-  if (state.status === "queued" || state.status === "running") return { state: "running" };
+  // Chỉ việc tách mới làm hàng này chạy lại; việc dựng hình học (geometry/region/membership) hiện ở hàng "Duyệt vật & Tạo mesh".
+  if ((state.status === "queued" || state.status === "running") && (state.mode === "objectify" || state.mode === "boxes")) {
+    return { state: "running" };
+  }
   // Chỉ báo lỗi bước khi scene thật sự không có vật nào (tách lỗi hết số lần thử). Dựng lại lỗi mà scene vẫn có vật
   // (tách theo vật hay hộp ứng viên) thì bước vẫn đã xong; chi tiết lỗi lần dựng lại nằm ở thông báo trong Studio.
   if (state.awaiting_choice) {

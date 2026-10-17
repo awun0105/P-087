@@ -22,7 +22,7 @@ from src.services.orchestration.evaluation.models import JobEvaluation, Metric, 
 from src.services.orchestration.evaluation.reference import ReferenceSet, describe, load_reference
 from src.services.orchestration.jobs.progress import job_progress
 from src.services.orchestration.jobs.stage_views import job_bundle
-from src.services.orchestration.processing.observed import usage_vram
+from src.services.orchestration.processing.observed import pipeline_usages, usage_vram
 from src.services.orchestration.processing.telemetry import ResourceUsage
 from src.services.orchestration.projects.registry import ProjectRegistry
 from src.services.orchestration.scene.errors import SceneError
@@ -807,7 +807,7 @@ def _system_metrics(
         for stage in current_attempt_stage_timings(job, attempts, progress)
         if stage.seconds is not None
     }
-    completed = [u for u in (usages or []) if u.job_id == job.job_id and u.outcome == "completed"]
+    completed = [u for u in pipeline_usages(usages or []) if u.job_id == job.job_id and u.outcome == "completed"]
     metrics: list[Metric] = []
     if seconds:
         slowest = max(seconds, key=lambda stage_id: seconds[stage_id])

@@ -338,6 +338,18 @@ def test_job_that_ran_out_of_memory_before_reruns_alone(tmp_path: Path, monkeypa
     assert gate(job) and _reservations(gate)[gate.worker_id].exclusive
 
 
+def test_scene_exhaustion_does_not_make_a_pipeline_job_run_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registry, job, gate = _queued(tmp_path)
+    _machine(monkeypatch)
+    _measure(gate, "preview", vram=1.5, ram=3.0)
+    _measure(
+        gate, "scene.geometry", vram=1.5, ram=3.0, job_id=job.job_id, outcome="failed", exit_code=1, exhausted=True
+    )
+    assert gate(job) and not _reservations(gate)[gate.worker_id].exclusive
+
+
 def test_reservation_on_another_gpu_of_the_same_host_only_shares_ram_and_disk(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

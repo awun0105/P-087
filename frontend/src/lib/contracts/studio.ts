@@ -96,6 +96,7 @@ export interface StudioProject {
   source_type: "upload" | "dataset";
   privacy: StudioPrivacy;
   input_video: { original_name: string; media_type: VideoMediaType; size_bytes: number } | null;
+  display_video_url?: string | null;
   created_at: string | null;
   created_by?: Actor | null;
   /** Mốc bản demo nếu scene được đánh dấu là bản demo. */
@@ -154,6 +155,8 @@ export interface SceneSummary {
   awaiting_anonymization_review?: boolean;
   /** Job xong nhưng tách theo vật lỗi hết số lần thử, chờ người dùng chọn; API cũ không gửi trường này. */
   awaiting_object_choice?: boolean;
+  /** Bước "Duyệt vật & Tạo mesh": chờ duyệt, đang dựng, Tạo mesh lỗi; null = không còn việc hoặc scene cũ. API cũ không gửi. */
+  geometry_review?: "waiting" | "running" | "failed" | null;
   /** Caller-specific ownership decision; absent on older APIs is treated as denied. */
   capabilities?: { can_delete_project: boolean };
   /** Thời gian máy đã xử lý (tổng các bước đã chạy xong), không gồm lúc xếp hàng và lúc chờ người dùng; null = chưa đo. */
@@ -178,6 +181,7 @@ export interface ExecutionErrorView {
 }
 
 export interface StageProgress {
+  note?: string | null;
   stage_id: StageId;
   state: StageState;
   started_at: string | null;
@@ -228,7 +232,7 @@ export interface JobProgress {
   stages: StageProgress[];
   preview_ready: boolean;
   /** Pipeline đang chờ người dùng làm gì (vd xác nhận tỉ lệ mét sau preview). */
-  waiting_for?: "metric_confirmation" | "resources" | "anonymization_review" | null;
+  waiting_for?: "metric_confirmation" | "resources" | "anonymization_review" | "runtime" | null;
   resource_wait?: ResourceWaitView | null;
   /** Vị trí trong hàng đợi khi job đang chờ máy xử lý; null khi đang chạy, đã xong hoặc chờ người dùng. */
   queue?: QueuePositionView | null;
@@ -482,6 +486,14 @@ export interface SampleSummary {
   machine: Record<string, string>;
 }
 
+export interface DemoObjectGeometry {
+  state: "succeeded" | "pending" | "failed";
+  duration_seconds: number | null;
+  objectgs_count: number | null;
+  shell_count: number | null;
+  collider_count: number | null;
+}
+
 export interface DemoManifest {
   schema_version: "1.0";
   demo_id: string;
@@ -492,7 +504,9 @@ export interface DemoManifest {
   produced_at: string;
   provenance: Record<string, string>;
   stages: DemoStage[];
+  object_geometry?: DemoObjectGeometry | null;
   video: DemoFile | null;
+  video_caption?: string | null;
   frames: DemoFile[];
   frame_count: number | null;
   splat: DemoFile;
@@ -516,11 +530,12 @@ export function parseJobProgress(value: unknown): JobProgress {
   }
   for (const stage of value.stages) {
     if (!isRecord(stage) || typeof stage.stage_id !== "string" ||
-        !STAGE_STATES.includes(stage.state as StageState)) {
+        !STAGE_STATES.includes(stage.state as StageState) ||
+        (stage.note !== undefined && stage.note !== null && typeof stage.note !== "string")) {
       throw new Error("Stage trong tiến trình không hợp lệ");
     }
   }
-  if (value.waiting_for !== undefined && value.waiting_for !== null && value.waiting_for !== "metric_confirmation" && value.waiting_for !== "resources" && value.waiting_for !== "anonymization_review") {
+  if (value.waiting_for !== undefined && value.waiting_for !== null && value.waiting_for !== "metric_confirmation" && value.waiting_for !== "resources" && value.waiting_for !== "anonymization_review" && value.waiting_for !== "runtime") {
     throw new Error("Lý do chờ của job không hợp lệ");
   }
   if (value.resource_wait !== undefined && value.resource_wait !== null) {
@@ -583,6 +598,15 @@ export function parseDemoManifest(value: unknown): DemoManifest {
   for (const stage of value.stages) {
     if (isRecord(stage) && Array.isArray(stage.assets)) {
       stage.assets = stage.assets.filter((asset) => isRecord(asset) && ASSET_KINDS.includes(String(asset.kind)));
+    }
+  }
+  const geometry = value.object_geometry;
+  if (geometry !== undefined && geometry !== null) {
+    if (!isRecord(geometry) || !["succeeded", "pending", "failed"].includes(String(geometry.state)) ||
+        (geometry.duration_seconds !== null && (!isFiniteNumber(geometry.duration_seconds) || geometry.duration_seconds <= 0)) ||
+        !["objectgs_count", "shell_count", "collider_count"].every((key) => geometry[key] === null ||
+          (isFiniteNumber(geometry[key]) && Number.isInteger(geometry[key]) && geometry[key] >= 0))) {
+      throw new Error("Kết quả tạo mesh của mẫu không hợp lệ");
     }
   }
   const assetFiles = value.stages.flatMap((stage) =>

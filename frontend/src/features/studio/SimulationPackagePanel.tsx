@@ -36,11 +36,14 @@ export function SimulationPackagePanel({
   jobId,
   sceneRevision,
   canCreate = true,
+  lockedReason = null,
   onSceneChanged,
 }: {
   jobId: string;
   sceneRevision: string;
   canCreate?: boolean;
+  /** Lý do khoá xuất USD khi scene chưa có hình học theo vật (Draft); null = không khoá. */
+  lockedReason?: string | null;
   onSceneChanged: () => void;
 }) {
   const [result, setResult] = useState<{ revision: string; value: SimulationPackageView | null } | null>(null);
@@ -63,7 +66,7 @@ export function SimulationPackagePanel({
   }, [jobId, sceneRevision]);
 
   async function create() {
-    if (!canCreate) return;
+    if (!canCreate || lockedReason) return;
     setBusy(true);
     setError(null);
     try {
@@ -89,7 +92,13 @@ export function SimulationPackagePanel({
           <PackageOpen className="size-4" aria-hidden /> Gói mô phỏng Isaac
         </p>
         {canCreate && (
-          <Button size="sm" variant={pkg?.package_ref ? "secondary" : "primary"} disabled={busy} onClick={create}>
+          <Button
+            size="sm"
+            variant={pkg?.package_ref ? "secondary" : "primary"}
+            disabled={busy || Boolean(lockedReason)}
+            title={lockedReason ?? undefined}
+            onClick={create}
+          >
             {busy && <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden />}
             {pkg?.package_ref
               ? "Kiểm tra lại"

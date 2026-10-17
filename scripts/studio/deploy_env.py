@@ -36,7 +36,7 @@ REQUIRED: dict[str, tuple[str, ...]] = {
         "PRODUCT_PRIVACY_MODE",
         "LLM_PROVIDER",
     ),
-    "api": ("ARTIFACT_ROOT", "PRODUCT_PROCESSING_CONFIG", "PRODUCT_RUNTIME_MANIFEST"),
+    "api": ("ARTIFACT_ROOT", "PRODUCT_PROCESSING_CONFIG"),
     "worker": (
         "ARTIFACT_ROOT",
         "PRODUCT_WORKER_ROOT",
@@ -152,7 +152,13 @@ def check(source: Source) -> list[Finding]:
         root = values.get("ARTIFACT_ROOT")
         if root and not root.startswith("/"):
             error(f"[{section}] ARTIFACT_ROOT phải là đường dẫn tuyệt đối ngoài development/test")
-        if bool(values.get("PRODUCT_PROCESSING_CONFIG")) != bool(values.get("PRODUCT_RUNTIME_MANIFEST")):
+        # T-040: API lấy runtime từ GPU worker đã công bố, không cần chép manifest của worker lên volume.
+        from_workers = section == "api" and _is_true(values.get("PRODUCT_RUNTIME_FROM_WORKERS"))
+        if section == "api" and not from_workers and not values.get("PRODUCT_RUNTIME_MANIFEST"):
+            error("[api] cần PRODUCT_RUNTIME_MANIFEST (ghim tay) hoặc PRODUCT_RUNTIME_FROM_WORKERS=true")
+        if not from_workers and bool(values.get("PRODUCT_PROCESSING_CONFIG")) != bool(
+            values.get("PRODUCT_RUNTIME_MANIFEST")
+        ):
             error(f"[{section}] PRODUCT_PROCESSING_CONFIG và PRODUCT_RUNTIME_MANIFEST phải khai báo cùng nhau")
 
     if _is_true(shared.get("PRODUCT_OBJECTIFY")) and not _is_true(api.get("PRODUCT_OBJECTIFY_REMOTE_WORKER")):

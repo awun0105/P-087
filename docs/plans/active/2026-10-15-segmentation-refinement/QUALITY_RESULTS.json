@@ -1,0 +1,433 @@
+{
+  "cases": [
+    {
+      "after": {
+        "config": {
+          "cluster_radius_m": 0.15,
+          "keep_thres": 0.4,
+          "mask_nms_thres": 0.8,
+          "max_prompts": 400,
+          "merge_thres": 0.5,
+          "min_instance_points": 30,
+          "min_mask_points": 10,
+          "min_views": 2,
+          "pred_iou_thres": 0.7,
+          "prompt_voxel_m": 0.2,
+          "refinement": "multiview_v1",
+          "vote_thres": 0.5
+        },
+        "metrics": {
+          "background_leakage": 0,
+          "completeness": 1.0,
+          "merge_errors": 0,
+          "object_to_background": 0,
+          "purity": 1.0,
+          "split_errors": 0
+        }
+      },
+      "before": {
+        "config": {
+          "cluster_radius_m": 0.15,
+          "keep_thres": 0.4,
+          "mask_nms_thres": 0.8,
+          "max_prompts": 400,
+          "merge_thres": 0.5,
+          "min_instance_points": 30,
+          "min_mask_points": 10,
+          "min_views": 2,
+          "pred_iou_thres": 0.7,
+          "prompt_voxel_m": 0.2,
+          "refinement": "legacy",
+          "vote_thres": 0.5
+        },
+        "metrics": {
+          "background_leakage": 0,
+          "completeness": 0.5,
+          "merge_errors": 0,
+          "object_to_background": 60,
+          "purity": 1.0,
+          "split_errors": 0
+        }
+      },
+      "case": "prompt_switch",
+      "input_checksum": "sha256:8d883be23c79a45827f480bfc2e794f3a03d19a25e8cf45fa0b1dddb572ff939",
+      "known_limit": false
+    },
+    {
+      "after": {
+        "config": {
+          "cluster_radius_m": 0.15,
+          "keep_thres": 0.4,
+          "mask_nms_thres": 0.8,
+          "max_prompts": 400,
+          "merge_thres": 0.5,
+          "min_instance_points": 30,
+          "min_mask_points": 10,
+          "min_views": 2,
+          "pred_iou_thres": 0.7,
+          "prompt_voxel_m": 0.2,
+          "refinement": "multiview_v1",
+          "vote_thres": 0.5
+        },
+        "metrics": {
+          "background_leakage": 0,
+          "completeness": 1.0,
+          "merge_errors": 0,
+          "object_to_background": 0,
+          "purity": 1.0,
+          "split_errors": 0
+        }
+      },
+      "before": {
+        "config": {
+          "cluster_radius_m": 0.15,
+          "keep_thres": 0.4,
+          "mask_nms_thres": 0.8,
+          "max_prompts": 400,
+          "merge_thres": 0.5,
+          "min_instance_points": 30,
+          "min_mask_points": 10,
+          "min_views": 2,
+          "pred_iou_thres": 0.7,
+          "prompt_voxel_m": 0.2,
+          "refinement": "legacy",
+          "vote_thres": 0.5
+        },
+        "metrics": {
+          "background_leakage": 0,
+          "completeness": 0.8333333333333333,
+          "merge_errors": 0,
+          "object_to_background": 20,
+          "purity": 1.0,
+          "split_errors": 0
+        }
+      },
+      "case": "occluded_part",
+      "input_checksum": "sha256:b2678f6c11331f14a47239de16e955cd29dac7c11038733b47852edbb76758a8",
+      "known_limit": false
+    },
+    {
+      "after": {
+        "config": {
+          "cluster_radius_m": 0.15,
+          "keep_thres": 0.4,
+          "mask_nms_thres": 0.8,
+          "max_prompts": 400,
+          "merge_thres": 0.5,
+          "min_instance_points": 30,
+          "min_mask_points": 10,
+          "min_views": 2,
+          "pred_iou_thres": 0.7,
+          "prompt_voxel_m": 0.2,
+          "refinement": "multiview_v1",
+          "vote_thres": 0.5
+        },
+        "metrics": {
+          "background_leakage": 0,
+          "completeness": 1.0,
+          "merge_errors": 0,
+          "object_to_background": 0,
+          "purity": 1.0,
+          "split_errors": 0
+        }
+      },
+      "before": {
+        "config": {
+          "cluster_radius_m": 0.15,
+          "keep_thres": 0.4,
+          "mask_nms_thres": 0.8,
+          "max_prompts": 400,
+          "merge_thres": 0.5,
+          "min_instance_points": 30,
+          "min_mask_points": 10,
+          "min_views": 2,
+          "pred_iou_thres": 0.7,
+          "prompt_voxel_m": 0.2,
+          "refinement": "legacy",
+          "vote_thres": 0.5
+        },
+        "metrics": {
+          "background_leakage": 0,
+          "completeness": 0.8333333333333333,
+          "merge_errors": 0,
+          "object_to_background": 20,
+          "purity": 1.0,
+          "split_errors": 0
+        }
+      },
+      "case": "disconnected_part",
+      "input_checksum": "sha256:62a6de758a2da663a82ccc2e0a9959c2b10f85151e5921a1ea8c81f1c0ff07b0",
+      "known_limit": false
+    },
+    {
+      "after": {
+        "config": {
+          "cluster_radius_m": 0.15,
+          "keep_thres": 0.4,
+          "mask_nms_thres": 0.8,
+          "max_prompts": 400,
+          "merge_thres": 0.5,
+          "min_instance_points": 30,
+          "min_mask_points": 10,
+          "min_views": 2,
+          "pred_iou_thres": 0.7,
+          "prompt_voxel_m": 0.2,
+          "refinement": "multiview_v1",
+          "vote_thres": 0.5
+        },
+        "metrics": {
+          "background_leakage": 0,
+          "completeness": 1.0,
+          "merge_errors": 0,
+          "object_to_background": 0,
+          "purity": 1.0,
+          "split_errors": 0
+        }
+      },
+      "before": {
+        "config": {
+          "cluster_radius_m": 0.15,
+          "keep_thres": 0.4,
+          "mask_nms_thres": 0.8,
+          "max_prompts": 400,
+          "merge_thres": 0.5,
+          "min_instance_points": 30,
+          "min_mask_points": 10,
+          "min_views": 2,
+          "pred_iou_thres": 0.7,
+          "prompt_voxel_m": 0.2,
+          "refinement": "legacy",
+          "vote_thres": 0.5
+        },
+        "metrics": {
+          "background_leakage": 0,
+          "completeness": 0.5,
+          "merge_errors": 1,
+          "object_to_background": 0,
+          "purity": 0.5,
+          "split_errors": 0
+        }
+      },
+      "case": "nearby_fused_view",
+      "input_checksum": "sha256:cba075c70f6404833c46f8ea1051156fca6ea680592423602149421f2e39b90c",
+      "known_limit": false
+    },
+    {
+      "after": {
+        "config": {
+          "cluster_radius_m": 0.15,
+          "keep_thres": 0.4,
+          "mask_nms_thres": 0.8,
+          "max_prompts": 400,
+          "merge_thres": 0.5,
+          "min_instance_points": 30,
+          "min_mask_points": 10,
+          "min_views": 2,
+          "pred_iou_thres": 0.7,
+          "prompt_voxel_m": 0.2,
+          "refinement": "multiview_v1",
+          "vote_thres": 0.5
+        },
+        "metrics": {
+          "background_leakage": 0,
+          "completeness": 1.0,
+          "merge_errors": 0,
+          "object_to_background": 0,
+          "purity": 1.0,
+          "split_errors": 0
+        }
+      },
+      "before": {
+        "config": {
+          "cluster_radius_m": 0.15,
+          "keep_thres": 0.4,
+          "mask_nms_thres": 0.8,
+          "max_prompts": 400,
+          "merge_thres": 0.5,
+          "min_instance_points": 30,
+          "min_mask_points": 10,
+          "min_views": 2,
+          "pred_iou_thres": 0.7,
+          "prompt_voxel_m": 0.2,
+          "refinement": "legacy",
+          "vote_thres": 0.5
+        },
+        "metrics": {
+          "background_leakage": 0,
+          "completeness": 1.0,
+          "merge_errors": 0,
+          "object_to_background": 0,
+          "purity": 1.0,
+          "split_errors": 0
+        }
+      },
+      "case": "complementary_prompts",
+      "input_checksum": "sha256:a3a4a51650b43132ba649bd76736fa9017cd60714a89b2e5d39cdb22d6da75ab",
+      "known_limit": false
+    },
+    {
+      "after": {
+        "config": {
+          "cluster_radius_m": 0.15,
+          "keep_thres": 0.4,
+          "mask_nms_thres": 0.8,
+          "max_prompts": 400,
+          "merge_thres": 0.5,
+          "min_instance_points": 30,
+          "min_mask_points": 10,
+          "min_views": 2,
+          "pred_iou_thres": 0.7,
+          "prompt_voxel_m": 0.2,
+          "refinement": "multiview_v1",
+          "vote_thres": 0.5
+        },
+        "metrics": {
+          "background_leakage": 0,
+          "completeness": 1.0,
+          "merge_errors": 0,
+          "object_to_background": 0,
+          "purity": 1.0,
+          "split_errors": 0
+        }
+      },
+      "before": {
+        "config": {
+          "cluster_radius_m": 0.15,
+          "keep_thres": 0.4,
+          "mask_nms_thres": 0.8,
+          "max_prompts": 400,
+          "merge_thres": 0.5,
+          "min_instance_points": 30,
+          "min_mask_points": 10,
+          "min_views": 2,
+          "pred_iou_thres": 0.7,
+          "prompt_voxel_m": 0.2,
+          "refinement": "legacy",
+          "vote_thres": 0.5
+        },
+        "metrics": {
+          "background_leakage": 0,
+          "completeness": 0.5,
+          "merge_errors": 1,
+          "object_to_background": 0,
+          "purity": 0.5,
+          "split_errors": 0
+        }
+      },
+      "case": "transitive_bridge",
+      "input_checksum": "sha256:1f7f6cb1f6c786db92f16249fc0713ad6091962df37d4e111900c2dceb16c32c",
+      "known_limit": false
+    },
+    {
+      "after": {
+        "config": {
+          "cluster_radius_m": 0.15,
+          "keep_thres": 0.4,
+          "mask_nms_thres": 0.8,
+          "max_prompts": 400,
+          "merge_thres": 0.5,
+          "min_instance_points": 30,
+          "min_mask_points": 10,
+          "min_views": 2,
+          "pred_iou_thres": 0.7,
+          "prompt_voxel_m": 0.2,
+          "refinement": "multiview_v1",
+          "vote_thres": 0.5
+        },
+        "metrics": {
+          "background_leakage": 0,
+          "completeness": 0.75,
+          "merge_errors": 0,
+          "object_to_background": 0,
+          "purity": 0.6666666666666666,
+          "split_errors": 1
+        }
+      },
+      "before": {
+        "config": {
+          "cluster_radius_m": 0.15,
+          "keep_thres": 0.4,
+          "mask_nms_thres": 0.8,
+          "max_prompts": 400,
+          "merge_thres": 0.5,
+          "min_instance_points": 30,
+          "min_mask_points": 10,
+          "min_views": 2,
+          "pred_iou_thres": 0.7,
+          "prompt_voxel_m": 0.2,
+          "refinement": "legacy",
+          "vote_thres": 0.5
+        },
+        "metrics": {
+          "background_leakage": 0,
+          "completeness": 0.75,
+          "merge_errors": 0,
+          "object_to_background": 0,
+          "purity": 0.6666666666666666,
+          "split_errors": 1
+        }
+      },
+      "case": "disjoint_identity_unresolved",
+      "input_checksum": "sha256:9118341ff3579ab0b3336ea769258caa53327a9dd6714a1b3829aedee713d2dc",
+      "known_limit": true
+    },
+    {
+      "after": {
+        "config": {
+          "cluster_radius_m": 0.15,
+          "keep_thres": 0.4,
+          "mask_nms_thres": 0.8,
+          "max_prompts": 400,
+          "merge_thres": 0.5,
+          "min_instance_points": 30,
+          "min_mask_points": 10,
+          "min_views": 2,
+          "pred_iou_thres": 0.7,
+          "prompt_voxel_m": 0.2,
+          "refinement": "multiview_v1",
+          "vote_thres": 0.5
+        },
+        "metrics": {
+          "background_leakage": 0,
+          "completeness": 1.0,
+          "merge_errors": 0,
+          "near_floor_completeness": 1.0,
+          "object_to_background": 0,
+          "purity": 1.0,
+          "split_errors": 0
+        }
+      },
+      "before": {
+        "config": {
+          "cluster_radius_m": 0.15,
+          "keep_thres": 0.4,
+          "mask_nms_thres": 0.8,
+          "max_prompts": 400,
+          "merge_thres": 0.5,
+          "min_instance_points": 30,
+          "min_mask_points": 10,
+          "min_views": 2,
+          "pred_iou_thres": 0.7,
+          "prompt_voxel_m": 0.2,
+          "refinement": "legacy",
+          "vote_thres": 0.5
+        },
+        "metrics": {
+          "background_leakage": 0,
+          "completeness": 0.75,
+          "merge_errors": 0,
+          "near_floor_completeness": 0.0,
+          "object_to_background": 30,
+          "purity": 1.0,
+          "split_errors": 0
+        }
+      },
+      "case": "near_floor",
+      "input_checksum": "sha256:0996cdf792c2276aa870323f7da0de6c9bad5e4a5b1749b089251c58e5521afb",
+      "known_limit": false
+    }
+  ],
+  "real_scene_acceptance": false,
+  "source": "annotated_synthetic",
+  "stage": "multiview_consolidation"
+}

@@ -1,0 +1,40 @@
+ruff-check-final
+All checks passed!
+
+ruff-format-final
+746 files already formatted
+
+mirror-final
+PASS — 5 enum, 8 model khớp Pydantic; không có union nào bị nới thành `string`.
+
+typecheck-final
+
+> frontend@0.1.0 typecheck
+> next typegen && tsc --noEmit
+
+Generating route types...
+✓ Types generated successfully
+
+lint-final
+
+> frontend@0.1.0 lint
+> eslint
+
+
+/home/lqaq/PROJECT/AI20K/P-087/frontend/src/features/studio/ImportedScenesHome.tsx
+   6:22  warning  'Box' is defined but never used     @typescript-eslint/no-unused-vars
+  13:17  warning  'Button' is defined but never used  @typescript-eslint/no-unused-vars
+  19:10  warning  'cn' is defined but never used      @typescript-eslint/no-unused-vars
+
+/home/lqaq/PROJECT/AI20K/P-087/frontend/src/features/studio/inspection/LidarCalibrationQAStage.tsx
+  29:6   warning  React Hook useEffect has a missing dependency: 'reportRef'. Either include it or remove the dependency array                                                                                                                                                                             react-hooks/exhaustive-deps
+  80:15  warning  Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` or a custom image loader to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+/home/lqaq/PROJECT/AI20K/P-087/frontend/tests/imported-scenes-home.test.tsx
+  1:37  warning  'waitFor' is defined but never used  @typescript-eslint/no-unused-vars
+
+/home/lqaq/PROJECT/AI20K/P-087/frontend/tests/studio-overview.test.tsx
+  11:15  warning  'ImportedScene' is defined but never used  @typescript-eslint/no-unused-vars
+
+✖ 7 problems (0 errors, 7 warnings)
+

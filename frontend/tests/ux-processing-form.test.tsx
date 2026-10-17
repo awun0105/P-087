@@ -94,3 +94,44 @@ describe("thông số nháp và evaluation hiện hành", () => {
     expect(hook.result.current.values).toEqual({ frames: 30 });
   });
 });
+
+const reviewOptions: ProcessingOptions = {
+  ...options,
+  parameters: [
+    ...options.parameters,
+    { key: "scene.geometry_review", group: "scene", label: "Duyệt tách vật", description: "", kind: "choice", min: null, max: null, step: null, unit: null, choices: [{ value: "required", label: "Dừng" }, { value: "auto", label: "Tạo mesh ngay" }] },
+  ],
+  presets: {
+    minimum_quality: { frames: 10, "scene.geometry_review": "required" },
+    maximum: { frames: 100, "scene.geometry_review": "required" },
+    machine_maximum: { frames: 100, "scene.geometry_review": "required" },
+  },
+};
+
+describe("lựa chọn duyệt tách vật trong hook", () => {
+  it("giữ đánh dấu preset khi đổi lựa chọn duyệt, và giữ lựa chọn đó khi đổi preset", async () => {
+    vi.mocked(getProcessingOptions).mockResolvedValue({ ok: true, data: reviewOptions });
+    const hook = renderHook(() => useProcessingForm(true));
+    await waitFor(() => expect(hook.result.current.values).toEqual({ frames: 10, "scene.geometry_review": "required" }));
+    expect(hook.result.current.activePreset).toBe("minimum_quality");
+    act(() => hook.result.current.setValue("scene.geometry_review", "auto"));
+    expect(hook.result.current.activePreset).toBe("minimum_quality");
+    act(() => hook.result.current.applyPreset("machine_maximum"));
+    expect(hook.result.current.values).toEqual({ frames: 100, "scene.geometry_review": "auto" });
+    expect(hook.result.current.activePreset).toBe("machine_maximum");
+    act(() => hook.result.current.setValue("frames", 50));
+    expect(hook.result.current.activePreset).toBeNull();
+  });
+
+  it("kịch bản không ghi đè lựa chọn duyệt tách vật người dùng đã chọn", async () => {
+    vi.mocked(getProcessingOptions).mockResolvedValue({ ok: true, data: reviewOptions });
+    vi.mocked(suggestProcessingPreset).mockResolvedValue({ ok: true, data: { preset_name: "video_single_object", params: { frames: 40, "scene.geometry_review": "required" }, evaluation } });
+    const hook = renderHook(() => useProcessingForm(true));
+    await waitFor(() => expect(hook.result.current.values).toEqual({ frames: 10, "scene.geometry_review": "required" }));
+    act(() => hook.result.current.setValue("scene.geometry_review", "auto"));
+    await act(async () => { await hook.result.current.applyScenario({ input_type: "video_loop_360", environment: "outdoor", subject_scope: "single_object", target_capacity: "balanced" }); });
+    expect(hook.result.current.values).toEqual({ frames: 40, "scene.geometry_review": "auto" });
+    expect(hook.result.current.scenarioPreset).toBe("video_single_object");
+    expect(hook.result.current.evaluation).toEqual(evaluation);
+  });
+});

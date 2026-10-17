@@ -407,6 +407,82 @@
       "max": 0.5,
       "step": 0.01,
       "unit": "m"
+    },
+    {
+      "key": "scene.refinement",
+      "group": "scene",
+      "label": "Tinh chỉnh tách vật đa góc nhìn",
+      "description": "multiview_v1 đối chiếu mask giữa nhiều góc nhìn để giữ đủ bộ phận và hạn chế gộp nhầm vật.",
+      "kind": "choice",
+      "choices": [
+        {
+          "value": "legacy",
+          "label": "Legacy"
+        },
+        {
+          "value": "multiview_v1",
+          "label": "Đa góc nhìn (multiview_v1)"
+        }
+      ]
+    },
+    {
+      "key": "scene.geometry_method",
+      "group": "scene",
+      "label": "Hình học theo vật",
+      "description": "Vỏ Gaussian: nhanh, luôn kín. ObjectGS: chi tiết hơn, cần GPU; vật không đạt chất lượng giữ collider từ vỏ.",
+      "kind": "choice",
+      "choices": [
+        {
+          "value": "shell",
+          "label": "Vỏ Gaussian (mặc định)"
+        },
+        {
+          "value": "legacy",
+          "label": "Legacy"
+        },
+        {
+          "value": "objectgs",
+          "label": "ObjectGS"
+        }
+      ]
+    },
+    {
+      "key": "scene.geometry_review",
+      "group": "scene",
+      "label": "Duyệt tách vật trước khi tạo mesh",
+      "description": "Dừng để duyệt tách vật: scene vào Draft, người dùng chỉnh vùng rồi bấm Tạo mesh. Tạo mesh ngay: máy tự dựng mesh sau khi tách.",
+      "kind": "choice",
+      "choices": [
+        {
+          "value": "required",
+          "label": "Dừng để duyệt tách vật"
+        },
+        {
+          "value": "auto",
+          "label": "Tạo mesh ngay"
+        }
+      ]
+    },
+    {
+      "key": "scene.objectgs_iterations",
+      "group": "scene",
+      "label": "Vòng huấn luyện ObjectGS",
+      "description": "Số vòng tạo checkpoint ObjectGS trước khi xuất surface mesh.",
+      "kind": "integer",
+      "min": 1,
+      "max": 100000,
+      "step": 1000
+    },
+    {
+      "key": "scene.objectgs_background_voxel_m",
+      "group": "scene",
+      "label": "Voxel môi trường theo vật",
+      "description": "Độ phân giải occupancy nền trước bước tạo mesh môi trường.",
+      "kind": "number",
+      "min": 0.01,
+      "max": 0.2,
+      "step": 0.01,
+      "unit": "m"
     }
   ],
   "presets": {
@@ -445,7 +521,12 @@
       "simulation.static_friction": 0.5,
       "simulation.dynamic_friction": 0.4,
       "simulation.restitution": 0,
-      "simulation.carve_margin_m": 0.05
+      "simulation.carve_margin_m": 0.05,
+      "scene.geometry_method": "shell",
+      "scene.geometry_review": "required",
+      "scene.refinement": "multiview_v1",
+      "scene.objectgs_iterations": 30000,
+      "scene.objectgs_background_voxel_m": 0.04
     },
     "maximum": {
       "sampling.sample_fps": 6,
@@ -482,7 +563,12 @@
       "simulation.static_friction": 0.5,
       "simulation.dynamic_friction": 0.4,
       "simulation.restitution": 0,
-      "simulation.carve_margin_m": 0.05
+      "simulation.carve_margin_m": 0.05,
+      "scene.geometry_method": "shell",
+      "scene.geometry_review": "required",
+      "scene.refinement": "multiview_v1",
+      "scene.objectgs_iterations": 30000,
+      "scene.objectgs_background_voxel_m": 0.04
     },
     "video_indoor_walkthrough": {
       "sampling.sample_fps": 3,
@@ -519,7 +605,12 @@
       "simulation.static_friction": 0.5,
       "simulation.dynamic_friction": 0.4,
       "simulation.restitution": 0,
-      "simulation.carve_margin_m": 0.05
+      "simulation.carve_margin_m": 0.05,
+      "scene.geometry_method": "shell",
+      "scene.geometry_review": "required",
+      "scene.refinement": "multiview_v1",
+      "scene.objectgs_iterations": 30000,
+      "scene.objectgs_background_voxel_m": 0.04
     },
     "video_indoor_orbital_360": {
       "sampling.sample_fps": 3,
@@ -556,7 +647,12 @@
       "simulation.static_friction": 0.5,
       "simulation.dynamic_friction": 0.4,
       "simulation.restitution": 0,
-      "simulation.carve_margin_m": 0.05
+      "simulation.carve_margin_m": 0.05,
+      "scene.geometry_method": "shell",
+      "scene.geometry_review": "required",
+      "scene.refinement": "multiview_v1",
+      "scene.objectgs_iterations": 30000,
+      "scene.objectgs_background_voxel_m": 0.04
     },
     "video_single_object": {
       "sampling.sample_fps": 3,
@@ -593,7 +689,12 @@
       "simulation.static_friction": 0.5,
       "simulation.dynamic_friction": 0.4,
       "simulation.restitution": 0,
-      "simulation.carve_margin_m": 0.05
+      "simulation.carve_margin_m": 0.05,
+      "scene.geometry_method": "shell",
+      "scene.geometry_review": "required",
+      "scene.refinement": "multiview_v1",
+      "scene.objectgs_iterations": 30000,
+      "scene.objectgs_background_voxel_m": 0.04
     },
     "video_outdoor_forward": {
       "sampling.sample_fps": 3,
@@ -630,7 +731,12 @@
       "simulation.static_friction": 0.5,
       "simulation.dynamic_friction": 0.4,
       "simulation.restitution": 0,
-      "simulation.carve_margin_m": 0.05
+      "simulation.carve_margin_m": 0.05,
+      "scene.geometry_method": "shell",
+      "scene.geometry_review": "required",
+      "scene.refinement": "multiview_v1",
+      "scene.objectgs_iterations": 30000,
+      "scene.objectgs_background_voxel_m": 0.04
     },
     "photo_collection_indoor": {
       "sampling.sample_fps": 3,
@@ -667,7 +773,12 @@
       "simulation.static_friction": 0.5,
       "simulation.dynamic_friction": 0.4,
       "simulation.restitution": 0,
-      "simulation.carve_margin_m": 0.05
+      "simulation.carve_margin_m": 0.05,
+      "scene.geometry_method": "shell",
+      "scene.geometry_review": "required",
+      "scene.refinement": "multiview_v1",
+      "scene.objectgs_iterations": 30000,
+      "scene.objectgs_background_voxel_m": 0.04
     },
     "photo_collection_outdoor": {
       "sampling.sample_fps": 3,
@@ -704,7 +815,12 @@
       "simulation.static_friction": 0.5,
       "simulation.dynamic_friction": 0.4,
       "simulation.restitution": 0,
-      "simulation.carve_margin_m": 0.05
+      "simulation.carve_margin_m": 0.05,
+      "scene.geometry_method": "shell",
+      "scene.geometry_review": "required",
+      "scene.refinement": "multiview_v1",
+      "scene.objectgs_iterations": 30000,
+      "scene.objectgs_background_voxel_m": 0.04
     }
   },
   "fixed": {

@@ -27,6 +27,7 @@ from src.models.contracts.input_assembly import (
 )
 from src.models.contracts.reconstruction import EstimatedTrajectoryArtifact
 from src.models.contracts.retryability import classify_retryability
+from src.runtime_env import runtime_env
 from src.services.orchestration.artifacts.store import ArtifactResolver, FilesystemArtifactStore
 from src.services.reconstruction.inputs.timestamps import (
     TimestampRowFormatError,
@@ -799,11 +800,11 @@ def test_odometry_timeout_and_missing_runtime_are_the_only_retryable_worker_erro
 
 
 @pytest.mark.skipif(
-    not os.environ.get("REC17_LIDAR_ODOMETRY_PYTHON"),
-    reason="set REC17_LIDAR_ODOMETRY_PYTHON to run the isolated KISS-ICP known-motion check",
+    not runtime_env(os.environ, "R2S_LIDAR_ODOMETRY_PYTHON"),
+    reason="set R2S_LIDAR_ODOMETRY_PYTHON to run the isolated KISS-ICP known-motion check",
 )
 def test_isolated_kiss_icp_recovers_known_scan_translation_and_publishes(tmp_path: Path) -> None:
-    python = Path(os.environ["REC17_LIDAR_ODOMETRY_PYTHON"])
+    python = Path(runtime_env(os.environ, "R2S_LIDAR_ODOMETRY_PYTHON"))
     if not python.is_file():
         pytest.skip("configured KISS-ICP runtime is not installed")
     resolver = ArtifactResolver(tmp_path / "artifacts")

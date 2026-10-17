@@ -1,4 +1,4 @@
-import type { StageView } from "@/features/studio/PipelineTimeline";
+import type { TimelineStageView } from "@/features/studio/PipelineTimeline";
 
 export interface PipelineEta {
   /** Thời gian còn lại ước tính của giai đoạn đang chạy (giây) */
@@ -11,7 +11,7 @@ export interface PipelineEta {
 
 /** Chỉ suy thời gian stage hiện tại từ elapsed time và fraction đo được. */
 export function estimateRemainingTime(
-  stages: readonly StageView[],
+  stages: readonly TimelineStageView[],
   isStale?: boolean,
 ): PipelineEta {
   const runningStage = stages.find((s) => s.state === "running");

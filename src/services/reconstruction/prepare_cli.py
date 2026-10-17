@@ -28,6 +28,7 @@ from src.services.reconstruction.rgb.frames.frame_extraction import (
     RGBFrameExtractor,
 )
 from src.services.reconstruction.rgb.frames.frame_sanitization import FrameSanitizer, subprocess_anonymizer
+from src.services.reconstruction.rgb.frames.manifest_frames import RGBManifestFrameAdapter, RGBManifestFrameSelection
 from src.services.reconstruction.rgb.preflight.ffmpeg_probe import FFmpegRGBProbe
 from src.services.reconstruction.rgb.preflight.privacy import SelfAttestedPrivacyGate
 from src.services.reconstruction.rgb.preflight.publication import ArtifactWriter, RGBPreflightPublisher
@@ -77,6 +78,19 @@ def extraction_config(stride: int) -> ExtractionConfig:
     return ExtractionConfig.model_validate(payload)
 
 
+def image_extraction_config() -> ExtractionConfig:
+    """Dataset images are already the extraction result; preserve every referenced source frame."""
+    payload: dict[str, object] = {
+        "schema_version": "1.0",
+        "mode": "image_refs",
+        "sampling_policy": "quality_accepted",
+        "timestamp_policy": "source_timestamp",
+        "config_checksum": "sha256:" + "0" * 64,
+    }
+    payload["config_checksum"] = canonical_content_checksum(payload, "config_checksum")
+    return ExtractionConfig.model_validate(payload)
+
+
 class VideoInputPreparer:
     """Một lần chuẩn bị cho một job; mỗi stage publish xong mới sang stage sau."""
 
@@ -89,6 +103,8 @@ class VideoInputPreparer:
         stages: list[StageArtifact] = []
         publisher = RGBPreflightPublisher(self.deps.writer)
         input_started_at = datetime.now(UTC)
+        if manifest.source_type.value == "dataset":
+            return self._prepare_dataset(request, manifest, stages, publisher, input_started_at)
         try:
             video = self._video(manifest, request.quality_profile)
             quality = self.deps.validator.validate_video(video)
@@ -161,6 +177,83 @@ class VideoInputPreparer:
             frame_set_ref=frame_set_ref,
             frame_stride=stride,
             video_duration_seconds=duration,
+            selected_frame_count=len(quality.selected_frame_ids),
+            extracted_frame_count=len(extracted.frame_set.frames),
+        )
+
+    def _prepare_dataset(self, request, manifest, stages, publisher, input_started_at):
+        """Use declared dataset image refs as extracted frames; never decode the composed input MP4."""
+        files = [file for file in manifest.files if file.media_type in {"image/png", "image/jpeg"}]
+        videos = [file for file in manifest.files if file.media_type in _VIDEO_MEDIA_TYPES]
+        supported_count = len(files) + len(videos)
+        if len(files) < 2 or len(videos) > 1 or supported_count != len(manifest.files):
+            return self._failed(
+                request,
+                manifest,
+                stages,
+                ExecutionError(
+                    error_code="RGB_INPUT_SHAPE_UNSUPPORTED",
+                    stage_id=StageId.INPUT_VALIDATE,
+                    human_message="Dataset preparation expects at least two PNG or JPEG frames",
+                    retryable=False,
+                    details={
+                        "action": "Declare ordered dataset images and at most one composed MP4 in the InputManifest"
+                    },
+                ),
+                input_started_at,
+            )
+        try:
+            selection = RGBManifestFrameSelection(
+                manifest=manifest,
+                frame_ids=tuple(range(len(files))),
+                selection_checksum=manifest.dataset_manifest_checksum or manifest.input_manifest_checksum,
+                profile=request.quality_profile,
+            )
+            quality = self.deps.validator.validate(
+                RGBManifestFrameAdapter(self.deps.resolve_uri).build_request(selection)
+            )
+            quality_ref = publisher.publish_quality(quality, request.job_id)
+            stages.append(_succeeded(StageId.INPUT_VALIDATE, quality_ref, input_started_at))
+        except RGBValidationError as error:
+            return self._failed(request, manifest, stages, error.to_execution_error(), input_started_at)
+        privacy_started_at = datetime.now(UTC)
+        gate = SelfAttestedPrivacyGate()
+        try:
+            proof = gate.issue(manifest, len(quality.selected_frame_ids))
+            privacy_ref = publisher.publish_privacy(proof.report, request.job_id)
+            stages.append(_succeeded(StageId.PRIVACY_GATE, privacy_ref, privacy_started_at))
+        except RGBValidationError as error:
+            failure = error.to_execution_error().model_copy(update={"stage_id": StageId.PRIVACY_GATE})
+            return self._failed(request, manifest, stages, failure, privacy_started_at)
+        frame_started_at = datetime.now(UTC)
+        extractor = RGBFrameExtractor(
+            FrameExtractionDependencies(
+                self.deps.writer, self.deps.resolve_uri, gate, self.deps.decoder, self.deps.require
+            )
+        )
+        try:
+            timestamps = {index: str(index / request.sample_fps) for index in range(len(files))}
+            extracted = extractor.execute(
+                FrameExtractionRequest(
+                    manifest,
+                    quality,
+                    proof,
+                    image_extraction_config(),
+                    request.job_id,
+                    timestamps=timestamps,
+                )
+            )
+        except FrameExtractionError as error:
+            stages.append(error.to_failed_stage().model_copy(update={"started_at": frame_started_at}))
+            return self._failed(request, manifest, stages, error.to_execution_error())
+        stages.append(extracted.stage.model_copy(update={"started_at": frame_started_at}))
+        return PrepareInputResult(
+            job_id=request.job_id,
+            input_manifest_checksum=manifest.input_manifest_checksum,
+            stage_artifacts=stages,
+            frame_set_ref=extracted.reference,
+            frame_stride=1,
+            video_duration_seconds=(len(files) - 1) / request.sample_fps,
             selected_frame_count=len(quality.selected_frame_ids),
             extracted_frame_count=len(extracted.frame_set.frames),
         )

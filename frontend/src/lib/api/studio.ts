@@ -11,6 +11,7 @@ import type {
   ColliderEditCommand,
   ObjectMembershipMergeCommand,
   ObjectMembershipReassignCommand,
+  ObjectRegionCommand,
   ProductArtifactRef,
   SceneEditResponse,
   SceneResponse,
@@ -77,6 +78,11 @@ export async function publishDemo(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   }));
+}
+
+/** Reviewer gỡ mẫu khỏi thư viện công khai, giữ nguyên dự án và artifact. */
+export async function removeSample(sampleId: string): Promise<void> {
+  await apiFetch(`/api/v1/samples/${encodeURIComponent(sampleId)}`, { method: "DELETE" });
 }
 
 /** Reviewer bỏ đánh dấu bản demo; nội dung scene giữ nguyên. */
@@ -626,6 +632,82 @@ export function reassignObjectMembership(
   });
 }
 
+/** Bộ đếm và mẫu của một lần xem trước vùng. Preview không ghi gì và không đổi revision (architecture.md §7.3). */
+export interface RegionPreview {
+  scene_revision: string;
+  membership_checksum: string;
+  object_id: string;
+  added_count: number;
+  removed_count: number;
+  object_gaussian_count: number;
+  protected_floor_count: number;
+  overlaps: Record<string, number>;
+  claimed: Record<string, number>;
+  /** Object-local, tối đa 20 000 điểm mỗi loại. */
+  added_sample_m: [number, number, number][];
+  removed_sample_m: [number, number, number][];
+  shell_glb_base64: string | null;
+  shell_error: string | null;
+  shell_sample_rows?: number;
+  /** Số Gaussian còn lại của từng vật "Lấy luôn" sau khi áp box (T-024). */
+  donor_remaining?: Record<string, number>;
+  /** Vật "Lấy luôn" sẽ còn dưới tối thiểu nếu áp box này: Apply bị khoá tới khi bỏ tick hoặc thu box. */
+  blockers?: { object_id: string; remaining: number; minimum: number }[];
+}
+
+export function previewObjectRegion(
+  jobId: string,
+  objectId: string,
+  command: ObjectRegionCommand,
+  signal?: AbortSignal,
+): Promise<RegionPreview> {
+  return apiFetch<RegionPreview>(
+    `${API}/jobs/${encodeURIComponent(jobId)}/scene/objects/${encodeURIComponent(objectId)}/region/preview`,
+    { method: "POST", body: JSON.stringify(command), signal },
+  );
+}
+
+/** Box ban đầu của "Chỉnh vùng": bao đúng các Gaussian hiện có của vật, object-local (T-023). Chỉ đọc. */
+export interface RegionFit {
+  scene_revision: string;
+  membership_checksum: string;
+  object_id: string;
+  center_m: [number, number, number];
+  half_extents_m: [number, number, number];
+  yaw_rad: number;
+  rows: number;
+}
+
+export function fetchRegionFit(
+  jobId: string,
+  objectId: string,
+  revision: string,
+  signal?: AbortSignal,
+): Promise<RegionFit> {
+  const query = new URLSearchParams({ expected_scene_revision: revision });
+  return apiFetch<RegionFit>(
+    `${API}/jobs/${encodeURIComponent(jobId)}/scene/objects/${encodeURIComponent(objectId)}/region/fit?${query}`,
+    { signal },
+  );
+}
+
+/** Draft: 201 với revision mới. Ready: 202 với tiến độ dựng lại (T-011). Dùng `isSceneEditResponse` để phân biệt. */
+export function applyObjectRegion(
+  jobId: string,
+  objectId: string,
+  command: ObjectRegionCommand,
+): Promise<SceneEditResponse | ObjectifyState> {
+  return apiFetch<SceneEditResponse | ObjectifyState>(
+    `${API}/jobs/${encodeURIComponent(jobId)}/scene/objects/${encodeURIComponent(objectId)}/region/apply`,
+    { method: "POST", body: JSON.stringify(command) },
+  );
+}
+
+/** Phản hồi apply là revision mới (Draft) hay tiến độ dựng lại (Ready): phân biệt theo dạng JSON, không theo mã HTTP. */
+export function isSceneEditResponse(value: SceneEditResponse | ObjectifyState): value is SceneEditResponse {
+  return "scene" in value && "scene_revision" in value;
+}
+
 /** Thêm vật cản hộp; `center` là tâm hộp theo mét trong khung world (sàn z = 0). */
 export function addBoxObstacle(
   jobId: string,
@@ -733,7 +815,7 @@ export function restoreSceneRevision(
 
 // ── dựng lại tập vật: chạy lại tách theo vật / dùng hộp ứng viên ─────────────
 
-export type ObjectifyMode = "objectify" | "boxes";
+export type ObjectifyMode = "objectify" | "boxes" | "membership" | "geometry" | "region";
 
 export type OperationResource = "vram" | "ram" | "disk";
 export type OperationWaitReason = "busy" | "external" | "exceeds_machine" | "unmeasured";
@@ -750,6 +832,8 @@ export interface ObjectifyResourceWait {
 
 /** Trạng thái tách theo vật của scene + yêu cầu dựng lại gần nhất (worker thực hiện). */
 export interface ObjectifyState {
+  operation_id?: string | null;
+  phase?: string | null;
   status: "idle" | "queued" | "running" | "done" | "failed" | "cancelled";
   mode: ObjectifyMode | null;
   /** Revision SceneIR hiện tại; API cũ không gửi. */
@@ -770,6 +854,9 @@ export interface ObjectifyState {
   resource_wait: ObjectifyResourceWait | null;
   /** Running operation has received a cancel request and is stopping/reaping its child. */
   cancellation_requested: boolean;
+  /** Trạng thái hình học theo vật của scene; null = scene cũ không có khoá (luồng cũ, T-021). */
+  object_geometry?: "awaiting_review" | "ready" | null;
+  geometry_note?: string | null;
 }
 
 export function getObjectifyState(jobId: string, signal?: AbortSignal): Promise<ObjectifyState> {
@@ -784,9 +871,17 @@ export function requestObjectify(jobId: string, expectedRevision: string, mode: 
   });
 }
 
+/** Xếp hàng tạo mesh theo vật trên đúng revision Draft đang hiển thị (architecture.md §7.4). */
+export function buildObjectGeometry(jobId: string, expectedRevision: string): Promise<ObjectifyState> {
+  return apiFetch<ObjectifyState>(`${API}/jobs/${encodeURIComponent(jobId)}/scene/geometry/build`, {
+    method: "POST",
+    body: JSON.stringify({ expected_scene_revision: expectedRevision }),
+  });
+}
+
 /** Cancel queued work or request a running objectify worker to stop its child process. */
-export function cancelObjectify(jobId: string): Promise<ObjectifyState> {
-  return apiFetch<ObjectifyState>(`${API}/jobs/${encodeURIComponent(jobId)}/scene/objectify/cancel`, {
+export function cancelObjectify(jobId: string, operationId?: string | null): Promise<ObjectifyState> {
+  return apiFetch<ObjectifyState>(`${API}/jobs/${encodeURIComponent(jobId)}/scene/objectify/cancel${operationId ? `?operation_id=${encodeURIComponent(operationId)}` : ""}`, {
     method: "POST",
   });
 }
@@ -1475,4 +1570,47 @@ export async function getJobEvaluation(jobId: string, signal?: AbortSignal): Pro
 /** Link tải báo cáo Markdown của bảng đánh giá (backend đặt tên file). */
 export function evaluationReportUrl(jobId: string): string {
   return `${API}/jobs/${encodeURIComponent(jobId)}/evaluation/report.md`;
+}
+
+
+export interface CollisionSurfacePlane {
+  id: string;
+  kind: "floor" | "wall";
+  source_checksum: string;
+  fill_regions?: boolean;
+  points: [[number,number,number],[number,number,number],[number,number,number]];
+}
+export function editCollisionSurface(jobId: string, command: {
+  expected_scene_revision: string; source_checksum: string; action: "mark" | "remove" | "fill";
+  kind?: "floor" | "wall"; points?: CollisionSurfacePlane["points"]; plane_id?: string;
+}): Promise<SceneEditResponse> {
+  return apiFetch<SceneEditResponse>(`${API}/jobs/${encodeURIComponent(jobId)}/scene/collision-surfaces`, {
+    method: "POST", body: JSON.stringify(command),
+  });
+}
+
+export interface MembershipPreview {
+  scene_revision: string;
+  membership_checksum: string;
+  source_visual_checksum: string;
+  source_object_id: string | null;
+  target_object_id: string | null;
+  affected_object_ids: string[];
+  gaussian_count: number;
+  protected_count: number;
+  wrong_owner_count: number;
+  source_gaussian_indices: number[];
+  remaining_gaussians: Record<string, number>;
+}
+
+export function previewMembership(jobId: string, command: ObjectMembershipReassignCommand): Promise<MembershipPreview> {
+  return apiFetch<MembershipPreview>(`${API}/jobs/${encodeURIComponent(jobId)}/scene/membership/preview`, {
+    method: "POST", body: JSON.stringify(command),
+  });
+}
+
+export function regenerateMembership(jobId: string, command: ObjectMembershipReassignCommand): Promise<ObjectifyState> {
+  return apiFetch<ObjectifyState>(`${API}/jobs/${encodeURIComponent(jobId)}/scene/membership/regenerate`, {
+    method: "POST", body: JSON.stringify(command),
+  });
 }

@@ -434,13 +434,13 @@ def test_metric_proposal_step_never_blocks_the_preview(tmp_path: Path, monkeypat
     )
     propose = Mock(return_value=None)
     monkeypatch.setattr(runner, "propose_metric", propose)
-    for name in ("REC06_MOGE_PYTHON", "REC06_MOGE_MODEL"):
+    for name in ("R2S_MOGE_PYTHON", "R2S_MOGE_MODEL"):
         monkeypatch.delenv(name, raising=False)
     runner._propose_metric(attempt, None)  # preview lỗi: không có ref
     runner._propose_metric(attempt, reference)  # runtime MoGe không cấu hình
     propose.assert_not_called()
-    monkeypatch.setenv("REC06_MOGE_PYTHON", "/usr/bin/python3")
-    monkeypatch.setenv("REC06_MOGE_MODEL", str(tmp_path / "model.pt"))
+    monkeypatch.setenv("R2S_MOGE_PYTHON", "/usr/bin/python3")
+    monkeypatch.setenv("R2S_MOGE_MODEL", str(tmp_path / "model.pt"))
     runner._propose_metric(attempt, reference)  # preview.json của fixture không phải ReconstructionPreview: bị bắt
     propose.assert_not_called()
     preview = SimpleNamespace(source_visual_ref=reference)

@@ -11,17 +11,22 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AppBase, Entity } from "playcanvas";
 
-import { parseGlbMesh, type TriangleMesh } from "@/features/viewer/glb-mesh";
+import { parseGlbCollider, parseGlbMesh, type ColliderMeshPart, type TriangleMesh } from "@/features/viewer/glb-mesh";
 import type { OverlayObject, SceneOverlay } from "@/features/viewer/scene-overlay";
-import { ScenePhysics, displayToCanonical, loadAmmo, type PhysicsObjectSpec } from "@/features/viewer/scene-physics";
+import { ScenePhysics, displayToCanonical, loadAmmo, physicsTransformBlocker, validateConvexPart, validateTriangleMesh, type AmmoModule, type PhysicsObjectSpec } from "@/features/viewer/scene-physics";
 import type { Vec3 } from "@/features/viewer/source-frame";
+import { ObjectCameraCollision } from "@/features/viewer/camera-collision";
+import type { CollisionQuery } from "@playcanvas/supersplat-viewer/viewer";
 import { WALK_EYE_HEIGHT_M } from "@/features/viewer/third-person";
 
 /** Một vật động như SceneIR mô tả, kèm URL collider để dựng bao lồi. */
 export interface PhysicsObjectInput {
   id: string;
+  dynamic?: boolean;
+  colliderType?: string;
   position: Vec3;
   rotation_xyzw: [number, number, number, number];
+  /** GLB đã bake trong collider-local frame canonical; không phải display-space GLB. */
   colliderUrl: string | null;
   /** Child collider frame relative to the SceneObject; applied to hull vertices before simulation. */
   colliderLocalTransform: {
@@ -29,7 +34,7 @@ export interface PhysicsObjectInput {
     rotation_quaternion_xyzw: [number, number, number, number];
   } | null;
   dimensions: Vec3 | null;
-  mass_kg: number;
+  mass_kg: number | null;
   friction: number;
   restitution: number;
 }
@@ -40,10 +45,26 @@ export type PhysicsStatus =
   | { state: "ready"; objects: number }
   | { state: "failed"; message: string };
 
-async function fetchMesh(url: string, signal: AbortSignal): Promise<TriangleMesh> {
+export function browserPhysicsBlocker(objects: readonly PhysicsObjectInput[]): string | null {
+  for (const item of objects) {
+    const transformError = physicsTransformBlocker(item);
+    if (transformError) return transformError;
+    const type = item.colliderType ?? (item.colliderUrl ? "CONVEX_HULL" : "AABB");
+    if (!["AABB", "OBB", "CONVEX_HULL", "CONVEX_DECOMPOSITION", "SIMPLIFIED_MESH"].includes(type)) return `${item.id}: unsupported collider type ${type}`;
+    if (item.dynamic !== false && (item.mass_kg === null || !Number.isFinite(item.mass_kg) || item.mass_kg <= 0)) return `${item.id}: dynamic body requires positive authored mass`;
+    if (item.dynamic !== false && type === "SIMPLIFIED_MESH") return `${item.id}: dynamic concave triangle mesh is unsupported`;
+    if (["AABB", "OBB"].includes(type)) {
+      if (!item.dimensions || item.dimensions.some(value => !Number.isFinite(value) || value <= 0)) return `${item.id}: thiếu kích thước box collider`;
+    } else if (!item.colliderUrl) return `${item.id}: thiếu collider artifact`;
+  }
+  return null;
+}
+
+async function fetchMesh(url: string, signal: AbortSignal, frame: "display_world" | "canonical_collider_local"): Promise<TriangleMesh> {
   const response = await fetch(url, { signal });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  return parseGlbMesh(await response.arrayBuffer());
+  const mesh = parseGlbMesh(await response.arrayBuffer());
+  return frame === "display_world" ? toCanonical(mesh) : mesh;
 }
 
 /** Lưới va chạm của viewer ở không gian hiển thị → hệ canonical của thế giới vật lý. */
@@ -105,99 +126,135 @@ export function fallbackColliderHull(
   return transformColliderHullToObjectFrame(new Float32Array(points), transform);
 }
 
-export function usePhysicsPlay({
-  app,
-  overlay,
-  walking,
-  collisionUrl,
-  objects,
-  overlayObjects,
-}: {
+interface PreparedScene {
+  request: string;
+  identity: string;
+  ammo: AmmoModule;
+  environment: TriangleMesh;
+  objects: PhysicsObjectSpec[];
+  camera: ObjectCameraCollision;
+}
+
+export function usePhysicsPlay({ app, overlay, walking, collisionUrl, objects, overlayObjects, onObjectCollision }: {
   app: AppBase | null;
   overlay: SceneOverlay | null;
   walking: boolean;
-  /** Lưới va chạm đã khoét vùng gốc của vật động, ở không gian hiển thị (cùng URL viewer dùng cho người đi). */
   collisionUrl: string | null;
   objects: readonly PhysicsObjectInput[];
-  /** Pose của vật theo SceneIR, để trả lớp phủ về đúng chỗ khi dừng/đặt lại. */
   overlayObjects: readonly OverlayObject[];
-}): { status: PhysicsStatus; reset: () => void } {
-  const [status, setStatus] = useState<PhysicsStatus>({ state: "off" });
+  onObjectCollision?: (collision: CollisionQuery | null) => void;
+}): { status: PhysicsStatus; reset: () => void; setPose: (id: string, position: Vec3, rotation: [number, number, number, number]) => void } {
+  const [prepared, setPrepared] = useState<PreparedScene | null>(null);
+  const [failure, setFailure] = useState<{ identity: string; message: string } | null>(null);
   const physicsRef = useRef<ScenePhysics | null>(null);
   const restore = useRef(overlayObjects);
-  useEffect(() => {
-    restore.current = overlayObjects;
-  }, [overlayObjects]);
-  const enabled = walking && objects.length > 0 && app !== null && overlay !== null && collisionUrl !== null;
-  // Dựng lại khi tập vật động hoặc lưới đổi, không khi chỉ đổi màu/chọn vật.
+  const cache = useRef(new Map<string, ColliderMeshPart[]>());
+  useEffect(() => { restore.current = overlayObjects; }, [overlayObjects]);
+  const enabled = objects.length > 0 && app !== null && overlay !== null && collisionUrl !== null;
   const key = JSON.stringify(objects);
+  const identity = JSON.stringify([collisionUrl, key]);
+  const request = JSON.stringify([enabled, identity]);
+  // Reset preparation synchronously on input/activation changes, so Restore cannot reuse a cleared old scene.
+  if (prepared && prepared.request !== request) setPrepared(null);
+  const data = prepared?.request === request ? prepared : null;
+
+  // Prepare camera collision before permitting Walk. This allocates no native Ammo world outside Walk.
+  useEffect(() => {
+    if (!enabled || !collisionUrl) { cache.current.clear(); return; }
+    const controller = new AbortController();
+    const specs: PhysicsObjectInput[] = JSON.parse(key);
+    const urls = new Set(specs.filter(item => item.colliderUrl).map(item => `${item.colliderType ?? "CONVEX_HULL"}:${item.colliderUrl}`));
+    for (const url of cache.current.keys()) if (!urls.has(url)) cache.current.delete(url);
+    void (async () => {
+      try {
+        const blocker = browserPhysicsBlocker(specs);
+        if (blocker) throw new Error(blocker);
+        const [ammo, environment, shapes] = await Promise.all([
+          loadAmmo(), fetchMesh(collisionUrl, controller.signal, "display_world"),
+          Promise.all(specs.map(async item => {
+            const type = item.colliderType ?? (item.colliderUrl ? "CONVEX_HULL" : "AABB");
+            if (type === "AABB" || type === "OBB") return undefined;
+            const url = item.colliderUrl!;
+            const cacheKey = `${type}:${url}`;
+            let parts = cache.current.get(cacheKey);
+            if (!parts) {
+              const response = await fetch(url, { signal: controller.signal });
+              if (!response.ok) throw new Error(`${item.id}: collider HTTP ${response.status}`);
+              try {
+                parts = parseGlbCollider(await response.arrayBuffer()).parts;
+                if (type === "CONVEX_HULL" && parts.length !== 1) throw new Error("CONVEX_HULL requires exactly one part");
+                for (const part of parts) {
+                  if (type === "SIMPLIFIED_MESH") validateTriangleMesh(part);
+                  else validateConvexPart(part);
+                }
+              } catch (error: unknown) { throw new Error(`${item.id}: ${error instanceof Error ? error.message : String(error)}`); }
+              if (controller.signal.aborted) return undefined;
+              cache.current.set(cacheKey, parts);
+            }
+            if (type === "CONVEX_HULL" && parts.length !== 1) throw new Error(`${item.id}: CONVEX_HULL requires exactly one part`);
+            return parts;
+          })),
+        ]);
+        if (controller.signal.aborted) return;
+        const bodies: PhysicsObjectSpec[] = specs.map((item,index) => ({
+          ...item, colliderType: item.colliderType ?? (item.colliderUrl ? "CONVEX_HULL" : "AABB"),
+          hull: null, parts: shapes[index], mass_kg: item.dynamic === false ? 0 : item.mass_kg!,
+        }));
+        const camera = new ObjectCameraCollision(bodies);
+        setFailure(null);
+        setPrepared({ request, identity, ammo, environment, objects: bodies, camera });
+      } catch (error: unknown) {
+        if (!controller.signal.aborted) setFailure({ identity, message: error instanceof Error ? error.message : String(error) });
+      }
+    })();
+    return () => controller.abort();
+  }, [enabled, collisionUrl, key, identity, request]);
 
   useEffect(() => {
-    if (!enabled || !app || !overlay || !collisionUrl) return;
-    const controller = new AbortController();
-    let physics: ScenePhysics | null = null;
-    const specs: PhysicsObjectInput[] = JSON.parse(key);
+    onObjectCollision?.(data?.camera ?? null);
+    return () => onObjectCollision?.(null);
+  }, [data, onObjectCollision]);
+  useEffect(() => () => { data?.camera.clear(); }, [data]);
+
+  useEffect(() => {
+    if (!walking || !data || !app || !overlay) return;
+    let physics: ScenePhysics;
+    try { physics = new ScenePhysics(data.ammo, data.environment, data.objects); }
+    catch (error: unknown) {
+      queueMicrotask(() => setFailure({ identity, message: error instanceof Error ? error.message : String(error) }));
+      return;
+    }
+    physicsRef.current = physics;
     const tick = (dt: number) => {
-      if (!physics) return;
       const camera = app.root?.findComponent("camera") as { entity: Entity } | null;
       const eye = camera?.entity.getPosition();
       const feet = eye ? displayToCanonical([eye.x, eye.y, eye.z]) : null;
       if (feet) feet[2] -= WALK_EYE_HEIGHT_M;
-      for (const [id, pose] of physics.step(dt, feet)) overlay.setObjectPose(id, pose.position, pose.rotation_xyzw);
+      for (const [id, pose] of physics.step(dt, feet)) {
+        overlay.setObjectPose(id, pose.position, pose.rotation_xyzw);
+        data.camera.setPose(id, pose);
+      }
       app.renderNextFrame = true;
     };
-    queueMicrotask(() => { if (!controller.signal.aborted) setStatus({ state: "loading" }); });
-    void (async () => {
-      try {
-        const [ammo, environment, hulls] = await Promise.all([
-          loadAmmo(),
-          fetchMesh(collisionUrl, controller.signal).then(toCanonical),
-          Promise.all(
-            specs.map((item) => {
-              const fallback = fallbackColliderHull(item.dimensions, item.colliderLocalTransform);
-              return item.colliderUrl
-                ? fetchMesh(item.colliderUrl, controller.signal).then(
-                    (mesh) => transformColliderHullToObjectFrame(toCanonical(mesh).positions, item.colliderLocalTransform),
-                    () => fallback,
-                  )
-                : Promise.resolve(fallback);
-            }),
-          ),
-        ]);
-        if (controller.signal.aborted) return;
-        const bodies: PhysicsObjectSpec[] = specs.map((item, index) => ({
-          id: item.id,
-          position: item.position,
-          rotation_xyzw: item.rotation_xyzw,
-          hull: hulls[index],
-          dimensions: item.dimensions,
-          mass_kg: item.mass_kg,
-          friction: item.friction,
-          restitution: item.restitution,
-        }));
-        physics = new ScenePhysics(ammo, environment, bodies);
-        physicsRef.current = physics;
-        app.on("update", tick);
-        setStatus({ state: "ready", objects: bodies.length });
-      } catch (error: unknown) {
-        if (!controller.signal.aborted) setStatus({ state: "failed", message: error instanceof Error ? error.message : String(error) });
-      }
-    })();
+    app.on("update", tick);
     return () => {
-      controller.abort();
       app.off("update", tick);
-      physics?.destroy();
+      physics.destroy();
       physicsRef.current = null;
-      // Rời chế độ chơi: mọi vật về đúng chỗ của SceneIR.
       overlay.setObjects(restore.current);
-      setStatus({ state: "off" });
+      for (const item of data.objects) data.camera.setPose(item.id,{position:item.position,rotation_xyzw:item.rotation_xyzw});
     };
-  }, [enabled, app, overlay, collisionUrl, key]);
+  }, [walking, data, app, overlay, identity]);
 
   const reset = useCallback(() => {
     physicsRef.current?.reset();
     overlay?.setObjects(restore.current);
-  }, [overlay]);
-
-  return { status, reset };
+    for (const item of data?.objects ?? []) data!.camera.setPose(item.id,{position:item.position,rotation_xyzw:item.rotation_xyzw});
+  }, [overlay, data]);
+  const status: PhysicsStatus = !enabled ? { state: "off" } : failure?.identity === identity
+    ? { state: "failed", message: failure.message } : data ? { state: "ready", objects: data.objects.length } : { state: "loading" };
+  const setPose = useCallback((id: string, position: Vec3, rotation: [number, number, number, number]) => {
+    data?.camera.setPose(id, {position, rotation_xyzw: rotation});
+  }, [data]);
+  return { status, reset, setPose };
 }

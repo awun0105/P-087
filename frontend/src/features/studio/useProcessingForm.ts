@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { PresetKey } from "@/features/studio/ProcessingSettings";
+import { GEOMETRY_REVIEW_KEY, type PresetKey } from "@/features/studio/ProcessingSettings";
 import { evaluateProcessing, getProcessingOptions, suggestProcessingPreset } from "@/lib/api/studio";
 import type { ParamValue, ProcessingEvaluation, ProcessingOptions, ScenarioPreferences } from "@/lib/contracts/studio";
 import { errorMessage } from "@/lib/ui-error";
@@ -24,6 +24,17 @@ const EVALUATE_DELAY_MS = 300;
 
 function samePreset(values: Record<string, ParamValue>, preset: Record<string, ParamValue>): boolean {
   return Object.keys(preset).every((key) => values[key] === preset[key]);
+}
+
+/** Khớp preset theo thông số chất lượng. Lựa chọn duyệt tách vật là radio riêng nên không tính. */
+function matchesPreset(values: Record<string, ParamValue>, preset: Record<string, ParamValue>): boolean {
+  return Object.keys(preset).every((key) => key === GEOMETRY_REVIEW_KEY || values[key] === preset[key]);
+}
+
+/** Preset và kịch bản không ghi đè lựa chọn duyệt tách vật người dùng đang giữ. */
+function keepReviewChoice(next: Record<string, ParamValue>, current: Record<string, ParamValue> | null): Record<string, ParamValue> {
+  const choice = current?.[GEOMETRY_REVIEW_KEY];
+  return choice === undefined || !(GEOMETRY_REVIEW_KEY in next) ? next : { ...next, [GEOMETRY_REVIEW_KEY]: choice };
 }
 
 /**
@@ -118,10 +129,10 @@ export function useProcessingForm(enabled: boolean, restored?: Record<string, Pa
         setScenarioPreset(null);
         setError(null); 
         setSelectedPreset(preset);
-        setValues({ ...options.presets[preset] }); 
+        setValues(keepReviewChoice({ ...options.presets[preset] }, values)); 
       }
     },
-    [options],
+    [options, values],
   );
 
   const applyScenario = useCallback(async (preferences: ScenarioPreferences) => {
@@ -146,19 +157,21 @@ export function useProcessingForm(enabled: boolean, restored?: Record<string, Pa
     }
     setSelectedPreset(null);
     setScenarioPreset(result.data.preset_name);
-    suggestedKey.current = JSON.stringify(normalized);
-    setValues(normalized);
+    // Ước lượng tài nguyên không đọc lựa chọn duyệt tách vật (processing/resources.py), nên dùng lại ước lượng của kịch bản.
+    const next = keepReviewChoice(normalized, values);
+    suggestedKey.current = JSON.stringify(next);
+    setValues(next);
     setEvaluation(result.data.evaluation);
-    setEvaluatedKey(JSON.stringify(normalized));
-  }, [options]);
+    setEvaluatedKey(JSON.stringify(next));
+  }, [options, values]);
 
   let activePreset: PresetKey | null = null;
   if (options && values) {
-    if (selectedPreset && samePreset(values, options.presets[selectedPreset])) {
+    if (selectedPreset && matchesPreset(values, options.presets[selectedPreset])) {
       activePreset = selectedPreset;
-    } else if (samePreset(values, options.presets.minimum_quality)) {
+    } else if (matchesPreset(values, options.presets.minimum_quality)) {
       activePreset = "minimum_quality";
-    } else if (samePreset(values, options.presets.machine_maximum)) {
+    } else if (matchesPreset(values, options.presets.machine_maximum)) {
       activePreset = "machine_maximum";
     }
   }

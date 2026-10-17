@@ -23,6 +23,10 @@ class StopAfterProvidersError(RuntimeError):
             "coacd": {"threshold": 0.03, "max_convex_hull": 3, "preprocess_resolution": 20, "voxel_m": 0.02},
             "inpaint": {"max_new_gaussians": 100, "behind_object_m": 0.07},
         },
+        {"scene": {"geometry_review": "required"}},
+        {"scene": {"geometry_review": "legacy"}},
+        {"scene": {"geometry_review": "auto"}},
+        {"scene": {"geometry_method": "shell", "geometry_review": "auto"}},
     ],
 )
 def test_provider_requests_receive_overrides(
@@ -89,8 +93,15 @@ def test_provider_requests_receive_overrides(
             scene_config=override,
         )
     groups = override or {}
+    # The runner falls back to legacy, so the chosen refinement is always sent explicitly.
+    # geometry_review routes the job after extraction; the lift runner must never receive it.
     assert requests["lift"]["config"] == {
-        key: value for key, value in groups.get("scene", {}).items() if key != "max_objects"
+        "refinement": "legacy",
+        **{
+            key: value
+            for key, value in groups.get("scene", {}).items()
+            if key not in {"max_objects", "geometry_review", "geometry_method"}
+        },
     }
     assert requests["convex"]["config"] == groups.get("coacd", {})
     assert requests["inpaint"]["config"] == groups.get("inpaint", {})
@@ -110,6 +121,8 @@ def test_provider_requests_receive_overrides(
         {"inpaint": {"max_new_gaussians": -1}},
         {"inpaint": {"behind_object_m": float("inf")}},
         {"scene": {"unknown": 1}},
+        {"scene": {"geometry_review": "later"}},
+        {"scene": {"geometry_method": "unknown"}},
     ],
 )
 def test_invalid_config_rejected_before_runtime(override: dict[str, object], tmp_path: Path) -> None:
@@ -121,10 +134,41 @@ def test_defaults_match_provider_fallbacks() -> None:
     config = module.ObjectifyConfig()
     assert config.scene.max_objects == 60
     assert config.scene.model_dump(exclude={"max_objects"}) == dict(
-        min_score=0.6, max_area=0.35, box_margin_m=0.15, sam_batch=32
+        refinement="legacy",
+        min_score=0.6,
+        max_area=0.35,
+        box_margin_m=0.15,
+        sam_batch=32,
+        geometry_method="legacy",
+        geometry_review="legacy",
+        objectgs_iterations=30000,
+        objectgs_background_voxel_m=0.04,
     )
     assert config.coacd.model_dump() == dict(threshold=0.08, max_convex_hull=8, preprocess_resolution=30, voxel_m=0.04)
     assert config.inpaint.model_dump() == dict(max_new_gaussians=400_000, behind_object_m=0.05)
+
+
+def test_geometry_method_accepts_shell_and_rejects_unknown_values() -> None:
+    assert module.SceneObjectifyConfig(geometry_method="shell").geometry_method == "shell"
+    with pytest.raises(ValueError):
+        module.SceneObjectifyConfig(geometry_method="unknown")
+
+
+@pytest.mark.parametrize(
+    ("scene", "strict"),
+    [
+        ({"geometry_method": "shell"}, True),
+        ({"geometry_method": "objectgs"}, True),
+        ({"geometry_method": "legacy"}, False),
+        ({}, False),
+    ],
+)
+def test_strict_geometry_follows_the_sealed_job_choice(
+    monkeypatch: pytest.MonkeyPatch, scene: dict, strict: bool
+) -> None:
+    monkeypatch.setattr(module, "load_job_config", lambda *args: SimpleNamespace(scene=scene))
+    job = SimpleNamespace(job_id="job-test", config_checksum="unused")
+    assert module.job_requires_strict_geometry(SimpleNamespace(runtime_resolver=None), job) is strict
 
 
 def test_seed_count_override_limits_instances(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -133,7 +177,7 @@ def test_seed_count_override_limits_instances(tmp_path: Path, monkeypatch: pytes
     monkeypatch.setattr(module.gaussian_split, "working_set", lambda *args: np.arange(12))
     monkeypatch.setattr(module.gaussian_split, "positions", lambda rows: points)
     monkeypatch.setattr(module, "run_sam2", lambda *args, **kwargs: None)
-    monkeypatch.setattr(module, "segment", lambda *args: instances)
+    monkeypatch.setattr(module, "segment", lambda *args, **kwargs: instances)
     monkeypatch.setattr(module, "box_from_points", lambda *args: SimpleNamespace(dimensions=(0.5, 0.5, 0.5)))
     args = (points, [], points, None, tmp_path, None)
     assert len(module._seeds(*args)) == 4
@@ -165,3 +209,78 @@ def test_retry_preserves_provider_configuration(tmp_path: Path, monkeypatch: pyt
     )
     assert actual is result
     assert [entry["scene_config"] for entry in seen] == [override, override]
+
+
+def test_multiview_choice_is_explicit_and_preserves_other_provider_controls(tmp_path, monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        module, "load_job_config", lambda *args: SimpleNamespace(scene={"sam_batch": 4, "coacd_threshold": 0.03})
+    )
+
+    def objectify(*args, **kwargs):
+        captured.update(kwargs["scene_config"])
+        return SimpleNamespace(provenance={})
+
+    monkeypatch.setattr(module, "objectify", objectify)
+    module.objectify_with_retry(
+        SimpleNamespace(runtime_resolver=None),
+        SimpleNamespace(job_id="job-test", config_checksum="unused"),
+        SimpleNamespace(),
+        SimpleNamespace(product_objectify_attempts=1),
+        tmp_path,
+        lambda ref, data: ref,
+        refinement="multiview_v1",
+    )
+    assert captured["scene"] == {"sam_batch": 4, "refinement": "multiview_v1"}
+    assert captured["coacd"] == {"threshold": 0.03}
+    assert module.SceneObjectifyConfig().refinement == "legacy"
+    with pytest.raises(ValueError):
+        module.SceneObjectifyConfig(refinement="unreviewed")
+
+
+def test_small_volumetric_candidate_retained_without_admitting_planar_wall(tmp_path, monkeypatch):
+    from eval.fixtures.segmentation import cases, floor_model
+    from tests.test_scene.test_membership_refinement import rows_for
+
+    model = floor_model(cases()[0])
+    small = np.array([(x, y, z) for x in np.linspace(0, 0.08, 5) for y in np.linspace(0, 0.08, 5) for z in (0.1, 0.14)])
+    wall = small.copy()
+    wall[:, 0] += 1
+    wall[:, 2] = 0.1
+    points = np.vstack([small, wall])
+    rows = rows_for(points)
+    instances = [np.arange(len(small)), np.arange(len(small), len(points))]
+    monkeypatch.setattr(module, "run_sam2", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module, "segment", lambda *args, **kwargs: instances)
+    arguments = (rows, [], np.array([[0, 0, 0]]), None, tmp_path, model)
+    assert module._seeds(*arguments) == []
+    refined = module._seeds(*arguments, refinement="multiview_v1")
+    assert len(refined) == 1
+    np.testing.assert_array_equal(refined[0], instances[0])
+
+
+def test_low_object_survives_prompt_candidate_floor_split_and_membership_encoding(tmp_path, monkeypatch):
+    from eval.fixtures.segmentation import cases, floor_model
+    from src.services.scene.editing.membership import encode_gaussian_membership_labels
+    from src.services.scene.sampro3d.consolidate import Proposal, Sampro3dConfig, select_prompts
+    from tests.test_scene.test_membership_refinement import rows_for
+
+    model = floor_model(cases()[0])
+    points = np.array(
+        [(x, y, z) for x in np.linspace(0, 0.08, 5) for y in np.linspace(0, 0.08, 5) for z in (0.003, 0.004)]
+    )
+    rows = rows_for(points)
+    assert len(select_prompts(points, model)) == 0
+    assert len(select_prompts(points, model, Sampro3dConfig(refinement="multiview_v1"))) > 0
+    proposal = Proposal(np.arange(3), np.zeros(3, dtype=int), np.ones(3), [np.arange(50)] * 3, [np.arange(50)] * 3)
+    monkeypatch.setattr(module, "run_sam2", lambda *args, **kwargs: proposal)
+    args = (rows, [], np.array([[0, 0, 0]]), None, tmp_path, model)
+    assert module._seeds(*args) == []
+    (members,) = module._seeds(*args, refinement="multiview_v1")
+    labels = np.full(50, -1, dtype=np.int32)
+    labels[members] = 0
+    labels = module.gaussian_split.assign_floor_gaussians_to_background(rows, labels, model, refinement=True)
+    background, parts = module.gaussian_split.split(rows, labels)
+    assert len(background) == 0 and len(parts) == 1 and len(parts[0].rows) == 50
+    payload = encode_gaussian_membership_labels(labels, gaussian_count=50, label_to_object_id={"0": "candidate-001"})
+    np.testing.assert_array_equal(np.frombuffer(payload, dtype="<i4"), np.zeros(50, dtype=int))

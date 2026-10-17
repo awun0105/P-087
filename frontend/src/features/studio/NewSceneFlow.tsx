@@ -15,8 +15,8 @@ import { canCreateScene, describeDetection, isLidar } from "@/features/studio/in
 import { ImportSetupStep } from "@/features/studio/ImportSetupStep";
 import { SamplePicker, SampleProcessStep, SampleSelectStep } from "@/features/studio/SampleFlow";
 import { UploadDropzone } from "@/features/studio/UploadDropzone";
-import { canEdit } from "@/lib/api/auth";
-import { getSample, listSamples } from "@/lib/api/studio";
+import { canDecideReview, canEdit } from "@/lib/api/auth";
+import { getSample, listSamples, removeSample } from "@/lib/api/studio";
 import { useUrlState } from "@/features/studio/useUrlState";
 import { PageHeader } from "@/components/studio/feedback";
 import { cn } from "@/lib/cn";
@@ -65,6 +65,8 @@ function NewSceneFlowBody({ source }: { source: ReadyMadeSource }) {
   const [samples, setSamples] = useState<SampleSummary[]>([]);
   const [samplesReady, setSamplesReady] = useState(false);
   const [samplesError, setSamplesError] = useState<string | null>(null);
+  const [removingSample, setRemovingSample] = useState(false);
+  const [removeError, setRemoveError] = useState<string | null>(null);
   const [samplesReload, setSamplesReload] = useState(0);
   const [sampleId, setSampleId] = useState<string | null>(null);
   const [sample, setSample] = useState<DemoManifest | null>(null);
@@ -108,6 +110,20 @@ function NewSceneFlowBody({ source }: { source: ReadyMadeSource }) {
     const timer = setTimeout(() => pickSample(requested), 0);
     return () => clearTimeout(timer);
   }, [requested, pickSample]);
+
+  const removeFromDemo = async (item: SampleSummary) => {
+    if (removingSample || !window.confirm(`Bỏ “${item.title}” khỏi demo? Dự án và dữ liệu scene vẫn được giữ lại.`)) return;
+    setRemovingSample(true);
+    setRemoveError(null);
+    try {
+      await removeSample(item.sample_id);
+      setSamples((current) => current.filter((sample) => sample.sample_id !== item.sample_id));
+    } catch (error) {
+      setRemoveError(errorMessage(error));
+    } finally {
+      setRemovingSample(false);
+    }
+  };
 
   const backToSample = () => {
     update({ sample: null, step: "input" });
@@ -155,12 +171,13 @@ function NewSceneFlowBody({ source }: { source: ReadyMadeSource }) {
         <FlowStepper steps={steps} current={step} />
       </div>
       <div className="mt-8">
+        {removeError && <Notice tone="rust" className="mb-4">{removeError}</Notice>}
         {step === 0 && (
           source === "sample" ? (
             !samplesReady ? <p role="status" className="text-sm text-ink-muted">Đang tải video mẫu…</p>
               : samplesError ? <Notice tone="rust">Không tải được video mẫu: {samplesError} <Button variant="secondary" size="sm" onClick={() => { setSamplesReady(false); setSamplesError(null); setSamplesReload((value) => value + 1); }}>Thử lại</Button></Notice>
                 : samples.length === 0 ? <EmptyState icon={<Clapperboard aria-hidden />} title="Chưa có video mẫu">Thử lại khi thư viện mẫu có dữ liệu.</EmptyState>
-                  : <SamplePicker samples={samples} selected={sampleId} onPick={pickSample} />
+                  : <SamplePicker samples={samples} selected={sampleId} onPick={pickSample} onRemove={canDecideReview(me) ? removeFromDemo : undefined} removing={removingSample} />
           ) : canEdit(me) ? (
             <div className="space-y-4">
               <UploadDropzone onUploaded={uploaded} />

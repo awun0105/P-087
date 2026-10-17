@@ -5,7 +5,13 @@ import { useState } from "react";
 import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
 
 import { ProgressBar } from "@/components/studio/primitives";
-import { LIDAR_CALIBRATION_QA_STAGE, MVP_STAGES, type StageMeta } from "@/features/studio/stages";
+import {
+  GEOMETRY_REVIEW_STAGE_ID,
+  LIDAR_CALIBRATION_QA_STAGE,
+  MVP_STAGES,
+  type TimelineStageId,
+  type TimelineStageMeta,
+} from "@/features/studio/stages";
 import { inspectHref, inspectionStage } from "@/features/studio/inspection";
 import { guidanceFor } from "@/features/studio/errorGuidance";
 import { cn } from "@/lib/cn";
@@ -14,8 +20,15 @@ import type { StageState } from "@/lib/contracts/studio";
 import { formatDuration } from "@/lib/format";
 import { estimateRemainingTime, formatEtaDuration } from "@/features/studio/scene/estimation";
 
+/** Hàng trên timeline: như `StageView`, nhưng có thêm hàng ảo phía giao diện (T-021). */
+export interface TimelineStageView extends Omit<StageView, "stage_id"> {
+  stage_id: TimelineStageId;
+  /** Phụ đề một dòng dưới tên bước (vd. hàng ảo: phase đang chạy, lý do lỗi). */
+  note?: string | null;
+}
+
 export interface StageAction {
-  stageId: StageId;
+  stageId: TimelineStageId;
   label: string;
   onClick: () => void;
   /** Nút vẫn hiện nhưng khoá (vd. đang gửi, hết lượt Guest); `hint` nói lý do khi rê chuột. */
@@ -56,23 +69,23 @@ export function PipelineTimeline({
   onSelectStage,
   stageActions,
 }: {
-  stages: readonly StageView[];
+  stages: readonly TimelineStageView[];
   timeNote?: string;
   /** Danh sách stage hiển thị; mặc định 5 stage tới preview (video mẫu). */
-  stageList?: readonly StageMeta[];
+  stageList?: readonly TimelineStageMeta[];
   /** Mẫu replay không có job nên không tạo link Inspect job giả. */
   jobId?: string;
   /** True nếu job đang RUNNING nhưng heartbeat đã quá hạn (mất kết nối hoặc worker chết). */
   isStale?: boolean;
-  selectedStage?: StageId | null;
-  onSelectStage?: (stageId: StageId) => void;
+  selectedStage?: TimelineStageId | null;
+  onSelectStage?: (stageId: TimelineStageId) => void;
   /** Thao tác người dùng cần làm ở một bước (xác nhận tỉ lệ mét, xem bản đã che…); nút hiện sẵn tại hàng của bước đó. */
   stageActions?: readonly StageAction[];
 }) {
-  const [internalSelected, setInternalSelected] = useState<StageId | null>(null);
+  const [internalSelected, setInternalSelected] = useState<TimelineStageId | null>(null);
   const selected = selectedStage !== undefined ? selectedStage : internalSelected;
   const setSelected = onSelectStage
-    ? (fn: (prev: StageId | null) => StageId | null) => {
+    ? (fn: (prev: TimelineStageId | null) => TimelineStageId | null) => {
         const next = fn(selected);
         if (next) onSelectStage(next);
       }
@@ -113,7 +126,10 @@ export function PipelineTimeline({
           const stage = stages.find((item) => item.stage_id === meta.id);
           const state = stage?.state ?? "pending";
           const isCurrentStale = state === "running" && isStale;
-          const inspectable = state === "succeeded" || (meta.id === LIDAR_CALIBRATION_QA_STAGE.id && state === "failed");
+          // Hàng ảo (Duyệt vật & Tạo mesh) không có route inspect và không chọn được: chỉ hiện trạng thái và nút hành động.
+          const apiStageId = meta.id === GEOMETRY_REVIEW_STAGE_ID ? null : meta.id;
+          const inspectable =
+            apiStageId !== null && (state === "succeeded" || (apiStageId === LIDAR_CALIBRATION_QA_STAGE.id && state === "failed"));
           const Icon = isCurrentStale ? AlertTriangle : ICONS[state];
           return (
             <li
@@ -143,7 +159,7 @@ export function PipelineTimeline({
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
                     <p className={cn("text-sm font-medium", state === "pending" ? "text-ink-subtle" : "text-ink")}>
-                      {(jobId && inspectable) || onSelectStage ? (
+                      {((jobId && inspectable) || onSelectStage) ? (
                         <button
                           type="button"
                           aria-expanded={selected === meta.id}
@@ -185,7 +201,8 @@ export function PipelineTimeline({
                       </span>
                     )}
                     {/* Chỉ thao tác người dùng cần làm (thử lại, xác nhận…) mới hiện sẵn cùng hàng tên bước. */}
-                    {state !== "succeeded" && stageActions?.filter((action) => action.stageId === meta.id).map((action) => (
+                    {/* Hàng ảo "Duyệt vật & Tạo mesh" còn nút khi đã xong (Mở Studio sau dựng lại lỗi). */}
+                    {(state !== "succeeded" || apiStageId === null) && stageActions?.filter((action) => action.stageId === meta.id).map((action) => (
                       <button key={action.label} type="button" onClick={action.onClick} disabled={action.disabled} title={action.hint} className={cn(STAGE_BUTTON, "disabled:cursor-not-allowed disabled:opacity-50")}>
                         {action.label}
                       </button>
@@ -196,6 +213,9 @@ export function PipelineTimeline({
                     <p className="mt-1 text-sm text-amber-500">
                       Tiến trình bị gián đoạn. Bấm thử lại để tiếp tục huấn luyện từ checkpoint đã lưu.
                     </p>
+                  )}
+                  {!isCurrentStale && stage?.note && (
+                    <p className={cn("mt-1 text-sm", state === "failed" ? "text-rust" : "text-ink-muted")}>{stage.note}</p>
                   )}
                   {!isCurrentStale && (state === "running" || state === "failed" || state === "waiting") && (
                     <p className="mt-1 text-sm leading-relaxed text-ink-muted">{meta.description}</p>
@@ -236,12 +256,12 @@ export function PipelineTimeline({
                       </div>
                     );
                   })()}
-                  {jobId && inspectable && selected === meta.id && (
+                  {jobId && inspectable && apiStageId !== null && selected === meta.id && (
                     <div id={`stage-detail-${meta.id}`} className="mt-3 space-y-2 border-t border-line pt-3">
                       <p className="text-sm leading-relaxed text-ink-muted">{meta.description}</p>
                       {/* Đường vào view kết quả nằm trong phần mở của bước; mũi tên cạnh tên bước báo có phần này. */}
-                      {inspectionStage(meta.id) && (
-                        <Link href={inspectHref(jobId, meta.id)} className={STAGE_BUTTON}>
+                      {inspectionStage(apiStageId) && (
+                        <Link href={inspectHref(jobId, apiStageId)} className={STAGE_BUTTON}>
                           Xem giai đoạn<span className="sr-only">: {meta.title}</span>
                         </Link>
                       )}

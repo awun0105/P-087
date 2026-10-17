@@ -145,11 +145,29 @@ export interface SourceGaussianROI {
 export interface ObjectMembershipReassignCommand {
   expected_scene_revision: string;
   membership_checksum: string;
-  region: SourceGaussianROI;
+  region?: SourceGaussianROI | null;
+  source_gaussian_indices?: number[] | null;
+  source_visual_checksum?: string | null;
   /** `null` means background. */
   source_object_id: string | null;
   /** `null` means background. */
   target_object_id: string | null;
+}
+
+/** `src/models/contracts/object_membership.py` RegionBox. Yaw quay phải quanh +Z: trục x box = (cos yaw, sin yaw, 0). */
+export interface RegionBox {
+  op: "add" | "subtract";
+  center_m: [number, number, number];
+  half_extents_m: [number, number, number];
+  yaw_rad: number;
+}
+
+/** `src/models/contracts/object_membership.py` ObjectRegionCommand. */
+export interface ObjectRegionCommand {
+  expected_scene_revision: string;
+  membership_checksum: string;
+  boxes: RegionBox[];
+  claim_from: string[];
 }
 
 /** `src/models/contracts/coordinates.py` Transform. */
@@ -213,6 +231,7 @@ export interface ProjectResponse {
   privacy: PrivacyStateResponse;
   /** Chỉ có với project tạo từ video upload (Studio MVP). */
   input_video?: { original_name: string; media_type: string; size_bytes: number } | null;
+  display_video_url?: string | null;
   created_at?: string | null;
   /** Người tạo scene; null với project cũ hoặc khi không bật đăng nhập. */
   created_by?: { user_id: string; display_name: string } | null;
@@ -327,6 +346,8 @@ export interface SceneObject {
   physics?: ObjectPhysics | null;
   /** Quyền sở hữu collision trên geometry nguồn tại revision này; vắng mặt ở SceneIR legacy. */
   source_collision?: SourceCollisionRegion | null;
+  /** Object surface geometry is separate from the physics collider. */
+  surface_mesh_ref?: ProductArtifactRef | null;
 }
 
 /** Source pose/region gốc dùng để rebuild collision sau các thao tác edit. */
@@ -369,6 +390,8 @@ export interface SceneEnvironment {
   visual_master_ref?: ArtifactRef | null;
   /** Membership is absent in legacy scenes; present only when objectify persisted the row map. */
   membership?: ObjectMembershipArtifact | null;
+  /** Producer manifest binding the separately authored active environment collider. */
+  object_aware_collision_ref?: ProductArtifactRef | null;
 }
 
 export interface SceneIR {
@@ -399,7 +422,16 @@ export interface VisualBinding {
   unavailable_reason: string | null;
 }
 
+export interface ObjectRepresentation {
+  object_id: string;
+  visual_policy: "source" | "object" | "omit";
+  source_visual_required: boolean;
+  source_transform: SceneObject["transform"] | null;
+  readiness_blockers: string[];
+}
+
 export interface SceneResponse {
+  representations?: ObjectRepresentation[];
   job_id: string;
   scene_id: string;
   supersedes_revision: string | null;
@@ -431,6 +463,7 @@ export interface ColliderEditCommand {
 }
 
 export interface SceneEditResponse {
+  representations?: ObjectRepresentation[];
   job_id: string;
   previous_scene_revision: string;
   scene_revision: string;

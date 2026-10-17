@@ -120,6 +120,90 @@ def _preparer(root: Path) -> tuple[VideoInputPreparer, ArtifactResolver, Filesys
     return VideoInputPreparer(deps), resolver, store
 
 
+def _publish_image_input(
+    store: FilesystemArtifactStore, image_paths: tuple[Path, ...], input_video: Path | None = None
+) -> ProductArtifactRef:
+    files = []
+    for index, path in enumerate(image_paths):
+        payload = path.read_bytes()
+        checksum = "sha256:" + hashlib.sha256(payload).hexdigest()
+        uri = f"artifact://jobs/{JOB}/input/frames/{path.name}"
+        reference = ProductArtifactRef(
+            artifact_type="RGBFrame",
+            schema_version="1.0",
+            artifact_uri=uri,
+            artifact_checksum=checksum,
+            data_class="product_input",
+            producer_stage=StageId.INPUT_VALIDATE,
+            job_id=JOB,
+        )
+        store.publish(reference, payload)
+        files.append(
+            dict(
+                original_name=path.name,
+                media_type="image/png" if path.suffix.lower() == ".png" else "image/jpeg",
+                size_bytes=len(payload),
+                checksum=checksum,
+                artifact_uri=uri,
+                data_class="product_input",
+            )
+        )
+    if input_video is not None:
+        data = input_video.read_bytes()
+        checksum = "sha256:" + hashlib.sha256(data).hexdigest()
+        uri = f"artifact://jobs/{JOB}/input/video/{input_video.name}"
+        store.publish(
+            ProductArtifactRef(
+                artifact_type="RGBVideo",
+                schema_version="1.0",
+                artifact_uri=uri,
+                artifact_checksum=checksum,
+                data_class="product_input",
+                producer_stage=StageId.INPUT_VALIDATE,
+                job_id=JOB,
+            ),
+            data,
+        )
+        files.append(
+            dict(
+                original_name=input_video.name,
+                media_type="video/mp4",
+                size_bytes=len(data),
+                checksum=checksum,
+                artifact_uri=uri,
+                data_class="product_input",
+            )
+        )
+    payload = InputManifest.model_validate_json(
+        (ROOT / "fixtures/mock_job/input_manifest.json").read_text()
+    ).model_dump(mode="json")
+    payload.update(
+        source_type="dataset",
+        files=files,
+        source_rights_attestation=_ATTESTED,
+        dataset_manifest_checksum="sha256:" + "c" * 64,
+        preparation_provenance={
+            "input_mode": "video_with_preextracted_image_refs" if input_video else "image_refs",
+            "video_decode_skipped": input_video is not None,
+        },
+        video_preparation=None,
+    )
+    payload["input_manifest_checksum"] = canonical_content_checksum(payload, "input_manifest_checksum")
+    manifest = InputManifest.model_validate(payload)
+    body = manifest.model_dump_json(indent=2).encode() + b"\n"
+    reference = ProductArtifactRef(
+        artifact_type="InputManifest",
+        schema_version="1.0",
+        artifact_uri=f"artifact://jobs/{JOB}/input/input_manifest.json",
+        artifact_checksum="sha256:" + hashlib.sha256(body).hexdigest(),
+        data_class="product_input",
+        producer_stage=StageId.INPUT_VALIDATE,
+        job_id=JOB,
+    )
+    store.publish(reference, body)
+    return reference
+
+
 def test_frame_stride_caps_frame_count() -> None:
     assert frame_stride(10, 240) == 1
     assert frame_stride(241, 240) == 2
@@ -158,6 +242,51 @@ def test_video_prepares_quality_privacy_and_strided_frame_set(tmp_path: Path) ->
     # Retry cùng job publish lại đúng bytes → idempotent, không kẹt ArtifactAlreadyExists.
     again = preparer.run(request)
     assert again.frame_set_ref == result.frame_set_ref
+
+
+def test_dataset_preparation_uses_image_refs_and_never_decodes_input_video(tmp_path: Path) -> None:
+    preparer, resolver, store = _preparer(tmp_path)
+    source_video = _video(tmp_path, "testsrc2=duration=1:size=64x48:rate=4")
+    image_dir = tmp_path / "images"
+    image_dir.mkdir()
+    result = subprocess.run(
+        ["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", str(source_video), str(image_dir / "%03d.png")],
+        check=False,
+    )
+    assert result.returncode == 0
+    images = tuple(sorted(image_dir.glob("*.png")))
+    manifest_ref = _publish_image_input(store, images, source_video)
+    source_video.unlink()
+    manifest = InputManifest.model_validate_json(resolver.require(manifest_ref).read_bytes())
+    assert any(item.media_type == "video/mp4" for item in manifest.files)
+    assert len([item for item in manifest.files if item.media_type.startswith("image/")]) == len(images)
+    request = PrepareInputRequest(job_id=JOB, input_manifest_ref=manifest_ref, quality_profile=_profile())
+    prepared, _, _ = _preparer(tmp_path)
+
+    class NoVideoDecoder(FFmpegFrameDecoder):
+        def timestamps(self, video: Path) -> list[str]:
+            raise AssertionError("dataset image preparation must not read a video")
+
+        def decode(self, video: Path, output: Path, frame_ids: list[int] | None = None):
+            raise AssertionError("dataset image preparation must not decode a video")
+
+    prepared.deps = PrepareDependencies(
+        writer=IdempotentWriter(FilesystemArtifactStore(resolver), resolver.require),
+        resolve_uri=resolver.resolve,
+        require=resolver.require,
+        validator=RGBQualityValidator(FFmpegRGBProbe()),
+        decoder=NoVideoDecoder(),
+    )
+    output = prepared.run(request)
+    assert output.error is None and output.frame_set_ref is not None
+    assert output.extracted_frame_count == len(images)
+    frame_set = FrameSetResolver(resolver.require, resolver.require).load(output.frame_set_ref)
+    for frame, source in zip(frame_set.frames, images, strict=True):
+        assert (
+            frame.image.artifact_uri
+            == f"artifact://jobs/{frame.image.job_id}/rec02a/frames/{frame.frame_id:06d}{source.suffix}"
+        )
+        assert frame.image.artifact_checksum == "sha256:" + hashlib.sha256(source.read_bytes()).hexdigest()
 
 
 def test_missing_attestation_stops_at_privacy_without_frames(tmp_path: Path) -> None:

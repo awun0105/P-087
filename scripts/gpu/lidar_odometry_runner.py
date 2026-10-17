@@ -91,6 +91,8 @@ def run(manifest_path: Path, output_path: Path) -> None:
             raise RuntimeError("KISS-ICP returned an invalid pose matrix")
         point_counts.append(int(len(points)))
         poses.append(matrix.tolist())
+        # Một dòng tiến độ mỗi scan: log tăng là dấu hiệu tiến triển để worker phát hiện treo (T-043).
+        print(json.dumps({"scan": len(poses), "of": len(scans)}), flush=True)
 
     output: dict[str, Any] = {
         "schema_version": "1.0",

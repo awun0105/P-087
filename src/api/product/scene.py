@@ -3,15 +3,21 @@
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import FileResponse, JSONResponse
 
 from src.api import schemas
 from src.api.auth import enforce_gpu_quota, record_gpu_run, require_contributor
 from src.api.ownership import authorize_job_mutation
 from src.api.product import deps
 from src.config import Settings
-from src.models.contracts.object_membership import ObjectMembershipMergeCommand, ObjectMembershipReassignCommand
+from src.models.contracts.artifacts import Identifier
+from src.models.contracts.object_membership import (
+    ObjectMembershipMergeCommand,
+    ObjectMembershipPreview,
+    ObjectMembershipReassignCommand,
+    ObjectRegionCommand,
+)
 from src.services.orchestration.artifacts import ArtifactNotFoundError, ArtifactStoreError
 from src.services.orchestration.auth import UserRecord
 from src.services.orchestration.jobs.stage_views import job_bundle
@@ -24,10 +30,22 @@ from src.services.orchestration.scene import (
 )
 from src.services.orchestration.scene.catalog import load_catalog, suggest_classes
 from src.services.orchestration.scene.collision_source_selection import select_lidar_collision_candidate
+from src.services.orchestration.scene.collision_surfaces import CollisionSurfaceCommand, publish_collision_surface
 from src.services.orchestration.scene.errors import SceneNotAvailableError
+from src.services.orchestration.scene.membership_regeneration import preview_correction
 from src.services.orchestration.scene.object_correction import merge_object_candidates, reassign_object_membership
+from src.services.orchestration.scene.object_region import (
+    ObjectRegionNotFoundError,
+    apply_region_draft,
+    fit_region,
+    preview_region,
+)
 from src.services.orchestration.scene.objectify import ObjectifyError
-from src.services.orchestration.scene.objectify_queue import ObjectifyRequestError, ObjectifyState
+from src.services.orchestration.scene.objectify_queue import (
+    ObjectGeometryAlreadyReadyError,
+    ObjectifyRequestError,
+    ObjectifyState,
+)
 from src.services.orchestration.scene.objects import (
     OBJECT_ACTIONS,
     add_box_object,
@@ -42,6 +60,7 @@ from src.services.scene.editing.membership import (
     StaleObjectMembershipRevisionError,
     validate_object_membership_command,
 )
+from src.services.scene.geometry_state import object_geometry_state
 
 router = APIRouter()
 
@@ -334,6 +353,93 @@ def request_objectify(
     return result
 
 
+@router.post("/jobs/{job_id}/scene/membership/preview")
+def preview_scene_membership(
+    job_id: str,
+    request: ObjectMembershipReassignCommand,
+    user: UserRecord | None = Depends(require_contributor),
+) -> ObjectMembershipPreview:
+    registry = deps.registry()
+    authorize_job_mutation(user, registry, job_id, operation="xem hiệu chỉnh membership của")
+    deps.job_or_404(job_id)
+    try:
+        return preview_correction(registry.scene, job_id, request)
+    except StaleObjectMembershipRevisionError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except ObjectMembershipValidationError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except (ArtifactStoreError, SceneError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.post("/jobs/{job_id}/scene/membership/regenerate", response_model=ObjectifyState, status_code=202)
+def regenerate_scene_membership(
+    job_id: str,
+    request: ObjectMembershipReassignCommand,
+    user: UserRecord | None = Depends(require_contributor),
+) -> ObjectifyState:
+    registry, settings = deps.registry(), deps.settings()
+    authorize_job_mutation(user, registry, job_id, operation="tái tạo membership vật thể của")
+    deps.job_or_404(job_id)
+    enforce_gpu_quota(user)
+    try:
+        result = objectify_queue.request(
+            registry,
+            settings,
+            job_id,
+            request.expected_scene_revision,
+            "membership",
+            correction=request,
+            actor_id=user.user_id if user else "local",
+        )
+    except (SceneRevisionConflictError, StaleObjectMembershipRevisionError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except (ObjectifyRequestError, ObjectMembershipValidationError) as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except (ArtifactStoreError, SceneError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    record_gpu_run(user, job_id, {"kind": "scene.membership_regeneration"})
+    return result
+
+
+class GeometryBuildRequest(schemas.ApiModel):
+    """Build the reviewed membership bound to this exact scene revision."""
+
+    expected_scene_revision: Identifier
+
+
+@router.post(
+    "/jobs/{job_id}/scene/geometry/build",
+    response_model=ObjectifyState,
+    status_code=202,
+    responses={409: {"model": schemas.ApiErrorResponse}, 422: {"model": schemas.ApiErrorResponse}},
+)
+def request_geometry_build(
+    job_id: str,
+    request: GeometryBuildRequest,
+    user: UserRecord | None = Depends(require_contributor),
+) -> ObjectifyState:
+    registry, settings = deps.registry(), deps.settings()
+    authorize_job_mutation(user, registry, job_id, operation="tạo hình học vật của")
+    deps.job_or_404(job_id)
+    enforce_gpu_quota(user)
+    try:
+        result = objectify_queue.request(
+            registry,
+            settings,
+            job_id,
+            request.expected_scene_revision,
+            "geometry",
+            actor_id=user.user_id if user else "local",
+        )
+    except ObjectGeometryAlreadyReadyError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except (ObjectifyRequestError, SceneRevisionConflictError, ArtifactStoreError, SceneError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    record_gpu_run(user, job_id, {"kind": "scene.geometry_build"})
+    return result
+
+
 def _membership_correction(
     job_id: str,
     request: ObjectMembershipMergeCommand | ObjectMembershipReassignCommand,
@@ -485,13 +591,17 @@ def reassign_scene_membership(
     response_model=ObjectifyState,
     responses={404: {"model": schemas.ApiErrorResponse}, 409: {"model": schemas.ApiErrorResponse}},
 )
-def cancel_objectify(job_id: str, user: UserRecord | None = Depends(require_contributor)) -> ObjectifyState:
+def cancel_objectify(
+    job_id: str, user: UserRecord | None = Depends(require_contributor), operation_id: str | None = None
+) -> ObjectifyState:
     """Cancel queued objectify immediately or request child-process shutdown for a running attempt."""
     registry = deps.registry()
     authorize_job_mutation(user, registry, job_id, operation="hủy yêu cầu dựng lại vật thể của")
     deps.job_or_404(job_id)
     try:
-        return objectify_queue.cancel(registry, deps.settings(), job_id)
+        return objectify_queue.cancel(
+            registry, deps.settings(), job_id, **({"expected_operation_id": operation_id} if operation_id else {})
+        )
     except SceneNotAvailableError as error:
         raise deps.scene_unavailable(error) from error
     except ObjectifyRequestError as error:
@@ -571,3 +681,104 @@ def restore_scene_revision(
     return deps.scene_mutation(
         lambda editor: restore_revision(editor, job_id, request.expected_scene_revision, request.target_revision)
     )
+
+
+@router.post("/jobs/{job_id}/scene/collision-surfaces", response_model=schemas.SceneEditResponse, status_code=201)
+def mark_collision_surface(
+    job_id: str,
+    command: CollisionSurfaceCommand,
+    user: UserRecord | None = Depends(require_contributor),
+) -> schemas.SceneEditResponse:
+    registry = deps.registry()
+    authorize_job_mutation(user, registry, job_id, operation="đánh dấu mặt collision của")
+    deps.job_or_404(job_id)
+    try:
+        return schemas.scene_edit_response(publish_collision_surface(registry.scene, job_id, command))
+    except SceneRevisionConflictError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except (SceneError, ArtifactStoreError, ValueError) as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@router.post("/jobs/{job_id}/scene/objects/{object_id}/region/preview")
+def preview_object_region(
+    job_id: str,
+    object_id: str,
+    request: ObjectRegionCommand,
+    user: UserRecord | None = Depends(require_contributor),
+) -> dict:
+    registry = deps.registry()
+    authorize_job_mutation(user, registry, job_id, operation="xem vùng Gaussian vật của")
+    deps.job_or_404(job_id)
+    try:
+        return preview_region(registry, job_id, object_id, request)
+    except StaleObjectMembershipRevisionError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except ObjectMembershipValidationError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except (ArtifactStoreError, SceneError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.get("/jobs/{job_id}/scene/objects/{object_id}/region/fit")
+def fit_object_region(
+    job_id: str,
+    object_id: str,
+    expected_scene_revision: str = Query(...),
+    user: UserRecord | None = Depends(require_contributor),
+) -> dict:
+    """Box ban đầu của "Chỉnh vùng": bao đúng các Gaussian hiện có của vật (T-023)."""
+    registry = deps.registry()
+    authorize_job_mutation(user, registry, job_id, operation="xem vùng Gaussian vật của")
+    deps.job_or_404(job_id)
+    try:
+        return fit_region(registry, job_id, object_id, expected_scene_revision)
+    except ObjectRegionNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except StaleObjectMembershipRevisionError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except ObjectMembershipValidationError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except (ArtifactStoreError, SceneError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.post(
+    "/jobs/{job_id}/scene/objects/{object_id}/region/apply",
+    response_model=schemas.SceneEditResponse | ObjectifyState,
+    status_code=201,
+    responses={202: {"model": ObjectifyState}, 409: {"model": schemas.ApiErrorResponse}},
+)
+def apply_object_region(
+    job_id: str,
+    object_id: str,
+    request: ObjectRegionCommand,
+    user: UserRecord | None = Depends(require_contributor),
+) -> schemas.SceneEditResponse | JSONResponse:
+    """Draft: publish the edit now (201). Ready: queue a rebuild of the affected objects (202)."""
+    registry = deps.registry()
+    authorize_job_mutation(user, registry, job_id, operation="sửa vùng Gaussian vật của")
+    deps.job_or_404(job_id)
+    actor_id = user.user_id if user else "local"
+    try:
+        if object_geometry_state(registry.scene.current(job_id).scene) == "ready":
+            enforce_gpu_quota(user)
+            queued = objectify_queue.request(
+                registry,
+                deps.settings(),
+                job_id,
+                request.expected_scene_revision,
+                "region",
+                region=(object_id, request),
+                actor_id=actor_id,
+            )
+            record_gpu_run(user, job_id, {"kind": "scene.region_rebuild"})
+            return JSONResponse(status_code=202, content=queued.model_dump(mode="json"))
+        result = apply_region_draft(registry, job_id, object_id, request, actor_id=actor_id)
+        return schemas.scene_edit_response(result)
+    except (StaleObjectMembershipRevisionError, SceneRevisionConflictError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except ObjectMembershipValidationError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except (ObjectifyRequestError, ArtifactStoreError, SceneError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error

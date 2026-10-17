@@ -9,6 +9,7 @@ function controls(): ViewerControls {
   return {
     select: vi.fn(() => true),
     setInputEnabled: vi.fn(),
+    setObjectCollision: vi.fn(),
     setCameraMode: vi.fn(() => true),
     frameScene: vi.fn(() => true),
     resetCamera: vi.fn(() => true),

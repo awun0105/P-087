@@ -64,6 +64,7 @@ export function crumbsFor(pathname: string, detailTitle?: string | null, signedI
   if (pathname === APP_HOME) return [{ label: "Tổng quan" }];
   if (pathname === "/scenes") return [{ label: "Scenes từ video" }];
   if (pathname === "/imports") return [{ label: "Scenes đã import" }];
+  if (pathname === "/benchmark") return [{ label: "Benchmark" }];
   const start = NEW_SCENE_PAGES[pathname];
   if (start) return [{ label: "Tạo scene mới", href: "/new" }, { label: start }];
   if (pathname === "/new" || pathname.startsWith("/new")) return [{ label: "Tạo scene mới" }];

@@ -63,7 +63,7 @@ export function StudioTab({
       </div>
     );
   }
-  if (sceneReady) return <ObjectReviewView jobId={jobId} revision={revision} onSaveState={onSaveState}
+  if (sceneReady) return <ObjectReviewView jobId={jobId} revision={revision} onSaveState={onSaveState} canMutateJob={canMutate}
     sceneStateControls={<DemoControls scope="state" jobId={jobId} revision={revision} sceneReady
       onRestored={(next) => onSaveState({ status: "saved", revision: next })} />} />;
   return (

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { UnifiedInputFlow } from "@/features/studio/UnifiedInputFlow";
@@ -295,6 +295,27 @@ describe("unified input flow", () => {
     mocks.importGaussian.mockResolvedValue({ imported_scene: { import_id: "import-1" }, intent_checksum: `sha256:${"6".repeat(64)}` });
   });
 
+  it("opens the capture guide from the new-scene page and closes it without creating an upload", async () => {
+    render(<UnifiedInputFlow />);
+    const trigger = screen.getByRole("button", { name: "Hướng dẫn quay/chụp" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.click(trigger);
+    const guide = screen.getByRole("dialog", { name: "Hướng dẫn quay/chụp" });
+    for (const name of ["Thông số máy quay", "Cách quay", "Đo bằng thước"]) {
+      expect(within(guide).getByRole("heading", { name })).toBeInTheDocument();
+    }
+    expect(within(guide).getByRole("table")).toBeInTheDocument();
+    expect(within(guide).queryByText(/Layout B|video_indoor_walkthrough/)).not.toBeInTheDocument();
+    fireEvent.click(within(guide).getByRole("button", { name: "Đóng hướng dẫn" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await waitFor(() => expect(trigger).toHaveFocus());
+    expect(mocks.create).not.toHaveBeenCalled();
+    expect(mocks.uploadAssembly).not.toHaveBeenCalled();
+    fireEvent.click(trigger);
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
   it("shows processing settings for an automatically selected video and sends the chosen preset", async () => {
     mocks.resolve.mockReset().mockResolvedValue({ report: report("ready", [videoCandidate("r1-auto", "file-upload-1", "ready")], "r1-auto") });
     const { container } = render(<UnifiedInputFlow />);
@@ -311,6 +332,67 @@ describe("unified input flow", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: /Tạo scene/ })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: /Tạo scene/ }));
     await waitFor(() => expect(mocks.run).toHaveBeenCalledWith("assembly-1", expect.objectContaining({ processing: { "sampling.max_frames": 100 } })));
+  });
+
+  it("sends scene.geometry_review = auto in the create payload when the user chooses Tạo mesh ngay", async () => {
+    mocks.processingOptions.mockResolvedValue({
+      ok: true,
+      data: {
+        ...processingOptions,
+        parameters: [
+          ...processingOptions.parameters,
+          { key: "scene.geometry_review", group: "scene", label: "Duyệt tách vật trước khi tạo mesh", description: "", kind: "choice", min: null, max: null, step: null, unit: null, choices: [{ value: "required", label: "Dừng để duyệt tách vật" }, { value: "auto", label: "Tạo mesh ngay" }] },
+        ],
+        presets: {
+          minimum_quality: { "sampling.max_frames": 10, "scene.geometry_review": "required" },
+          maximum: { "sampling.max_frames": 100, "scene.geometry_review": "required" },
+          machine_maximum: { "sampling.max_frames": 100, "scene.geometry_review": "required" },
+        },
+      },
+    });
+    mocks.resolve.mockReset().mockResolvedValue({ report: report("ready", [videoCandidate("r1-auto", "file-upload-1", "ready")], "r1-auto") });
+    const { container } = render(<UnifiedInputFlow />);
+    fireEvent.change(container.querySelector<HTMLInputElement>('input[type="file"]')!, { target: { files: [new File(["video"], "warehouse.mp4", { type: "video/mp4" })] } });
+    fireEvent.click(await screen.findByRole("button", { name: "Tải file đã chọn lên" }));
+    await nextStep();
+    await screen.findByRole("heading", { name: "Thông số xử lý" });
+    fireEvent.click(screen.getByRole("radio", { name: /Tạo mesh ngay, không duyệt/ }));
+    await nextStep();
+    completeVideoAttestation();
+    await waitFor(() => expect(screen.getByRole("button", { name: /Tạo scene/ })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: /Tạo scene/ }));
+    await waitFor(() => expect(mocks.run).toHaveBeenCalledWith("assembly-1", expect.objectContaining({ processing: { "sampling.max_frames": 10, "scene.geometry_review": "auto" } })));
+  });
+
+  it("tóm tắt thông số hiện nhãn lựa chọn thay vì giá trị thô", async () => {
+    mocks.processingOptions.mockResolvedValue({
+      ok: true,
+      data: {
+        ...processingOptions,
+        parameters: [
+          ...processingOptions.parameters,
+          { key: "scene.geometry_method", group: "scene", label: "Hình học theo vật", description: "", kind: "choice", min: null, max: null, step: null, unit: null, choices: [{ value: "shell", label: "Vỏ Gaussian (mặc định)" }, { value: "objectgs", label: "ObjectGS" }] },
+          { key: "scene.geometry_review", group: "scene", label: "Duyệt tách vật trước khi tạo mesh", description: "", kind: "choice", min: null, max: null, step: null, unit: null, choices: [{ value: "required", label: "Dừng để duyệt tách vật" }, { value: "auto", label: "Tạo mesh ngay" }] },
+        ],
+        presets: {
+          minimum_quality: { "sampling.max_frames": 10, "scene.geometry_method": "shell", "scene.geometry_review": "required" },
+          maximum: { "sampling.max_frames": 100, "scene.geometry_method": "shell", "scene.geometry_review": "required" },
+          machine_maximum: { "sampling.max_frames": 100, "scene.geometry_method": "shell", "scene.geometry_review": "required" },
+        },
+      },
+    });
+    mocks.resolve.mockReset().mockResolvedValue({ report: report("ready", [videoCandidate("r1-summary", "file-upload-1", "ready")], "r1-summary") });
+    const { container } = render(<UnifiedInputFlow />);
+    fireEvent.change(container.querySelector<HTMLInputElement>('input[type="file"]')!, { target: { files: [new File(["video"], "warehouse.mp4", { type: "video/mp4" })] } });
+    fireEvent.click(await screen.findByRole("button", { name: "Tải file đã chọn lên" }));
+    await nextStep();
+    await screen.findByRole("heading", { name: "Thông số xử lý" });
+    await nextStep();
+    const summary = screen.getByText("Xem thông số đã chọn").closest("details") as HTMLElement;
+    expect(within(summary).getByText("Vỏ Gaussian (mặc định)")).toBeInTheDocument();
+    expect(within(summary).getByText("Dừng để duyệt tách vật")).toBeInTheDocument();
+    expect(within(summary).queryByText("shell")).not.toBeInTheDocument();
+    expect(within(summary).queryByText("required")).not.toBeInTheDocument();
   });
 
   it("automatically resolves a legacy upload and hides redundant notices", async () => {

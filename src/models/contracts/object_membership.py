@@ -1,9 +1,9 @@
 """Versioned ownership map from source Gaussian rows to scene objects."""
 
-from math import isfinite
-from typing import Literal, Self
+from math import isfinite, pi
+from typing import Annotated, Literal, Self
 
-from pydantic import Field, FiniteFloat, model_validator
+from pydantic import Field, FiniteFloat, StrictInt, model_validator
 
 from src.models.contracts.artifacts import Checksum, ContractModel, Identifier, ProductArtifactRef
 from src.models.contracts.coordinates import CoordinateSystem
@@ -93,14 +93,69 @@ class SourceGaussianROI(ContractModel):
 class ObjectMembershipReassignCommand(MembershipCommandBase):
     """Move selected source Gaussian rows between an object and the background."""
 
-    region: SourceGaussianROI
+    region: SourceGaussianROI | None = None
+    source_gaussian_indices: list[StrictInt] | None = Field(default=None, min_length=1, max_length=250_000)
+    source_visual_checksum: Checksum | None = None
     source_object_id: Identifier | None
     target_object_id: Identifier | None
 
     @model_validator(mode="after")
     def _require_distinct_owners(self) -> Self:
+        if (self.region is None) == (self.source_gaussian_indices is None):
+            raise ValueError("provide exactly one source ROI or source Gaussian index selection")
+        if self.source_gaussian_indices is not None:
+            if self.source_visual_checksum is None:
+                raise ValueError("source Gaussian selection requires source_visual_checksum")
+            if self.source_gaussian_indices != sorted(set(self.source_gaussian_indices)) or any(
+                index < 0 for index in self.source_gaussian_indices
+            ):
+                raise ValueError("source Gaussian indices must be sorted, unique and non-negative")
         if self.source_object_id is None and self.target_object_id is None:
             raise ValueError("a Gaussian region cannot move from background back to background")
         if self.source_object_id == self.target_object_id:
             raise ValueError("source and target owners must differ; null denotes background")
+        return self
+
+
+class ObjectMembershipPreview(ContractModel):
+    """Read-only effective selection after ownership and background floor protection."""
+
+    scene_revision: Identifier
+    membership_checksum: Checksum
+    source_visual_checksum: Checksum
+    source_object_id: Identifier | None
+    target_object_id: Identifier | None
+    affected_object_ids: list[Identifier]
+    gaussian_count: int = Field(gt=0, strict=True)
+    protected_count: int = Field(ge=0, strict=True)
+    wrong_owner_count: int = Field(ge=0, strict=True)
+    source_gaussian_indices: list[StrictInt] = Field(min_length=1, max_length=250_000)
+    remaining_gaussians: dict[Identifier, int]
+
+
+#: Nửa kích thước box theo trục cục bộ: khoảng đóng [0.005, 20] m (architecture §7.3).
+HalfExtentM = Annotated[FiniteFloat, Field(ge=0.005, le=20)]
+
+
+class RegionBox(ContractModel):
+    """Object-local box that adds or subtracts source rows; yaw turns right-handed about +Z."""
+
+    op: Literal["add", "subtract"]
+    center_m: tuple[FiniteFloat, FiniteFloat, FiniteFloat]
+    half_extents_m: tuple[HalfExtentM, HalfExtentM, HalfExtentM]
+    yaw_rad: FiniteFloat = Field(default=0.0, ge=-2 * pi, le=2 * pi)
+
+
+class ObjectRegionCommand(MembershipCommandBase):
+    """Box edit of one object's source rows, shared by preview and apply."""
+
+    boxes: list[RegionBox] = Field(min_length=1, max_length=16)
+    claim_from: list[Identifier] = Field(default_factory=list, max_length=32)
+
+    @model_validator(mode="after")
+    def _require_add_box_and_unique_claims(self) -> Self:
+        if not any(box.op == "add" for box in self.boxes):
+            raise ValueError("region command requires at least one add box")
+        if len(set(self.claim_from)) != len(self.claim_from):
+            raise ValueError("claim_from must not repeat object ids")
         return self

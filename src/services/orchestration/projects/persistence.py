@@ -37,6 +37,7 @@ from src.services.orchestration.inputs.runs import (
     InputAssemblyRunResult,
 )
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError, RuntimeTransaction
+from src.services.orchestration.jobs.lease import fence
 from src.services.orchestration.jobs.models import JobAttemptRecord
 from src.services.orchestration.projects.errors import JobNotFoundError, ProjectNotFoundError
 from src.services.orchestration.projects.models import ProjectRecord
@@ -50,6 +51,28 @@ class _InputRunReplayError(RuntimeError):
     def __init__(self, result: InputAssemblyRunResult) -> None:
         super().__init__("input run already accepted")
         self.result = result
+
+
+def _require_runtime_rebind(current: JobManifest, manifest: JobManifest, event: JobAttemptRecord) -> None:
+    """Gắn lại runtime (T-040) chỉ cho job QUEUED chưa có stage; ngoài trường runtime mọi thứ phải giữ nguyên."""
+    if current.status != JobStatus.QUEUED or current.stage_artifacts:
+        raise RuntimeStateConflictError("Chỉ gắn lại runtime cho job QUEUED chưa có stage artifact")
+    rebound = event.runtime_rebound
+    if (
+        rebound is None
+        or rebound.from_checksum != current.runtime_manifest_checksum
+        or rebound.to_checksum != manifest.runtime_manifest_checksum
+        or manifest.runtime_manifest_checksum == current.runtime_manifest_checksum
+    ):
+        raise ValueError("Event gắn lại runtime không khớp revision")
+    unchanged = manifest.model_copy(
+        update={
+            "runtime_manifest_checksum": current.runtime_manifest_checksum,
+            "job_manifest_checksum": current.job_manifest_checksum,
+        }
+    )
+    if unchanged != current:
+        raise ValueError("Gắn lại runtime chỉ được đổi trường runtime")
 
 
 class ProjectPersistence:
@@ -132,6 +155,7 @@ class ProjectPersistence:
         upload_ids_to_link: tuple[str, ...] = (),
         input_assembly_run: InputAssemblyRunCommit | None = None,
         expected_scene_revision: str | None = None,
+        runtime_rebind: bool = False,
     ) -> GuestQuotaIntentResult | InputAssemblyRunResult | None:
         """Commit quota, accepted job/CAS, and optional upload project atomically."""
         if self._job(reference.model_dump_json()) != manifest:
@@ -201,6 +225,8 @@ class ProjectPersistence:
         quota_result: GuestQuotaIntentResult | None = None
         try:
             with self.database.transaction(write=True) as tx:
+                # T-040 Q2: attempt đang giữ lease của job này chỉ ghi được khi lease còn của chính nó.
+                fence(tx, manifest.job_id)
                 if expected_scene_revision is not None:
                     from src.services.orchestration.scene.heads import _parse_head_row
 
@@ -306,6 +332,8 @@ class ProjectPersistence:
                         or expected.job_id != manifest.job_id
                     ):
                         raise RuntimeStateConflictError("Job đã thay đổi; command cần revision mới nhất")
+                    if runtime_rebind:
+                        _require_runtime_rebind(current, manifest, event)
                     for field in (
                         "input_manifest_checksum",
                         "config_checksum",
@@ -313,6 +341,8 @@ class ProjectPersistence:
                         "seed",
                         "started_at",
                     ):
+                        if field == "runtime_manifest_checksum" and runtime_rebind:
+                            continue
                         if getattr(current, field) != getattr(manifest, field):
                             raise ValueError("Job revision không được thay source/config/runtime identity")
                     previous_row = tx.execute(

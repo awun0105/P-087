@@ -7,6 +7,8 @@ reclaim RUNNING theo timeout vì trainer có thể vẫn còn sống trên host 
 import argparse
 import logging
 import signal
+from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 from threading import Event, Thread
 from typing import Protocol
@@ -17,8 +19,10 @@ from src.models.contracts.retryability import classify_retryability
 from src.services.orchestration.jobs.admission import ResourceAdmission
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
 from src.services.orchestration.jobs.dispatch import load_prepared_profile, prepared_frame_reference, require_profile
+from src.services.orchestration.jobs.lease import expired_job_ids, leased, release_expired
 from src.services.orchestration.jobs.log_context import configure_worker_logging, job_log_context
 from src.services.orchestration.jobs.models import TransitionRequest
+from src.services.orchestration.jobs.profile import ExecutionProfile
 from src.services.orchestration.jobs.progress import (
     awaiting_anonymization_review,
     awaiting_finalize,
@@ -32,10 +36,12 @@ from src.services.orchestration.jobs.runner import (
     run_reviewed_preview_job,
     run_video_job,
 )
+from src.services.orchestration.jobs.worker_runtimes import has_live_runtime, publisher
 from src.services.orchestration.jobs.workspace import attempt_in_use, job_attempts, job_root
 from src.services.orchestration.processing import is_presets_file, load_presets
 from src.services.orchestration.processing.capability import probe as probe_capability
 from src.services.orchestration.processing.capability import record as record_capability
+from src.services.orchestration.processing.capability import worker_identity
 from src.services.orchestration.projects.errors import PrivacyGateBlockedError
 from src.services.orchestration.projects.privacy import require_project_dispatch
 from src.services.orchestration.projects.registry import ProjectRegistry, get_project_registry
@@ -233,8 +239,9 @@ def _dispatch(
     reviewed_runner: VideoRunner = run_reviewed_preview_job,
 ) -> bool:
     """Một lượt quét hàng đợi của `dispatch_next`."""
-    if registry.persistence is None:
-        raise ValueError("Queue consumer cần durable registry")
+    if registry.persistence is None or registry.execution_profile is None:
+        raise ValueError("Queue consumer cần durable registry và execution profile")
+    profile = registry.execution_profile
     # Thứ tự xoay vòng theo người yêu cầu (jobs/queue.py): cũng là thứ tự UI báo cho người dùng.
     for job_id in [item.job_id for item in fair_order(waiting_jobs(registry))]:
         job: JobManifest | None = None
@@ -248,10 +255,17 @@ def _dispatch(
                     # Người dùng đã xác nhận tỉ lệ (job RUNNING, hoặc QUEUED khi retry): chạy
                     # tiếp REC-05/REC-10 trên cùng job; vẫn qua cổng privacy của project.
                     require_project_dispatch(registry.get_project(candidate.project_id))
+                    if not _runtime_matches(profile, candidate):
+                        continue  # T-040 Q4: chờ máy đúng runtime; không hoàn tất bằng cấu hình của máy khác
                     if admission is not None and not admission(candidate, "finalize"):
                         continue
                     try:
-                        finalize_runner(job_id, expected_checksum=candidate.job_manifest_checksum)
+                        if not _leased_call(
+                            registry,
+                            job_id,
+                            lambda: finalize_runner(job_id, expected_checksum=candidate.job_manifest_checksum),
+                        ):
+                            continue
                     except RuntimeStateConflictError:
                         raise
                     except Exception as error:
@@ -265,9 +279,16 @@ def _dispatch(
                     require_project_dispatch(registry.get_project(candidate.project_id))
                     if admission is not None and not admission(candidate):
                         continue
-                    reviewed_runner(job_id, expected_checksum=candidate.job_manifest_checksum)
+                    if not _leased_call(
+                        registry,
+                        job_id,
+                        lambda: reviewed_runner(job_id, expected_checksum=candidate.job_manifest_checksum),
+                    ):
+                        continue
                     return True
-                require_profile(candidate, registry.execution_profile)
+                if _rebind_orphaned_job(registry, candidate, profile):
+                    return True  # Lượt sau dispatch job này trên runtime mới.
+                require_profile(candidate, profile)
                 project = registry.get_project(candidate.project_id)
                 require_project_dispatch(project)
                 job = candidate
@@ -275,13 +296,21 @@ def _dispatch(
                 if frames is not None:
                     if admission is not None and not admission(job):
                         continue
-                    runner(job_id, frames.artifact_uri, expected_checksum=job.job_manifest_checksum)
+                    if not _leased_call(
+                        registry,
+                        job_id,
+                        lambda: runner(job_id, frames.artifact_uri, expected_checksum=job.job_manifest_checksum),
+                    ):
+                        continue
                     return True
                 if project.input_manifest_ref is None:
                     continue  # Chưa có input để chuẩn bị (ví dụ project dataset chưa publish frames).
                 if admission is not None and not admission(job):
                     continue
-                video_runner(job_id, expected_checksum=job.job_manifest_checksum)
+                if not _leased_call(
+                    registry, job_id, lambda: video_runner(job_id, expected_checksum=job.job_manifest_checksum)
+                ):
+                    continue
                 return True
         except (RuntimeStateConflictError, PrivacyGateBlockedError):
             continue  # Job không eligible hoặc runner khác đã claim; không auto retry.
@@ -294,12 +323,82 @@ def _dispatch(
     return False
 
 
+def _leased_call(registry: ProjectRegistry, job_id: str, call: Callable[[], object]) -> bool:
+    """Chạy một runner trong lease của job (T-040 Q2); False khi worker khác đang giữ job."""
+    if registry.persistence is None:
+        raise ValueError("Lease cần durable registry")
+    with leased(registry.persistence.database, job_id, worker_identity()[0]) as held:
+        if held is None:
+            return False
+        call()
+    return True
+
+
+def recover_expired_leases(registry: ProjectRegistry, *, now: datetime | None = None) -> int:
+    """T-040 Q2: job RUNNING mà worker giữ lease đã mất → FAILED retryable. Máy nào cũng làm được, không cần workspace."""
+    if registry.persistence is None:
+        return 0
+    database = registry.persistence.database
+    recovered = 0
+    for job_id in expired_job_ids(database, now=now):
+        try:
+            job = registry.get_job(job_id)
+            if job.status == JobStatus.RUNNING:
+                details = {"job_id": job_id, "stage": job.current_stage}
+                error = ExecutionError(
+                    stage_id=job.current_stage,
+                    error_code="INTERRUPTED_SHUTDOWN",
+                    human_message="Worker chạy job đã mất (quá thời gian gia hạn). Bấm thử lại để chạy tiếp.",
+                    retryable=classify_retryability("INTERRUPTED_SHUTDOWN", details),
+                    details=details,
+                )
+                registry.transition_job(
+                    job_id,
+                    TransitionRequest(target_status=JobStatus.FAILED, error=error),
+                    expected_checksum=job.job_manifest_checksum,
+                )
+                recovered += 1
+                logger.info("Job %s: lease hết hạn, đưa về FAILED (retryable=True)", job_id)
+            release_expired(database, job_id, now=now)
+        except RuntimeStateConflictError:
+            continue  # Máy khác đã xử lý trước (CAS); lượt sau đọc lại.
+        except Exception as error:  # noqa: BLE001 - một job lỗi không được chặn các job hết hạn khác
+            logger.warning("Không xử lý được lease hết hạn job %s: %s", job_id, type(error).__name__)
+    return recovered
+
+
+def _runtime_matches(profile: ExecutionProfile, job: JobManifest) -> bool:
+    return profile.accepts_runtime(job.runtime_manifest_checksum) and job.seed == profile.seed
+
+
+def _rebind_orphaned_job(registry: ProjectRegistry, job: JobManifest, profile: ExecutionProfile) -> bool:
+    """T-040 Q1: job QUEUED chưa có stage mà runtime của nó không còn worker sống, còn máy này sống và chạy được.
+
+    Job đã có stage không bao giờ được gắn lại ở đây; người dùng xử lý theo `waiting_for="runtime"`.
+    """
+    if job.status != JobStatus.QUEUED or job.stage_artifacts or job.seed != profile.seed:
+        return False
+    if profile.accepts_runtime(job.runtime_manifest_checksum):
+        return False
+    if registry.persistence is None or has_live_runtime(registry.persistence.database, job.runtime_manifest_checksum):
+        return False
+    try:
+        registry.rebind_job_runtime(job, profile.job_runtime_checksum, reason="no_live_worker")
+    except RuntimeStateConflictError:
+        return False  # Máy khác đã gắn lại trước (CAS); lượt sau đọc revision mới.
+    logger.info("Job %s được gắn lại sang runtime của worker đang sống", job.job_id)
+    return True
+
+
 #: Chu kỳ đo lại cấu hình máy; nhỏ hơn TTL của số đo (15 phút) để UI luôn có số mới.
 CAPABILITY_INTERVAL_SECONDS = 300
 
 
 def _start_capability_heartbeat(
-    registry: ProjectRegistry, worker_root: Path, admission: ResourceAdmission | None = None
+    registry: ProjectRegistry,
+    worker_root: Path,
+    admission: ResourceAdmission | None = None,
+    publish_runtime: Callable[[RuntimeDatabase], None] | None = None,
 ) -> Event:
     """Đo và ghi cấu hình máy ngay, rồi lặp ở luồng nền (job dài không làm số đo quá hạn).
 
@@ -318,6 +417,8 @@ def _start_capability_heartbeat(
                     idle = admission.machine_idle() if admission is not None else False
                     previous = probe_capability(worker_root, idle=idle, previous=previous)
                     record_capability(database, previous)
+                    if publish_runtime is not None:
+                        publish_runtime(database)
                     from src.services.orchestration.uploads.temporary import TemporaryUploadService
 
                     TemporaryUploadService(database, registry.runtime_resolver).purge_expired()
@@ -358,7 +459,12 @@ def main(argv: list[str] | None = None) -> int:
     validation_worker = IsaacValidationWorker(registry, settings, admission)
     if admission.discard_leftover_reservation():
         logger.warning("Đã xoá giữ chỗ tài nguyên còn sót của lần chạy trước worker=%s", admission.worker_id)
-    heartbeat = _start_capability_heartbeat(registry, settings.product_worker_root, admission)
+    publish_runtime = (
+        publisher(settings.product_processing_config, settings.product_runtime_manifest, registry.execution_profile)
+        if settings.product_runtime_manifest is not None
+        else None
+    )
+    heartbeat = _start_capability_heartbeat(registry, settings.product_worker_root, admission, publish_runtime)
     previous = signal.getsignal(signal.SIGTERM)
 
     def interrupt(signum: int, frame: object) -> None:
@@ -369,9 +475,11 @@ def main(argv: list[str] | None = None) -> int:
     pause = Event()
     try:
         recover_interrupted_jobs(registry, settings)
+        recover_expired_leases(registry)
         recover_interrupted(settings)
         import_service.recover_legacy_packaging()
         while True:
+            recover_expired_leases(registry)
             # Job trong hàng đợi đi trước; rảnh mới nhận yêu cầu chạy lại tách theo vật (cùng dùng GPU).
             handled = (
                 dispatch_next(registry, admission=admission)

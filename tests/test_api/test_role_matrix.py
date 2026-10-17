@@ -30,6 +30,7 @@ PUBLIC = {
 
 #: Chỉ Reviewer: quản lý thành viên, audit, mốc demo, phát hành, xoá hẳn thùng rác.
 REVIEWER = {
+    ("DELETE", "/samples/{sample_id}"),
     ("GET", "/auth/audit"),
     ("POST", "/auth/invites"),
     ("GET", "/auth/users"),
@@ -44,6 +45,16 @@ REVIEWER = {
 
 #: Đã đăng nhập (Guest trở lên). Quyền sửa resource của người khác do `src/api/ownership.py` quyết định.
 AUTHENTICATED = {
+    ("POST", "/jobs/{job_id}/value-events/operator-time"),
+    ("POST", "/jobs/{job_id}/value-events/walk-session"),
+    ("GET", "/jobs/{job_id}/benchmark-truth"),
+    ("PUT", "/jobs/{job_id}/benchmark-truth"),
+    ("GET", "/jobs/{job_id}/value-metrics"),
+    ("GET", "/jobs/{job_id}/value-metrics.md"),
+    ("GET", "/jobs/{job_id}/value-metrics.csv"),
+    ("GET", "/value-metrics/benchmark"),
+    ("GET", "/value-metrics/benchmark.md"),
+    ("GET", "/value-metrics/benchmark.csv"),
     ("GET", "/imports"),
     ("POST", "/imports"),
     ("DELETE", "/imports/{import_id}"),
@@ -101,9 +112,16 @@ AUTHENTICATED = {
     ("POST", "/jobs/{job_id}/scene/catalog-objects"),
     ("POST", "/jobs/{job_id}/scene/collider"),
     ("POST", "/jobs/{job_id}/scene/collision-source/lidar"),
+    ("POST", "/jobs/{job_id}/scene/collision-surfaces"),
     ("POST", "/jobs/{job_id}/scene/corrections/merge"),
     ("POST", "/jobs/{job_id}/scene/corrections/reassign"),
     ("POST", "/jobs/{job_id}/scene/edits"),
+    ("POST", "/jobs/{job_id}/scene/geometry/build"),
+    ("POST", "/jobs/{job_id}/scene/objects/{object_id}/region/preview"),
+    ("GET", "/jobs/{job_id}/scene/objects/{object_id}/region/fit"),
+    ("POST", "/jobs/{job_id}/scene/objects/{object_id}/region/apply"),
+    ("POST", "/jobs/{job_id}/scene/membership/preview"),
+    ("POST", "/jobs/{job_id}/scene/membership/regenerate"),
     ("GET", "/jobs/{job_id}/scene/objectify"),
     ("POST", "/jobs/{job_id}/scene/objectify"),
     ("POST", "/jobs/{job_id}/scene/objectify/cancel"),

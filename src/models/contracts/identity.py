@@ -71,6 +71,8 @@ def verify_candidate_inventory(candidate: CandidatePackage) -> None:
         raise ValueError("CandidateManifest collision_source_ref is missing from package collider refs")
     if collision_selection_ref is not None:
         refs.append(collision_selection_ref)
+    if candidate.candidate_manifest.object_aware_collision_ref is not None:
+        refs.append(candidate.candidate_manifest.object_aware_collision_ref)
     checksums = [ref.artifact_checksum for ref in refs]
     if candidate.candidate_manifest.artifact_checksums != checksums:
         raise ValueError("CandidateManifest artifact_checksums do not match package refs")

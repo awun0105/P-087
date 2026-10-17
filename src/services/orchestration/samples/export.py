@@ -22,11 +22,13 @@ from src.services.orchestration.artifacts import ArtifactStoreError, sha256_file
 from src.services.orchestration.jobs.dispatch import prepared_frame_reference
 from src.services.orchestration.jobs.models import JobAttemptRecord
 from src.services.orchestration.jobs.progress import MVP_PIPELINE, sanitized_frame_stage
-from src.services.orchestration.samples.bundle import DemoLibrary, DemoUnavailableError
+from src.services.orchestration.jobs.stage_results import recorded_results, result_facts
+from src.services.orchestration.samples.bundle import UNPUBLISHED_MARKER, DemoLibrary, DemoUnavailableError
 from src.services.orchestration.samples.models import (
     DemoFact,
     DemoFile,
     DemoManifest,
+    DemoObjectGeometry,
     DemoSource,
     DemoStage,
     DemoStageAsset,
@@ -123,11 +125,25 @@ def stage_durations(job: JobManifest, attempts: Sequence[JobAttemptRecord]) -> l
             DemoStage(
                 stage_id=stage_id,
                 state=state,
-                duration_seconds=duration if duration is not None and duration >= 0 else None,
+                duration_seconds=duration if duration is not None and duration > 0 else None,
                 summary="Mẫu này chưa ghi kết quả của bước này." if state == "pending" else "",
             )
         )
         cursor = end  # Gap thiếu evidence không được gán thời gian của nhiều bước vào stage sau.
+    prepare_ids = MVP_PIPELINE[:3]
+    prepare = [records.get(stage_id) for stage_id in prepare_ids]
+    if any(record is not None and record.started_at is None for record in prepare):
+        # Prepare publish ba receipt cùng lúc: chỉ có thể đo thời gian chung.
+        for stage in stages[:3]:
+            stage.duration_seconds = None
+        ends = [record.completed_at for record in prepare if record is not None and record.completed_at is not None]
+        if running and running[0].current_stage in prepare_ids and len(ends) == 3:
+            elapsed = (max(ends) - running[0].recorded_at).total_seconds()
+            if elapsed > 0:
+                stages[0].duration_seconds = elapsed
+                stages[
+                    0
+                ].summary = "Thời gian chuẩn bị gộp chung 3 bước: kiểm tra video, quyền riêng tư và tách khung hình."
     return stages
 
 
@@ -253,12 +269,29 @@ def _export_job_bundle(
     video = None
     # Job đã che khuôn mặt/biển số: frame trong bundle là bản đã che, nên không đưa video gốc chưa che ra thư viện công khai.
     if project.input_manifest_ref is not None and sanitized_frame_stage(job) is None:
-        manifest = InputManifest.model_validate_json(resolver.require(project.input_manifest_ref).read_bytes())
-        first = manifest.files[0]
-        path = resolver.resolve(first.artifact_uri)
-        if sha256_file(path) != first.checksum:
-            raise SampleExportError("Video gốc sai checksum")
-        video = add_file(out, path, "input" + Path(first.original_name).suffix.lower())
+        if project.input_video is None and project.display_video_ref is not None:
+            path = resolver.require(project.display_video_ref)
+            if sha256_file(path) != project.display_video_ref.artifact_checksum:
+                raise SampleExportError("Video ghép để xem lại sai checksum")
+            video = add_file(out, path, "display.mp4")
+            video_caption = "Video ghép từ ảnh gốc, chỉ để xem lại"
+        else:
+            manifest = InputManifest.model_validate_json(resolver.require(project.input_manifest_ref).read_bytes())
+            source_video = next(
+                (item for item in manifest.files if item.media_type in {"video/mp4", "video/quicktime"}), None
+            )
+            if source_video is not None:
+                path = resolver.resolve(source_video.artifact_uri)
+                if sha256_file(path) != source_video.checksum:
+                    raise SampleExportError("Video gốc sai checksum")
+                video = add_file(out, path, "input" + Path(source_video.original_name).suffix.lower())
+            video_caption = (
+                "Video ghép từ ảnh gốc, dùng làm đầu vào giả lập và xem lại"
+                if source_video is not None and project.display_video_ref is not None
+                else None
+            )
+    else:
+        video_caption = None
     frame_files: list[DemoFile] = []
     frame_count = None
     frame_ref = prepared_frame_reference(job)
@@ -277,8 +310,41 @@ def _export_job_bundle(
         except Exception:  # noqa: BLE001 - camera chỉ là lớp phụ; thiếu thì bundle vẫn dùng được
             cameras = []
     stages = stage_durations(job, registry.list_job_attempts(job.job_id))
-    if stage_assets:
-        _attach_assets(out, stages, stage_assets)
+    results = recorded_results(registry, job)
+    automatic = {
+        stage_id: [StageAssetSpec(kind="facts", facts=tuple(facts))]
+        for stage_id, facts in result_facts(results).items()
+    }
+    collision = results.get("collision_ref")
+    if collision and StageId.RGB_GEOMETRY in automatic:
+        import trimesh
+
+        path = resolver.require_uri(collision["artifact_uri"], collision["artifact_checksum"])
+        mesh = trimesh.load(path, force="mesh", process=False)
+        automatic[StageId.RGB_GEOMETRY].append(
+            StageAssetSpec(kind="facts", facts=(("Số tam giác của lưới", str(len(mesh.faces))),))
+        )
+    # Ảnh xem trước chỉ lấy từ artifact đã publish của job, không render ảnh mới.
+    for stage in job.stage_artifacts:
+        if stage.status != StageStatus.SUCCEEDED or not stage.artifact_uri:
+            continue
+        if stage.stage_id not in automatic or Path(stage.artifact_uri).suffix.lower() not in _ASSET_SUFFIXES["image"]:
+            continue
+        automatic[stage.stage_id].append(
+            StageAssetSpec(kind="image", path=resolver.require_uri(stage.artifact_uri, stage.artifact_checksum))
+        )
+    combined = {
+        stage_id: [*automatic.get(stage_id, []), *(stage_assets or {}).get(stage_id, [])]
+        for stage_id in automatic.keys() | (stage_assets or {}).keys()
+    }
+    if combined:
+        _attach_assets(out, stages, combined)
+    if results.get("object_extraction") == "objectify_failed_awaiting_choice":
+        for stage in stages:
+            if stage.stage_id == StageId.OBJECT_EXTRACT:
+                stage.state = "failed"
+                stage.summary = "Tách theo vật chưa thành công; scene chưa có vật ứng viên."
+    geometry = results.get("object_geometry")
     demo = DemoManifest(
         processing=_job_processing(resolver, job),
         machine=_machine(),
@@ -297,7 +363,9 @@ def _export_job_bundle(
             "visual_producer_version": preview.producer_version,
         },
         stages=stages,
+        object_geometry=DemoObjectGeometry.model_validate(geometry) if geometry else None,
         video=video,
+        video_caption=video_caption,
         frames=frame_files,
         frame_count=frame_count,
         splat=splat,
@@ -420,6 +488,9 @@ def publish_job_bundle(
         slug = slugify(title) or "scene"
         demo_id = f"{slug[:60]}-{job_id.removeprefix('job-')[:8]}"
         target = library_root / demo_id
+        if (target / UNPUBLISHED_MARKER).exists():
+            demo_id = f"{demo_id}-{uuid4().hex[:8]}"
+            target = library_root / demo_id
         if target.exists():
             raise SampleExportError(f"Thư viện đã có mẫu {demo_id}")
         temp = library_root / f".tmp-{demo_id}-{uuid4().hex[:8]}"

@@ -20,7 +20,7 @@ from src.api.ownership import authorize_upload_mutation, owner_mutation_allowed
 from src.api.studio import deps
 from src.api.studio.error_view import filter_job_progress_errors, filter_manifest_errors
 from src.models.contracts.manifests import JobManifest, JobStatus, StageId, StageStatus
-from src.services.orchestration.artifacts import ArtifactStoreError
+from src.services.orchestration.artifacts import ArtifactStoreError, sha256_file
 from src.services.orchestration.auth import Actor, UserRecord, actor_of, with_current_role
 from src.services.orchestration.auth.quota_ledger import GuestQuotaExceededError, GuestQuotaIdempotencyConflictError
 from src.services.orchestration.jobs.admission import job_reservation, resource_wait
@@ -33,16 +33,18 @@ from src.services.orchestration.jobs.progress import (
     job_progress,
 )
 from src.services.orchestration.jobs.queue import job_requester_actors, job_requesters, queue_position
+from src.services.orchestration.jobs.stage_results import stage_notes
 from src.services.orchestration.jobs.stage_views import StageViewList, stage_views
 from src.services.orchestration.jobs.thumbnails import scene_thumbnail
+from src.services.orchestration.jobs.worker_runtimes import has_live_runtime
 from src.services.orchestration.processing import build_job_config, evaluate, is_presets_file, preset_values
 from src.services.orchestration.processing.observed import load_usages, processing_seconds
 from src.services.orchestration.projects import (
     JobCreateInput,
     JobNotFoundError,
     PrivacyGateBlockedError,
-    ProjectNotFoundError,
 )
+from src.services.orchestration.projects.errors import ProjectNotFoundError
 from src.services.orchestration.projects.models import UploadProjectInput
 from src.services.orchestration.projects.registry import ProjectRegistry
 from src.services.orchestration.scene import objectify_queue
@@ -51,6 +53,25 @@ from src.services.orchestration.scene.objectify import AWAITING_CHOICE
 from src.services.orchestration.uploads import UploadNotFoundError
 
 router = APIRouter()
+
+
+@router.get("/projects/{project_id}/display-video", response_class=FileResponse)
+def get_project_display_video(project_id: str) -> FileResponse:
+    """Serve the optional replay-only MP4 without adding it to the pipeline InputManifest."""
+    registry = deps.registry()
+    try:
+        project = registry.get_project(project_id)
+        reference = project.display_video_ref
+        if reference is None:
+            raise HTTPException(status_code=404, detail="Project không có video xem lại")
+        path = registry.runtime_resolver.require(reference)
+        if sha256_file(path) != reference.artifact_checksum:
+            raise HTTPException(status_code=409, detail="Video xem lại sai checksum")
+    except ProjectNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Không tìm thấy project") from error
+    except ArtifactStoreError as error:
+        raise HTTPException(status_code=404, detail="Không tìm thấy video xem lại") from error
+    return FileResponse(path, media_type="video/mp4", headers={"Cache-Control": "private, no-cache"})
 
 
 class SceneCapabilities(BaseModel):
@@ -85,6 +106,9 @@ class SceneSummary(BaseModel):
     #: Job đã xong nhưng tách theo vật lỗi hết số lần thử: scene chỉ có môi trường, chờ người dùng chọn chạy lại hoặc dùng
     #: hộp ứng viên (cùng điều kiện với `awaiting_choice` của `GET /jobs/{id}/scene/objectify`).
     awaiting_object_choice: bool = False
+    #: Bước "Duyệt vật & Tạo mesh" của scene theo vật: chờ duyệt, đang dựng, hoặc Tạo mesh lỗi. None = không còn việc
+    #: (scene Ready) hoặc scene cũ không có bước này. Cùng quy tắc với hàng tiến trình trong Studio (T-021).
+    geometry_review: objectify_queue.GeometryReview | None = None
     #: Thời gian máy đã xử lý của job mới nhất (tổng các bước đã chạy xong); không gồm lúc xếp hàng và lúc chờ người
     #: dùng. None = job chưa có bước nào được đo.
     processing_seconds: float | None = None
@@ -179,10 +203,11 @@ def create_scene_from_upload(
 
     # `qa_verified`: mọi video phải qua bộ che và được người upload chấp nhận; thiếu bộ che thì từ chối ngay.
     deps.require_anonymize(request.anonymize)
-    if registry.execution_profile is None:
+    if registry.job_profile() is None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Chưa cấu hình worker: cần PRODUCT_PROCESSING_CONFIG và PRODUCT_RUNTIME_MANIFEST",
+            detail="Chưa có runtime cho job: cần PRODUCT_PROCESSING_CONFIG và PRODUCT_RUNTIME_MANIFEST, "
+            "hoặc GPU worker đã công bố runtime (PRODUCT_RUNTIME_FROM_WORKERS=true)",
         )
     processing = None
     if settings.product_processing_config is not None and is_presets_file(settings.product_processing_config):
@@ -296,6 +321,47 @@ def _awaiting_object_choice(registry: ProjectRegistry, job: JobManifest) -> bool
         return False  # scene chưa đọc được: danh sách không đoán, màn scene sẽ nói rõ
 
 
+#: Trạng thái hình học theo (job, revision scene hiện tại); chỉ đọc SceneIR khi revision đổi, như `_OBJECT_CHOICE_CACHE`.
+_GEOMETRY_CACHE: dict[tuple[str, str], objectify_queue.ObjectGeometry | None] = {}
+_GEOMETRY_CACHE_MAX = 512
+
+
+def _geometry_review(registry: ProjectRegistry, job: JobManifest) -> objectify_queue.GeometryReview | None:
+    """Scene của job còn việc ở bước "Duyệt vật & Tạo mesh" không (Draft chờ duyệt, đang dựng, Tạo mesh lỗi)."""
+    done = any(
+        stage.stage_id == StageId.OBJECT_EXTRACT and stage.status == StageStatus.SUCCEEDED
+        for stage in job.stage_artifacts
+    )
+    if job.status != JobStatus.SUCCEEDED or not done:
+        return None
+    try:
+        head = registry.scene.head_repository.get(job.job_id) if registry.scene.head_repository is not None else None
+        key = (job.job_id, head.scene_revision) if head is not None else None
+        if key is not None and key in _GEOMETRY_CACHE:
+            geometry = _GEOMETRY_CACHE[key]
+            revision = head.scene_revision
+        else:
+            scene = registry.scene.current(job.job_id).scene
+            geometry = objectify_queue.object_geometry_status(scene.provenance)
+            revision = head.scene_revision if head is not None else scene.scene_revision
+            if key is not None:
+                if len(_GEOMETRY_CACHE) >= _GEOMETRY_CACHE_MAX:
+                    _GEOMETRY_CACHE.clear()
+                _GEOMETRY_CACHE[key] = geometry
+        if geometry is None:
+            return None  # scene cũ không có bước này: không đọc hàng đợi
+        # Trạng thái hàng đợi đổi nhanh nên không cache.
+        return _geometry_queue_state(job.job_id, geometry, revision)
+    except (SceneError, ArtifactStoreError, ValueError, OSError):
+        return None  # scene chưa đọc được: danh sách không đoán, màn scene sẽ nói rõ
+
+
+def _geometry_queue_state(
+    job_id: str, geometry: objectify_queue.ObjectGeometry, revision: str
+) -> objectify_queue.GeometryReview | None:
+    return objectify_queue.geometry_review(deps.settings(), job_id, geometry, revision)
+
+
 def _objectify_request_pending(registry: ProjectRegistry, job_id: str) -> bool:
     """Có yêu cầu dựng lại tập vật đang xếp hàng hoặc chạy của job không (chỉ gọi cho scene đang chờ chọn)."""
     return objectify_queue.state(registry, deps.settings(), job_id).status in {"queued", "running"}
@@ -344,6 +410,7 @@ def list_scenes(user: UserRecord | None = Depends(require_contributor)) -> Scene
                 preview_ready=latest is not None and deps.preview_ready(registry, latest.job_id),
                 awaiting_anonymization_review=latest is not None and awaiting_anonymization_review(latest),
                 awaiting_object_choice=latest is not None and _awaiting_object_choice(registry, latest),
+                geometry_review=None if latest is None else _geometry_review(registry, latest),
                 processing_seconds=None if latest is None else measured.get(latest.job_id),
                 requested_by=None if latest is None else with_current_role(requester_actors.get(latest.job_id), actors),
                 capabilities=SceneCapabilities(can_delete_project=can_delete_project),
@@ -368,6 +435,10 @@ def get_job_progress(job_id: str, user: UserRecord | None = Depends(require_cont
     heartbeat_at = reservation.heartbeat_at if reservation is not None else None
     # Vị trí hàng đợi chỉ tính cho job đang chờ worker (đọc journal của mọi job): job đang chạy không cần.
     position = queue_position(registry, job_id) if job.status == JobStatus.QUEUED or awaiting_finalize(job) else None
+    # T-040: không worker nào đang sống chạy được runtime của job thì UI báo "đang chờ GPU" thay vì im lặng.
+    runtime_wait = registry.persistence is not None and not has_live_runtime(
+        registry.persistence.database, job.runtime_manifest_checksum
+    )
     progress = job_progress(
         job,
         attempts,
@@ -375,6 +446,8 @@ def get_job_progress(job_id: str, user: UserRecord | None = Depends(require_cont
         observation,
         position,
         heartbeat_at=heartbeat_at,
+        runtime_wait=runtime_wait,
+        notes=stage_notes(registry, job),
     )
     progress = filter_job_progress_errors(progress, user)
     allowed = owner_mutation_allowed(

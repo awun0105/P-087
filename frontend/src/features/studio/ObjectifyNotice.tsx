@@ -5,6 +5,7 @@ import { Boxes, Loader2, RefreshCw } from "lucide-react";
 import { Button, Notice } from "@/components/studio/primitives";
 import { useObjectify } from "@/features/studio/scene/objectifyContext";
 import type { ObjectifyMode } from "@/lib/api/studio";
+import { geometryPhaseLabel } from "@/lib/scene/geometry-state";
 
 /**
  * Báo scene chưa phải scene theo vật và cho người dùng chọn: chạy lại tách theo vật, hoặc dùng hộp ứng viên.
@@ -20,11 +21,18 @@ export function ObjectifyNotice({ jobId, revision, onRevision }: { jobId: string
   };
 
   const pending = state.status === "queued" || state.status === "running";
+  const phase = geometryPhaseLabel(state.phase) ?? (state.status === "queued" ? "đang xếp hàng" : "đang chuẩn bị");
   if (pending) {
     return (
       <Notice tone="ember" className="m-3" icon={<Loader2 className="size-4 animate-spin" aria-hidden />}>
         {state.cancellation_requested
           ? "Đang dừng tiến trình và giải phóng tài nguyên…"
+          : state.mode === "geometry"
+            ? `Đang tạo mesh · ${phase}. Scene duyệt được giữ đến khi hoàn tất.`
+          : state.mode === "region"
+            ? `Đang áp vùng · ${phase}. Scene hiện tại được giữ đến khi hoàn tất.`
+          : state.mode === "membership"
+            ? `Đang tái tạo sau hiệu chỉnh Gaussian · ${state.phase ?? state.status}. Scene hiện tại được giữ đến khi hoàn tất.`
           : state.mode === "boxes"
             ? "Đang dựng hộp ứng viên…"
             : "Đang chạy lại tách theo vật (tự thử lại tối đa 3 lần, mỗi lần vài phút)…"}
@@ -39,6 +47,28 @@ export function ObjectifyNotice({ jobId, revision, onRevision }: { jobId: string
         {error && <span className="mt-1 block text-xs">{error}</span>}
       </Notice>
     );
+  }
+  if (state.mode === "geometry" || state.mode === "region") {
+    if (state.status !== "failed" && state.status !== "cancelled") return null;
+    const outcome = state.status === "cancelled" ? "đã huỷ" : "thất bại";
+    return state.mode === "geometry" ? (
+      <Notice tone="rust" className="m-3">
+        Tạo mesh {outcome}. Scene duyệt được giữ nguyên. {state.error}
+        <span className="mt-2 block">
+          <Button size="sm" variant="secondary" disabled={sending} onClick={() => void send("geometry")}>
+            <RefreshCw aria-hidden /> Thử lại
+          </Button>
+        </span>
+        {error && <span className="mt-1 block text-xs">{error}</span>}
+      </Notice>
+    ) : (
+      <Notice tone="rust" className="m-3">Áp vùng {outcome}. Scene hiện tại được giữ nguyên. {state.error}</Notice>
+    );
+  }
+  if (state.mode === "membership") {
+    return state.status === "failed" || state.status === "cancelled" ? (
+      <Notice tone="rust" className="m-3">Tái tạo {state.status === "cancelled" ? "đã hủy" : "thất bại"}. Scene hiện tại được giữ nguyên. Mở chỉnh vùng Gaussian để thử lại. {state.error}</Notice>
+    ) : null;
   }
   if (state.object_centric && state.status !== "cancelled") return null;
 

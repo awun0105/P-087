@@ -10,18 +10,24 @@ from threading import Event
 from typing import TextIO
 
 from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import SettingsConfigDict
+
+from src.runtime_env import RuntimeSettings
+from src.services.process_control import ProgressWatchdog, file_size_marker
 
 
-class VoxelRuntimeSettings(BaseSettings):
+class VoxelRuntimeSettings(RuntimeSettings):
     """Runtime được deployment inject; không cài npm hoặc đổi driver ngầm."""
 
     cli: Path
     module_path: Path
     node_command: tuple[str, ...] = ("node",)
     timeout_seconds: float = Field(default=300, gt=0, allow_inf_nan=False)
+    #: Log không tăng trong khoảng này thì coi như treo. Log voxel thật chỉ có pha dưới 0,2 s (xem report T-043),
+    #: nên 120 s là hệ số lớn; `timeout_seconds` vẫn là lưới cuối.
+    stall_seconds: float = Field(default=120, gt=0, allow_inf_nan=False)
     environment: dict[str, str] = Field(default_factory=dict)
-    model_config = SettingsConfigDict(env_prefix="REC05_VOXEL_", extra="forbid")
+    model_config = SettingsConfigDict(env_prefix="R2S_VOXEL_", extra="forbid")
 
 
 class GeometryError(ValueError):
@@ -79,6 +85,7 @@ class VoxelProcess:
                 env=os.environ | self.settings.environment,
             ) as process:
                 deadline = time.monotonic() + self.settings.timeout_seconds
+                watchdog = ProgressWatchdog(self.settings.stall_seconds, [file_size_marker(Path(log.name))])
                 while True:
                     if cancel_event is not None and cancel_event.is_set():
                         self._kill(process)
@@ -91,8 +98,17 @@ class VoxelProcess:
                         process.wait()
                         log.write("\nGEOMETRY_TIMEOUT\n")
                         raise GeometryError("Geometry timeout; inspect attempt log and configured limits")
+                    watchdog.poll()
+                    if watchdog.stalled():
+                        self._kill(process)
+                        process.wait()
+                        log.write("\nGEOMETRY_STALLED\n")
+                        raise GeometryError(
+                            f"Geometry không tiến triển trong {int(self.settings.stall_seconds)} giây và đã bị dừng. "
+                            "Xem log của lượt chạy; nếu scene rất lớn, tăng R2S_VOXEL_STALL_SECONDS."
+                        )
                     try:
-                        return process.wait(timeout=min(0.1, remaining) if cancel_event is not None else remaining)
+                        return process.wait(timeout=min(0.1, remaining))
                     except subprocess.TimeoutExpired:
                         continue
         except OSError as error:

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ProcessingSettings } from "@/features/studio/ProcessingSettings";
 import { useProcessingForm } from "@/features/studio/useProcessingForm";
@@ -74,5 +74,56 @@ describe("scenario wizard", () => {
     expect(screen.getByText("Không được ghi lại trong video mẫu.")).toBeInTheDocument();
     expect(screen.queryByLabelText("Kiểu lưới")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Cách ghép ảnh")).toHaveValue("sequential");
+  });
+});
+
+const reviewParameters = [...parameters, choice("scene.geometry_review", "scene", "Duyệt tách vật trước khi tạo mesh", ["required", "auto"])];
+const reviewValues = { ...values, "scene.geometry_review": "required" };
+const REQUIRED_LABEL = "Dừng để duyệt và chỉnh vùng vật (khuyên dùng)";
+const AUTO_LABEL = /Tạo mesh ngay, không duyệt/;
+
+describe("lựa chọn duyệt tách vật", () => {
+  it("đặt ngoài thông số nâng cao và mặc định theo giá trị niêm phong", () => {
+    render(<ProcessingSettings parameters={reviewParameters} values={reviewValues} editable onChange={vi.fn()} />);
+    const group = screen.getByRole("group", { name: "Sau khi tách vật" });
+    expect(document.querySelector("details")).not.toContainElement(group);
+    expect(screen.getByRole("radio", { name: REQUIRED_LABEL })).toBeChecked();
+    expect(screen.getByRole("radio", { name: AUTO_LABEL })).not.toBeChecked();
+  });
+
+  it("chọn Tạo mesh ngay gửi scene.geometry_review = auto", () => {
+    const onChange = vi.fn();
+    render(<ProcessingSettings parameters={reviewParameters} values={reviewValues} editable onChange={onChange} />);
+    fireEvent.click(screen.getByRole("radio", { name: AUTO_LABEL }));
+    expect(onChange).toHaveBeenCalledWith("scene.geometry_review", "auto");
+  });
+
+  it("không lặp trong thông số nâng cao, và số đếm chỉ tính các ô còn trong danh sách", () => {
+    render(<ProcessingSettings parameters={reviewParameters} values={reviewValues} editable onChange={vi.fn()} />);
+    const details = document.querySelector("details") as HTMLElement;
+    expect(within(details).queryByLabelText("Duyệt tách vật trước khi tạo mesh")).not.toBeInTheDocument();
+    expect(screen.getByText("Thông số chi tiết (7 tham số)")).toBeInTheDocument();
+  });
+
+  it("khi chỉ đọc hiện đúng giá trị đã niêm phong và khoá cả hai lựa chọn", () => {
+    render(<ProcessingSettings parameters={reviewParameters} values={{ ...reviewValues, "scene.geometry_review": "auto" }} editable={false} />);
+    expect(screen.getByRole("radio", { name: AUTO_LABEL })).toBeChecked();
+    expect(screen.getByRole("radio", { name: AUTO_LABEL })).toBeDisabled();
+    expect(screen.getByRole("radio", { name: REQUIRED_LABEL })).not.toBeChecked();
+    expect(screen.getByRole("radio", { name: REQUIRED_LABEL })).toBeDisabled();
+  });
+
+  it("không bịa lựa chọn khi giá trị đã ghi không có khóa duyệt tách vật", () => {
+    const recorded = Object.fromEntries(Object.entries(reviewValues).filter(([key]) => key !== "scene.geometry_review"));
+    render(<ProcessingSettings parameters={reviewParameters} values={recorded} editable={false} />);
+    expect(screen.getByText("Job này tạo trước khi có lựa chọn này; dùng hành vi cũ (không dừng duyệt).")).toBeInTheDocument();
+    expect(screen.queryByRole("radio", { name: AUTO_LABEL })).not.toBeInTheDocument();
+    expect(screen.queryByRole("radio", { name: REQUIRED_LABEL })).not.toBeInTheDocument();
+  });
+
+  it("không hiện khối khi preset không có khóa duyệt tách vật (preset cũ)", () => {
+    render(<ProcessingSettings parameters={parameters} values={values} editable onChange={vi.fn()} />);
+    expect(screen.queryByRole("group", { name: "Sau khi tách vật" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("radio", { name: AUTO_LABEL })).not.toBeInTheDocument();
   });
 });

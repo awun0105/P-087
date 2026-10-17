@@ -508,3 +508,383 @@ def test_cc0_previews_match_the_nvidia_asset_sizes() -> None:
         low, high = glb_bounds((root / "catalog_previews" / f"{family}.glb").read_bytes())
         assert (high - low) == pytest.approx(catalog[family]["size_xyz_m"], abs=2e-3), family
         assert (high + low) / 2 == pytest.approx([0, 0, 0], abs=2e-3), family
+
+
+@pytest.mark.asyncio
+async def test_visual_membership_preview_rejects_stale_and_legacy_without_mutation(client, isolated_registry):
+    before = isolated_registry.scene.current("job-fixture-001").scene
+    command = {
+        "expected_scene_revision": "rev-stale",
+        "membership_checksum": "sha256:" + "a" * 64,
+        "source_visual_checksum": "sha256:" + "b" * 64,
+        "source_gaussian_indices": [0, 2],
+        "source_object_id": _PALLET,
+        "target_object_id": None,
+    }
+    stale = await client.post(f"{_JOB}/scene/membership/preview", json=command)
+    assert stale.status_code == 409
+    command["expected_scene_revision"] = before.scene_revision
+    legacy = await client.post(f"{_JOB}/scene/membership/preview", json=command)
+    assert legacy.status_code == 422
+    assert isolated_registry.scene.current("job-fixture-001").scene == before
+
+
+@pytest.mark.asyncio
+async def test_visual_membership_apply_enqueues_exact_command_and_returns_202(client, monkeypatch):
+    from src.api.product import scene as scene_api
+    from src.services.orchestration.scene.objectify_queue import ObjectifyState
+
+    seen = []
+
+    def request(registry, settings, job_id, revision, mode, *, correction, actor_id):
+        seen.append((job_id, revision, mode, correction, actor_id))
+        return ObjectifyState(status="queued", mode="membership", base_revision=revision, phase="queued")
+
+    monkeypatch.setattr(scene_api.objectify_queue, "request", request)
+    monkeypatch.setattr(scene_api, "record_gpu_run", lambda *a: None)
+    command = {
+        "expected_scene_revision": "rev-001",
+        "membership_checksum": "sha256:" + "a" * 64,
+        "source_visual_checksum": "sha256:" + "b" * 64,
+        "source_gaussian_indices": [0, 2],
+        "source_object_id": _PALLET,
+        "target_object_id": None,
+    }
+    response = await client.post(f"{_JOB}/scene/membership/regenerate", json=command)
+    assert response.status_code == 202
+    assert response.json()["mode"] == "membership" and response.json()["phase"] == "queued"
+    assert seen[0][:3] == ("job-fixture-001", "rev-001", "membership")
+    assert seen[0][3].source_gaussian_indices == [0, 2]
+    assert seen[0][4] == "local"
+
+
+def _as_draft(registry, monkeypatch) -> None:
+    """Chỉ đổi revision mà route đọc: job mẫu coi như đang chờ tách vật, không ghi artifact nào."""
+    current = registry.scene.current("job-fixture-001")
+    draft = current.scene.model_copy(
+        update={"provenance": {**current.scene.provenance, "object_geometry": "awaiting_review"}}
+    )
+    monkeypatch.setattr(registry.scene, "current", lambda job_id: current.model_copy(update={"scene": draft}))
+
+
+@pytest.mark.asyncio
+async def test_draft_scene_rejects_move_and_collider_edits_without_publishing(
+    client, isolated_registry, monkeypatch
+) -> None:
+    _as_draft(isolated_registry, monkeypatch)
+    move = await client.post(
+        f"{_JOB}/scene/edits",
+        json={
+            "expected_scene_revision": "rev-001",
+            "edits": [{"object_id": _PALLET, "translation_xyz": [3.0, 2.0, 0.0]}],
+        },
+    )
+    collider = await client.post(
+        f"{_JOB}/scene/collider",
+        json={"expected_scene_revision": "rev-001", "object_id": _PALLET, "dimensions_xyz_m": [1.4, 0.8, 0.6]},
+    )
+
+    assert move.status_code == 422
+    assert move.json()["detail"] == "Cần tạo mesh trước khi di chuyển/xoay vật."
+    assert collider.status_code == 422
+    assert collider.json()["detail"] == "Cần tạo mesh trước khi sửa collider."
+    assert isolated_registry.scene.revision("job-fixture-001", "rev-002") is None
+
+
+@pytest.mark.asyncio
+async def test_draft_scene_refuses_walk_collision_for_the_current_and_a_pinned_revision(
+    client, isolated_registry, monkeypatch
+) -> None:
+    _as_draft(isolated_registry, monkeypatch)
+    params = {
+        "artifact_uri": "artifact://jobs/job-fixture-001/rec05/abc/collision.glb",
+        "artifact_checksum": "sha256:" + "1" * 64,
+    }
+    current = await client.get(f"{_JOB}/walk-collision/collision.glb", params=params)
+    pinned = await client.get(f"{_JOB}/walk-collision/collision.glb", params={**params, "scene_revision": "rev-001"})
+
+    assert current.status_code == 409
+    assert current.json()["detail"] == "Cần tạo mesh trước khi Walk."
+    assert pinned.status_code == 409
+    assert pinned.json()["detail"] == "Cần tạo mesh trước khi Walk."
+
+
+@pytest.mark.asyncio
+async def test_draft_scene_refuses_simulation_package_without_publishing(
+    client, isolated_registry, monkeypatch
+) -> None:
+    from src.api.studio import deps as studio_deps
+
+    monkeypatch.setattr(studio_deps, "get_project_registry", lambda: isolated_registry)
+    _as_draft(isolated_registry, monkeypatch)
+    response = await client.post(f"{_JOB}/simulation-package")
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Cần tạo mesh trước khi xuất USD."
+    assert isolated_registry.scene.revision("job-fixture-001", "rev-002") is None
+
+
+@pytest.mark.asyncio
+async def test_draft_scene_refuses_adding_a_box_after_the_ready_path_passes(
+    client, isolated_registry, monkeypatch
+) -> None:
+    payload = {"name": "Thùng", "dimensions_xyz_m": [0.6, 0.4, 0.5], "position_xyz": [1.0, 2.0, 0.25]}
+    added = await client.post(f"{_JOB}/scene/objects", json={**payload, "expected_scene_revision": "rev-001"})
+    assert added.status_code == 201
+    _as_draft(isolated_registry, monkeypatch)
+
+    refused = await client.post(f"{_JOB}/scene/objects", json={**payload, "expected_scene_revision": "rev-002"})
+
+    assert refused.status_code == 422
+    assert refused.json()["detail"] == "Cần tạo mesh trước khi thêm vật."
+    assert isolated_registry.scene.revision("job-fixture-001", "rev-003") is None
+
+
+@pytest.mark.asyncio
+async def test_draft_scene_refuses_adding_a_catalog_asset(client, isolated_registry, monkeypatch) -> None:
+    body = {"family": "SM_CardBoxA", "position_xyz": [2.0, 3.0, 0.0]}
+    added = await client.post(f"{_JOB}/scene/catalog-objects", json={**body, "expected_scene_revision": "rev-001"})
+    assert added.status_code == 201
+    _as_draft(isolated_registry, monkeypatch)
+
+    refused = await client.post(f"{_JOB}/scene/catalog-objects", json={**body, "expected_scene_revision": "rev-002"})
+
+    assert refused.status_code == 422
+    assert refused.json()["detail"] == "Cần tạo mesh trước khi thêm vật từ thư viện."
+    assert isolated_registry.scene.revision("job-fixture-001", "rev-003") is None
+
+
+@pytest.mark.asyncio
+async def test_draft_scene_refuses_duplicating_an_object(client, isolated_registry, monkeypatch) -> None:
+    duplicated = await client.post(
+        f"{_JOB}/scene/objects/{_PALLET}/duplicate", json={"expected_scene_revision": "rev-001"}
+    )
+    assert duplicated.status_code == 201
+    _as_draft(isolated_registry, monkeypatch)
+
+    refused = await client.post(
+        f"{_JOB}/scene/objects/{_PALLET}/duplicate", json={"expected_scene_revision": "rev-002"}
+    )
+
+    assert refused.status_code == 422
+    assert refused.json()["detail"] == "Cần tạo mesh trước khi nhân bản vật."
+    assert isolated_registry.scene.revision("job-fixture-001", "rev-003") is None
+
+
+@pytest.mark.asyncio
+async def test_draft_scene_refuses_collision_surface_marks(client, isolated_registry, monkeypatch) -> None:
+    checksum = isolated_registry.scene.current("job-fixture-001").scene.environment.geometry_ref.artifact_checksum
+    body = {"source_checksum": checksum, "kind": "floor", "points": [[0, 0, 0], [1, 0, 0], [0, 1, 0]]}
+    marked = await client.post(f"{_JOB}/scene/collision-surfaces", json={**body, "expected_scene_revision": "rev-001"})
+    assert marked.status_code == 201
+    _as_draft(isolated_registry, monkeypatch)
+
+    refused = await client.post(f"{_JOB}/scene/collision-surfaces", json={**body, "expected_scene_revision": "rev-002"})
+
+    assert refused.status_code == 422
+    assert refused.json()["detail"] == "Cần tạo mesh trước khi sửa bề mặt va chạm."
+    assert isolated_registry.scene.revision("job-fixture-001", "rev-003") is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", ["queued", "ready", "stale", "busy", "anonymous"])
+async def test_geometry_build_route_returns_typed_queue_status(
+    client, isolated_registry, tmp_path, monkeypatch, case
+) -> None:
+    from src.api import auth
+    from src.api.product import deps as product_deps
+    from src.api.product import scene as scene_api
+    from src.config import Settings
+    from src.models.contracts.reconstruction import ReconstructionBundle
+    from tests.test_orchestration.test_scene_extraction import _FIXTURE
+
+    settings = Settings(
+        database_url=f"sqlite:///{tmp_path / 'geometry-queue.db'}", product_objectify_remote_worker=True
+    )
+    monkeypatch.setattr(product_deps, "get_settings", lambda: settings)
+    monkeypatch.setattr(scene_api, "record_gpu_run", lambda *args: None)
+    bundle = ReconstructionBundle.model_validate_json(_FIXTURE.read_bytes())
+    monkeypatch.setattr(scene_api.objectify_queue, "job_bundle", lambda *args: bundle)
+    if case != "ready":
+        _as_draft(isolated_registry, monkeypatch)
+    if case == "busy":
+        scene_api.objectify_queue.request(isolated_registry, settings, "job-fixture-001", "rev-001", "boxes")
+    if case == "anonymous":
+        monkeypatch.setattr(auth, "settings", lambda: settings.model_copy(update={"auth_required": True}))
+        monkeypatch.setattr(auth, "current_user", lambda request: None)
+    response = await client.post(
+        f"{_JOB}/scene/geometry/build", json={"expected_scene_revision": "rev-009" if case == "stale" else "rev-001"}
+    )
+    assert response.status_code == {"queued": 202, "ready": 422, "stale": 409, "busy": 409, "anonymous": 401}[case]
+    body = response.json()
+    if case == "queued":
+        assert body["status"] == "queued" and body["mode"] == "geometry"
+        assert body["operation_id"] and body["base_revision"] == "rev-001" and body["phase"] is None
+    else:
+        assert set(body) == {"detail"}
+        if case == "ready":
+            assert body["detail"] == "Scene đã có hình học; dùng chỉnh vùng để dựng lại vật."
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["preview", "apply"])
+@pytest.mark.parametrize("case", ["success", "stale", "checksum", "invalid", "ready"])
+async def test_region_routes(client, tmp_path, monkeypatch, operation, case):
+    from src.api.product import scene as scene_api
+    from tests.test_scene.test_object_region import JOB, TARGET
+    from tests.test_scene.test_object_region import draft as draft_fixture
+
+    registry, scene, command, *_ = draft_fixture.__wrapped__(tmp_path, monkeypatch)
+    monkeypatch.setattr(scene_api.deps, "registry", lambda: registry)
+    monkeypatch.setattr(scene_api.deps, "job_or_404", lambda _: None)
+    authorized = []
+    monkeypatch.setattr(
+        scene_api, "authorize_job_mutation", lambda user, reg, job_id, **kwargs: authorized.append((reg, job_id))
+    )
+    body = command.model_dump(mode="json")
+    if case == "stale":
+        body["expected_scene_revision"] = "rev-999"
+    elif case == "checksum":
+        body["membership_checksum"] = "sha256:" + "a" * 64
+    elif case == "invalid":
+        body["boxes"] = []
+    elif case == "ready":
+        current = registry.scene.publish_next(
+            JOB,
+            scene.scene_revision,
+            scene.model_copy(update={"provenance": {"object_geometry": "ready"}}),
+            "ready-fixture",
+        ).revision.scene
+        body["expected_scene_revision"] = current.scene_revision
+    queued = []
+
+    def fake_request(reg, settings, job_id, revision, mode, **kwargs):
+        queued.append((job_id, revision, mode, kwargs["region"][0], kwargs["region"][1].model_dump(mode="json")))
+        return scene_api.ObjectifyState(status="queued", mode=mode, base_revision=revision, operation_id="op-1")
+
+    monkeypatch.setattr(scene_api.objectify_queue, "request", fake_request)
+    response = await client.post(f"{_JOB}/scene/objects/{TARGET}/region/{operation}", json=body)
+    expected = (
+        409
+        if case in {"stale", "checksum"}
+        else 422
+        if case == "invalid"
+        else 202
+        if case == "ready" and operation == "apply"
+        else 200
+        if operation == "preview"
+        else 201
+    )
+    assert response.status_code == expected, response.text
+    if case != "invalid":
+        assert authorized == [(registry, JOB)]
+    if expected == 201:
+        assert response.json()["scene"]["scene_revision"] != scene.scene_revision
+    elif expected == 200:
+        assert response.json()["shell_glb_base64"]
+    elif expected == 202:
+        # A Ready scene queues a region rebuild of the affected objects instead of publishing directly.
+        assert response.json()["mode"] == "region"
+        assert queued == [(JOB, body["expected_scene_revision"], "region", TARGET, body)]
+    elif case != "invalid":
+        assert set(response.json()) == {"detail"}
+
+
+@pytest.mark.asyncio
+async def test_region_apply_on_ready_scene_without_membership_is_rejected(client):
+    response = await client.post(
+        f"{_JOB}/scene/objects/{_PALLET}/region/apply",
+        json={
+            "expected_scene_revision": "rev-001",
+            "membership_checksum": "sha256:" + "a" * 64,
+            "boxes": [{"op": "add", "center_m": [0, 0, 0], "half_extents_m": [0.3, 0.3, 0.3], "yaw_rad": 0}],
+        },
+    )
+    assert response.status_code == 422
+    assert response.json() == {"detail": "scene has no persisted Gaussian membership"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", ["queued", "busy", "stale", "checksum", "too_small"])
+async def test_ready_region_apply_through_real_durable_queue(client, tmp_path, monkeypatch, isolated_registry, case):
+    from pathlib import Path
+
+    from src.api.product import scene as module
+    from src.config import Settings
+    from src.models.contracts.reconstruction import ReconstructionBundle
+    from tests.test_scene.test_object_region import JOB, TARGET, draft
+
+    registry, scene, command, *_ = draft.__wrapped__(tmp_path, monkeypatch)
+    registry.get_job = isolated_registry.get_job
+    scene = registry.scene.publish_next(
+        JOB,
+        scene.scene_revision,
+        scene.model_copy(update={"provenance": {"object_geometry": "ready"}}),
+        "ready-fixture",
+    ).revision.scene
+    command = command.model_copy(update={"expected_scene_revision": scene.scene_revision})
+    settings = Settings(database_url=f"sqlite:///{tmp_path / 'queue.db'}")
+    bundle = ReconstructionBundle.model_validate_json(
+        (Path(__file__).resolve().parents[2] / "fixtures/reconstruction_bundle/manifest.json").read_bytes()
+    )
+    monkeypatch.setattr(module.deps, "registry", lambda: registry)
+    monkeypatch.setattr(module.deps, "settings", lambda: settings)
+    monkeypatch.setattr(module.deps, "job_or_404", lambda _: None)
+    monkeypatch.setattr(module, "authorize_job_mutation", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module.objectify_queue, "job_bundle", lambda *args: bundle)
+    body = command.model_dump(mode="json")
+    if case == "busy":
+        first = await client.post(f"{_JOB}/scene/objects/{TARGET}/region/apply", json=body)
+        assert first.status_code == 202, first.text
+    elif case == "stale":
+        body["expected_scene_revision"] = "rev-999"
+    elif case == "checksum":
+        body["membership_checksum"] = "sha256:" + "a" * 64
+    elif case == "too_small":
+        body["boxes"][0]["half_extents_m"] = [0.005, 0.005, 0.005]
+    result = await client.post(f"{_JOB}/scene/objects/{TARGET}/region/apply", json=body)
+    assert result.status_code == (202 if case == "queued" else 422 if case == "too_small" else 409), result.text
+    assert registry.scene.current(JOB).scene == scene
+    if case == "queued":
+        with module.objectify_queue._database(settings).transaction() as tx:
+            record = module.objectify_queue._read(tx, JOB)
+            assert record.region_command == command and record.region_object_id == TARGET
+            assert record.actor_id == "local"
+        assert result.json()["mode"] == "region" and result.json()["operation_id"]
+    else:
+        assert set(result.json()) == {"detail"}
+
+
+@pytest.mark.asyncio
+async def test_region_fit_route_maps_stale_legacy_and_unknown_objects(client, monkeypatch) -> None:
+    from src.api.product import scene as scene_api
+    from src.services.orchestration.scene.object_region import ObjectRegionNotFoundError
+
+    url = f"{_JOB}/scene/objects/{_PALLET}/region/fit"
+    stale = await client.get(url, params={"expected_scene_revision": "rev-stale"})
+    legacy = await client.get(url, params={"expected_scene_revision": "rev-001"})
+
+    assert stale.status_code == 409
+    assert "scene đã đổi" in stale.json()["detail"]
+    assert legacy.status_code == 422
+    assert "no persisted Gaussian membership" in legacy.json()["detail"]
+
+    def unknown(*args, **kwargs):
+        raise ObjectRegionNotFoundError("vật object-x không có trong membership")
+
+    monkeypatch.setattr(scene_api, "fit_region", unknown)
+    gone = await client.get(url, params={"expected_scene_revision": "rev-001"})
+    assert gone.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_objectify_state_exposes_object_geometry_as_null_for_legacy_scene(client, tmp_path, monkeypatch) -> None:
+    from src.api.product import deps as product_deps
+    from src.config import Settings
+
+    settings = Settings(database_url=f"sqlite:///{tmp_path / 'runtime.db'}")
+    monkeypatch.setattr(product_deps, "get_settings", lambda: settings)
+    response = await client.get(f"{_JOB}/scene/objectify")
+
+    assert response.status_code == 200
+    assert response.json()["object_geometry"] is None

@@ -4,7 +4,8 @@ import { Aperture, Cpu, Images, ScanSearch, ShieldCheck } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { cn } from "@/lib/cn";
-import type { StageId } from "@/lib/contracts/api";
+import type { TimelineStageId } from "@/features/studio/stages";
+import { demoReplayStages } from "@/features/studio/demoStages";
 import type { DemoManifest, DemoStage, DemoStageAsset } from "@/lib/contracts/studio";
 
 /**
@@ -20,7 +21,7 @@ import type { DemoManifest, DemoStage, DemoStageAsset } from "@/lib/contracts/st
  */
 export interface ShowcaseContext {
   demo: DemoManifest;
-  stage: StageId;
+  stage: TimelineStageId;
   /** Tiến độ phát lại của bước, 0..1. */
   fraction: number;
   fileUrl: (name: string) => string;
@@ -30,6 +31,7 @@ export type ShowcaseRenderer = (context: ShowcaseContext) => ReactNode;
 
 export interface StagePresenter {
   icon: ReactNode;
+  handlesAssets?: boolean;
   render: ShowcaseRenderer;
   caption?: (context: ShowcaseContext) => string | undefined;
 }
@@ -44,20 +46,39 @@ function coverOf(demo: DemoManifest) {
   return demo.frames[Math.floor(demo.frames.length / 2)];
 }
 
-export const STAGE_PRESENTERS: Partial<Record<StageId, StagePresenter>> = {
+function StageResults(context: ShowcaseContext) {
+  const record = demoReplayStages(context.demo).find((stage) => stage.stage_id === context.stage);
+  const assets = record?.assets ?? [];
+  if (!assets.length) return null;
+  return <div className="space-y-4">{assets.map((asset, index) => (
+    <div key={index}>
+      {asset.title && <p className="mb-2 text-sm font-medium">{asset.title}</p>}
+      {ASSET_RENDERERS[asset.kind](asset, context)}
+    </div>
+  ))}</div>;
+}
+
+export const STAGE_PRESENTERS: Partial<Record<TimelineStageId, StagePresenter>> = {
+  "UI-GEOMETRY-REVIEW": { icon: <Cpu aria-hidden />, render: StageResults, handlesAssets: true },
+  "ST-METRIC-CANONICALIZE": { icon: <Aperture aria-hidden />, render: StageResults, handlesAssets: true },
+  "ST-RGB-GEOMETRY": { icon: <Images aria-hidden />, render: StageResults, handlesAssets: true },
+  "ST-OBJECT-EXTRACT": { icon: <ScanSearch aria-hidden />, render: StageResults, handlesAssets: true },
   "ST-INPUT-VALIDATE": {
     icon: <ScanSearch aria-hidden />,
     render: ({ demo, fileUrl }) =>
       demo.video ? (
-        <video
-          src={fileUrl(demo.video.name)}
-          className="aspect-video w-full rounded-xl bg-viewport object-cover"
-          muted
-          loop
-          autoPlay
-          playsInline
-          aria-label="Video gốc của video mẫu"
-        />
+        <figure>
+          <video
+            src={fileUrl(demo.video.name)}
+            className="aspect-video w-full rounded-xl bg-viewport object-cover"
+            muted
+            loop
+            autoPlay
+            playsInline
+            aria-label={demo.video_caption ?? "Video gốc của video mẫu"}
+          />
+          {demo.video_caption && <figcaption className="mt-1.5 text-xs text-ink-muted">{demo.video_caption}</figcaption>}
+        </figure>
       ) : (
         <FrameImage src={coverOf(demo) ? fileUrl(coverOf(demo)!.name) : undefined} />
       ),
@@ -173,7 +194,7 @@ export const ASSET_RENDERERS: Record<DemoStageAsset["kind"], AssetRenderer> = {
 };
 
 /** Bước đã có bằng chứng thật trong bundle (đã chạy xong); bước pending/failed không được vẽ như thành công. */
-export function hasEvidence(record: DemoStage | undefined): boolean {
+export function hasEvidence(record: Pick<DemoStage, "state"> | undefined): boolean {
   return record !== undefined && (record.state ?? "succeeded") === "succeeded";
 }
 

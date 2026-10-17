@@ -437,10 +437,11 @@ def run_input_assembly(
     settings = deps.settings()
     # `qa_verified`: mọi video phải qua bộ che và được người upload chấp nhận; thiếu bộ che thì từ chối ngay.
     deps.require_anonymize(request.anonymize)
-    if registry.execution_profile is None:
+    if registry.job_profile() is None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Chưa cấu hình worker: cần PRODUCT_PROCESSING_CONFIG và PRODUCT_RUNTIME_MANIFEST",
+            detail="Chưa có runtime cho job: cần PRODUCT_PROCESSING_CONFIG và PRODUCT_RUNTIME_MANIFEST, "
+            "hoặc GPU worker đã công bố runtime (PRODUCT_RUNTIME_FROM_WORKERS=true)",
         )
     processing = None
     if settings.product_processing_config is not None and is_presets_file(settings.product_processing_config):
@@ -475,7 +476,7 @@ def run_input_assembly(
             detail="Worker chưa dùng file thông số chung; không nhận thông số tùy chỉnh",
         )
     config_checksum = (
-        sha256_bytes(config_bytes(processing)) if processing is not None else registry.execution_profile.config_checksum
+        sha256_bytes(config_bytes(processing)) if processing is not None else registry.job_profile().config_checksum
     )
 
     service = _service()

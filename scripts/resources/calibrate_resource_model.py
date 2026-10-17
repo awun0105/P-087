@@ -19,7 +19,7 @@ from src.models.contracts.manifests import StageId  # noqa: E402
 from src.services.orchestration.jobs.database import RuntimeDatabase  # noqa: E402
 from src.services.orchestration.processing import load_presets  # noqa: E402
 from src.services.orchestration.processing.models import ParamValue  # noqa: E402
-from src.services.orchestration.processing.observed import load_usages, usage_vram  # noqa: E402
+from src.services.orchestration.processing.observed import load_usages, pipeline_usages, usage_vram  # noqa: E402
 from src.services.orchestration.processing.resources import estimate_gb  # noqa: E402
 from src.services.orchestration.projects import ProjectRegistry  # noqa: E402
 from src.services.orchestration.projects.errors import JobNotFoundError  # noqa: E402
@@ -96,7 +96,7 @@ def main() -> None:
     presets, _ = load_presets(config_path)
     model = presets.resource_model
 
-    usages = load_usages(db)
+    usages = pipeline_usages(load_usages(db))
     if not usages:
         print("Không tìm thấy bản ghi r2s_resource_usage nào.")
         return
