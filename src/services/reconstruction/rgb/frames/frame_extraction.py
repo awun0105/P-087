@@ -23,7 +23,12 @@ from src.models.contracts.video_preparation import (
     default_video_normalization_profile,
     validate_video_frame_map_rows,
 )
-from src.services.reconstruction.rgb.frames.frame_set import NormalizedRGBFrame, NormalizedRGBFrameSet, _sha256
+from src.services.reconstruction.rgb.frames.frame_set import (
+    NormalizedRGBFrame,
+    NormalizedRGBFrameSet,
+    _sha256,
+    frame_image_name,
+)
 from src.services.reconstruction.rgb.preflight.privacy import PrivacyDispatchProof, RGBPrivacyGate
 from src.services.reconstruction.rgb.preflight.publication import ArtifactWriter
 from src.services.reconstruction.rgb.preflight.quality_models import RGBFrameQuality, RGBQualityReport
@@ -384,21 +389,13 @@ class RGBFrameExtractor:
             )
         if quality.quality != "accepted":
             return None
-        ref = self._source_ref(job_id, file)
+        # Bundle gates require every frame under this job, like decoded video frames; bytes and format are kept.
+        payload = path.read_bytes()
+        name = frame_image_name(quality.frame_id, Path(file.artifact_uri))
+        ref = self._reference(_ArtifactSpec(job_id, f"rec02a/frames/{name}", "RGBFrame"), payload)
+        published = ProductArtifactRef.model_validate(self.deps.writer.publish(ref, payload).model_dump())
         return NormalizedRGBFrame(
-            frame_id=quality.frame_id, timestamp_sec=candidate.timestamp, image=ref, source_checksum=file.checksum
-        )
-
-    @staticmethod
-    def _source_ref(job_id: str, file: InputFile) -> ProductArtifactRef:
-        return ProductArtifactRef(
-            artifact_type="RGBFrame",
-            schema_version="1.0",
-            artifact_uri=file.artifact_uri,
-            artifact_checksum=file.checksum,
-            data_class=file.data_class,
-            producer_stage=StageId.INPUT_VALIDATE,
-            job_id=job_id,
+            frame_id=quality.frame_id, timestamp_sec=candidate.timestamp, image=published, source_checksum=file.checksum
         )
 
     def _video_frames(self, request: FrameExtractionRequest) -> list[NormalizedRGBFrame]:

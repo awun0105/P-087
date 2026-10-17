@@ -22,6 +22,7 @@ from src.services.reconstruction.adapters.brush_input import BrushInputAdapter
 from src.services.reconstruction.adapters.colmap import ColmapAdapter, ColmapDependencies, ColmapRequest
 from src.services.reconstruction.adapters.colmap_input import ColmapInputAdapter
 from src.services.reconstruction.adapters.torwic_frame_source import TorwicFrameSource, TorwicFrameSourceConfig
+from src.services.reconstruction.bundle_validation import BundleDependencies
 from src.services.reconstruction.rgb.frames.frame_extraction import (
     ExtractionConfig,
     FFmpegFrameDecoder,
@@ -199,8 +200,35 @@ def _service(
     return RGBFrameExtractor(dependencies), resolver
 
 
+def test_image_refs_publish_job_owned_copies_accepted_by_bundle_gate(tmp_path: Path) -> None:
+    """Dataset images become job-owned frame artifacts with the source bytes, so the bundle gate accepts them."""
+    paths = tuple(tmp_path / f"input-{index}{suffix}" for index, suffix in enumerate((".jpg", ".png")))
+    for index, path in enumerate(paths):
+        path.write_bytes(f"image-{index}".encode())
+    payload = _manifest(paths, "image/png").model_dump(mode="json")
+    payload["files"][0]["media_type"] = "image/jpeg"
+    payload["input_manifest_checksum"] = canonical_content_checksum(payload, "input_manifest_checksum")
+    manifest = InputManifest.model_validate(payload)
+    quality = _quality(manifest, (0, 1), ())
+    gate, proof = _privacy(manifest, 2)
+    service, resolver = _service(tmp_path, manifest, paths, gate)
+    result = service.execute(
+        FrameExtractionRequest(manifest, quality, proof, _config("image_refs"), "dataset-job", {0: "0", 1: "1"})
+    )
+    images = [frame.image for frame in result.frame_set.frames]
+    assert [image.artifact_uri for image in images] == [
+        "artifact://jobs/dataset-job/rec02a/frames/000000.jpg",
+        "artifact://jobs/dataset-job/rec02a/frames/000001.png",
+    ]
+    assert {image.job_id for image in images} == {"dataset-job"}
+    assert {image.data_class for image in images} == {ArtifactDataClass.DERIVED}
+    assert [image.artifact_checksum for image in images] == [file.checksum for file in manifest.files]
+    dependencies = BundleDependencies(resolver.require)
+    assert [dependencies.require(image, "dataset-job").read_bytes() for image in images] == [b"image-0", b"image-1"]
+
+
 def test_image_refs_keep_source_frames_and_exclude_blur(tmp_path: Path) -> None:
-    """Frame-set chỉ tham chiếu input frames; held-out không có trong manifest."""
+    """Frame-set giữ đúng byte ảnh nguồn được chấp nhận; ảnh mờ bị loại."""
     paths = tuple(tmp_path / f"{index:06d}.png" for index in range(3))
     for index, path in enumerate(paths):
         path.write_bytes(f"png-{index}".encode())
@@ -214,18 +242,22 @@ def test_image_refs_keep_source_frames_and_exclude_blur(tmp_path: Path) -> None:
     result = service.execute(request)
     assert result.stage.status.value == "SUCCEEDED"
     assert [frame.frame_id for frame in result.frame_set.frames] == [10, 12]
-    assert result.frame_set.frames[0].image.data_class == ArtifactDataClass.PRODUCT_INPUT
-    mapping = {file.artifact_uri: path for file, path in zip(manifest.files, paths, strict=True)}
-    reader = FrameSetResolver(lambda ref: mapping[ref.artifact_uri], resolver.require)
+    assert result.frame_set.frames[0].image.data_class == ArtifactDataClass.DERIVED
+    reader = FrameSetResolver(resolver.require, resolver.require)
     loaded = reader.load(result.reference)
-    assert reader.materialize(loaded) == ((10, paths[0], "0.1"), (12, paths[2], "0.3"))
+    materialized = reader.materialize(loaded)
+    assert [(frame_id, path.read_bytes(), timestamp) for frame_id, path, timestamp in materialized] == [
+        (10, b"png-0", "0.1"),
+        (12, b"png-2", "0.3"),
+    ]
     colmap_input = ColmapInputAdapter(reader).prepare(result.reference, tmp_path / "colmap")
     assert colmap_input.frame_ids == (10, 12)
     assert (colmap_input.image_dir / "000010.png").read_bytes() == paths[0].read_bytes()
     assert (colmap_input.image_dir / "000012.png").read_bytes() == paths[2].read_bytes()
     (colmap_input.image_dir / "000010.png").write_bytes(b"workspace changed")
     assert paths[0].read_bytes() == b"png-0"
-    assert len(tuple((tmp_path / "artifacts").rglob("*.png"))) == 0
+    assert materialized[0][1].read_bytes() == b"png-0"
+    assert len(tuple((tmp_path / "artifacts").rglob("*.png"))) == 2
 
 
 @pytest.mark.parametrize(

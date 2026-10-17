@@ -282,7 +282,10 @@ def test_dataset_preparation_uses_image_refs_and_never_decodes_input_video(tmp_p
     assert output.extracted_frame_count == len(images)
     frame_set = FrameSetResolver(resolver.require, resolver.require).load(output.frame_set_ref)
     for frame, source in zip(frame_set.frames, images, strict=True):
-        assert frame.image.artifact_uri.endswith(source.name)
+        assert (
+            frame.image.artifact_uri
+            == f"artifact://jobs/{frame.image.job_id}/rec02a/frames/{frame.frame_id:06d}{source.suffix}"
+        )
         assert frame.image.artifact_checksum == "sha256:" + hashlib.sha256(source.read_bytes()).hexdigest()
 
 
