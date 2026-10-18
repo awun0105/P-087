@@ -33,11 +33,11 @@ export interface ShellSpec {
   style: ShellStyle;
 }
 
-const SHELL_OPACITY: Record<ShellStyle, number> = { selected: 0.25, idle: 0.1 };
-const WIRE_OPACITY = 0.5;
-const PENDING_OPACITY = 0.12;
+const SHELL_OPACITY: Record<ShellStyle, number> = { selected: 0.2, idle: 0.06 };
+const WIRE_OPACITY = 0.4;
+const PENDING_OPACITY = 0.06;
 const PULSE_PERIOD_MS = 2000;
-const PULSE_AMPLITUDE = 0.03;
+const PULSE_AMPLITUDE = 0.01;
 
 interface PointRecord {
   root: Entity;
@@ -119,10 +119,11 @@ export class ShellGlowLayer {
   private readonly points = new Map<string, PointRecord>();
   private destroyed = false;
   private subscribed = false;
+  private hovered: string | null = null;
 
   constructor(private readonly host: SceneOverlay) {}
 
-  /** Nhịp của vỏ đang chọn: độ mờ 0,22–0,28 theo chu kỳ 2 s; tắt khi người dùng bật giảm chuyển động. */
+  /** Nhịp nhẹ của vỏ đang chọn: độ mờ 0,19–0,21; tắt khi bật giảm chuyển động. */
   private readonly onUpdate = (): void => {
     if (this.destroyed) return;
     const reduce = prefersReducedMotion();
@@ -137,7 +138,7 @@ export class ShellGlowLayer {
       record.pulsing = true;
       animating = true;
       record.fill.opacity = SHELL_OPACITY.selected + PULSE_AMPLITUDE * (2 * wave - 1);
-      record.fill.emissiveIntensity = 1 + 0.3 * wave;
+      record.fill.emissiveIntensity = 1 + 0.1 * wave;
       record.fill.update();
     }
     if (animating) this.host.requestFrame();
@@ -167,6 +168,7 @@ export class ShellGlowLayer {
         blobUrl,
         settle: resolve,
       };
+      record.root.enabled = style === "selected" || objectId === this.hovered;
       parent.addChild(record.root);
       this.shells.set(objectId, record);
       this.subscribe();
@@ -238,6 +240,20 @@ export class ShellGlowLayer {
     if (!record || record.tone === tone) return;
     record.tone = tone;
     this.applyTone(record);
+    this.updateVisibility(objectId, record);
+  }
+
+  /** Hover chỉ bật/tắt entity đã nạp; không tải lại GLB hoặc đổi lựa chọn của người dùng. */
+  setHovered(objectId: string | null): void {
+    if (this.destroyed || this.hovered === objectId) return;
+    this.hovered = objectId;
+    for (const [id, record] of this.shells) this.updateVisibility(id, record);
+  }
+
+  private updateVisibility(objectId: string, record: ShellRecord): void {
+    const visible = record.style === "selected" || record.tone !== "normal" || objectId === this.hovered;
+    record.root.enabled = visible;
+    this.host.requestFrame();
   }
 
   /** Gỡ vỏ và điểm của một vật, hoặc của mọi vật khi không truyền `objectId`. */
@@ -265,7 +281,7 @@ export class ShellGlowLayer {
     this.host.application().on("update", this.onUpdate);
   }
 
-  /** Màu và độ mờ theo trạng thái: thường (độ mờ theo kiểu), đang tính (mờ 0,12), hoặc xem trước lỗi (màu cam). */
+  /** Màu và độ mờ theo trạng thái: thường, đang tính (mờ 0,06), hoặc xem trước lỗi (màu cam). */
   private applyTone(record: ShellRecord): void {
     const color = record.tone === "warning" ? themeColor("--studio-ochre", "#f59e0b") : themeColor("--studio-sage", "#2dd4bf");
     record.fill.emissive = new Color().fromString(color);
