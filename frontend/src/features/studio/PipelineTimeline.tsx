@@ -211,7 +211,7 @@ export function PipelineTimeline({
                   </div>
                   {isCurrentStale && (
                     <p className="mt-1 text-sm text-amber-500">
-                      Tiến trình bị gián đoạn. Bấm thử lại để tiếp tục huấn luyện từ checkpoint đã lưu.
+                      Đã lâu chưa nhận tín hiệu từ máy xử lý. Nếu máy xử lý đã dừng, bước này sẽ chuyển sang lỗi và có nút Thử lại để chạy tiếp từ checkpoint đã lưu.
                     </p>
                   )}
                   {!isCurrentStale && stage?.note && (

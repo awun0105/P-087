@@ -59,7 +59,10 @@ export function useNow(active: boolean): number {
   return now;
 }
 
-/** Kiểm tra job đang RUNNING nhưng heartbeat đã quá hạn (mất kết nối / worker chết). Ngưỡng mặc định: 3 phút (180.000ms). */
+/**
+ * Kiểm tra job đang RUNNING nhưng heartbeat đã quá hạn (mất kết nối / worker chết). Worker làm mới heartbeat
+ * mỗi 30 giây (HEARTBEAT_INTERVAL_SECONDS); ngưỡng mặc định 3 phút = sáu nhịp liền bị lỡ.
+ */
 export function isJobStale(progress: JobProgress | null, now: number, thresholdMs: number = 180_000): boolean {
   if (!progress || progress.status !== "RUNNING") return false;
   // Nếu đang chờ tương tác của người dùng thì không phải stale
