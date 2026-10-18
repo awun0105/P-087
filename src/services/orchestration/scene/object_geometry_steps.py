@@ -126,6 +126,7 @@ def run_surface_colliders(
     cancel_event: Event | None,
     *,
     surface_label: str = "ObjectGS surface",
+    surface_origin: str = "objectgs",
 ) -> dict[str, dict]:
     """Run strict surface CoACD and reject missing, failed or empty collider output."""
     from src.services.orchestration.scene.objectify import CONVEX_RUNNER, ObjectifyError, _run
@@ -136,6 +137,7 @@ def run_surface_colliders(
                 "id": item.key,
                 "surface_mesh": str(item.surface_path),
                 "surface_checksum": item.surface_checksum,
+                "surface_origin": surface_origin,
                 "coordinate_frame": "object_local",
                 "distance_unit": "m",
                 "output_glb": str(item.output_glb),
@@ -146,14 +148,31 @@ def run_surface_colliders(
     }
     result = _run(python, CONVEX_RUNNER, request, workspace, "convex", timeout, cancel_event=cancel_event)
     colliders = {str(item["id"]): item for item in result["objects"]}
-    if any(
-        not colliders.get(item.key, {}).get("parts")
-        or colliders.get(item.key, {}).get("error")
-        or not item.output_glb.is_file()
-        for item in inputs
-    ):
+    failures: dict[str, list[str]] = {}
+    for item in inputs:
+        entry = colliders.get(item.key)
+        if entry is None:
+            reason = "không có kết quả tạo collider"
+        elif entry.get("error"):
+            reason = str(entry["error"])
+        elif not entry.get("parts"):
+            reason = "không tạo được khối lồi nào"
+        elif not item.output_glb.is_file():
+            reason = "thiếu file collider đầu ra"
+        else:
+            continue
+        if "intersection_budget_exceeded" in reason:
+            reason = "chưa hoàn tất kiểm tra giao cắt"
+        elif "surface parts exceed budget" in reason or "disconnected components but the object hull budget" in reason:
+            reason = "số phần rời vượt giới hạn khối lồi của vật"
+        elif "exceeded the part budget" in reason:
+            reason = "không tạo được khối lồi trong giới hạn đã cấp"
+        failures.setdefault(reason, []).append(item.key)
+    if failures:
+        details = "; ".join(f"{', '.join(keys)}: {reason}" for reason, keys in failures.items())
         raise ObjectifyError(
-            f"{surface_label} collider generation failed; Gaussian/OBB fallback is forbidden", retryable=False
+            f"{surface_label} collider generation failed; Gaussian/OBB fallback is forbidden. " + details,
+            retryable=False,
         )
     return colliders
 
