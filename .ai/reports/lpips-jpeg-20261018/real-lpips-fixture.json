@@ -1,0 +1,14 @@
+{
+  "scope": "synthetic PNG renders paired with JPEG sources; not drjohnson",
+  "device": "cpu",
+  "source_hashes_unchanged": true,
+  "result": {
+    "net": "vgg",
+    "count": 2,
+    "lpips": 0.0004190022009424865,
+    "per_view": {
+      "000000": 0.0004190022009424865,
+      "000008": 0.0004190022009424865
+    }
+  }
+}
