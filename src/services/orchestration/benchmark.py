@@ -272,6 +272,11 @@ def _tool_timings(
         return []
     usages = load_usages(registry.persistence.database)
     cutoff = attempt_completed_at or observed_at
+    runtime_checksums = {runtime_manifest_checksum}
+    profile = getattr(registry, "execution_profile", None)
+    if profile is not None and profile.accepts_runtime(runtime_manifest_checksum):
+        # Supported legacy jobs carry the full checksum; samplers record the worker software checksum.
+        runtime_checksums.add(profile.job_runtime_checksum)
     return [
         ToolTiming(
             tool=usage.tool,
@@ -283,7 +288,7 @@ def _tool_timings(
         for usage in usages
         if usage.job_id == job_id
         and usage.config_checksum == config_checksum
-        and usage.runtime_manifest_checksum == runtime_manifest_checksum
+        and usage.runtime_manifest_checksum in runtime_checksums
         and usage.started_at >= attempt_started_at
         and usage.completed_at <= cutoff
     ]
