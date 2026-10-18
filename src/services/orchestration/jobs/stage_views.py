@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict
 
 from src.models.contracts.artifacts import ProductArtifactRef
 from src.models.contracts.manifests import JobManifest, StageArtifact, StageId, StageStatus
+from src.models.contracts.preview import ReconstructionPreview
 from src.models.contracts.reconstruction import ReconstructionBundle
 from src.services.orchestration.artifacts import ArtifactStoreError
 from src.services.orchestration.projects.registry import ProjectRegistry
@@ -74,6 +75,25 @@ def job_bundle(registry: ProjectRegistry, job: JobManifest) -> ReconstructionBun
     return ReconstructionBundle.model_validate_json(path.read_bytes())
 
 
+def preview_display_rotation(
+    registry: ProjectRegistry, job: JobManifest, preview: ReconstructionPreview
+) -> Quaternion | None:
+    """Hướng SfM→display của đúng preview đã được xác nhận; giữ nguyên artifact và đơn vị."""
+    if preview.camera_pose_ref is None:
+        return None
+    confirmation = _stage(job, StageId.METRIC_CANONICALIZE, "RGBMetricConfirmation")
+    if confirmation is None or not confirmation.artifact_uri or not confirmation.artifact_checksum:
+        return None
+    path = registry.runtime_resolver.require_uri(confirmation.artifact_uri, confirmation.artifact_checksum)
+    record = MetricConfirmation.model_validate_json(path.read_bytes())
+    if (
+        record.preview.request.source_visual != preview.source_visual_ref
+        or record.preview.source_camera_poses != preview.camera_pose_ref
+    ):
+        return None
+    return compose_rotation((-math.sqrt(0.5), 0, 0, math.sqrt(0.5)), record.preview.transform.rotation_xyzw)
+
+
 def job_frame_images(registry: ProjectRegistry, job: JobManifest) -> list[ProductArtifactRef]:
     """Ảnh frame đã trích (REC-02A) của job, qua public port REC."""
     stage = _stage(job, StageId.FRAME_EXTRACT, "NormalizedRGBFrameSet")
@@ -114,19 +134,7 @@ def stage_views(registry: ProjectRegistry, job_id: str) -> StageViewList:
         preview = None
     if preview is not None:
         cameras = camera_markers(preview.camera_pose_ref, resolve)
-        display_rotation = None
-        confirmation = _stage(job, StageId.METRIC_CANONICALIZE, "RGBMetricConfirmation")
-        if confirmation is not None and confirmation.artifact_uri and confirmation.artifact_checksum:
-            path = registry.runtime_resolver.require_uri(confirmation.artifact_uri, confirmation.artifact_checksum)
-            record = MetricConfirmation.model_validate_json(path.read_bytes())
-            if (
-                record.preview.request.source_visual == preview.source_visual_ref
-                and record.preview.source_camera_poses == preview.camera_pose_ref
-            ):
-                # Display Y-up ← canonical Z-up ← raw SfM. Giữ nguyên đơn vị/bytes preview.
-                display_rotation = compose_rotation(
-                    (-math.sqrt(0.5), 0, 0, math.sqrt(0.5)), record.preview.transform.rotation_xyzw
-                )
+        display_rotation = preview_display_rotation(registry, job, preview)
         views.append(
             StageView(
                 stage_id=StageId.CAMERA_POSE,

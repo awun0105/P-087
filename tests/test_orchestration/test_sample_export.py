@@ -110,6 +110,23 @@ def test_publish_writes_a_valid_bundle_atomically(tmp_path: Path) -> None:
     assert len(manifest.stages) == 8 and manifest.stages[0].stage_id == StageId.INPUT_VALIDATE
 
 
+def test_export_preserves_preview_orientation_without_changing_splat_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import math
+
+    from src.services.orchestration.samples import export as module
+
+    registry, splat = _registry(tmp_path)
+    rotation = (-math.sqrt(0.5), 0.0, 0.0, math.sqrt(0.5))
+    monkeypatch.setattr(module, "preview_display_rotation", lambda *_: rotation)
+    out = tmp_path / "aligned"
+    manifest = export_job_bundle(registry, JOB_ID, out, demo_id="aligned", title="Kho", description="", source=SOURCE)
+    reloaded = DemoLibrary(out).bundle("aligned").manifest()
+    assert reloaded.display_rotation_xyzw == manifest.display_rotation_xyzw == rotation
+    assert (out / "files" / manifest.splat.name).read_bytes() == splat.read_bytes()
+
+
 def test_publishing_twice_returns_the_existing_sample_and_never_overwrites(tmp_path: Path) -> None:
     registry, _ = _registry(tmp_path)
     library = tmp_path / "library"

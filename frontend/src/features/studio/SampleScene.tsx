@@ -49,6 +49,7 @@ export function SampleScene({ sampleId }: { sampleId: string }) {
       filename={demo.splat.name}
       badges={<Badge tone="ember">Video mẫu · xử lý sẵn</Badge>}
       cameras={demo.cameras}
+      displayRotation={demo.display_rotation_xyzw ?? undefined}
     />
   );
 }

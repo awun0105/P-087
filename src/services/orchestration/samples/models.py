@@ -5,6 +5,7 @@ vụ kịch bản demo. Mọi file có checksum; thời lượng stage lấy t�
 gốc (null khi nguồn không ghi được), UI không được bịa số.
 """
 
+import math
 import re
 from collections.abc import Iterable
 from datetime import datetime
@@ -15,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from src.models.contracts.artifacts import Checksum
 from src.models.contracts.manifests import StageId
 from src.services.orchestration.jobs.progress import STUDIO_PIPELINE
+from src.services.reconstruction.rgb.pose.camera_pose import Quaternion
 from src.services.reconstruction.views import CameraMarker
 
 _FILE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
@@ -150,10 +152,19 @@ class DemoManifest(BaseModel):
     splat: DemoFile
     #: Quỹ đạo camera từ COLMAP/canonical để viewer định vị camera ban đầu bên trong scene.
     cameras: list[CameraMarker] = Field(default_factory=list)
+    #: Phép xoay source SfM→display Y-up, áp dụng cùng lúc cho Gaussian và camera.
+    display_rotation_xyzw: Quaternion | None = None
     #: Thông số xử lý thật của job (theo file cấu hình chung); None với bundle cũ/smoke.
     processing: dict[str, int | float | str] | None = None
     #: Máy đã xử lý (từ RuntimeManifest), ví dụ {"gpu_model": "RTX 4090", "vram": "24564 MiB"}.
     machine: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("display_rotation_xyzw")
+    @classmethod
+    def _unit_display_rotation(cls, value: Quaternion | None) -> Quaternion | None:
+        if value is not None and not math.isclose(math.hypot(*value), 1, rel_tol=0, abs_tol=1e-6):
+            raise ValueError("demo display rotation must be a unit quaternion")
+        return value
 
     @model_validator(mode="after")
     def _unique_names(self) -> Self:

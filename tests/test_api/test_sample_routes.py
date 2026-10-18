@@ -210,6 +210,14 @@ def _manifest(stages: list[DemoStage]) -> DemoManifest:
     )
 
 
+@pytest.mark.parametrize("rotation", [(0, 0, 0, 0), (0, 0, 0, 2), (0, 1), (0, 0, 0, float("nan"))])
+def test_sample_rejects_invalid_display_rotation(rotation: tuple[float, ...]) -> None:
+    data = _manifest([]).model_dump()
+    data["display_rotation_xyzw"] = rotation
+    with pytest.raises(ValueError):
+        DemoManifest.model_validate(data)
+
+
 def test_lidar_stages_are_kept_after_frame_extract_in_pipeline_order() -> None:
     manifest = _manifest(
         [

@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 
 import { PreviewScene } from "@/features/studio/scene/PreviewScene";
 import type { CameraMode, ViewerControls } from "@/features/viewer/PlayCanvasScene";
-import type { CameraMarkerLike, DisplayCameraPose } from "@/features/viewer/source-frame";
+import type { CameraMarkerLike, DisplayCameraPose, DisplayRotation } from "@/features/viewer/source-frame";
 
 /**
  * Workspace chỉ xem 3DGS cho scene không có pipeline hệ mét (video mẫu, file import):
@@ -17,6 +17,7 @@ export function SceneWorkspace({
   filename,
   badges,
   cameras,
+  displayRotation,
   initialCamera,
   initialCameraMode,
   onControlsReady,
@@ -32,6 +33,7 @@ export function SceneWorkspace({
   filename: string;
   badges?: ReactNode;
   cameras?: readonly CameraMarkerLike[];
+  displayRotation?: DisplayRotation;
   initialCamera?: DisplayCameraPose;
   initialCameraMode?: Exclude<CameraMode, "anim">;
   onControlsReady?: (controls: ViewerControls | null) => void;
@@ -51,6 +53,7 @@ export function SceneWorkspace({
           filename={filename}
           title={`Viewer 3DGS: ${title}`}
           cameras={cameras}
+          displayRotation={displayRotation}
           initialCamera={initialCamera}
           initialCameraMode={initialCameraMode}
           onControlsReady={onControlsReady}

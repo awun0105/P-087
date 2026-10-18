@@ -513,6 +513,7 @@ export interface DemoManifest {
   processing?: Record<string, ParamValue> | null;
   machine?: Record<string, string>;
   cameras?: { frame_id: number; center: [number, number, number]; rotation_xyzw: [number, number, number, number] }[];
+  display_rotation_xyzw?: [number, number, number, number] | null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -594,6 +595,11 @@ export function parseDemoManifest(value: unknown): DemoManifest {
       !Array.isArray(value.frames) || !Array.isArray(value.stages) ||
       (value.origin !== "pipeline_job" && value.origin !== "smoke_run")) {
     throw new Error("Demo bundle không hợp lệ");
+  }
+  const rotation = value.display_rotation_xyzw;
+  if (rotation != null && !(Array.isArray(rotation) && rotation.length === 4 &&
+      rotation.every(isFiniteNumber) && Math.abs(Math.hypot(...rotation) - 1) < 1e-6)) {
+    throw new Error("Hướng hiển thị của demo không hợp lệ");
   }
   for (const stage of value.stages) {
     if (isRecord(stage) && Array.isArray(stage.assets)) {

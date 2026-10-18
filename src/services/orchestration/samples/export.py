@@ -23,6 +23,7 @@ from src.services.orchestration.jobs.dispatch import prepared_frame_reference
 from src.services.orchestration.jobs.models import JobAttemptRecord
 from src.services.orchestration.jobs.progress import MVP_PIPELINE, sanitized_frame_stage
 from src.services.orchestration.jobs.stage_results import recorded_results, result_facts
+from src.services.orchestration.jobs.stage_views import preview_display_rotation
 from src.services.orchestration.samples.bundle import UNPUBLISHED_MARKER, DemoLibrary, DemoUnavailableError
 from src.services.orchestration.samples.models import (
     DemoFact,
@@ -370,6 +371,7 @@ def _export_job_bundle(
         frame_count=frame_count,
         splat=splat,
         cameras=cameras,
+        display_rotation_xyzw=preview_display_rotation(registry, job, preview),
     )
     write_manifest(out, demo)
     return demo

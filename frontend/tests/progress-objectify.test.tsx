@@ -235,6 +235,63 @@ describe("thông báo tạo mesh theo vật (T-013)", () => {
     expect(await screen.findByText(/Áp vùng thất bại\. Scene hiện tại được giữ nguyên\. box ngoài sàn/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Thử lại" })).toBeNull();
   });
+
+  const buildModes = ["geometry", "region", "membership"] as const;
+  const outcomes = ["failed", "cancelled"] as const;
+
+  it.each(buildModes.flatMap((mode) => outcomes.map((status) => ({ mode, status }))))(
+    "keeps $mode $status visible only while viewing its base revision",
+    async ({ mode, status }) => {
+      vi.mocked(getObjectifyState).mockResolvedValue(objectify({
+        status, mode, base_revision: "rev-121", scene_revision: "rev-121", error: "build outcome",
+      }));
+      const { rerender } = render(<ObjectifyNotice jobId="job-1" revision="rev-121" onRevision={vi.fn()} />);
+      expect(await screen.findByRole("alert")).toHaveTextContent("build outcome");
+
+      // Restore advances the displayed revision before the shared status request returns.
+      rerender(<ObjectifyNotice jobId="job-1" revision="rev-122" onRevision={vi.fn()} />);
+      expect(screen.queryByRole("alert")).toBeNull();
+      expect(screen.queryByRole("button", { name: "Thử lại" })).toBeNull();
+    },
+  );
+
+  it.each(buildModes.flatMap((mode) => outcomes.map((status) => ({ mode, status }))))(
+    "does not attach an old $mode $status to a restored scene on a fresh page load",
+    async ({ mode, status }) => {
+      vi.mocked(getObjectifyState).mockResolvedValue(objectify({
+        status, mode, base_revision: "rev-121", scene_revision: "rev-122",
+        error: "scene đã đổi sang rev-122 sau khi yêu cầu; yêu cầu lại nếu vẫn cần",
+      }));
+      await act(async () => {
+        render(<ObjectifyNotice jobId="job-1" revision="rev-122" onRevision={vi.fn()} />);
+      });
+      expect(getObjectifyState).toHaveBeenCalled();
+      expect(screen.queryByRole("alert")).toBeNull();
+      expect(screen.queryByRole("button", { name: "Thử lại" })).toBeNull();
+    },
+  );
+
+  it("waits for the displayed scene to catch up before showing an outcome from a newer revision", async () => {
+    vi.mocked(getObjectifyState).mockResolvedValue(objectify({
+      status: "failed", mode: "region", base_revision: "rev-122", scene_revision: "rev-122", error: "new build failed",
+    }));
+    const { rerender } = await act(async () => render(<ObjectifyNotice jobId="job-1" revision="rev-121" onRevision={vi.fn()} />));
+    expect(screen.queryByRole("alert")).toBeNull();
+    rerender(<ObjectifyNotice jobId="job-1" revision="rev-122" onRevision={vi.fn()} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("new build failed");
+  });
+
+  it.each(["queued", "running"] as const)("keeps cancellation available for $status work after restore", async (status) => {
+    vi.mocked(getObjectifyState).mockResolvedValue(objectify({
+      status, mode: "region", base_revision: "rev-121", scene_revision: "rev-122", operation_id: "old-region",
+    }));
+    vi.mocked(cancelObjectify).mockResolvedValue(objectify({
+      status: "cancelled", mode: "region", base_revision: "rev-121", scene_revision: "rev-122", operation_id: "old-region",
+    }));
+    render(<ObjectifyNotice jobId="job-1" revision="rev-122" onRevision={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Hủy yêu cầu" }));
+    await waitFor(() => expect(cancelObjectify).toHaveBeenCalledWith("job-1", "old-region"));
+  });
 });
 
 describe("dòng kết quả thật trong tab Tiến trình", () => {

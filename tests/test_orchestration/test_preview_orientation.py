@@ -14,7 +14,9 @@ from src.services.reconstruction.rgb.canonical.metric_math import rotate
 from tests.test_reconstruction.support.rec06_bundle_metric_fixture import prepared
 
 
-@pytest.mark.parametrize("confirmation_state", ["matching", "missing", "foreign_visual", "foreign_poses", "corrupt"])
+@pytest.mark.parametrize(
+    "confirmation_state", ["matching", "missing", "missing_poses", "foreign_visual", "foreign_poses", "corrupt"]
+)
 def test_preview_orientation_uses_only_matching_confirmation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, confirmation_state: str
 ) -> None:
@@ -24,6 +26,8 @@ def test_preview_orientation_uses_only_matching_confirmation(
     preview = ReconstructionPreview.model_validate_json(path.read_bytes())
     record = canonicalizer.load(reference)
     original_visual = resolver.require(preview.delivery_ref).read_bytes()
+    if confirmation_state == "missing_poses":
+        preview = preview.model_copy(update={"camera_pose_ref": None})
     if confirmation_state == "foreign_visual":
         preview = preview.model_copy(
             update={
@@ -52,6 +56,9 @@ def test_preview_orientation_uses_only_matching_confirmation(
     )
     job = SimpleNamespace(stage_artifacts=[] if confirmation_state == "missing" else [stage])
     registry = SimpleNamespace(get_job=lambda _: job, get_preview=lambda _: preview, runtime_resolver=resolver)
+    if confirmation_state == "missing_poses":
+        assert module.preview_display_rotation(registry, job, preview) is None
+        return
     monkeypatch.setattr(module, "job_frame_images", lambda *_: [])
     monkeypatch.setattr(module, "job_bundle", lambda *_: None)
     if confirmation_state == "corrupt":

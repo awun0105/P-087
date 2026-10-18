@@ -14,6 +14,7 @@ import {
   recordingCameraPose,
   type CameraMarkerLike,
   type DisplayCameraPose,
+  type DisplayRotation,
   type SourceFrame,
 } from "@/features/viewer/source-frame";
 import { useJobCameras } from "@/features/studio/scene/useJobCameras";
@@ -28,6 +29,7 @@ export function PreviewScene({
   initialCamera,
   initialCameraMode,
   cameras,
+  displayRotation: suppliedDisplayRotation,
   sourceFrame = "colmap",
   onControlsReady,
   onSaveDefaultCamera,
@@ -45,6 +47,7 @@ export function PreviewScene({
   initialCamera?: DisplayCameraPose;
   initialCameraMode?: Exclude<CameraMode, "anim">;
   cameras?: readonly CameraMarkerLike[];
+  displayRotation?: DisplayRotation;
   sourceFrame?: SourceFrame;
   onControlsReady?: (controls: ViewerControls | null) => void;
   onSaveDefaultCamera?: (controls?: ViewerControls | null) => Promise<void> | void;
@@ -94,7 +97,9 @@ export function PreviewScene({
   const supplied = initialCamera !== undefined || (cameras?.length ?? 0) > 0;
   const fetched = useJobCameras(supplied ? undefined : jobId);
   const effectiveCameras = cameras ?? fetched.cameras;
-  const displayRotation = !supplied && sourceFrame === "colmap" ? fetched.displayRotation : undefined;
+  const displayRotation = sourceFrame === "colmap"
+    ? suppliedDisplayRotation ?? (!supplied ? fetched.displayRotation : undefined)
+    : undefined;
   const resolvedCamera = useMemo(() => {
     if (initialCamera) return initialCamera;
     if (effectiveCameras && effectiveCameras.length > 0) return recordingCameraPose(sourceFrame, effectiveCameras, 60, displayRotation);

@@ -48,6 +48,12 @@ export function ObjectifyNotice({ jobId, revision, onRevision }: { jobId: string
       </Notice>
     );
   }
+  // Kết quả dựng của revision cũ không còn mô tả scene sau khi khôi phục/chỉnh sửa.
+  if (
+    (state.mode === "geometry" || state.mode === "region" || state.mode === "membership") &&
+    state.base_revision !== null &&
+    (state.base_revision !== revision || state.base_revision !== state.scene_revision)
+  ) return null;
   if (state.mode === "geometry" || state.mode === "region") {
     if (state.status !== "failed" && state.status !== "cancelled") return null;
     const outcome = state.status === "cancelled" ? "đã huỷ" : "thất bại";

@@ -3,7 +3,9 @@ import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PreviewScene } from "@/features/studio/scene/PreviewScene";
-import { getStageViews } from "@/lib/api/studio";
+import { SampleScene } from "@/features/studio/SampleScene";
+import { getSample, getStageViews } from "@/lib/api/studio";
+import { parseDemoManifest } from "@/lib/contracts/studio";
 import type { StageView } from "@/lib/contracts/studio";
 
 const viewer = vi.hoisted(() => ({
@@ -14,7 +16,8 @@ const viewer = vi.hoisted(() => ({
     extraControls?: import("react").ReactNode;
   }[],
 }));
-vi.mock("@/lib/api/studio", () => ({ getStageViews: vi.fn() }));
+vi.mock("@/lib/api/studio", () => ({ getStageViews: vi.fn(), getSample: vi.fn(), sampleFileUrl: (id: string, name: string) => `/samples/${id}/${name}` }));
+vi.mock("@/features/shell/Breadcrumbs", () => ({ usePageTitle: vi.fn() }));
 vi.mock("@/features/viewer/PlayCanvasScene", async (original) => ({
   ...(await original<typeof import("@/features/viewer/PlayCanvasScene")>()),
   usePlayCanvasCapability: () => ["ready", vi.fn()],
@@ -61,6 +64,32 @@ beforeEach(() => {
 });
 
 describe("PreviewScene mở đầu bên trong scene", () => {
+  it.each([true, false])("demo truyền hướng cho cả Gaussian và camera, tương thích mẫu cũ: %s", async (aligned) => {
+    const rotation: [number, number, number, number] = [-Math.SQRT1_2, 0, 0, Math.SQRT1_2];
+    const demo = parseDemoManifest({
+      schema_version: "1.0", origin: "pipeline_job", title: "Sample", frames: [], stages: [],
+      splat: { name: "scene.sog" }, cameras: sfmCameras,
+      ...(aligned ? { display_rotation_xyzw: rotation } : {}),
+    });
+    vi.mocked(getSample).mockResolvedValue({ ok: true, data: demo });
+    render(<SampleScene sampleId="sample" />);
+    await screen.findByTestId("viewer");
+    const props = viewer.props.at(-1)!;
+    expect(props.displayRotation).toEqual(aligned ? rotation : undefined);
+    const expectedPosition = aligned ? [1, 3, -2] : [-1, -2, 3];
+    const expectedTarget = aligned ? [1, 5, -2] : [-1, -2, 5];
+    props.initialCamera!.position.forEach((value, axis) => expect(value).toBeCloseTo(expectedPosition[axis]));
+    props.initialCamera!.target.forEach((value, axis) => expect(value).toBeCloseTo(expectedTarget[axis]));
+    expect(getStageViews).not.toHaveBeenCalled();
+  });
+
+  it.each([[0, 0, 0, 0], [0, 0, 0, 2], [0, 1], [0, 0, 0, NaN]])("từ chối hướng demo không hợp lệ: %s", (...rotation) => {
+    expect(() => parseDemoManifest({
+      schema_version: "1.0", origin: "pipeline_job", frames: [], stages: [], splat: { name: "scene.sog" },
+      display_rotation_xyzw: rotation,
+    })).toThrow("Hướng hiển thị của demo không hợp lệ");
+  });
+
   it("dùng hướng xác nhận của preview cho cả camera và nội dung; không lấy camera hệ mét", async () => {
     const rotation: [number, number, number, number] = [-Math.SQRT1_2, 0, 0, Math.SQRT1_2];
     vi.mocked(getStageViews).mockResolvedValue([
@@ -73,7 +102,7 @@ describe("PreviewScene mở đầu bên trong scene", () => {
     expect(viewer.props.at(-1)?.displayRotation).toEqual(rotation);
     viewer.props.at(-1)!.initialCamera!.position.forEach((value, axis) => expect(value).toBeCloseTo([1, 3, -2][axis]));
     // Caller cung cấp camera hệ mét: không áp hướng SfM lên nó lần nữa.
-    rerender(<PreviewScene jobId="job-a" sourceFrame="z_up" cameras={sfmCameras} contentUrl="/metric.sog" filename="metric.sog" />);
+    rerender(<PreviewScene jobId="job-a" sourceFrame="z_up" cameras={sfmCameras} displayRotation={rotation} contentUrl="/metric.sog" filename="metric.sog" />);
     expect(viewer.props.at(-1)?.displayRotation).toBeUndefined();
     expect(viewer.props.at(-1)?.initialCamera?.position).toEqual([1, 3, -2]);
   });
