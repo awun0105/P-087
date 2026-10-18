@@ -1,0 +1,42 @@
+{
+  "legacy_runtime_filter": {
+    "recorded_usage_count": 1,
+    "legacy_job_selected_count": 0,
+    "software_job_selected_count": 1
+  },
+  "failed_hours_budget": {
+    "previous_failed_hours": 2,
+    "cap_hours": 1,
+    "returned_spent_and_cap": [
+      0.0,
+      1
+    ],
+    "new_run_allowed": true
+  },
+  "machine_attribution": {
+    "actual_worker_assumption": "worker-A",
+    "freshest_other_worker": "worker-B",
+    "snapshot_worker": "worker-B",
+    "snapshot_gpu": "A40"
+  },
+  "incomplete_stage_total": {
+    "missing_stage": "ST-CAMERA-POSE",
+    "reported_total_seconds": 30,
+    "display": "0.5 phút",
+    "verdict": null,
+    "meaning": "Tổng thời gian các bước đã chạy trong lượt hiện tại, không tính lúc chờ người dùng."
+  },
+  "live_rate_reprices_history": {
+    "same_usage_hours": 1,
+    "rate_1": 0.5,
+    "cost_1": 0.5,
+    "rate_2": 1,
+    "cost_2": 1.0
+  },
+  "partial_usage_looks_measured": {
+    "only_tool": "prepare",
+    "reported_minutes": 1.0,
+    "provenance": "measured",
+    "note": null
+  }
+}
