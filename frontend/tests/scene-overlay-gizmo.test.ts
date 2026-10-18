@@ -441,3 +441,62 @@ it("keeps collider GLB and its live pose when frames are hidden, switches real t
   expect(destroyed).toHaveBeenCalledOnce();
   expect(unloaded).toHaveBeenCalledOnce();
 });
+
+it("fits selection bounds to the current shell including its local offset, without moving the object", () => {
+  let positions = [2, 3, 4, 4, 3, 4, 2, 7, 10];
+  const renderSystem = {
+    addComponent(entity: Entity, data: { material: unknown }) {
+      const mesh = {
+        primitive: [{ count: 3 }],
+        getPositions: (out: number[]) => { out.push(...positions); return 3; },
+        getIndices: (out: number[]) => out.push(0, 1, 2),
+      };
+      (entity as unknown as { c: Record<string, unknown> }).c.render = {
+        meshInstances: [{ mesh, node: entity, material: data.material }], system: renderSystem, onPostStateChange: vi.fn(),
+      };
+    },
+    removeComponent(entity: Entity) { delete (entity as unknown as { c: Record<string, unknown> }).c.render; },
+  };
+  const app = {
+    root: { addChild: vi.fn() }, graphicsDevice: { canvas: document.createElement("canvas") },
+    systems: { light: { addComponent: vi.fn() }, render: renderSystem },
+    assets: { add: vi.fn(), load: vi.fn(), remove: vi.fn() }, renderNextFrame: false,
+  };
+  const overlay = new SceneOverlay(app as unknown as ViewerAppLike);
+  overlay.setObjects([{ id: "A", url: null, position: [10, 20, 30], rotation_xyzw: [0, 0, 0, 1], visible: true }]);
+  const input = { id: "A", center: [10, 20, 30] as [number, number, number], rotation_xyzw: [0, 0, 0, 1] as [number, number, number, number], dimensions: [9, 9, 9] as [number, number, number], color: "#ffffff", emphasized: true, boundsUrl: "/old.glb" };
+  const load = (asset = app.assets.add.mock.lastCall![0] as Asset) => {
+    asset.resource = { instantiateRenderEntity: () => {
+      const entity = new Entity("shell", app as unknown as AppBase);
+      entity.addComponent("render", { type: "box" });
+      return entity;
+    }, destroy: vi.fn() };
+    asset.fire("load");
+  };
+  overlay.setBoxes([input]);
+  load();
+  const root = app.root.addChild.mock.lastCall![0] as Entity;
+  const first = root.findByName("r2s-box-fill-A") as Entity;
+  expect(first.getLocalPosition().toArray()).toEqual([3, 5, 7]);
+  expect(first.getLocalScale().toArray()).toEqual([2, 4, 6]);
+  positions = [-4, 0, 1, -2, 0, 1, -4, 2, 3];
+  overlay.setBoxes([{ ...input, boundsUrl: "/new.glb" }]);
+  load();
+  let current = root.findByName("r2s-box-fill-A") as Entity;
+  expect(current.getLocalPosition().toArray()).toEqual([-3, 1, 2]);
+  expect(current.getLocalScale().toArray()).toEqual([2, 2, 2]);
+  expect(overlay.objectEntity("A")!.getLocalPosition().toArray()).toEqual([10, 20, 30]);
+  overlay.setBoxes([{ ...input, boundsUrl: "/late.glb" }]);
+  const stale = app.assets.add.mock.lastCall![0] as Asset;
+  overlay.setBoxes([{ ...input, boundsUrl: "/new.glb" }]);
+  current = root.findByName("r2s-box-fill-A") as Entity;
+  positions = [100, 100, 100, 200, 100, 100, 100, 200, 200];
+  load(stale);
+  expect(current.getLocalPosition().toArray()).toEqual([-3, 1, 2]);
+  expect(current.getLocalScale().toArray()).toEqual([2, 2, 2]);
+  overlay.setObjectPose("A", [7, 8, 9], [0, 0, Math.SQRT1_2, Math.SQRT1_2]);
+  expect((root.findByName("r2s-box-A") as Entity).getLocalPosition().toArray()).toEqual([7, 8, 9]);
+  expect(current.getLocalPosition().toArray()).toEqual([-3, 1, 2]);
+  expect(root.findByName("r2s-collider-A")).toBeNull();
+  overlay.destroy();
+});
