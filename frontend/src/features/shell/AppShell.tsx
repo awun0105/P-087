@@ -1,11 +1,11 @@
 "use client";
 
-import { ArrowLeft, Box, ChartBarBig, ChevronsUpDown, Clapperboard, FolderDown, LayoutDashboard, Loader2, LogIn, LogOut, PanelLeftClose, PanelLeftOpen, PlusCircle, Trash2, Users, UserRound } from "lucide-react";
+import { ArrowLeft, ChartBarBig, ChevronsUpDown, Clapperboard, FolderDown, LayoutDashboard, Loader2, LogIn, LogOut, PanelLeftClose, PanelLeftOpen, PlusCircle, Trash2, Users, UserRound } from "lucide-react";
 import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ErrorFeedback } from "@/components/studio/feedback";
-import { BrandWordmark } from "@/components/studio/primitives";
+import { BrandIcon, BrandWordmark } from "@/components/studio/primitives";
 import { errorMessage } from "@/lib/ui-error";
 import { useNavigationGuard } from "@/features/shell/NavigationGuard";
 
@@ -167,9 +167,7 @@ function SidebarBrand({ signedIn }: { signedIn: boolean }) {
         {!collapsed && (
           <SidebarMenuButton asChild size="lg" className="min-w-0 flex-1">
             <Link href={signedIn ? APP_HOME : "/"}>
-              <span className="grid size-8 place-items-center rounded-lg bg-primary text-primary-foreground">
-                <Box className="size-4" aria-hidden />
-              </span>
+              <BrandIcon className="size-8 shrink-0 rounded-lg" />
               <BrandWordmark />
             </Link>
           </SidebarMenuButton>
