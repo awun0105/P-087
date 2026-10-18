@@ -14,6 +14,7 @@ import { useAuth } from "@/features/studio/AuthProvider";
 import { notifySuccess, FieldError } from "@/components/studio/feedback";
 import { login, register, registerGuest } from "@/lib/api/auth";
 import { APP_HOME } from "@/lib/routes";
+import { BrandIcon } from "@/components/studio/primitives";
 
 /** Chỉ cho quay lại đường dẫn nội bộ (tránh open redirect qua `?next=`); thiếu/không hợp lệ thì về Tổng quan của app. */
 export function safeNext(value: string | null): string {
@@ -84,13 +85,7 @@ function Shell({
             className="flex min-w-0 items-center gap-3 transition-opacity hover:opacity-90"
             aria-label="Real2Sim Studio Trang chủ"
           >
-            <div className="flex size-8 shrink-0 items-center justify-center rounded-md border border-[color-mix(in_srgb,var(--studio-ink-muted)_20%,transparent)] bg-[var(--studio-viewport)] p-1.5 shadow-xs">
-              <svg viewBox="0 0 24 24" fill="none" className="size-full" aria-hidden="true">
-                <path d="M12 2L3 7L12 12L21 7L12 2Z" stroke="var(--studio-ember)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                <path d="M3 17L12 22L21 17" stroke="var(--studio-geometry)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                <path d="M3 12L12 17L21 12" stroke="var(--studio-ochre)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </div>
+            <BrandIcon className="size-8 shrink-0 rounded-md" />
             <div className="flex items-baseline gap-1.5">
               <span className="font-display text-lg font-bold tracking-tight text-foreground">
                 Real2Sim
