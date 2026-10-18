@@ -7,6 +7,7 @@
 
 import { cva, type VariantProps } from "class-variance-authority";
 import type { ComponentProps, ReactNode } from "react";
+import Image from "next/image";
 
 import { Button as BaseButton } from "@/components/shadcn/button";
 import { cn } from "@/lib/cn";
@@ -65,6 +66,10 @@ export function BrandWordmark({ className }: { className?: string }) {
       </span>
     </span>
   );
+}
+
+export function BrandIcon({ className }: { className?: string }) {
+  return <Image src="/icon.svg" alt="" width={32} height={32} className={className} aria-hidden="true" />;
 }
 
 export function Card({ className, ...props }: ComponentProps<"section">) {
