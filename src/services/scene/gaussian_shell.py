@@ -22,12 +22,10 @@ from scipy.spatial import cKDTree
 from scipy.special import expit
 
 from src.services.scene.object_aware_geometry import occupancy_surface
-from src.services.scene.surface_mesh import assess_surface
+from src.services.scene.surface_mesh import SHELL_INTERSECTION_BUDGET, assess_surface
 
 MIN_GAUSSIANS = 50
 _CROSS = ndimage.generate_binary_structure(3, 1)  # 6-connected neighbourhood for every morphology step
-# Shell meshes are denser than the 250k pair budget that suits ObjectGS and CoACD surfaces; shells get their own.
-SHELL_INTERSECTION_BUDGET = 2_000_000
 
 
 class GaussianShellError(ValueError):
@@ -163,16 +161,21 @@ def _body_diagonal_targets(grid: np.ndarray) -> np.ndarray:
 
 
 def _repair_diagonals(grid: np.ndarray) -> tuple[np.ndarray, int]:
-    """Turn on empty cells in rounds until no diagonal contact is left; returns grid and cells added."""
+    """Remove diagonal contacts and enclosed voids together; return grid and total cells added."""
     fixes = 0
     for _ in range(_MAX_DIAGONAL_ROUNDS):
         targets = _planar_diagonal_targets(grid) | _body_diagonal_targets(grid)
-        if not targets.any():
+        # Bridging diagonal contacts can seal a void; filling it can create new diagonal contacts.
+        repaired = ndimage.binary_fill_holes(grid | targets, structure=_CROSS)
+        added = int(np.count_nonzero(repaired & ~grid))
+        if not added:
             return grid, fixes
-        fixes += int(np.count_nonzero(targets & ~grid))
-        grid = grid | targets
-    if (_planar_diagonal_targets(grid) | _body_diagonal_targets(grid)).any():
-        raise GaussianShellError("diagonal contacts remain after the repair round limit")
+        fixes += added
+        grid = repaired
+    if (_planar_diagonal_targets(grid) | _body_diagonal_targets(grid)).any() or not np.array_equal(
+        ndimage.binary_fill_holes(grid, structure=_CROSS), grid
+    ):
+        raise GaussianShellError("diagonal contacts or enclosed voids remain after the repair round limit")
     return grid, fixes
 
 
