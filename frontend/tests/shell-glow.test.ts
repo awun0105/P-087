@@ -85,6 +85,8 @@ function autoLoad(app: AppBase): void {
 }
 
 function hostWith(app: AppBase, entities: Map<string, Entity>): SceneOverlay {
+  // The fake app has no scene root; production parents are already in the enabled hierarchy.
+  for (const entity of entities.values()) Object.assign(entity, { _enabledInHierarchy: true });
   return {
     isAlive: () => true,
     application: () => app,
@@ -126,23 +128,60 @@ describe("ShellGlowLayer: vỏ của vật", () => {
     expect(shellOf(object, "A")?.parent).toBe(object);
   });
 
+  it("chỉ bật vỏ idle khi hover, chuyển vật và rời chuột không nạp lại GLB", async () => {
+    const other = new Entity("object-B", app);
+    const both = new ShellGlowLayer(hostWith(app, new Map([["A", object], ["B", other]])));
+    await both.setShell("A", GLB_URL, "idle");
+    await both.setShell("B", GLB_URL, "idle");
+    expect(shellOf(object, "A")!.enabled).toBe(false);
+    expect(shellOf(other, "B")!.enabled).toBe(false);
+    both.setHovered("A");
+    expect(shellOf(object, "A")!.enabled).toBe(true);
+    both.setHovered("B");
+    expect(shellOf(object, "A")!.enabled).toBe(false);
+    expect(shellOf(other, "B")!.enabled).toBe(true);
+    both.setHovered(null);
+    expect(shellOf(other, "B")!.enabled).toBe(false);
+    expect(app.assets.load).toHaveBeenCalledTimes(2);
+    await both.setShell("A", GLB_URL, "selected");
+    both.setHovered("B");
+    expect(shellOf(object, "A")!.enabled).toBe(true);
+    both.setHovered(null);
+    expect(shellOf(object, "A")!.enabled).toBe(true);
+    both.destroy();
+    expect(() => both.setHovered("A")).not.toThrow();
+  });
+
+  it("hover trước khi nạp xong vẫn được giữ; cảnh báo và pending không bị mất khi rời chuột", async () => {
+    layer.setHovered("A");
+    await layer.setShell("A", GLB_URL, "idle");
+    expect(shellOf(object, "A")!.enabled).toBe(true);
+    layer.setHovered(null);
+    layer.setTone("A", "pending");
+    expect(shellOf(object, "A")!.enabled).toBe(true);
+    layer.setTone("A", "warning");
+    expect(shellOf(object, "A")!.enabled).toBe(true);
+    layer.setTone("A", "normal");
+    expect(shellOf(object, "A")!.enabled).toBe(false);
+  });
+
   it("vỏ đang chọn có thêm viền, vỏ idle thì không; vật liệu phát sáng cộng dồn và không ghi depth", async () => {
     await layer.setShell("A", GLB_URL, "selected");
     const shell = shellOf(object, "A") as Entity;
     const [solid, wire] = shell.children as Entity[];
     const fill = renderOf(solid).meshInstances[0].material as StandardMaterial;
-    expect(fill.opacity).toBeCloseTo(0.25);
+    expect(fill.opacity).toBeCloseTo(0.06);
     expect(fill.blendType).toBe(BLEND_ADDITIVE);
     expect(fill.depthWrite).toBe(false);
     expect(fill.cull).toBe(CULLFACE_NONE);
     expect(fill.emissive.equals(new Color().fromString("#2dd4bf"))).toBe(true);
-    expect((renderOf(wire).meshInstances[0].material as StandardMaterial).opacity).toBeCloseTo(0.5);
+    expect((renderOf(wire).meshInstances[0].material as StandardMaterial).opacity).toBeCloseTo(0.12);
 
     await layer.setShell("A", GLB_URL, "idle");
     const idle = shellOf(object, "A") as Entity;
     expect(idle.children).toHaveLength(1);
     const idleFill = renderOf(idle.children[0] as Entity).meshInstances[0].material as StandardMaterial;
-    expect(idleFill.opacity).toBeCloseTo(0.1);
+    expect(idleFill.opacity).toBeCloseTo(0.02);
   });
 
   it("vỏ mới của cùng vật thay vỏ cũ: chỉ còn một vỏ, asset cũ được gỡ và unload", async () => {
@@ -273,7 +312,7 @@ describe("ShellGlowLayer: nhịp phát sáng và trạng thái", () => {
   const frame = (): (() => void) => vi.mocked(app.on).mock.calls.find(([event]) => event === "update")![1] as () => void;
   const fillOf = (id: string) => renderOf(shellOf(object, id)!.children[0] as Entity).meshInstances[0].material as StandardMaterial;
 
-  it("vỏ đang chọn nhấp nháy trong 0,22–0,28 và yêu cầu khung kế tiếp; chưa có vỏ thì chưa đăng ký nhịp", async () => {
+  it("vỏ đang chọn nhấp nháy trong 0,057–0,063 và yêu cầu khung kế tiếp; chưa có vỏ thì chưa đăng ký nhịp", async () => {
     expect(app.on).not.toHaveBeenCalled();
     await layer.setShell("A", GLB_URL, "selected");
     expect(app.on).toHaveBeenCalledWith("update", expect.any(Function));
@@ -282,12 +321,12 @@ describe("ShellGlowLayer: nhịp phát sáng và trạng thái", () => {
     for (const now of [0, 500, 1000, 1500, 2000]) {
       vi.mocked(performance.now).mockReturnValue(now);
       frame()();
-      expect(fill.opacity).toBeGreaterThanOrEqual(0.22 - 1e-9);
-      expect(fill.opacity).toBeLessThanOrEqual(0.28 + 1e-9);
+      expect(fill.opacity).toBeGreaterThanOrEqual(0.057 - 1e-9);
+      expect(fill.opacity).toBeLessThanOrEqual(0.063 + 1e-9);
       peak = Math.max(peak, fill.emissiveIntensity);
     }
     expect(peak).toBeGreaterThan(1);
-    expect(peak).toBeLessThanOrEqual(1.3 + 1e-9);
+    expect(peak).toBeLessThanOrEqual(1.1 + 1e-9);
     expect(host.requestFrame).toHaveBeenCalled();
   });
 
@@ -295,7 +334,7 @@ describe("ShellGlowLayer: nhịp phát sáng và trạng thái", () => {
     await layer.setShell("A", GLB_URL, "idle");
     vi.mocked(performance.now).mockReturnValue(1000);
     frame()();
-    expect(fillOf("A").opacity).toBeCloseTo(0.1);
+    expect(fillOf("A").opacity).toBeCloseTo(0.02);
     expect(host.requestFrame).not.toHaveBeenCalled();
   });
 
@@ -303,33 +342,33 @@ describe("ShellGlowLayer: nhịp phát sáng và trạng thái", () => {
     await layer.setShell("A", GLB_URL, "selected");
     vi.mocked(performance.now).mockReturnValue(1000);
     frame()();
-    expect(fillOf("A").opacity).toBeCloseTo(0.28);
+    expect(fillOf("A").opacity).toBeCloseTo(0.063);
 
     vi.mocked(window.matchMedia).mockReturnValue({ matches: true } as MediaQueryList);
     vi.mocked(host.requestFrame).mockClear();
     frame()();
-    expect(fillOf("A").opacity).toBeCloseTo(0.25);
+    expect(fillOf("A").opacity).toBeCloseTo(0.06);
     expect(host.requestFrame).not.toHaveBeenCalled();
   });
 
-  it("pending làm mờ vỏ về 0,12 và dừng nhấp nháy; trở lại thường thì có lại độ mờ gốc", async () => {
+  it("pending làm mờ vỏ về 0,02 và dừng nhấp nháy; trở lại thường thì có lại độ mờ gốc", async () => {
     await layer.setShell("A", GLB_URL, "selected");
     layer.setTone("A", "pending");
-    expect(fillOf("A").opacity).toBeCloseTo(0.12);
-    expect((renderOf((shellOf(object, "A") as Entity).children[1] as Entity).meshInstances[0].material as StandardMaterial).opacity).toBeCloseTo(0.12);
+    expect(fillOf("A").opacity).toBeCloseTo(0.02);
+    expect((renderOf((shellOf(object, "A") as Entity).children[1] as Entity).meshInstances[0].material as StandardMaterial).opacity).toBeCloseTo(0.02);
     vi.mocked(performance.now).mockReturnValue(1000);
     frame()();
-    expect(fillOf("A").opacity).toBeCloseTo(0.12);
+    expect(fillOf("A").opacity).toBeCloseTo(0.02);
 
     layer.setTone("A", "normal");
-    expect(fillOf("A").opacity).toBeCloseTo(0.25);
+    expect(fillOf("A").opacity).toBeCloseTo(0.06);
   });
 
   it("warning đổi màu vỏ sang cam và giữ độ mờ của kiểu vỏ", async () => {
     await layer.setShell("A", GLB_URL, "selected");
     layer.setTone("A", "warning");
     expect(fillOf("A").emissive.equals(new Color().fromString("#f59e0b"))).toBe(true);
-    expect(fillOf("A").opacity).toBeCloseTo(0.25);
+    expect(fillOf("A").opacity).toBeCloseTo(0.06);
   });
 
   it("setTone khi chưa có vỏ thì không làm gì", () => {
