@@ -137,3 +137,25 @@ def test_occupancy_surface_rejects_empty_and_invalid_voxel():
     for voxel_m in [0.0, -0.1, float("nan"), float("inf")]:
         with pytest.raises(ValueError, match="voxel_m"):
             occupancy_surface({(0, 0, 0)}, voxel_m)
+
+
+def test_sparse_environment_with_wide_bounds_does_not_allocate_a_dense_grid():
+    points = np.array([[0, 0, 0], [1372, 1919, 1288]], dtype=float) * 0.04
+    labels = np.array([-1, -1])
+    result = build_background_collision(points, labels, set(), voxel_m=0.04)
+    assert result.statistics["retained_cells"] == 2
+    assert len(result.vertices) == 16 and len(result.faces) == 24
+    with pytest.raises(ValueError, match="3411790250 bounding grid cells, exceeds budget 32000000"):
+        build_background_collision(points, labels, set(), voxel_m=0.04, max_grid_cells=32_000_000)
+
+
+def test_occupied_cell_limit_still_fails_before_meshing(monkeypatch):
+    from src.services.scene import object_aware_geometry as module
+
+    monkeypatch.setattr(module, "occupancy_surface", lambda *args: pytest.fail("must not mesh over-budget occupancy"))
+    points = np.array([[0, 0, 0], [2, 2, 2]], dtype=float)
+    labels = np.array([-1, -1])
+    with pytest.raises(ValueError, match="2 occupied cells, exceeds budget 1"):
+        build_background_collision(points, labels, set(), voxel_m=1.0, max_occupied_cells=1)
+    with pytest.raises(ValueError, match="invalid voxel resolution or occupancy budget"):
+        build_background_collision(points, labels, set(), voxel_m=1.0, max_occupied_cells=0)
