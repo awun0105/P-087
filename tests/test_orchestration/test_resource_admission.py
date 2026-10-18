@@ -21,7 +21,7 @@ from src.services.orchestration.jobs.progress import job_progress
 from src.services.orchestration.jobs.worker_cli import dispatch_next
 from src.services.orchestration.processing import build_job_config, job_config_reference, load_presets, preset_values
 from src.services.orchestration.processing.capability import GpuReading
-from src.services.orchestration.processing.observed import numeric_params
+from src.services.orchestration.processing.observed import Phase, numeric_params
 from src.services.orchestration.processing.telemetry import ResourceUsage
 from src.services.orchestration.projects.models import JobCreateInput
 from src.services.orchestration.projects.registry import ProjectRegistry
@@ -287,6 +287,31 @@ def test_job_alone_on_gpu_is_not_held_back_by_a_wrong_estimate(tmp_path: Path, m
         registry, job, gate = _queued(tmp_path / str(index))
         _machine(monkeypatch, {**LIVE, "vram_free_gb": vram})
         assert gate(job) and resource_wait(gate.database, job) is None
+
+
+@pytest.mark.parametrize("phase", ["preview", "finalize"])
+def test_heavier_config_measurement_does_not_block_first_exclusive_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, phase: Phase
+) -> None:
+    """A larger run is an upper bound, not a measurement permitting the new config to share a GPU."""
+    registry, job, gate = _queued(tmp_path)
+    second = _second_job(registry)
+    _machine(monkeypatch, {**LIVE, "vram_free_gb": 3.62})
+    presets, _ = load_presets(PRESETS)
+    heavier = numeric_params(preset_values(presets, "minimum_quality"))
+    heavier["brush.max_splats"] *= 2
+    tools = ("preview",) if phase == "preview" else ("finalize", "scene_extract")
+    for tool in tools:
+        _measure(gate, tool, vram=3.62, ram=3.0, params=heavier)
+
+    assert gate(job, phase=phase)
+    assert _reservations(gate)[gate.worker_id].exclusive
+    assert resource_wait(gate.database, job) is None
+    other = _second_worker(gate)
+    assert not other(second, phase=phase)
+    wait = resource_wait(gate.database, second)
+    assert wait is not None and wait.needs_exclusive_gpu
+    assert wait.reasons == {"vram": "busy"}
 
 
 def test_measured_jobs_share_a_gpu_until_measured_budgets_no_longer_fit(
