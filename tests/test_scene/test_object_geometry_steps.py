@@ -142,7 +142,10 @@ def test_surface_colliders_reject_incomplete_output(
     assert error.value.retryable is False
 
 
-def test_surface_colliders_send_strict_local_mesh_request(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("origin", ["objectgs", "gaussian_shell"])
+def test_surface_colliders_send_strict_local_mesh_request(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, origin: str
+) -> None:
     from threading import Event
 
     from src.services.orchestration.scene.object_geometry_steps import SurfaceInput, run_surface_colliders
@@ -170,6 +173,7 @@ def test_surface_colliders_send_strict_local_mesh_request(tmp_path: Path, monkey
         tmp_path,
         10,
         cancel,
+        surface_origin=origin,
     )
     assert actual == {"4": {"id": "4", "parts": 2, "volume_m3": 0.2}}
     assert seen == {
@@ -178,6 +182,7 @@ def test_surface_colliders_send_strict_local_mesh_request(tmp_path: Path, monkey
                 "id": "4",
                 "surface_mesh": str(tmp_path / "surface.glb"),
                 "surface_checksum": checksum,
+                "surface_origin": origin,
                 "coordinate_frame": "object_local",
                 "distance_unit": "m",
                 "output_glb": str(output),
@@ -330,3 +335,61 @@ def test_precomputed_inpaint_is_packaged_once_and_cancellation_blocks_publicatio
             inpaint_result={"method": "fixture"},
         )
     assert packaged == [True]
+
+
+def test_surface_collider_failure_lists_each_object_and_reason(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from src.services.orchestration.scene.object_geometry_steps import SurfaceInput, run_surface_colliders
+
+    monkeypatch.setattr(
+        pipeline,
+        "_run",
+        lambda *args, **kwargs: {
+            "objects": [
+                {
+                    "id": "chair",
+                    "parts": 0,
+                    "error": "strict surface quality gate failed: intersection_budget_exceeded",
+                },
+                {"id": "table", "parts": 0, "error": "surface parts exceed budget"},
+            ]
+        },
+    )
+    inputs = [
+        SurfaceInput(key, tmp_path / f"{key}.glb", "sha256:" + "a" * 64, tmp_path / f"{key}-collider.glb")
+        for key in ("chair", "table")
+    ]
+    with pytest.raises(pipeline.ObjectifyError) as error:
+        run_surface_colliders(tmp_path / "python", inputs, {}, tmp_path, 10, None)
+    assert "chair: chưa hoàn tất kiểm tra giao cắt" in str(error.value)
+    assert "table: số phần rời vượt giới hạn khối lồi của vật" in str(error.value)
+    assert error.value.retryable is False
+
+
+def test_repeated_collider_failures_keep_all_ids_in_the_public_error_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from src.services.orchestration.scene.object_geometry_steps import SurfaceInput, run_surface_colliders
+
+    keys = [f"candidate-{i:03d}" for i in range(6)]
+    monkeypatch.setattr(
+        pipeline,
+        "_run",
+        lambda *args, **kwargs: {
+            "objects": [
+                {
+                    "id": key,
+                    "parts": 0,
+                    "error": "CoACD returned no parts or exceeded the part budget; hull fallback is forbidden",
+                }
+                for key in keys
+            ]
+        },
+    )
+    inputs = [
+        SurfaceInput(key, tmp_path / f"{key}.glb", "sha256:" + "a" * 64, tmp_path / f"{key}-collider.glb")
+        for key in keys
+    ]
+    with pytest.raises(pipeline.ObjectifyError) as error:
+        run_surface_colliders(tmp_path / "python", inputs, {}, tmp_path, 10, None)
+    assert len(str(error.value)) < 500
+    assert all(key in str(error.value) for key in keys)
