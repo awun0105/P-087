@@ -7,6 +7,7 @@ reclaim RUNNING theo timeout vì trainer có thể vẫn còn sống trên host 
 import argparse
 import logging
 import signal
+import time
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -392,6 +393,8 @@ def _rebind_orphaned_job(registry: ProjectRegistry, job: JobManifest, profile: E
 
 #: Chu kỳ đo lại cấu hình máy; nhỏ hơn TTL của số đo (15 phút) để UI luôn có số mới.
 CAPABILITY_INTERVAL_SECONDS = 300
+#: Chu kỳ làm mới giữ chỗ của job đang chạy; UI coi job mất tín hiệu sau vài nhịp này (isJobStale).
+HEARTBEAT_INTERVAL_SECONDS = 30
 
 
 def _start_capability_heartbeat(
@@ -403,7 +406,7 @@ def _start_capability_heartbeat(
     """Đo và ghi cấu hình máy ngay, rồi lặp ở luồng nền (job dài không làm số đo quá hạn).
 
     Lượt đo lúc pipeline không dùng máy được ghi làm mốc "máy rảnh" (preset Maximum tính theo
-    mốc này); lúc bận thì giữ mốc rảnh gần nhất. Cùng nhịp đó làm mới giữ chỗ của job đang chạy.
+    mốc này); lúc bận thì giữ mốc rảnh gần nhất. Giữ chỗ của job đang chạy được làm mới theo nhịp dày hơn.
     Trả Event để dừng luồng khi worker thoát; lỗi đo được log, không làm dừng worker.
     """
     stop = Event()
@@ -411,22 +414,29 @@ def _start_capability_heartbeat(
 
     def beat() -> None:
         previous = None
+        next_probe = 0.0
         while True:
-            try:
-                if database is not None:
-                    idle = admission.machine_idle() if admission is not None else False
-                    previous = probe_capability(worker_root, idle=idle, previous=previous)
-                    record_capability(database, previous)
-                    if publish_runtime is not None:
-                        publish_runtime(database)
-                    from src.services.orchestration.uploads.temporary import TemporaryUploadService
+            # Đo máy nặng hơn nên giữ nhịp 5 phút; giữ chỗ chỉ ghi một dòng nên làm mới dày để UI không báo nhầm.
+            if time.monotonic() >= next_probe:
+                next_probe = time.monotonic() + CAPABILITY_INTERVAL_SECONDS
+                try:
+                    if database is not None:
+                        idle = admission.machine_idle() if admission is not None else False
+                        previous = probe_capability(worker_root, idle=idle, previous=previous)
+                        record_capability(database, previous)
+                        if publish_runtime is not None:
+                            publish_runtime(database)
+                        from src.services.orchestration.uploads.temporary import TemporaryUploadService
 
-                    TemporaryUploadService(database, registry.runtime_resolver).purge_expired()
-                    if admission is not None:
-                        admission.touch()
-            except Exception as error:  # noqa: BLE001 - luồng nền: lỗi đo/DB không được làm chết heartbeat
-                logger.warning("Không ghi được cấu hình máy worker: %s", type(error).__name__)
-            if stop.wait(CAPABILITY_INTERVAL_SECONDS):
+                        TemporaryUploadService(database, registry.runtime_resolver).purge_expired()
+                except Exception as error:  # noqa: BLE001 - luồng nền: lỗi đo/DB không được làm chết heartbeat
+                    logger.warning("Không ghi được cấu hình máy worker: %s", type(error).__name__)
+            try:
+                if database is not None and admission is not None:
+                    admission.touch()
+            except Exception as error:  # noqa: BLE001 - luồng nền: lỗi DB không được làm chết heartbeat
+                logger.warning("Không làm mới được giữ chỗ của job: %s", type(error).__name__)
+            if stop.wait(HEARTBEAT_INTERVAL_SECONDS):
                 return
 
     Thread(target=beat, name="capability-heartbeat", daemon=True).start()

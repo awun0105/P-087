@@ -208,3 +208,37 @@ def test_capability_heartbeat_records_worker_machine(tmp_path: Path) -> None:
         assert capability is not None and capability.cpu_count >= 1 and capability.disk_free_gb >= 0
     finally:
         stop.set()
+
+
+def test_heartbeat_touches_reservation_more_often_than_it_probes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Giữ chỗ được làm mới theo nhịp dày; đo máy nặng hơn vẫn giữ nhịp riêng thưa hơn."""
+    import time
+
+    from src.services.orchestration.jobs import worker_cli
+
+    probes: list[int] = []
+    monkeypatch.setattr(worker_cli, "HEARTBEAT_INTERVAL_SECONDS", 0.01)
+    monkeypatch.setattr(worker_cli, "CAPABILITY_INTERVAL_SECONDS", 60)
+    monkeypatch.setattr(worker_cli, "probe_capability", lambda *args, **kwargs: probes.append(1))
+    monkeypatch.setattr(worker_cli, "record_capability", lambda *args, **kwargs: None)
+
+    class FakeAdmission:
+        touches = 0
+
+        def machine_idle(self) -> bool:
+            return True
+
+        def touch(self) -> None:
+            self.touches += 1
+
+    admission = FakeAdmission()
+    stop = worker_cli._start_capability_heartbeat(_registry(tmp_path), tmp_path / "workers", admission)  # type: ignore[arg-type]
+    try:
+        for _ in range(100):
+            if admission.touches >= 3:
+                break
+            time.sleep(0.01)
+    finally:
+        stop.set()
+    assert admission.touches >= 3
+    assert len(probes) == 1
