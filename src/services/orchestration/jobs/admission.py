@@ -355,11 +355,14 @@ class ResourceAdmission:
         budget = None
         colmap_use_gpu = config.colmap.get("use_gpu", False)
         if not exhausted_before(usages, job.job_id) and isinstance(colmap_use_gpu, bool):
+            observation_params = resource_observation_params(params, colmap_use_gpu=colmap_use_gpu)
+            # A heavier configuration gives an upper bound, not a measurement of this config.
+            # New configurations use the existing exclusive-run path to collect their own measurements.
             budget = observed_budget(
-                usages,
+                (usage for usage in usages if usage.params == observation_params),
                 tools=PHASE_TOOLS[phase],
                 optional_tools=PHASE_OPTIONAL_TOOLS[phase],
-                params=resource_observation_params(params, colmap_use_gpu=colmap_use_gpu),
+                params=observation_params,
                 gpu_name=gpu_name,
                 runtime_manifest_checksum=job.runtime_manifest_checksum,
             )
