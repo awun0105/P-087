@@ -12,6 +12,8 @@ import numpy as np
 import trimesh
 from scipy.spatial import cKDTree
 
+SHELL_INTERSECTION_BUDGET = 2_000_000
+
 
 def load_surface(path: Path) -> trimesh.Trimesh:
     scene = trimesh.load(path, force="scene", process=False)
