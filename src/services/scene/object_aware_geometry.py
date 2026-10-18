@@ -58,7 +58,8 @@ def build_background_collision(
     unknown: np.ndarray | None = None,
     observed_free_cells: np.ndarray | None = None,
     inferred_support_points: np.ndarray | None = None,
-    max_grid_cells: int = 32_000_000,
+    max_grid_cells: int = 4_000_000_000,
+    max_occupied_cells: int = 32_000_000,
 ) -> ObjectAwareGeometry:
     """Keep background/shared/unknown/support occupancy, exclude object-only cells before extraction.
 
@@ -72,7 +73,7 @@ def build_background_collision(
         raise ValueError("background geometry needs finite source points")
     if labels.shape != (len(points),) or not np.issubdtype(labels.dtype, np.integer):
         raise ValueError("one integer membership label is required per source point")
-    if not np.isfinite(voxel_m) or voxel_m <= 0 or max_grid_cells <= 0:
+    if not np.isfinite(voxel_m) or voxel_m <= 0 or max_grid_cells <= 0 or max_occupied_cells <= 0:
         raise ValueError("invalid voxel resolution or occupancy budget")
     if -1 in removed_labels or any(label < 0 for label in removed_labels):
         raise ValueError("background cannot be an excluded object label")
@@ -108,11 +109,19 @@ def build_background_collision(
     kept = (background | support) - free
     if not kept:
         raise ValueError("object-aware environment occupancy is empty")
+    # Meshing uses sparse occupancy; a large empty span does not allocate a dense grid.
+    if len(kept) > max_occupied_cells:
+        raise ValueError(
+            f"object-aware occupancy needs {len(kept)} occupied cells, exceeds budget {max_occupied_cells}"
+        )
     kept_cells = np.asarray(sorted(kept), dtype=np.int64)
     low, high = kept_cells.min(axis=0), kept_cells.max(axis=0)
     dimensions = high - low + 3
-    if np.prod(dimensions.astype(object)) > max_grid_cells:
-        raise ValueError("object-aware occupancy exceeds the configured grid budget")
+    grid_cells = int(np.prod(dimensions.astype(object)))
+    if grid_cells > max_grid_cells:
+        raise ValueError(
+            f"object-aware occupancy needs {grid_cells} bounding grid cells, exceeds budget {max_grid_cells}"
+        )
     # Emit only exposed voxel faces. No smoothing/fill step can reintroduce excluded occupancy.
     vertices, faces = occupancy_surface(kept, voxel_m)
     digest = hashlib.sha256(
