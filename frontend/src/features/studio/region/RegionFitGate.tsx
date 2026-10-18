@@ -13,12 +13,14 @@ import type { SceneObject } from "@/lib/contracts/api";
  * không tạo box mặc định từ kích thước; người dùng chỉ có Thử lại hoặc Đóng.
  */
 export function RegionFitGate({
+  embedded = false,
   jobId,
   object,
   sceneRevision,
   onReady,
   onClose,
 }: {
+  embedded?: boolean;
   jobId: string;
   object: SceneObject;
   sceneRevision: string;
@@ -49,7 +51,7 @@ export function RegionFitGate({
   return (
     <section
       aria-label="Chỉnh vùng đang tải"
-      className="pointer-events-auto w-80 max-w-full space-y-3 rounded-md border border-line-dark bg-viewport-deep/95 p-3 text-xs text-on-dark shadow-2xl backdrop-blur-md"
+      className={embedded ? "space-y-3 p-3 text-xs text-on-dark" : "pointer-events-auto w-80 max-w-full space-y-3 rounded-md border border-line-dark bg-viewport-deep/95 p-3 text-xs text-on-dark shadow-2xl backdrop-blur-md"}
     >
       <header className="flex items-center justify-between gap-2">
         <h3 className="truncate text-sm font-semibold">Chỉnh vùng · {object.name}</h3>
