@@ -497,6 +497,7 @@ def _publish_colliders(
                     settings.product_scene_timeout_seconds,
                     cancel_event,
                     surface_label=_SURFACE_LABEL[origin],
+                    surface_origin=origin,
                 )
             )
         except ObjectifyError as error:
