@@ -102,7 +102,6 @@ export function MetricSceneView({
   onFillSurface,
   surfaceToolsTarget,
   surfaceToolsActive = true,
-  collisionDiagnostics,
   lockedReason = null,
   regionEdit = null,
   regionApi,
@@ -291,6 +290,7 @@ export function MetricSceneView({
   // Bấm = nhấn và nhả gần như tại chỗ, nhanh; kéo để xoay camera không tính là chọn.
   const press = useRef<{ x: number; y: number; time: number } | null>(null);
   const onPointerDown = (event: ReactPointerEvent) => {
+    glow?.setHovered(null);
     press.current = { x: event.clientX, y: event.clientY, time: event.timeStamp };
   };
   const canvasPoint = (event: ReactPointerEvent): [number, number] | null => {
@@ -299,9 +299,16 @@ export function MetricSceneView({
     return [event.clientX - rect.left, event.clientY - rect.top];
   };
   const onPointerMove = (event: ReactPointerEvent) => {
-    if (!placement || !overlay) return;
+    if (!overlay) return;
     const point = canvasPoint(event);
-    overlay.setGhost(placement.dimensions, point ? overlay.floorPoint(point[0], point[1]) : null);
+    if (placement) {
+      overlay.setGhost(placement.dimensions, point ? overlay.floorPoint(point[0], point[1]) : null);
+      glow?.setHovered(null);
+      return;
+    }
+    const hovering = shells.length > 0 && selectMode && layers.splat && !measuring && !surfaceTool && !regionEdit
+      && event.buttons === 0 && !press.current;
+    glow?.setHovered(hovering && point ? overlay.pick(point[0], point[1]) : null);
   };
   const onPointerUp = (event: ReactPointerEvent) => {
     const start = press.current;
@@ -330,8 +337,13 @@ export function MetricSceneView({
     else onDeselect?.();
   };
   const onPointerLeave = () => {
+    press.current = null;
+    glow?.setHovered(null);
     if (placement) overlay?.setGhost(null);
   };
+  useEffect(() => {
+    if (!shells.length || !selectMode || !layers.splat || measuring || surfaceTool || regionEdit || placement) glow?.setHovered(null);
+  }, [glow, shells.length, selectMode, layers.splat, measuring, surfaceTool, regionEdit, placement]);
 
   // Hết chế độ đặt (đặt xong/huỷ/đổi vật) thì ẩn hộp xem trước; Esc huỷ đặt hoặc bỏ chọn vật.
   const placementDims = placement?.dimensions;
@@ -340,7 +352,7 @@ export function MetricSceneView({
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         if (placementDims) cancelPlacement?.();
-        else if (selectedObject) onDeselect?.();
+        else if (selectedObject && !regionEdit) onDeselect?.();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -348,7 +360,7 @@ export function MetricSceneView({
       window.removeEventListener("keydown", onKey);
       if (placementDims) overlay?.setGhost(null);
     };
-  }, [placementDims, cancelPlacement, selectedObject, onDeselect, overlay]);
+  }, [placementDims, cancelPlacement, selectedObject, onDeselect, overlay, regionEdit]);
 
   useEffect(() => {
     if (!overlay || !collisionUrl) return;
@@ -434,7 +446,7 @@ export function MetricSceneView({
   useEffect(() => {
     regionEditRef.current = regionEdit;
   }, [regionEdit]);
-  const regionObjectId = regionEdit?.objectId ?? null;
+  const regionObjectId = layers.boxes && !measuring && !surfaceTool && !placement ? regionEdit?.objectId ?? null : null;
   const regionBoxes = regionEdit?.boxes;
   const regionSelected = regionEdit?.selectedId ?? null;
   // Entity của vật được dựng lại khi objects đổi: overlay cũ được gỡ và tạo lại với box hiện tại.
@@ -510,13 +522,18 @@ export function MetricSceneView({
    * vỏ cũ (vỏ lỗi thì giữ vỏ cũ và đổi màu cam). Không có kết quả và không tính: trả vỏ gốc và xoá điểm.
    */
   const showPreview = useCallback(
-    (objectId: string, preview: RegionPreview | null, pending: boolean) => {
+    (objectId: string, preview: RegionPreview | null, pending: boolean, options?: { restoreBase: boolean }) => {
       const layer = glowRef.current;
       if (!layer) return;
       if (!preview && !pending) {
         if (!previewOwners.current.delete(objectId)) return;
         layer.setPointSets(objectId, EMPTY_POINTS, EMPTY_POINTS);
-        restoreBaseShell(objectId);
+        if (options?.restoreBase === false) {
+          baseShellRefs.current.delete(objectId);
+          layer.clear(objectId);
+        } else {
+          restoreBaseShell(objectId);
+        }
         return;
       }
       previewOwners.current.add(objectId);
@@ -592,8 +609,8 @@ export function MetricSceneView({
     overlay?.setColliders(colliderBoxes, layers.collision && !measuring, layers.triangles);
   }, [overlay, colliderBoxes, layers.collision, layers.triangles, measuring]);
   useEffect(() => {
-    overlay?.setBoxes(layers.boxes && !measuring ? boxes : []);
-  }, [overlay, boxes, layers.boxes, measuring]);
+    overlay?.setBoxes(layers.boxes && !measuring ? boxes.filter((box) => box.id !== regionObjectId) : []);
+  }, [overlay, boxes, layers.boxes, measuring, regionObjectId]);
   useEffect(() => {
     overlay?.setSurfaceMarkers(surfacePlanes,layers.collision && !measuring);
   }, [overlay,surfacePlanes,layers.collision,measuring]);
@@ -918,13 +935,6 @@ export function MetricSceneView({
           {lidarUrl && toggle("lidar", "Đám mây LiDAR")}
 
         </div>
-        {collisionPreview && <div className="rounded-md bg-viewport-deep/90 px-3 py-1 text-xs text-on-dark">Walk kiểm tra bố trí hiện tại, gồm cả vật chưa xác nhận. Tam giác đã đánh dấu có viền màu.</div>}
-        {collisionDiagnostics && (layers.collision || walking) && <div aria-label="Thông tin collision" className="rounded-md bg-viewport-deep/90 px-3 py-1 text-xs text-on-dark">
-          Nguồn: {collisionDiagnostics.source} · Revision: {sceneRevision ?? "source-preview"} · Tam giác môi trường: {collisionState?.triangles ?? "chưa nạp"} · Collider vật thể: {physicsObjects.length}
-          {collisionDiagnostics.selectedParts !== null && <> · Khối lồi của vật đang chọn: {collisionDiagnostics.selectedParts}</>}
-          <span className="block">Artifact nền: {collisionDiagnostics.backgroundChecksum}</span>
-          {collisionState?.error && <span className="block">Collision chưa sẵn sàng: {collisionState.error}</span>}
-        </div>}
 
         {walking && physics.status.state !== "off" && (
           <div className="pointer-events-auto flex flex-wrap items-center gap-2 rounded-md border border-line-dark bg-viewport-deep/85 px-3 py-1.5 text-xs text-on-dark/90 backdrop-blur-md shadow-lg" role="status">
