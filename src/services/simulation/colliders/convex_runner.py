@@ -26,7 +26,7 @@ from skimage import measure
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scene"))
 from diagnostics import recorder  # noqa: E402
-from surface_mesh import assess_surface, clean_surface, load_surface  # noqa: E402
+from surface_mesh import SHELL_INTERSECTION_BUDGET, assess_surface, clean_surface, load_surface  # noqa: E402
 
 _PLY_TYPES = {"float": "f4", "float32": "f4", "double": "f8", "uchar": "u1", "int": "i4", "uint": "u4"}
 
@@ -114,6 +114,19 @@ def convex_parts(
     return _limit(hulls, limit) or [mesh.convex_hull]
 
 
+def component_budgets(components: list[trimesh.Trimesh], limit: int) -> list[int]:
+    """Reserve one hull per disconnected component, then share the remainder by surface area."""
+    count = len(components)
+    if limit < count or not count:
+        raise ValueError(f"surface has {count} disconnected components but the object hull budget is {limit}")
+    areas = np.asarray([component.area for component in components], dtype=np.float64)
+    shares = (limit - count) * areas / areas.sum()
+    extra = np.floor(shares).astype(int)
+    for index in np.argsort(-(shares - extra), kind="stable")[: limit - count - int(extra.sum())]:
+        extra[index] += 1
+    return (extra + 1).tolist()
+
+
 def surface_parts(item: dict, config: dict, diagnostics: dict | None = None) -> list[trimesh.Trimesh]:
     """Decompose verified object-local metre surface components without bridging their gaps."""
     if item.get("coordinate_frame") != "object_local" or item.get("distance_unit") != "m":
@@ -126,7 +139,14 @@ def surface_parts(item: dict, config: dict, diagnostics: dict | None = None) -> 
     if not len(mesh.vertices) or not len(mesh.faces) or not np.isfinite(mesh.vertices).all():
         raise ValueError("surface mesh must contain finite vertices and triangles")
     mesh = clean_surface(mesh)
-    quality = assess_surface(mesh)
+    origin = item.get("surface_origin", "objectgs")
+    if origin not in {"gaussian_shell", "objectgs"}:
+        raise ValueError("unsupported surface origin")
+    quality = (
+        assess_surface(mesh, intersection_budget=SHELL_INTERSECTION_BUDGET)
+        if origin == "gaussian_shell"
+        else assess_surface(mesh)
+    )
     if diagnostics is not None:
         diagnostics["quality"] = quality
     if not quality["passed"]:
@@ -142,14 +162,19 @@ def surface_parts(item: dict, config: dict, diagnostics: dict | None = None) -> 
     if not len(components) or any(not component.is_watertight for component in components):
         raise ValueError("surface mesh requires controlled repair before CoACD; open components are unsupported")
     hulls: list[trimesh.Trimesh] = []
-    for component in components:
+    budgets = component_budgets(components, int(config.get("max_convex_hull", 8)))
+    for component, budget in zip(components, budgets, strict=True):
         if component.volume < 0:
             component.invert()
         if component.volume <= 0:
             raise ValueError("surface component has no positive volume")
-        component_diagnostics = {} if diagnostics is not None else None
+        component_diagnostics = {"allocated_parts": budget} if diagnostics is not None else None
         try:
-            hulls.extend(convex_parts(component, config, strict=True, diagnostics=component_diagnostics))
+            hulls.extend(
+                convex_parts(
+                    component, {**config, "max_convex_hull": budget}, strict=True, diagnostics=component_diagnostics
+                )
+            )
         finally:
             if diagnostics is not None:
                 diagnostics.setdefault("component_decompositions", []).append(component_diagnostics)
