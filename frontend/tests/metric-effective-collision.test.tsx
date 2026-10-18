@@ -7,8 +7,9 @@ import type { CollisionSurfacePlane } from "@/lib/api/studio";
 
 const setShell = vi.hoisted(() => vi.fn(async () => undefined));
 const clearShell = vi.hoisted(() => vi.fn());
+const setHovered = vi.hoisted(() => vi.fn());
 vi.mock("@/features/viewer/shell-glow", () => ({ ShellGlowLayer: class {
-  destroy = vi.fn(); setShell = setShell; clear = clearShell;
+  destroy = vi.fn(); setShell = setShell; clear = clearShell; setHovered = setHovered;
 } }));
 const renderViewer = vi.hoisted(() => vi.fn());
 const gizmo = vi.hoisted(() => vi.fn());
@@ -17,11 +18,12 @@ const setColliders = vi.hoisted(() => vi.fn());
 const setCollision = vi.hoisted(() => vi.fn());
 const loadCollision = vi.hoisted(() => vi.fn<(url: string, opacity: number) => Promise<number>>(async () => 0));
 const pickCollisionTriangle = vi.hoisted(() => vi.fn());
+const pick = vi.hoisted(() => vi.fn<() => string | null>(() => "A"));
 vi.mock("@/features/viewer/scene-overlay", () => ({ SceneOverlay: class {
   objectEntity = () => ({}); attachGizmo = gizmo;
   destroy = vi.fn(); detachGizmo = vi.fn(); setObjects = vi.fn(); setBoxes = setBoxes; setColliders = setColliders; setSurfaceMarkers = vi.fn();
   setSplatVisible = vi.fn(); setCollision = setCollision; collisionPositions = () => null; bindViewerGotoPose = vi.fn();
-  loadCollision = loadCollision; pickCollisionTriangle = pickCollisionTriangle;
+  loadCollision = loadCollision; pickCollisionTriangle = pickCollisionTriangle; pick = pick;
 } }));
 vi.mock("@/features/viewer/third-person", () => ({
   WALK_EYE_HEIGHT_M: 1.3, ThirdPersonRig: class {
@@ -36,6 +38,39 @@ vi.mock("@/features/viewer/PlayCanvasScene", async (original) => ({
 const visual = { artifact_uri: "artifact://jobs/j/background.sog", artifact_checksum: "sha256:visual" };
 const collision = { artifact_uri: "artifact://jobs/j/collision.glb", artifact_checksum: "sha256:mesh" };
 const cameras: [] = [];
+
+it("hover chỉ làm sáng vật dưới chuột; kéo camera, rời canvas và chọn điểm thì tắt", () => {
+  const props = { jobId: "j", visual, cameras, shells: [{ id: "A", url: "/shell.glb", style: "idle" as const }], onPickBox: vi.fn(), inspection: { onReady: vi.fn(), onState: vi.fn() } };
+  const { rerender } = render(<MetricSceneView {...props} />);
+  act(() => renderViewer.mock.lastCall![0].onApp({}, { setObjectCollision: vi.fn() }));
+  const surface = screen.getByTestId("viewer-surface");
+  const canvas = document.createElement("canvas");
+  surface.append(canvas);
+  pick.mockReturnValue("A");
+  const move = (buttons = 0) => fireEvent(canvas, new MouseEvent("pointermove", { bubbles: true, clientX: 20, clientY: 30, buttons }));
+  move();
+  expect(setHovered).toHaveBeenLastCalledWith("A");
+  expect(props.onPickBox).not.toHaveBeenCalled();
+  pick.mockReturnValue(null);
+  move();
+  expect(setHovered).toHaveBeenLastCalledWith(null);
+  pick.mockReturnValue("A");
+  move(1);
+  expect(setHovered).toHaveBeenLastCalledWith(null);
+  move();
+  expect(setHovered).toHaveBeenLastCalledWith("A");
+  fireEvent.pointerLeave(surface.parentElement!);
+  expect(setHovered).toHaveBeenLastCalledWith(null);
+  move();
+  act(() => renderViewer.mock.lastCall![0].onInspectionState({ ...EMPTY_INSPECTION, measuring: true }));
+  expect(setHovered).toHaveBeenLastCalledWith(null);
+  move();
+  expect(setHovered).toHaveBeenLastCalledWith(null);
+  act(() => renderViewer.mock.lastCall![0].onInspectionState(EMPTY_INSPECTION));
+  rerender(<MetricSceneView {...props} selectMode={false} />);
+  move();
+  expect(setHovered).toHaveBeenLastCalledWith(null);
+});
 
 describe("MetricSceneView effective collision", () => {
   it("requests the original reconstruction collision explicitly for a stage preview", () => {
@@ -133,18 +168,15 @@ it("uses preview URLs and sends a picked canonical triangle to surface annotatio
   expect(onRemoveSurface).toHaveBeenCalledWith("plane-1");
 });
 
-it("reports the active collision source, revision, triangle count and selected convex parts", async () => {
+it("loads collision without showing preview and diagnostic banners", async () => {
   loadCollision.mockResolvedValueOnce(123);
-  render(<MetricSceneView jobId="j" visual={visual} collision={collision} cameras={cameras} sceneRevision="rev-5"
+  render(<MetricSceneView jobId="j" visual={visual} collision={collision} cameras={cameras} sceneRevision="rev-5" collisionPreview
     collisionDiagnostics={{source: "Object-aware", backgroundChecksum: "sha256:active-background", selectedParts: 3}} />);
   act(() => renderViewer.mock.lastCall![0].onApp({}, {setObjectCollision: vi.fn()}));
   fireEvent.click(screen.getByLabelText("Collision mesh"));
-  await waitFor(() => expect(screen.getByLabelText("Thông tin collision")).toHaveTextContent("Tam giác môi trường: 123"));
-  const diagnostics = screen.getByLabelText("Thông tin collision");
-  expect(diagnostics).toHaveTextContent("Nguồn: Object-aware");
-  expect(diagnostics).toHaveTextContent("Revision: rev-5");
-  expect(diagnostics).toHaveTextContent("Khối lồi của vật đang chọn: 3");
-  expect(diagnostics).toHaveTextContent("sha256:active-background");
+  await waitFor(() => expect(loadCollision).toHaveBeenCalled());
+  expect(screen.queryByLabelText("Thông tin collision")).toBeNull();
+  expect(screen.queryByText(/Walk kiểm tra bố trí hiện tại/)).toBeNull();
 });
 
 describe("MetricSceneView khoá Draft (T-013)", () => {
