@@ -20,6 +20,7 @@ from src.services.reconstruction.rgb.canonical.metric_verification import (
     CrossArtifactVerificationRequest,
     MetricVerificationService,
 )
+from src.services.reconstruction.rgb.frames.bundle_frames import bundle_frame_references
 
 
 @dataclass(frozen=True)
@@ -146,7 +147,7 @@ class BundleMetricVerifier:
         frames = self.sources.poses.frames.load(raw.source_frame_set)
         if bundle.source_input_checksum != frames.input_manifest_checksum:
             raise ValueError("bundle source InputManifest differs from reconstruction lineage")
-        if bundle.rgb_frame_refs != [frame.image for frame in frames.frames]:
+        if bundle.rgb_frame_refs != bundle_frame_references(frames, bundle.job_id):
             raise ValueError("bundle frame inventory differs from reconstruction source")
         self.sources.poses.frames.materialize(frames)
         deps = BundleDependencies(self.sources.resolve)
