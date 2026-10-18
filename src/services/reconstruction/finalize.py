@@ -53,6 +53,7 @@ from src.services.reconstruction.rgb.canonical.canonical_visual import (
 from src.services.reconstruction.rgb.canonical.canonical_visual_models import CanonicalVisualRequest
 from src.services.reconstruction.rgb.canonical.metric import MetricCanonicalizer, MetricDependencies
 from src.services.reconstruction.rgb.canonical.metric_models import DistanceAnchor, MetricAcceptance, MetricPreview
+from src.services.reconstruction.rgb.frames.bundle_frames import publish_bundle_frames
 from src.services.reconstruction.rgb.frames.frame_set import FrameSetResolver
 from src.services.reconstruction.rgb.geometry.geometry_publication import (
     GeometryDependencies,
@@ -546,7 +547,7 @@ class FinalizeWorker:
             lidar_geometry_ref=lidar.geometry_ref if lidar else None,
             alignment_record=lidar.record if lidar else None,
             metric_scale=MetricScale(status="CONFIRMED", meters_per_unit=1),
-            rgb_frame_refs=[frame.image for frame in frames.frames],
+            rgb_frame_refs=publish_bundle_frames(frames, request.job_id, self.visuals.poses.frames, self.deps.writer),
             camera_pose_refs=[result.canonical_pose_ref],
             visual_artifact_ref=result.visual_delivery_ref,
             rgb_geometry_ref=result.geometry_ref,
