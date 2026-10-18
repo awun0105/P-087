@@ -6,6 +6,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { getContent, getUiLabels } from "@/features/landing/content";
 import { STUDIO_LOGIN_URL } from "@/lib/api";
 import { applyLanguage, currentLanguage, subscribeLanguage, type Language } from "@/lib/i18n";
+import Image from "next/image";
 import { applyPalette, applyTheme, currentPalette, currentTheme, subscribeTheme, type Palette, type Theme } from "@/lib/theme";
 
 const serverTheme = (): Theme => "light";
@@ -227,12 +228,6 @@ export function LandingHeader({
 
 function BrandMark() {
   return (
-    <span className="flex h-8 w-8 items-center justify-center rounded-md bg-viewport p-1.5" aria-hidden>
-      <svg viewBox="0 0 24 24" fill="none" className="h-full w-full" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M12 2L3 7l9 5 9-5-9-5z" stroke="var(--studio-ember)" strokeWidth="2" />
-        <path d="M3 12l9 5 9-5" stroke="var(--studio-ochre)" strokeWidth="1.8" />
-        <path d="M3 17l9 5 9-5" stroke="var(--studio-geometry)" strokeWidth="1.8" />
-      </svg>
-    </span>
+    <Image src="/icon.svg" alt="" width={32} height={32} className="h-8 w-8 shrink-0" aria-hidden="true" />
   );
 }

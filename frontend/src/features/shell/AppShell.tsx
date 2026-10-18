@@ -167,7 +167,7 @@ function SidebarBrand({ signedIn }: { signedIn: boolean }) {
         {!collapsed && (
           <SidebarMenuButton asChild size="lg" className="min-w-0 flex-1">
             <Link href={signedIn ? APP_HOME : "/"}>
-              <BrandIcon className="size-8 shrink-0 rounded-lg" />
+              <BrandIcon className="size-8 shrink-0" />
               <BrandWordmark />
             </Link>
           </SidebarMenuButton>

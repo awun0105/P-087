@@ -85,7 +85,7 @@ function Shell({
             className="flex min-w-0 items-center gap-3 transition-opacity hover:opacity-90"
             aria-label="Real2Sim Studio Trang chủ"
           >
-            <BrandIcon className="size-8 shrink-0 rounded-md" />
+            <BrandIcon className="size-8 shrink-0" />
             <div className="flex items-baseline gap-1.5">
               <span className="font-display text-lg font-bold tracking-tight text-foreground">
                 Real2Sim
