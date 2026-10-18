@@ -84,6 +84,7 @@ function rowText({ kind, count }: OverlapRow, name: string, claimed: boolean): s
  * danh sách box.
  */
 export function RegionEditor({
+  embedded = false,
   jobId,
   object,
   fit,
@@ -97,6 +98,7 @@ export function RegionEditor({
   onClose,
   viewApi,
 }: {
+  embedded?: boolean;
   jobId: string;
   object: SceneObject;
   /** Box ban đầu do máy chủ tính (T-023); "Đặt lại" trở về đúng box này. */
@@ -154,6 +156,8 @@ export function RegionEditor({
         boxes: toCommandBoxes(session.boxes),
         claim_from: [...session.claimFrom],
       });
+      // Apply đã được nhận: shell cũ có thể hết quyền tải trước khi viewer nhận scene mới.
+      viewApi.current?.showPreview(object.id, null, false, { restoreBase: false });
       onApplied(result);
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 409) setConflict(true);
@@ -198,7 +202,7 @@ export function RegionEditor({
   return (
     <section
       aria-label="Chỉnh vùng"
-      className="pointer-events-auto w-80 max-w-full space-y-3 rounded-md border border-line-dark bg-viewport-deep/95 p-3 text-xs text-on-dark shadow-2xl backdrop-blur-md"
+      className={embedded ? "space-y-3 p-3 text-xs text-on-dark" : "pointer-events-auto w-80 max-w-full space-y-3 rounded-md border border-line-dark bg-viewport-deep/95 p-3 text-xs text-on-dark shadow-2xl backdrop-blur-md"}
     >
       <header className="flex items-center justify-between gap-2">
         <h3 className="truncate text-sm font-semibold">Chỉnh vùng · {object.name}</h3>
