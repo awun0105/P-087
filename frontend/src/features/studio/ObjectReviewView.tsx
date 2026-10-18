@@ -344,6 +344,7 @@ export function ObjectReviewView({
   const [membershipEditorOpen, setMembershipEditorOpen] = useState(false);
   // Chỉnh vùng (T-016): phiên của vật đang chọn. Chọn vật khác thì phiên bị bỏ; chọn lại đúng vật đó thì giữ phiên.
   const [regionSession, setRegionSession] = useState<RegionSession | null>(null);
+  const [regionPanelOpen, setRegionPanelOpen] = useState(false);
   // Box ban đầu của phiên (T-023) và vật đang chờ máy chủ tính box: panel chỉ mở sau khi có fit.
   const [regionFit, setRegionFit] = useState<RegionFit | null>(null);
   const [regionRequest, setRegionRequest] = useState<string | null>(null);
@@ -384,6 +385,7 @@ export function ObjectReviewView({
   const panelTab = !sceneStateControls && leftTab === "state" ? "objects" : leftTab;
   const [surfaceToolsTarget, setSurfaceToolsTarget] = useState<HTMLDivElement | null>(null);
   const [rightCollapsed, setRightCollapsed] = useState(false);
+  const [detailTab, setDetailTab] = useState("details");
   /** Vật đang chờ đặt bằng chuột: kích thước hộp xem trước + lệnh ghi khi bấm sàn. */
   const [placing, setPlacing] = useState<{ label: string; dimensions: [number, number, number]; commit: (point: [number, number, number]) => void } | null>(null);
   // Draft: huỷ chế độ đặt vật đang chờ ngay khi scene bị khoá (chỉnh state theo prop trong lúc render, không dùng effect).
@@ -399,7 +401,16 @@ export function ObjectReviewView({
     if (id !== selected) setColliderDraft(null);
     setSelected(id);
     setRegionSession((session) => (session?.objectId === id ? session : null));
-    setRegionRequest((request) => (request === id ? request : null));
+    if (id !== selected) {
+      setRegionPanelOpen(false);
+      setDetailTab("details");
+      setTool("none");
+      const object = scene?.objects.find((item) => item.id === id);
+      const membership = scene?.environment.membership;
+      setRegionRequest(object && scene && "object_geometry" in scene.provenance && membership
+        && Object.values(membership.label_to_object_id).includes(object.id)
+        && !isIgnored(object) && !hiddenIds.has(object.id) ? object.id : null);
+    }
   };
 
   useEffect(() => {
@@ -411,6 +422,9 @@ export function ObjectReviewView({
     setReassignTargetId(null);
     setRoi(EMPTY_ROI);
     setColliderDraft(null);
+    setRegionSession(null);
+    setRegionRequest(null);
+    setRegionPanelOpen(false);
   }, [scene?.scene_revision, jobId]);
 
   /** Chọn và cho camera bay tới vật (từ danh sách hoặc nút trong inspector). */
@@ -575,6 +589,8 @@ export function ObjectReviewView({
             emphasized: object.id === selected,
             // Collider phân rã lồi bám theo hình vật; vật chỉ có hộp (thêm tay, asset thư viện) thì vẽ hộp.
             shapeUrl: colliderShapeUrl(jobId, collider),
+            boundsUrl: !collider && object.visual_ref?.artifact_type === "ObjectGaussians" && object.geometry_ref.artifact_uri.endsWith(".glb")
+              ? jobArtifactContentUrl(jobId, object.geometry_ref) : null,
             colliderLocalTransform: collider?.local_transform ?? null,
           };
         }),
@@ -730,6 +746,10 @@ export function ObjectReviewView({
   const awaitingGeometry = objectGeometryState(scene) === "awaiting_review";
   const openRegionEditor = () => {
     if (!current || !membership) return;
+    setRegionPanelOpen(true);
+    setDetailTab("region");
+    setRightCollapsed(false);
+    setTool("none");
     if (regionSession?.objectId === current.id) return;
     setRegionRequest(current.id);
   };
@@ -785,44 +805,6 @@ export function ObjectReviewView({
       </AlertDialog>
       {/* Viewport 3D chiếm toàn bộ không gian khung nhìn */}
       <div className="relative size-full">
-        {regionRequest === selected && !regionOpen && current && membership && (
-          <div className="pointer-events-none absolute top-3 right-3 z-20">
-            <RegionFitGate
-              jobId={jobId}
-              object={current}
-              sceneRevision={scene.scene_revision}
-              onReady={(fit) => {
-                setRegionFit(fit);
-                setRegionSession(initialRegionSession(current, fit));
-                setRegionRequest(null);
-              }}
-              onClose={() => setRegionRequest(null)}
-            />
-          </div>
-        )}
-        {regionOpen && regionFit && current && membership && (
-          <div className="pointer-events-none absolute top-3 right-3 z-20">
-            <RegionEditor
-              jobId={jobId}
-              object={current}
-              fit={regionFit}
-              sceneRevision={scene.scene_revision}
-              membershipChecksum={membership.labels_ref.artifact_checksum}
-              nameOf={(id) => scene.objects.find((item) => item.id === id)?.name ?? id}
-              session={regionOpen}
-              onSession={setRegionSession}
-              onApplied={(result) => {
-                setRegionSession(null);
-                // Draft (201): scene mới, tải lại theo revision mới. Ready (202): đang dựng lại, đọc tiến độ.
-                if (isSceneEditResponse(result)) setReload((value) => value + 1);
-                else sharedObjectify?.refresh();
-              }}
-              onReload={() => setReload((value) => value + 1)}
-              onClose={() => setRegionSession(null)}
-              viewApi={regionApi}
-            />
-          </div>
-        )}
         {benchmarkOpen && (
           <div className="pointer-events-none absolute top-3 right-3 z-30">
             <BenchmarkPanel
@@ -871,15 +853,20 @@ export function ObjectReviewView({
             boxes={boxes}
             objects={splats}
             shells={shells}
-            regionEdit={regionOpen ? {
+            regionEdit={regionOpen && tool === "none" && selectMode && !busy && !membershipEditorOpen && !benchmarkOpen && !hiddenIds.has(regionOpen.objectId) ? {
               objectId: regionOpen.objectId,
               boxes: regionOpen.boxes,
               selectedId: regionOpen.selectedId,
-              onChange: (boxes) => setRegionSession((session) => (session ? { ...session, boxes } : session)),
+              onChange: (boxes) => {
+                setRegionPanelOpen(true);
+                setDetailTab("region");
+                setRightCollapsed(false);
+                setRegionSession((session) => (session ? { ...session, boxes } : session));
+              },
               onSelect: (id) => setRegionSession((session) => (session ? selectRegionBox(session, id) : session)),
             } : null}
             regionApi={regionApi}
-            gizmo={!geometryLockReason && tool !== "none" && current && isPlaced(current) && !hiddenIds.has(current.id) ? { id: current.id, mode: tool } : null}
+            gizmo={!(regionPanelOpen && regionOpen) && !geometryLockReason && tool !== "none" && current && isPlaced(current) && !hiddenIds.has(current.id) ? { id: current.id, mode: tool } : null}
             onTransform={(id, position, rotation) => run((revision) => setObjectTransform(jobId, revision, id, position, rotation))}
             focus={focus}
             onPickBox={selectFromScene}
@@ -905,12 +892,15 @@ export function ObjectReviewView({
                     id: current.id,
                     name: current.name,
                     viewportHidden: hiddenIds.has(current.id),
-                    canTransform: isPlaced(current) && !hiddenIds.has(current.id),
+                    canTransform: !(regionPanelOpen && regionOpen) && isPlaced(current) && !hiddenIds.has(current.id),
                   }
                 : null
             }
             tool={tool}
-            onTool={(next) => setTool(geometryLockReason && next !== "none" ? "none" : next)}
+            onTool={(next) => {
+              if (regionPanelOpen && regionOpen) return;
+              setTool(geometryLockReason && next !== "none" ? "none" : next);
+            }}
             onDuplicate={current && !isIgnored(current) ? () => void act(current, "duplicate") : undefined}
             onToggleVisibility={current ? () => toggleViewportVisibility(current.id) : undefined}
             onDelete={
@@ -1424,7 +1414,16 @@ export function ObjectReviewView({
                 <ChevronUp className="size-4" aria-hidden />
               </button>
             </div>
-            <div className="flex-1 overflow-y-auto">
+            <Tabs value={detailTab} onValueChange={(value) => {
+              if (value === "region") openRegionEditor();
+              else setDetailTab(value);
+            }} className="min-h-0 flex-1">
+              <TabsList aria-label="Chi tiết vật thể" className="mx-3 mt-2 h-auto w-auto shrink-0 border border-line-dark bg-viewport-deep/70">
+                <TabsTrigger value="details" className="min-w-0 px-2 text-xs text-on-dark/70 data-active:bg-on-dark/15 data-active:text-on-dark">Thông tin</TabsTrigger>
+                <TabsTrigger value="region" className="min-w-0 px-2 text-xs text-on-dark/70 data-active:bg-on-dark/15 data-active:text-on-dark" disabled={!current || !membership || !("object_geometry" in scene.provenance) || !Object.values(membership.label_to_object_id).includes(current.id) || busy}>Chỉnh vùng</TabsTrigger>
+              </TabsList>
+              <TabsContent value="details" forceMount hidden={detailTab !== "details"} className="min-h-0 overflow-y-auto">
+
               <ObjectifyNotice jobId={jobId} revision={scene.scene_revision} onRevision={() => setReload((value) => value + 1)} />
               {missingSourcePolicies.length > 0 && <Notice tone="rust" className="m-3">SOURCE_POLICY_MISSING: Không có metadata nguồn để đặt Gaussian của {missingSourcePolicies.map((item) => item.id).join(", ")}. Hãy tải lại scene.</Notice>}
               {representations.some((item) => item.readiness_blockers.length) && (
@@ -1510,7 +1509,55 @@ export function ObjectReviewView({
                   });
                 }}
               />
-            </div>
+              </TabsContent>
+              <TabsContent value="region" forceMount hidden={detailTab !== "region"} className="min-h-0 overflow-y-auto">
+                {regionRequest === selected && !regionOpen && current && membership && (
+                  <div>
+                    <RegionFitGate
+                      embedded
+                      jobId={jobId}
+                      object={current}
+                      sceneRevision={scene.scene_revision}
+                      onReady={(fit) => {
+                        setRegionFit(fit);
+                        setRegionSession(initialRegionSession(current, fit));
+                        setRegionRequest(null);
+                      }}
+                      onClose={() => { setRegionRequest(null); setDetailTab("details"); }}
+                    />
+                  </div>
+                )}
+                {regionPanelOpen && regionOpen && regionFit && current && membership && (
+                  <div>
+                    <RegionEditor
+                      embedded
+                      jobId={jobId}
+                      object={current}
+                      fit={regionFit}
+                      sceneRevision={scene.scene_revision}
+                      membershipChecksum={membership.labels_ref.artifact_checksum}
+                      nameOf={(id) => scene.objects.find((item) => item.id === id)?.name ?? id}
+                      session={regionOpen}
+                      onSession={setRegionSession}
+                      onApplied={(result) => {
+                        setRegionSession(null);
+                        setDetailTab("details");
+                        // Draft (201): scene mới, tải lại theo revision mới. Ready (202): đang dựng lại, đọc tiến độ.
+                        if (isSceneEditResponse(result)) setReload((value) => value + 1);
+                        else sharedObjectify?.refresh();
+                      }}
+                      onReload={() => setReload((value) => value + 1)}
+                      onClose={() => {
+                        setRegionPanelOpen(false);
+                        setDetailTab("details");
+                        setRegionSession(initialRegionSession(current, regionFit));
+                      }}
+                      viewApi={regionApi}
+                    />
+                  </div>
+                )}
+              </TabsContent>
+            </Tabs>
           </>
         )}
       </aside>
