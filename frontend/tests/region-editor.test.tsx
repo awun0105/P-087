@@ -591,14 +591,31 @@ describe("Apply và Huỷ", () => {
     });
   });
 
+  it("Draft Apply bỏ preview trước khi đóng panel, không yêu cầu nạp shell của revision cũ", async () => {
+    vi.mocked(applyObjectRegion).mockResolvedValue(applied);
+    const showPreview = vi.fn();
+    const viewApi: RefObject<RegionViewApi | null> = { current: { viewFrom: () => true, isGesturing: () => false, showPreview } };
+    const onApplied = vi.fn(() => {
+      expect(showPreview).toHaveBeenLastCalledWith("pallet", null, false, { restoreBase: false });
+    });
+    render(<Panel viewApi={viewApi} onApplied={onApplied} />);
+    await screen.findByText("+3 / −0 · tổng 120");
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    await waitFor(() => expect(onApplied).toHaveBeenCalledWith(applied));
+    expect(screen.queryByText("Không áp dụng được vùng.")).not.toBeInTheDocument();
+  });
+
   it("Apply trên scene Ready (202) đưa kết quả tiến độ cho cha", async () => {
     const queued = { status: "queued", mode: "region", scene_revision: "rev-001", operation_id: "op-1" } as unknown as ApplyResult;
     vi.mocked(applyObjectRegion).mockResolvedValue(queued);
     const onApplied = vi.fn();
-    render(<Panel onApplied={onApplied} />);
+    const showPreview = vi.fn();
+    const viewApi: RefObject<RegionViewApi | null> = { current: { viewFrom: () => true, isGesturing: () => false, showPreview } };
+    render(<Panel viewApi={viewApi} onApplied={onApplied} />);
     await screen.findByText("+3 / −0 · tổng 120");
     fireEvent.click(screen.getByRole("button", { name: "Apply" }));
     await waitFor(() => expect(onApplied).toHaveBeenCalledWith(queued));
+    expect(showPreview).toHaveBeenLastCalledWith("pallet", null, false, { restoreBase: false });
   });
 
   it("409: báo scene đã đổi, giữ nguyên box, nút Tải lại gọi onReload", async () => {
@@ -643,6 +660,7 @@ vi.mock("@/features/viewer/shell-glow", async (original) => ({
     setShell = vi.fn(async () => undefined);
     setPointSets = vi.fn();
     setTone = vi.fn();
+    setHovered = vi.fn();
     clear = vi.fn();
     destroy = vi.fn();
     constructor() {
@@ -663,7 +681,7 @@ type FakeRegion = {
 const viewer = vi.hoisted(() => ({
   viewerProps: vi.fn(),
   entities: new Map<string, object>(),
-  sceneOverlays: [] as Array<{ bindViewerGotoPose: Mock }>,
+  sceneOverlays: [] as Array<{ bindViewerGotoPose: Mock; setBoxes: Mock }>,
   regionOverlays: [] as FakeRegion[],
   glowLayers: [] as Array<{ setShell: Mock; setPointSets: Mock; setTone: Mock; clear: Mock; destroy: Mock }>,
 }));
@@ -731,19 +749,21 @@ const palletObject = {
 };
 type RegionEditProp = NonNullable<Parameters<typeof MetricSceneView>[0]["regionEdit"]>;
 type ViewerProps = {
+  boxes?: Parameters<typeof MetricSceneView>[0]["boxes"];
   regionEdit: RegionEditProp | null;
   objects?: (typeof palletObject)[];
   regionApi?: RefObject<RegionViewApi | null>;
   shells?: readonly ShellSpec[];
 };
 
-function viewerElement({ regionEdit, objects = [palletObject], regionApi, shells }: ViewerProps) {
+function viewerElement({ regionEdit, objects = [palletObject], regionApi, shells, boxes }: ViewerProps) {
   return (
     <MetricSceneView
       jobId="j"
       visual={visualRef}
       cameras={[]}
       objects={objects}
+      boxes={boxes}
       regionEdit={regionEdit}
       regionApi={regionApi}
       shells={shells}
@@ -800,6 +820,14 @@ describe("MetricSceneView nối overlay vùng", () => {
     viewer.regionOverlays[0].handlers.onSelect(null);
     expect(region.onChange).toHaveBeenCalledWith(moved);
     expect(region.onSelect).toHaveBeenCalledWith(null);
+  });
+
+  it("hộp chỉnh vùng thay hộp chọn, đóng vùng trả hộp chọn", () => {
+    const boxes = [{ id: "pallet", rotation_xyzw: [0, 0, 0, 1] as [number, number, number, number], emphasized: true, center: [0, 0, 1] as [number, number, number], dimensions: [1, 1, 1] as [number, number, number], color: "#ffffff" }];
+    const { update } = mountViewer({ regionEdit: regionEdit([addBox]), boxes });
+    expect(viewer.sceneOverlays[0].setBoxes).toHaveBeenLastCalledWith([]);
+    update({ regionEdit: null, boxes });
+    expect(viewer.sceneOverlays[0].setBoxes).toHaveBeenLastCalledWith(boxes);
   });
 
   it("không ghi box vào overlay khi đang kéo; box thả đến từ cha thì ghi", () => {
@@ -877,6 +905,21 @@ describe("MetricSceneView nối overlay vùng", () => {
     api.current!.showPreview("pallet", null, false);
     expect(layer.setShell).toHaveBeenLastCalledWith("pallet", "https://example.test/pallet.glb", "selected");
     expect(layer.setPointSets).toHaveBeenLastCalledWith("pallet", new Float32Array(0), new Float32Array(0));
+  });
+
+  it("Draft Apply rồi cleanup trước reload không nạp shell cũ; scene mới nạp đúng shell mới", () => {
+    const api: RefObject<RegionViewApi | null> = { current: null };
+    const shells: ShellSpec[] = [{ id: "pallet", url: "https://example.test/old.glb", style: "selected" }];
+    const { update } = mountViewer({ regionEdit: regionEdit([addBox]), regionApi: api, shells });
+    const layer = viewer.glowLayers[0];
+    api.current!.showPreview("pallet", { ...preview, shell_glb_base64: btoa("glTF") }, false);
+    layer.setShell.mockClear();
+    api.current!.showPreview("pallet", null, false, { restoreBase: false });
+    api.current!.showPreview("pallet", null, false);
+    expect(layer.setShell).not.toHaveBeenCalled();
+    expect(layer.clear).toHaveBeenCalledWith("pallet");
+    update({ regionEdit: null, regionApi: api, shells: [{ ...shells[0], url: "https://example.test/new.glb" }] });
+    expect(layer.setShell).toHaveBeenCalledExactlyOnceWith("pallet", "https://example.test/new.glb", "selected");
   });
 
   it("xem trước lỗi vỏ: giữ vỏ cũ và đổi màu cam, điểm xanh vẫn được vẽ", () => {
