@@ -3,6 +3,7 @@
 import numpy as np
 import pytest
 import trimesh
+from scipy import ndimage
 
 from src.services.scene.gaussian_shell import (
     GaussianShellError,
@@ -294,6 +295,70 @@ def test_body_diagonal_contact_is_repaired_until_no_pattern_remains():
     assert fixes >= 1
     assert not _planar_diagonal_targets(repaired).any()
     assert not _body_diagonal_targets(repaired).any()
+
+
+@pytest.mark.parametrize("axes", [(0, 1, 2), (2, 0, 1)])
+def test_diagonal_repair_does_not_leave_new_enclosed_cavities(axes: tuple[int, int, int]) -> None:
+    # These disconnected cells enclose an empty cell only after the diagonal bridges are added.
+    cells = np.array(
+        [
+            [2, 3, 3],
+            [2, 4, 4],
+            [2, 5, 3],
+            [3, 3, 3],
+            [3, 5, 2],
+            [3, 5, 4],
+            [4, 3, 3],
+            [4, 4, 4],
+            [4, 5, 3],
+            [5, 4, 2],
+            [5, 5, 2],
+            [5, 5, 3],
+            [5, 5, 4],
+        ]
+    )
+    grid = np.zeros((8, 8, 8), dtype=bool)
+    grid[tuple(cells[:, axes].T)] = True
+    original = grid.copy()
+    np.testing.assert_array_equal(ndimage.binary_fill_holes(grid), grid)
+
+    repaired, fixes = _repair_diagonals(grid)
+
+    np.testing.assert_array_equal(ndimage.binary_fill_holes(repaired), repaired)
+    assert not _planar_diagonal_targets(repaired).any()
+    assert not _body_diagonal_targets(repaired).any()
+    assert np.all(repaired[grid])
+    assert fixes == int(repaired.sum() - grid.sum())
+    np.testing.assert_array_equal(grid, original)
+    again, added = _repair_diagonals(repaired)
+    np.testing.assert_array_equal(again, repaired)
+    assert added == 0
+
+    # Exercise the full Gaussian→mesh path, including the unchanged surface QA.
+    points = np.repeat((cells[:, axes] + 0.5) * VOXEL, 10, axis=0)
+    shell = build_gaussian_shell(points, None, ShellParams(dilate_voxels=0, close_iterations=0, smooth_iterations=0))
+    assert shell.quality["passed"]
+    assert all(part.volume > 0 for part in mesh_of(shell).split(only_watertight=False, repair=False))
+
+
+def test_diagonal_repair_preserves_cavity_connected_to_the_exterior() -> None:
+    grid = np.zeros((12, 12, 12), dtype=bool)
+    grid[2:10, 2:10, 2:10] = True
+    grid[4:8, 4:8, 2:8] = False  # Wide opening to the exterior, not an enclosed void.
+    repaired, fixes = _repair_diagonals(grid)
+    np.testing.assert_array_equal(repaired, grid)
+    assert not repaired[6, 6, 6]
+    assert fixes == 0
+
+
+def test_diagonal_repair_fails_closed_when_round_budget_is_exhausted(monkeypatch: pytest.MonkeyPatch) -> None:
+    import src.services.scene.gaussian_shell as module
+
+    grid = np.zeros((5, 5, 5), dtype=bool)
+    grid[1, 1, 1] = grid[2, 2, 2] = True
+    monkeypatch.setattr(module, "_MAX_DIAGONAL_ROUNDS", 1)
+    with pytest.raises(GaussianShellError, match="repair round limit"):
+        _repair_diagonals(grid)
 
 
 def test_same_input_and_params_give_same_checksum():
