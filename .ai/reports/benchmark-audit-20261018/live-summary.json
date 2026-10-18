@@ -1,0 +1,138 @@
+[
+  {
+    "job": "job-a14981f78f85",
+    "status": "SUCCEEDED",
+    "stage": "ST-OBJECT-EXTRACT",
+    "runtime": "sha256:861c5b2a56b9b0201383c3aaa902e23288030f845acdb5fd73231938887dbf53",
+    "usages_n": 4,
+    "usage_runtimes": {
+      "sha256:861c5b2a56b9b0201383c3aaa902e23288030f845acdb5fd73231938887dbf53": 4
+    },
+    "all_seconds": 6411.137674014999,
+    "selected_seconds": 6411.137674014999,
+    "outcomes": {
+      "completed": 4
+    },
+    "benchmarks": [
+      {
+        "path": "data/studio_local/artifacts/jobs/job-a14981f78f85/benchmark/pipeline_runtime/attempt-2-terminal.json",
+        "status": "SUCCEEDED",
+        "phase": "terminal",
+        "attempt": 2,
+        "machine": "lqaq-ThinkPad-P1-Gen-2:141674",
+        "timings_n": 4,
+        "runtime": "sha256:861c5b2a56b9b0201383c3aaa902e23288030f845acdb5fd73231938887dbf53",
+        "gpu_rate": null,
+        "cost": null
+      },
+      {
+        "path": "data/studio_local/artifacts/jobs/job-a14981f78f85/benchmark/pipeline_runtime/attempt-2-partial.json",
+        "status": "RUNNING",
+        "phase": "partial",
+        "attempt": 2,
+        "machine": null,
+        "timings_n": 2,
+        "runtime": "sha256:861c5b2a56b9b0201383c3aaa902e23288030f845acdb5fd73231938887dbf53",
+        "gpu_rate": null,
+        "cost": null
+      }
+    ]
+  },
+  {
+    "job": "job-7c9820b4834f",
+    "status": "SUCCEEDED",
+    "stage": "ST-OBJECT-EXTRACT",
+    "runtime": "sha256:77e78f272b2d26ca94aa537e9a51d640219f4247381d2cbd3c7d25113d502ddc",
+    "usages_n": 6,
+    "usage_runtimes": {
+      "sha256:77e78f272b2d26ca94aa537e9a51d640219f4247381d2cbd3c7d25113d502ddc": 6
+    },
+    "all_seconds": 6554.737633099023,
+    "selected_seconds": 5901.516033630003,
+    "outcomes": {
+      "completed": 4,
+      "cancelled": 1,
+      "failed": 1
+    },
+    "benchmarks": [
+      {
+        "path": "data/studio_local/artifacts/jobs/job-7c9820b4834f/benchmark/pipeline_runtime/attempt-2-terminal.json",
+        "status": "FAILED",
+        "phase": "terminal",
+        "attempt": 2,
+        "machine": "lqaq-ThinkPad-P1-Gen-2:1009782",
+        "timings_n": 3,
+        "runtime": "sha256:77e78f272b2d26ca94aa537e9a51d640219f4247381d2cbd3c7d25113d502ddc",
+        "gpu_rate": null,
+        "cost": null
+      },
+      {
+        "path": "data/studio_local/artifacts/jobs/job-7c9820b4834f/benchmark/pipeline_runtime/attempt-2-partial.json",
+        "status": "RUNNING",
+        "phase": "partial",
+        "attempt": 2,
+        "machine": "lqaq-ThinkPad-P1-Gen-2:1009782",
+        "timings_n": 2,
+        "runtime": "sha256:77e78f272b2d26ca94aa537e9a51d640219f4247381d2cbd3c7d25113d502ddc",
+        "gpu_rate": null,
+        "cost": null
+      }
+    ]
+  },
+  {
+    "job": "job-f9f14e7fbfb1",
+    "status": "SUCCEEDED",
+    "stage": "ST-OBJECT-EXTRACT",
+    "runtime": "sha256:77e78f272b2d26ca94aa537e9a51d640219f4247381d2cbd3c7d25113d502ddc",
+    "usages_n": 17,
+    "usage_runtimes": {
+      "sha256:77e78f272b2d26ca94aa537e9a51d640219f4247381d2cbd3c7d25113d502ddc": 17
+    },
+    "all_seconds": 15893.591430612985,
+    "selected_seconds": 15308.898800724972,
+    "outcomes": {
+      "completed": 6,
+      "failed": 11
+    },
+    "benchmarks": [
+      {
+        "path": "data/studio_local/artifacts/jobs/job-f9f14e7fbfb1/benchmark/pipeline_runtime/attempt-1-terminal.json",
+        "status": "SUCCEEDED",
+        "phase": "terminal",
+        "attempt": 1,
+        "machine": "lqaq-ThinkPad-P1-Gen-2:1341430",
+        "timings_n": 5,
+        "runtime": "sha256:77e78f272b2d26ca94aa537e9a51d640219f4247381d2cbd3c7d25113d502ddc",
+        "gpu_rate": null,
+        "cost": null
+      },
+      {
+        "path": "data/studio_local/artifacts/jobs/job-f9f14e7fbfb1/benchmark/pipeline_runtime/attempt-1-partial.json",
+        "status": "RUNNING",
+        "phase": "partial",
+        "attempt": 1,
+        "machine": "lqaq-ThinkPad-P1-Gen-2:1341430",
+        "timings_n": 3,
+        "runtime": "sha256:77e78f272b2d26ca94aa537e9a51d640219f4247381d2cbd3c7d25113d502ddc",
+        "gpu_rate": null,
+        "cost": null
+      }
+    ]
+  },
+  {
+    "job": "job-bfc7d73f0dbf",
+    "status": "RUNNING",
+    "stage": "ST-CAMERA-POSE",
+    "runtime": "sha256:77e78f272b2d26ca94aa537e9a51d640219f4247381d2cbd3c7d25113d502ddc",
+    "usages_n": 1,
+    "usage_runtimes": {
+      "sha256:77e78f272b2d26ca94aa537e9a51d640219f4247381d2cbd3c7d25113d502ddc": 1
+    },
+    "all_seconds": 19.59439288899989,
+    "selected_seconds": 19.59439288899989,
+    "outcomes": {
+      "completed": 1
+    },
+    "benchmarks": []
+  }
+]
