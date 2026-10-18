@@ -58,6 +58,14 @@
 .lp-header .lp-wrap {
   max-width: 88rem;
 }
+@media (max-width: 639px) {
+  .lp-header > .lp-wrap {
+    padding-inline: 0.75rem;
+  }
+  .lp-header > .lp-wrap .lp-btn {
+    display: none;
+  }
+}
 @media (min-width: 1024px) {
   .lp-header .lp-wrap {
     padding-inline: 1.5rem;

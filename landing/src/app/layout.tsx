@@ -22,9 +22,9 @@ const mono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Real2Sim Studio — Từ video thật đến scene mô phỏng",
+  title: "Real2Sim Studio — Scene 3D có thể chỉnh sửa cho robotics",
   description:
-    "Biến video quay môi trường thật thành scene 3D đúng tỉ lệ mét, tách được vật thể, có collider và xuất OpenUSD. Lát cắt đầu tiên: nhà kho trong nhà và NVIDIA Isaac Sim.",
+    "Tái tạo không gian thực từ video, chỉnh sửa từng vật thể, kiểm tra hình học va chạm và chuẩn bị scene cho mô phỏng robot di động trong nhà.",
   icons: {
     icon: [
       { url: "/icon.svg", type: "image/svg+xml" },

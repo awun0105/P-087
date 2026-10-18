@@ -82,7 +82,7 @@ export function LandingHeader({
 
         <nav
           aria-label={ui.navAria}
-          className="hidden shrink-0 items-center gap-2 text-[13px] font-medium text-ink-muted whitespace-nowrap lg:flex lg:gap-2.5 xl:gap-4 2xl:gap-5.5 xl:text-[14px]"
+          className="hidden shrink-0 items-center gap-2 text-[13px] font-medium text-ink-muted whitespace-nowrap xl:flex lg:gap-2.5 xl:gap-3 2xl:gap-5.5 xl:text-[14px]"
         >
           {content.NAV.map((n) => (
             <a key={n.href} href={n.href} className="whitespace-nowrap rounded px-1.5 py-1 transition-colors hover:text-ink">
@@ -195,7 +195,7 @@ export function LandingHeader({
             onClick={() => setOpen((v) => !v)}
             aria-expanded={open}
             aria-controls="lp-mobile-nav"
-            className="shrink-0 rounded-lg border border-line p-1.5 text-ink-muted hover:bg-paper-sunken hover:text-ink lg:hidden"
+            className="shrink-0 rounded-lg border border-line p-1.5 text-ink-muted hover:bg-paper-sunken hover:text-ink xl:hidden"
           >
             <span className="sr-only">{open ? ui.menuClose : ui.menuOpen}</span>
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" aria-hidden>
@@ -206,7 +206,7 @@ export function LandingHeader({
       </div>
 
       {open ? (
-        <nav id="lp-mobile-nav" aria-label={ui.navAria} className="border-t border-line bg-paper-raised lg:hidden">
+        <nav id="lp-mobile-nav" aria-label={ui.navAria} className="border-t border-line bg-paper-raised xl:hidden">
           <div className="lp-wrap flex flex-col py-3 text-[15px] font-medium text-ink">
             {content.NAV.map((n) => (
               <a key={n.href} href={n.href} onClick={() => setOpen(false)} className="py-2.5 hover:text-ember-strong">
@@ -215,6 +215,9 @@ export function LandingHeader({
             ))}
 
             <div className="mt-3 flex flex-col gap-2 border-t border-line pt-3 sm:hidden">
+              <a href={tryDemoHref} onClick={() => setOpen(false)} className="lp-btn lp-btn-primary lp-btn-sm justify-center">
+                {ui.tryDemo}
+              </a>
               <a href={studioHref} onClick={() => setOpen(false)} className="lp-btn lp-btn-ghost lp-btn-sm justify-center">
                 {ui.openStudio}
               </a>
