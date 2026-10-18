@@ -25,6 +25,7 @@ vi.mock("@/features/studio/MetricSceneView", () => ({
     onDelete,
     onTransform,
     lockedReason,
+    regionEdit,
   }: {
     boxes: {
       id: string;
@@ -45,9 +46,11 @@ vi.mock("@/features/studio/MetricSceneView", () => ({
     onTool?: (tool: "translate" | "rotate" | "none") => void;
     onDelete?: () => void;
     onTransform?: (id: string, position: [number, number, number], rotation: [number, number, number, number]) => void;
+    regionEdit?: Parameters<typeof import("@/features/studio/MetricSceneView").MetricSceneView>[0]["regionEdit"];
     lockedReason?: string | null;
   }) => (
     <div data-testid="metric-scene" data-objects={JSON.stringify(objects)} data-boxes={JSON.stringify(boxes)} data-physics-objects={JSON.stringify(physicsObjects)} data-shells={JSON.stringify(shells)}>
+      {regionEdit && <button onClick={() => regionEdit.onChange(regionEdit.boxes.map((box) => ({ ...box, half: [box.half[0] / 2, box.half[1], box.half[2]] })))} type="button">Kéo mặt hộp</button>}
       {boxes.map((box) => `${box.id}:${box.color}`).join(",")}
       <span data-testid="splats">{objects.map((item) => `${item.id}:${item.url ? "ply" : "none"}:${item.visible}`).join(",")}</span>
       <span data-testid="gizmo">{gizmo ? `${gizmo.id}:${gizmo.mode}` : "none"}</span>
@@ -373,7 +376,7 @@ describe("ObjectReviewView", () => {
     expect(screen.getByRole("heading", {name: "Quản lý scene"})).toBeInTheDocument();
     const stateTab = screen.getByRole("tab", { name: "Trạng thái scene" });
     const objectsTab = screen.getByRole("tab", { name: "Vật thể" });
-    expect(screen.getAllByRole("tab").map(tab => tab.textContent)).toEqual(["Trạng thái scene", "Vật thể", "Sàn & tường"]);
+    expect(within(stateTab.closest('[role="tablist"]') as HTMLElement).getAllByRole("tab").map(tab => tab.textContent)).toEqual(["Trạng thái scene", "Vật thể", "Sàn & tường"]);
     expect(stateTab).toHaveAttribute("aria-selected", "true");
     fireEvent.mouseDown(objectsTab, { button: 0, ctrlKey: false });
     const object = await screen.findByRole("button", { name: "Chọn Vật thể 1" });
@@ -1438,6 +1441,32 @@ describe("ObjectReviewView chỉnh vùng (T-016)", () => {
     global.fetch = vi.fn();
   });
 
+  it("chọn vật có tay nắm; kéo hộp mở xem trước, huỷ không ghi scene", async () => {
+    routeFetch({
+      "/region/preview": Array.from({ length: 4 }, () => reply(regionPreview)),
+      "/scene": [reply({ scene: regionScene() })],
+    });
+    render(<ObjectReviewView jobId="job-a" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Chọn Vật thể 1" }));
+    const handle = await screen.findByRole("button", { name: "Kéo mặt hộp" });
+    expect(screen.queryByRole("region", { name: "Chỉnh vùng" })).not.toBeInTheDocument();
+    expect(vi.mocked(global.fetch).mock.calls.filter(([url]) => String(url).includes("/region/preview"))).toHaveLength(0);
+    fireEvent.click(handle);
+    const inspector = screen.getByRole("complementary", { name: "Inspector" });
+    expect(await within(inspector).findByRole("region", { name: "Chỉnh vùng" })).toBeInTheDocument();
+    expect(within(inspector).getByRole("tab", { name: "Chỉnh vùng" })).toHaveAttribute("aria-selected", "true");
+    fireEvent.mouseDown(within(inspector).getByRole("tab", { name: "Thông tin" }), { button: 0, ctrlKey: false });
+    expect(screen.queryByRole("region", { name: "Chỉnh vùng" })).not.toBeInTheDocument();
+    fireEvent.mouseDown(within(inspector).getByRole("tab", { name: "Chỉnh vùng" }), { button: 0, ctrlKey: false });
+    expect(within(inspector).getByRole("region", { name: "Chỉnh vùng" })).toBeInTheDocument();
+    await waitFor(() => expect(vi.mocked(global.fetch).mock.calls.some(([url]) => String(url).includes("/region/preview"))).toBe(true));
+    const preview = vi.mocked(global.fetch).mock.calls.find(([url]) => String(url).includes("/region/preview"));
+    expect(JSON.parse(String(preview![1]?.body)).boxes[0].half_extents_m[0]).toBe(regionFit.half_extents_m[0] / 2);
+    fireEvent.click(screen.getByRole("button", { name: "Huỷ" }));
+    expect(screen.queryByRole("region", { name: "Chỉnh vùng" })).not.toBeInTheDocument();
+    expect(vi.mocked(global.fetch).mock.calls.some(([url]) => String(url).includes("/region/apply"))).toBe(false);
+  });
+
   it("scene có object_geometry: Chỉnh vùng mở panel của vật đang chọn; Brush/Lasso vẫn là trình sửa chi tiết", async () => {
     routeFetch({
       "/region/preview": Array.from({ length: 4 }, () => reply(regionPreview)),
@@ -1485,10 +1514,16 @@ describe("ObjectReviewView chỉnh vùng (T-016)", () => {
   });
 
   it("Apply trên Draft (201) gửi revision và membership, đóng panel rồi tải lại scene", async () => {
+    const before = { ...draftRegionScene(), objects: draftRegionScene().objects.map((object) => ({ ...object, visual_ref: { ...ref, artifact_type: "ObjectGaussians" } })) };
+    const after = { ...draftRegionScene("rev-002"), objects: draftRegionScene("rev-002").objects.map((object) => ({
+      ...object,
+      visual_ref: { ...ref, artifact_type: "ObjectGaussians" },
+      geometry_ref: { ...ref, artifact_uri: "artifact://jobs/job-a/scene/objects/shells/updated.glb", artifact_checksum: `sha256:${"f".repeat(64)}` },
+    })) };
     const routes = {
       "/region/preview": Array.from({ length: 4 }, () => reply(regionPreview)),
       "/region/apply": [reply({ job_id: "job-a", previous_scene_revision: "rev-001", scene_revision: "rev-002", scene: {} }, 201)],
-      "/scene": [reply({ scene: regionScene() }), reply({ scene: regionScene("rev-002") })],
+      "/scene": [reply({ scene: before }), reply({ scene: after })],
     };
     routeFetch(routes);
     render(<ObjectReviewView jobId="job-a" />);
@@ -1499,6 +1534,7 @@ describe("ObjectReviewView chỉnh vùng (T-016)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Apply" }));
     await waitFor(() => expect(screen.queryByRole("region", { name: "Chỉnh vùng" })).not.toBeInTheDocument());
     await waitFor(() => expect(routes["/scene"]).toHaveLength(0));
+    await waitFor(() => expect(JSON.parse(screen.getByTestId("metric-scene").getAttribute("data-boxes")!)[0].boundsUrl).toBe(jobArtifactContentUrl("job-a", after.objects[0].geometry_ref)));
     const apply = vi.mocked(global.fetch).mock.calls.find(([url]) => String(url).includes("/region/apply"));
     expect(JSON.parse((apply![1] as RequestInit).body as string)).toMatchObject({
       expected_scene_revision: "rev-001",
