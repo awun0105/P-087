@@ -44,6 +44,8 @@ Commands run from `landing/` unless stated otherwise:
 - `npm test -- --reporter=dot`: 1 file passed, 8 tests passed, 0 failed.
 - `../frontend/node_modules/.bin/eslint --config ../frontend/eslint.config.mjs src/app/layout.tsx src/features/landing/content.ts src/features/landing/LandingHeader.tsx --max-warnings=0`: exit 0.
 - `git diff --check` from repository root: exit 0.
+- Pre-push `next build`: passed compilation, TypeScript, and static export;
+  5/5 static pages generated.
 - `graphify update .` from repository root: exit 0; graph refreshed after the header
   change. The final run found no further topology changes. Generated graph outputs
   are not part of the tracked diff.
@@ -118,9 +120,23 @@ error, so the same Chrome DevTools toolset was used to emulate a 390×844 viewpo
   URLs during its build. No Cloudflare configuration was changed. Pushing landing
   changes to `develop` triggers this existing deployment workflow.
 
-No new server was left running.
-Delivery target: `origin/develop`, as requested. No manual Cloudflare deployment
-was run; the existing workflow handles deployment after push.
+No new server was left running. The existing landing was opened in the user's
+browser at `http://localhost:3011/`; the server returns HTTP 200.
+
+## Delivery
+
+- Source commit: `468259a3` — `fix(landing): refresh positioning and repair responsive navigation`.
+- `git push origin develop`: succeeded. The pre-existing `.git/hooks/pre-push`
+  automatically built and deployed the landing with Bun/Wrangler before push.
+- Deployment: `https://2537a76e.c4-app-087.pages.dev`.
+- HTTP checks on that deployment and `https://c4-app-087.pages.dev/` found the new
+  positioning copy. All Studio login/sample links in both responses point to
+  `https://app.real2sim.vn`; no localhost Studio destinations were deployed.
+- The production static export was independently checked with the same result.
+- GitHub Actions run `39129314560` failed before any steps started. Its annotation
+  states that recent account payments failed or the spending limit needs to be
+  increased. This account issue does not invalidate the successful local hook
+  deployment or the HTTP checks above. Workflow billing was not changed.
 
 ## Pre-flight — GUIDE.md Rule 13
 
