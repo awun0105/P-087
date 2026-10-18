@@ -221,3 +221,57 @@ def test_four_leg_table_cleanup_and_real_coacd_leave_under_table_void(tmp_path):
     for part in trimesh.load(item["output_glb"], force="scene").geometry.values():
         halfspaces = ConvexHull(part.vertices).equations
         assert not np.all(halfspaces[:, :3] @ [0.4, 0.4, 0.4] + halfspaces[:, 3] <= 1e-7)
+
+
+def test_component_budgets_are_shared_before_decomposition(tmp_path):
+    item = request(tmp_path)
+    script = """
+import importlib.util,json,sys,numpy as np,trimesh
+spec=importlib.util.spec_from_file_location('runner','src/services/simulation/colliders/convex_runner.py')
+r=importlib.util.module_from_spec(spec);spec.loader.exec_module(r)
+parts=[trimesh.creation.box(extents=[size]*3) for size in (1,2,4)]
+assert r.component_budgets(parts,8)==[1,2,5]
+assert r.component_budgets(parts,3)==[1,1,1]
+assert r.component_budgets(parts[:2],5)==[2,3]
+calls=[]
+def fill(mesh,**kwargs):
+ calls.append(kwargs['max_convex_hull'])
+ return [(mesh.vertices,mesh.indices)]*kwargs['max_convex_hull']
+r.coacd.run_coacd=fill
+result=r.build_one(json.loads(sys.argv[1]),{'max_convex_hull':8})
+assert not result.get('error'),result
+assert calls==[4,4],calls
+assert result['parts']==8
+assert [c['allocated_parts'] for c in result['component_decompositions']]==[4,4]
+"""
+    output = subprocess.run(
+        [str(RUNTIME), "-c", script, json.dumps(item)], cwd=ROOT, capture_output=True, text=True, timeout=30
+    )
+    assert output.returncode == 0, output.stderr
+
+
+def test_shell_quality_budget_is_explicit_and_other_surfaces_keep_default(tmp_path):
+    item = request(tmp_path)
+    script = """
+import importlib.util,json,sys
+spec=importlib.util.spec_from_file_location('runner','src/services/simulation/colliders/convex_runner.py')
+r=importlib.util.module_from_spec(spec);spec.loader.exec_module(r)
+real=r.assess_surface
+seen=[]
+def assess(mesh,**kwargs):
+ seen.append(kwargs.get('intersection_budget',250000))
+ return real(mesh,**kwargs)
+r.assess_surface=assess
+r.convex_parts=lambda mesh,config,**kwargs:[mesh.convex_hull]
+item=json.loads(sys.argv[1])
+for origin in ('gaussian_shell','objectgs'):
+ result=r.build_one({**item,'surface_origin':origin},{})
+ assert not result.get('error'),result
+assert seen==[2000000,250000],seen
+result=r.build_one({**item,'surface_origin':'unknown'},{})
+assert 'unsupported surface origin' in result['error']
+"""
+    output = subprocess.run(
+        [str(RUNTIME), "-c", script, json.dumps(item)], cwd=ROOT, capture_output=True, text=True, timeout=30
+    )
+    assert output.returncode == 0, output.stderr
