@@ -22,9 +22,9 @@ export interface RegionViewApi {
   isGesturing(): boolean;
   /**
    * Vỏ và điểm của lần xem trước trong viewer. `pending`: đang tính (làm mờ vỏ cũ). `preview` null và không pending:
-   * trả vỏ gốc của vật và xoá điểm.
+   * trả vỏ gốc của vật và xoá điểm. Sau khi publish, `restoreBase: false` bỏ preview mà không nạp ref cũ.
    */
-  showPreview(objectId: string, preview: RegionPreview | null, pending: boolean): void;
+  showPreview(objectId: string, preview: RegionPreview | null, pending: boolean, options?: { restoreBase: boolean }): void;
 }
 
 /**
