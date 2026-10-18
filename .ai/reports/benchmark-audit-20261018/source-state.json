@@ -1,0 +1,13 @@
+{
+  "head": "e98e8f06ce5c1e8b4c17fe68fe41a2665d3c3d72",
+  "source_sha256": {
+    "src/services/orchestration/benchmark.py": "1892774d5421cb637948d0873c81d9fbeec1514a0f0ed88f62bb5c3afef50b83",
+    "src/services/orchestration/jobs/runner.py": "bad62e4cd91add59cd9f39ea1105d98e312f7447bbd953de906418d575293d25",
+    "src/services/orchestration/processing/telemetry.py": "4ae3448eed42039bd7cff665ed3bc5c53aa23666c4b37b8aab398dcebd2f2f77",
+    "src/services/orchestration/processing/observed.py": "f943d9130c6c7ec38c59e16fa256159fb6a619b9162f936a53b9894d2d9f71d1",
+    "src/services/orchestration/processing/gpu_budget.py": "07c4014aaa5d0bcc6ee7b47c9d1b03b4d4b1e3f70ac9092f289e877e5ea3682b",
+    "src/services/orchestration/processing/capability.py": "2041325feda43d2ce396cc58f0cfb7d5ef163145eed50825e54faeca961a8c14",
+    "src/services/orchestration/value/scorecard.py": "0691c0f1ea926536036fc685c6c91ae0fee38d1e9409b19b5e825bd4248f9e43",
+    "src/services/orchestration/evaluation/scorecard.py": "744836c27cb5c1f9df1ee1f7c00cc1c2d9d76b77743145dbef2b11890a93d2d8"
+  }
+}
