@@ -100,6 +100,7 @@ from src.services.orchestration.jobs.progress import (
 )
 from src.services.orchestration.jobs.workspace import attempt_lease, cleanup_attempt_workspace, cleanup_finished_job
 from src.services.orchestration.processing.capability import latest as latest_capability
+from src.services.orchestration.processing.capability import probe as probe_capability
 from src.services.orchestration.processing.config import load_job_config
 from src.services.orchestration.processing.expected_duration import Estimate, deadline_seconds, expected_seconds
 from src.services.orchestration.processing.gpu_budget import (
@@ -687,7 +688,11 @@ def _cleanup_finished_job(attempt: _Attempt) -> None:
 def _record_benchmark(attempt: _Attempt) -> None:
     """Ghi benchmark sau attempt; không bao giờ làm hỏng job vì lỗi đo đạc (process boundary)."""
     try:
-        machine = latest_capability(RuntimeDatabase(attempt.settings.database_url))
+        try:
+            machine = probe_capability(attempt.settings.product_worker_root)
+        except (OSError, ValueError) as error:
+            logger.warning("Không đo được máy chạy benchmark cause=%s", type(error).__name__)
+            machine = None
         benchmark = build_benchmark(
             attempt.registry,
             attempt.job.job_id,
