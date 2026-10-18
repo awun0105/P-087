@@ -257,6 +257,8 @@ export interface OverlayBox {
    * đồng thời cung cấp hình học cho lớp collider độc lập.
    */
   shapeUrl?: string | null;
+  /** Object-local GLB used only to fit the selection box; never a physics collider. */
+  boundsUrl?: string | null;
   colliderLocalTransform?: { translation_xyz: Vec3; rotation_quaternion_xyzw: [number, number, number, number] } | null;
 }
 
@@ -566,25 +568,40 @@ export class SceneOverlay {
         const rotation = current.getLocalRotation();
         this.setOutlinePose(outline, [position.x, position.y, position.z], [rotation.x, rotation.y, rotation.z, rotation.w]);
       }
-      const record = box.shapeUrl ? this.shape(box.shapeUrl) : null;
-      if (record?.geometry) {
-        this.showSelectionShape(outline, record, fill, box.emphasized);
-      } else {
-        const fallback = new Entity(`r2s-box-fill-${box.id}`, this.app);
-        fallback.addComponent("render", { type: "box", material: fill });
-        fallback.setLocalScale(...box.dimensions);
-        root.addChild(fallback);
-        outline.box = fallback;
-        if (record && !record.failed) {
-          record.asset.once("load", () => {
-            // Chỉ thay khi khung này vẫn là khung đang vẽ (setBoxes sau đó đã tạo lại thì bỏ qua).
-            if (!this.alive || !this.outlines.includes(outline) || !record.geometry) return;
-            fallback.destroy();
-            outline.box = null;
-            this.showSelectionShape(outline, record, fill, box.emphasized);
-            this.redraw();
-          });
+      const fallback = new Entity(`r2s-box-fill-${box.id}`, this.app);
+      fallback.addComponent("render", { type: "box", material: fill });
+      fallback.setLocalScale(...box.dimensions);
+      root.addChild(fallback);
+      outline.box = fallback;
+      const url = box.boundsUrl ?? box.shapeUrl;
+      const record = url ? this.shape(url) : null;
+      const applyGeometry = () => {
+        if (!this.alive || !record?.geometry) return;
+        if (box.boundsUrl) {
+          const low: Vec3 = [Infinity, Infinity, Infinity];
+          const high: Vec3 = [-Infinity, -Infinity, -Infinity];
+          const positions = record.geometry.positions;
+          for (let i = 0; i < positions.length; i += 3) {
+            for (let axis = 0; axis < 3; axis++) {
+              low[axis] = Math.min(low[axis], positions[i + axis]);
+              high[axis] = Math.max(high[axis], positions[i + axis]);
+            }
+          }
+          fallback.setLocalPosition((low[0] + high[0]) / 2, (low[1] + high[1]) / 2, (low[2] + high[2]) / 2);
+          fallback.setLocalScale(high[0] - low[0], high[1] - low[1], high[2] - low[2]);
+        } else {
+          fallback.destroy();
+          outline.box = null;
+          this.showSelectionShape(outline, record, fill, box.emphasized);
         }
+      };
+      if (record?.geometry) applyGeometry();
+      else if (record && !record.failed) {
+        record.asset.once("load", () => {
+          if (!this.outlines.includes(outline)) return;
+          applyGeometry();
+          this.redraw();
+        });
       }
       return outline;
     });
