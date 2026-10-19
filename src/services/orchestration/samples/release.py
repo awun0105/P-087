@@ -11,7 +11,9 @@ import shutil
 import stat
 import tempfile
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path, PurePosixPath
+from threading import Lock
 from uuid import uuid4
 
 from src.config import Settings
@@ -168,17 +170,28 @@ def publish_library(settings: Settings, package: Path) -> dict:
     if not prefix or any(part in {"", ".", ".."} for part in prefix.split("/")):
         raise ValueError("Invalid PRODUCT_DEMO_OBJECT_PREFIX")
     with zipfile.ZipFile(package) as archive, tempfile.TemporaryDirectory(prefix="r2s-demo-publish-") as temporary:
-        path = Path(temporary) / "object"
-        for record in manifest["files"]:
+        extraction_lock = Lock()
+
+        def publish_member(record: dict) -> None:
             key = prefix + "/" + record["path"].removeprefix("library/")
             existing = remote.store.head(key)
             if existing is not None:
                 if existing.checksum != record["checksum"]:
                     raise ValueError("Immutable demo object already exists with different bytes")
-                continue
-            with archive.open(record["path"]) as source, path.open("wb") as target:
-                shutil.copyfileobj(source, target)
-            remote.store.put_file(key, path, record["checksum"])
+                return
+            path = Path(temporary) / hashlib.sha256(record["path"].encode()).hexdigest()
+            try:
+                with extraction_lock:
+                    with archive.open(record["path"]) as source, path.open("xb") as target:
+                        shutil.copyfileobj(source, target)
+                remote.store.put_file(key, path, record["checksum"])
+            finally:
+                path.unlink(missing_ok=True)
+
+        # Bound temporary extraction and connections while publishing thousands of objects.
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            for _ in executor.map(publish_member, manifest["files"]):
+                pass
     archive_key = settings.product_demo_archive_key or prefix + ".zip"
     checksum = sha256_file(package)
     existing = remote.store.head(archive_key)

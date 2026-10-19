@@ -12,6 +12,7 @@ const BACKEND_ORIGIN = process.env.REAL2SIM_API_URL ?? "http://127.0.0.1:8000";
 const APP_HOME = "/overview";
 
 const nextConfig: NextConfig = {
+  typescript: { tsconfigPath: "tsconfig.build.json" },
   // `localhost` đã được Next cho phép mặc định; `127.0.0.1` thì không, nên dev server trả 403 cho HMR và
   // trang đăng nhập mở qua `127.0.0.1` treo ở "Đang kiểm tra phiên đăng nhập…" (chỉ ảnh hưởng `next dev`).
   allowedDevOrigins: ["127.0.0.1"],

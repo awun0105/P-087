@@ -26,7 +26,11 @@ def transport(api_key: str) -> Transport:
         request = urllib.request.Request(
             url,
             data=json.dumps(body).encode() if body is not None else None,
-            headers={"Authorization": "Bearer " + api_key, "Content-Type": "application/json"},
+            headers={
+                "Authorization": "Bearer " + api_key,
+                "Content-Type": "application/json",
+                "User-Agent": "Real2Sim-deployment-preflight/1.0",
+            },
             method=method,
         )
         creating = method == "POST" and path == "/pods"
@@ -108,9 +112,10 @@ class RunPod:
         offers = []
         for gpu in result["data"].get("gpuTypes", []):
             price = gpu.get("lowestPrice") or {}
-            if gpu.get("id") not in gpu_types or 1 not in price.get("availableGpuCounts", []):
+            counts = price.get("availableGpuCounts")
+            if gpu.get("id") not in gpu_types or (counts is not None and 1 not in counts):
                 continue
-            if price.get("stockStatus", "").lower() in {"none", "unavailable"}:
+            if (price.get("stockStatus") or "").lower() in {"none", "unavailable"}:
                 continue
             try:
                 rate, vram = float(price["uninterruptablePrice"]), float(gpu["memoryInGb"])
