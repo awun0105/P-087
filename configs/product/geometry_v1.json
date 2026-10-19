@@ -16,5 +16,6 @@
   "crop_below_floor_m": 0.5,
   "crop_height_m": 4.0,
   "cluster_seed_height_m": 0.02,
-  "gpu_index": 0
+  "gpu_index": 0,
+  "max_gaussian_scale_log": 1.0
 }

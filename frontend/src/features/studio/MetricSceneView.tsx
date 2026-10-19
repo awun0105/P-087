@@ -1,32 +1,64 @@
 "use client";
 
-import type { AppBase } from "playcanvas";
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { createPortal } from "react-dom";
 
-import { Copy, Eye, EyeOff, Hand, Maximize, Move3d, PersonStanding, RotateCcw, RotateCw, Trash2, X } from "lucide-react";
+import type { AppBase, Entity } from "playcanvas";
+import {
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+  type RefObject,
+} from "react";
+
+import { Copy, Eye, EyeOff, Footprints, Hand, Maximize, Move3d, PersonStanding, RotateCcw, RotateCw, Trash2, X } from "lucide-react";
 import { Notice } from "@/components/studio/primitives";
+import type { EditableBox } from "@/features/studio/region/box-model";
+import type { RegionViewApi } from "@/features/studio/region/region-session";
 import {
   INITIAL_RUNTIME,
   PlayCanvasScene,
+  playCanvasErrorMessage,
   usePlayCanvasCapability,
   type ViewerAnnotation,
   type ViewerAppLike,
   type ViewerControls,
 } from "@/features/viewer/PlayCanvasScene";
+import { RegionOverlay, type RegionOverlayHandlers } from "@/features/viewer/region-overlay";
+import { ShellGlowLayer, decodeShellGlb, type ShellSpec } from "@/features/viewer/shell-glow";
 import { SceneOverlay, type GizmoMode, type OverlayBox, type OverlayObject } from "@/features/viewer/scene-overlay";
 import { ThirdPersonRig } from "@/features/viewer/third-person";
-import { usePhysicsPlay, type PhysicsObjectInput } from "@/features/viewer/usePhysicsPlay";
+import { browserPhysicsBlocker, usePhysicsPlay, type PhysicsObjectInput } from "@/features/viewer/usePhysicsPlay";
 import {
   objectViewPose,
   recordingCameraPose,
   toDisplay,
   type CameraMarkerLike,
+  type SourceFrame,
 } from "@/features/viewer/source-frame";
+import type { InspectionState } from "@/features/viewer/inspection-history";
+import type { SplatInspection } from "@/features/viewer/splat-inspection";
 import { jobArtifactContentUrl, jobLidarOverlayUrl, jobWalkCollisionUrl } from "@/lib/api/endpoints";
+import type { CollisionQuery } from "@playcanvas/supersplat-viewer/viewer";
+import { rotateVector, multiplyQuaternions } from "@/features/viewer/layers";
+import type { CollisionSurfacePlane, RegionPreview } from "@/lib/api/studio";
+import { useWalkSession } from "@/features/studio/value/useWalkSession";
+import { themeColor } from "@/lib/theme";
 import { cn } from "@/lib/cn";
 
 const EMPTY_OBJECTS: readonly OverlayObject[] = [];
 const NO_PHYSICS: readonly PhysicsObjectInput[] = [];
+const NO_SHELLS: readonly ShellSpec[] = [];
+const EMPTY_POINTS = new Float32Array(0);
+
+/** Các điểm `[x, y, z]` của lần xem trước thành mảng xyz liên tiếp, đúng dạng viewer nhận. */
+function toPointArray(points: readonly [number, number, number][]): Float32Array {
+  return Float32Array.from(points.flat());
+}
+const NO_SURFACES: readonly CollisionSurfacePlane[] = [];
 
 interface Ref {
   artifact_uri: string;
@@ -41,6 +73,9 @@ export function MetricSceneView({
   jobId,
   visual,
   collision,
+  sceneRevision,
+  collisionPreview = false,
+  reconstruction = false,
   cameras,
   boxes = [],
   objects = EMPTY_OBJECTS,
@@ -58,13 +93,28 @@ export function MetricSceneView({
   tool = "none",
   onTool,
   onDuplicate,
-  onToggleActive,
+  onToggleVisibility,
   onDelete,
   onDeselect,
+  surfacePlanes = NO_SURFACES,
+  onMarkSurface,
+  onRemoveSurface,
+  onFillSurface,
+  surfaceToolsTarget,
+  surfaceToolsActive = true,
+  lockedReason = null,
+  regionEdit = null,
+  regionApi,
+  shells = NO_SHELLS,
+  inspection = null,
 }: {
   jobId: string;
   visual: Ref;
   collision?: Ref;
+  sceneRevision?: string;
+  collisionPreview?: boolean;
+  /** Kết quả tái dựng gốc của stage, độc lập với revision đang chỉnh vật. */
+  reconstruction?: boolean;
   cameras: readonly CameraMarkerLike[];
   boxes?: readonly OverlayBox[];
   /** Scene theo vật (pipeline v2): mỗi vật một khối Gaussian riêng, transform lấy từ SceneIR. */
@@ -94,7 +144,7 @@ export function MetricSceneView({
   selectedObject?: {
     id: string;
     name: string;
-    active: boolean;
+    viewportHidden: boolean;
     canTransform: boolean;
   } | null;
   /** Chế độ công cụ gizmo hiện tại. */
@@ -102,39 +152,94 @@ export function MetricSceneView({
   onTool?: (tool: GizmoMode | "none") => void;
   /** Nhân bản vật đang chọn. */
   onDuplicate?: () => void;
-  /** Bật/tắt trạng thái ẩn khỏi mô phỏng cho vật đang chọn. */
-  onToggleActive?: () => void;
+  /** Ẩn/hiện vật trong viewport, không ghi SceneIR. */
+  onToggleVisibility?: () => void;
   /** Xoá vật đang chọn. */
   onDelete?: () => void;
   /** Bỏ chọn vật. */
   onDeselect?: () => void;
+  surfacePlanes?: readonly CollisionSurfacePlane[];
+  onMarkSurface?: (kind: "floor" | "wall", points: CollisionSurfacePlane["points"]) => void;
+  onRemoveSurface?: (id: string) => void;
+  onFillSurface?: (id: string) => void;
+  /** Vùng nội dung tab Sàn & tường do panel Studio cung cấp. */
+  surfaceToolsTarget?: HTMLElement | null;
+  surfaceToolsActive?: boolean;
+  collisionDiagnostics?: { source: "Legacy" | "Object-aware"; backgroundChecksum: string; selectedParts: number | null };
+  /** Lý do khoá thao tác cần hình học (scene Draft): khoá Đi bộ, Dịch/Xoay và không nạp lưới va chạm. null = không khoá. */
+  lockedReason?: string | null;
+  /** Vật đang chỉnh vùng: overlay vùng gắn vào entity của vật; box và chọn lấy từ cha, null = không chỉnh. */
+  regionEdit?: {
+    objectId: string;
+    boxes: EditableBox[];
+    selectedId: string | null;
+    onChange(boxes: EditableBox[]): void;
+    onSelect(id: string | null): void;
+  } | null;
+  /** Cầu nối tới góc nhìn và trạng thái cử chỉ của overlay vùng, để panel chỉnh vùng dùng. */
+  regionApi?: RefObject<RegionViewApi | null>;
+  /** Vỏ của từng vật trong Draft (T-017): GLB vỏ thô theo URL; `selected` cho vật đang chọn. Ready không truyền. */
+  shells?: readonly ShellSpec[];
+  /**
+   * Chọn điểm trên scene (Benchmark, T-033). Bật một lần khi mount: đổi cờ này làm dựng lại viewer.
+   * `onReady` và `onState` phải là hàm ổn định (vd setState) vì viewer dựng lại khi chúng đổi.
+   */
+  inspection?: {
+    onReady(controller: SplatInspection | null): void;
+    onState(state: InspectionState): void;
+  } | null;
 }) {
   const [capability, setCapability] = usePlayCanvasCapability();
   const fail = useCallback(() => setCapability("failed"), [setCapability]);
   const [overlay, setOverlay] = useState<SceneOverlay | null>(null);
-  const [layers, setLayers] = useState({ ...defaultLayers, lidar: false });
-  const [lidarState, setLidarState] = useState<{ points?: number; error?: string } | null>(null);
+  const [glow, setGlow] = useState<ShellGlowLayer | null>(null);
+  const [surfaceTool, setSurfaceTool] = useState<"floor" | "wall" | null>(null);
+  // Không giữ chế độ chọn tam giác khi tab công cụ đóng hoặc scene bị khoá.
+  if (surfaceTool && (lockedReason || !surfaceToolsActive)) setSurfaceTool(null);
+  const [surfacePickError, setSurfacePickError] = useState<string | null>(null);
+  const [layers, setLayers] = useState({ ...defaultLayers, lidar: false, triangles: false });
+  const [, setLidarState] = useState<{ points?: number; error?: string } | null>(null);
   const lidarUrl = lidarOverlay ? jobLidarOverlayUrl(jobId, lidarOverlay) : null;
   const [collisionState, setCollisionState] = useState<{ triangles?: number; error?: string } | null>(null);
   const initialCamera = useMemo(() => recordingCameraPose("z_up", cameras), [cameras]);
   const contentUrl = jobArtifactContentUrl(jobId, visual);
-  const collisionUrl = collision ? jobArtifactContentUrl(jobId, collision) : null;
-  // Viewer đọc toạ độ đỉnh thô của lưới va chạm, nên chế độ đi bộ dùng bản đã xoay sang không gian hiển thị.
-  // Vùng gốc của vật động được khoét khỏi lưới đi bộ. URL này nằm trong deps tạo viewer, nên chốt theo tập vật
-  // động lúc mở scene: xác nhận/loại/ẩn/nhân bản vật không đổi URL (đổi = tải lại cả 3DGS). Tập mới áp dụng ở lần mở sau.
-  const [initialCollision] = useState(collision);
-  const [initialDynamic] = useState(() => physicsObjects.map((item) => item.id).sort());
-  const walkCollisionUrl = useMemo(
-    () => (initialCollision ? jobWalkCollisionUrl(jobId, initialCollision, initialDynamic) : null),
-    [jobId, initialCollision, initialDynamic],
-  );
+  // Draft: lưới va chạm theo vật chưa có, máy chủ sẽ từ chối; không gọi để khỏi báo lỗi thừa.
+  const collisionUrl = collision && !lockedReason ? (sceneRevision ? jobWalkCollisionUrl(jobId, collision, [], sceneRevision, "canonical", collisionPreview) : jobArtifactContentUrl(jobId, collision)) : null;
+  const walkCollisionUrl = collision && !lockedReason ? jobWalkCollisionUrl(jobId, collision, [], sceneRevision, "display", collisionPreview, reconstruction) : null;
+  const colliderBoxes = useMemo<OverlayBox[]>(() => physicsObjects.flatMap((item) => {
+    if (!item.dimensions && !item.colliderUrl) return [];
+    const local = item.colliderLocalTransform;
+    const offset = local ? rotateVector(item.rotation_xyzw, local.translation_xyz) : [0, 0, 0];
+    return [{
+      id: item.id,
+      center: [item.position[0] + offset[0], item.position[1] + offset[1], item.position[2] + offset[2]],
+      rotation_xyzw: local ? multiplyQuaternions(item.rotation_xyzw, local.rotation_quaternion_xyzw) : item.rotation_xyzw,
+      dimensions: item.dimensions ?? [1, 1, 1], // GLB uses its geometry; dimensions are unused for mesh colliders.
+      color: themeColor("--studio-geometry", "#2f7ea8"), emphasized: false, shapeUrl: item.colliderUrl, colliderLocalTransform: local,
+    }];
+  }), [physicsObjects]);
+  const physicsBlocker = browserPhysicsBlocker(physicsObjects);
+  const physicsIdentity = JSON.stringify([physicsObjects, walkCollisionUrl]);
+  const [physicsFailure, setPhysicsFailure] = useState<{ identity: string; message: string } | null>(null);
+  const [walkCollisionError, setWalkCollisionError] = useState<string | null>(null);
   const [runtime, setRuntime] = useState(INITIAL_RUNTIME);
   const [viewerControls, setViewerControls] = useState<ViewerControls | null>(null);
+  const sourceFrame: SourceFrame = "z_up";
+  const [measuring, setMeasuring] = useState(false);
+  const notifyInspection = inspection?.onState;
+  const onInspectionState = useCallback((state: InspectionState) => {
+    setMeasuring(state.measuring);
+    notifyInspection?.(state);
+  }, [notifyInspection]);
   const [wheelFactor, setWheelFactor] = useState(2);
   const [thirdPerson, setThirdPerson] = useState(false);
 
   // Viewer gọi onApp(app) khi tạo và onApp(null) trước khi huỷ app → lớp phủ sống đúng bằng app.
   const overlayRef = useRef<SceneOverlay | null>(null);
+  // Vỏ phát sáng (T-017) gắn vào overlay hiện tại. Vật đang có lần xem trước giữ vỏ và điểm của lần đó (`previewOwners`).
+  const glowRef = useRef<ShellGlowLayer | null>(null);
+  const previewOwners = useRef(new Set<string>());
+  const baseShellRefs = useRef(new Map<string, { key: string; entity: Entity }>());
   const controls = useRef<ViewerControls | null>(null);
   const rigRef = useRef<ThirdPersonRig | null>(null);
   const [rig, setRig] = useState<ThirdPersonRig | null>(null);
@@ -144,11 +249,18 @@ export function MetricSceneView({
     rigRef.current?.destroy();
     rigRef.current = app ? new ThirdPersonRig(app as unknown as AppBase) : null;
     setRig(rigRef.current);
+    glowRef.current?.destroy();
     overlayRef.current?.destroy();
     overlayRef.current = app ? new SceneOverlay(app) : null;
+    // Góc nhìn của overlay vùng đi qua lệnh chuyển camera của viewer.
+    overlayRef.current?.bindViewerGotoPose(next ? (pose) => next.gotoPose(pose) : null);
+    glowRef.current = overlayRef.current ? new ShellGlowLayer(overlayRef.current) : null;
+    previewOwners.current.clear();
+    baseShellRefs.current.clear();
     controls.current = next ?? null;
     setViewerControls(next ?? null);
     setOverlay(overlayRef.current);
+    setGlow(glowRef.current);
   }, []);
 
   // Mỗi hộp là một điểm đến camera của viewer. PlayCanvasScene cập nhật danh sách này tại chỗ (không tạo lại
@@ -178,6 +290,7 @@ export function MetricSceneView({
   // Bấm = nhấn và nhả gần như tại chỗ, nhanh; kéo để xoay camera không tính là chọn.
   const press = useRef<{ x: number; y: number; time: number } | null>(null);
   const onPointerDown = (event: ReactPointerEvent) => {
+    glow?.setHovered(null);
     press.current = { x: event.clientX, y: event.clientY, time: event.timeStamp };
   };
   const canvasPoint = (event: ReactPointerEvent): [number, number] | null => {
@@ -186,9 +299,16 @@ export function MetricSceneView({
     return [event.clientX - rect.left, event.clientY - rect.top];
   };
   const onPointerMove = (event: ReactPointerEvent) => {
-    if (!placement || !overlay) return;
+    if (!overlay) return;
     const point = canvasPoint(event);
-    overlay.setGhost(placement.dimensions, point ? overlay.floorPoint(point[0], point[1]) : null);
+    if (placement) {
+      overlay.setGhost(placement.dimensions, point ? overlay.floorPoint(point[0], point[1]) : null);
+      glow?.setHovered(null);
+      return;
+    }
+    const hovering = shells.length > 0 && selectMode && layers.splat && !measuring && !surfaceTool && !regionEdit
+      && event.buttons === 0 && !press.current;
+    glow?.setHovered(hovering && point ? overlay.pick(point[0], point[1]) : null);
   };
   const onPointerUp = (event: ReactPointerEvent) => {
     const start = press.current;
@@ -196,6 +316,14 @@ export function MetricSceneView({
     const point = canvasPoint(event);
     if (!start || !overlay || !point) return;
     if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > 5 || event.timeStamp - start.time > 400) return;
+    if (surfaceTool && onMarkSurface && !lockedReason) {
+      const triangle = overlay.pickCollisionTriangle(point[0], point[1], collisionUrl ?? undefined);
+      if (!triangle) { setSurfacePickError("Chưa chọn trúng tam giác môi trường. Bấm vào mặt sàn hoặc tường."); return; }
+      onMarkSurface(surfaceTool, triangle);
+      setSurfaceTool(null);
+      setSurfacePickError(null);
+      return;
+    }
     if (placement) {
       // Đang đặt vật: bấm vào sàn thì đặt tại đó; trượt sàn (trời/xa) thì bỏ qua, vẫn ở chế độ đặt.
       if (event.button !== 0) return;
@@ -209,8 +337,13 @@ export function MetricSceneView({
     else onDeselect?.();
   };
   const onPointerLeave = () => {
+    press.current = null;
+    glow?.setHovered(null);
     if (placement) overlay?.setGhost(null);
   };
+  useEffect(() => {
+    if (!shells.length || !selectMode || !layers.splat || measuring || surfaceTool || regionEdit || placement) glow?.setHovered(null);
+  }, [glow, shells.length, selectMode, layers.splat, measuring, surfaceTool, regionEdit, placement]);
 
   // Hết chế độ đặt (đặt xong/huỷ/đổi vật) thì ẩn hộp xem trước; Esc huỷ đặt hoặc bỏ chọn vật.
   const placementDims = placement?.dimensions;
@@ -219,7 +352,7 @@ export function MetricSceneView({
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         if (placementDims) cancelPlacement?.();
-        else if (selectedObject) onDeselect?.();
+        else if (selectedObject && !regionEdit) onDeselect?.();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -227,11 +360,14 @@ export function MetricSceneView({
       window.removeEventListener("keydown", onKey);
       if (placementDims) overlay?.setGhost(null);
     };
-  }, [placementDims, cancelPlacement, selectedObject, onDeselect, overlay]);
+  }, [placementDims, cancelPlacement, selectedObject, onDeselect, overlay, regionEdit]);
 
+  const overlayCollisionWanted = layers.collision || surfaceTool !== null || (thirdPerson && runtime.cameraMode === "walk");
   useEffect(() => {
-    if (!overlay || !collisionUrl) return;
+    if (!overlay || !collisionUrl || !overlayCollisionWanted) return;
     let active = true;
+    rig?.setCollision(null);
+    queueMicrotask(() => { if (active) setCollisionState(null); });
     overlay.loadCollision(collisionUrl, 0.3).then(
       (triangles) => active && setCollisionState({ triangles }),
       (error: unknown) => active && setCollisionState({ error: error instanceof Error ? error.message : String(error) }),
@@ -239,14 +375,15 @@ export function MetricSceneView({
     return () => {
       active = false;
     };
-  }, [overlay, collisionUrl]);
+  }, [overlay, collisionUrl, rig, overlayCollisionWanted]);
 
   // Góc nhìn thứ ba chỉ có nghĩa khi đang đi bộ; lưới va chạm (nạp xong mới có) giữ camera không lùi xuyên tường.
   const walking = runtime.cameraMode === "walk";
+  useWalkSession({ walking, sceneRevision });
   useEffect(() => {
     // Trích đỉnh của lưới va chạm một lần mỗi khi lưới nạp xong, không lặp lại mỗi lần bật/tắt.
-    rig?.setCollision(overlay?.collisionPositions() ?? null);
-  }, [rig, overlay, collisionState]);
+    if (thirdPerson && walking) rig?.setCollision(overlay?.collisionPositions() ?? null);
+  }, [rig, overlay, collisionState, thirdPerson, walking]);
   useEffect(() => {
     if (!rig) return;
     rig.setActive(thirdPerson && walking);
@@ -260,9 +397,19 @@ export function MetricSceneView({
     collisionUrl: walkCollisionUrl,
     objects: physicsObjects,
     overlayObjects: objects,
+    onObjectCollision: useCallback((collision: CollisionQuery | null) => viewerControls?.setObjectCollision(collision), [viewerControls]),
   });
 
+  const setPreviewPose = physics.setPose;
+
   // Lớp LiDAR chỉ tải khi người dùng bật (vài MB); tắt thì giải phóng GPU, bật lại lấy từ cache của trình duyệt.
+  useEffect(() => {
+    if (physics.status.state !== "failed") return;
+    const message = physics.status.message;
+    queueMicrotask(() => setPhysicsFailure({ identity: physicsIdentity, message }));
+  }, [physics.status, physicsIdentity]);
+  const walkBlocker = physicsBlocker ?? (physicsFailure?.identity === physicsIdentity ? physicsFailure.message : null);
+
   const lidarWanted = layers.lidar && lidarUrl !== null;
   useEffect(() => {
     if (!overlay || !lidarWanted || !lidarUrl) return;
@@ -293,6 +440,138 @@ export function MetricSceneView({
     overlay.setObjects(objects.map((item) => ({ ...item, visible: item.visible && layers.splat })));
   }, [overlay, objects, layers.splat]);
 
+  // Overlay vùng của vật đang chỉnh: box lấy từ cha; cha đổi box chỉ khi thả (onChange), nên khi đang kéo không ghi đè.
+  const regionRef = useRef<RegionOverlay | null>(null);
+  const regionEntityRef = useRef<Entity | null>(null);
+  const regionEditRef = useRef(regionEdit);
+  useEffect(() => {
+    regionEditRef.current = regionEdit;
+  }, [regionEdit]);
+  const regionObjectId = layers.boxes && !measuring && !surfaceTool && !placement ? regionEdit?.objectId ?? null : null;
+  const regionBoxes = regionEdit?.boxes;
+  const regionSelected = regionEdit?.selectedId ?? null;
+  // Entity của vật được dựng lại khi objects đổi: overlay cũ được gỡ và tạo lại với box hiện tại.
+  useEffect(() => {
+    const entity = overlay && regionObjectId ? overlay.objectEntity(regionObjectId) : null;
+    if (!overlay || !regionObjectId || !entity) {
+      regionRef.current?.destroy();
+      regionRef.current = null;
+      regionEntityRef.current = null;
+      return;
+    }
+    if (regionRef.current && regionEntityRef.current === entity) return;
+    regionRef.current?.destroy();
+    const handlers: RegionOverlayHandlers = {
+      onChange: (boxes) => regionEditRef.current?.onChange(boxes),
+      onSelect: (id) => regionEditRef.current?.onSelect(id),
+    };
+    const region = new RegionOverlay(overlay, regionObjectId, handlers);
+    regionRef.current = region;
+    regionEntityRef.current = entity;
+    if (regionEditRef.current) region.setBoxes(regionEditRef.current.boxes, regionEditRef.current.selectedId);
+  }, [overlay, regionObjectId, objects]);
+  // Không ghi box vào overlay khi đang kéo; box thả đã đến qua onChange.
+  useEffect(() => {
+    const region = regionRef.current;
+    if (!region || regionBoxes === undefined || region.isGesturing()) return;
+    region.setBoxes(regionBoxes, regionSelected);
+  }, [regionBoxes, regionSelected]);
+  // Vỏ của vật (T-017): vật đang có lần xem trước giữ vỏ và điểm của lần đó; các vật khác theo `shells`.
+  const shellsRef = useRef(shells);
+  useEffect(() => {
+    shellsRef.current = shells;
+  }, [shells]);
+  useEffect(() => {
+    if (!glow || !overlay) return;
+    const visibleShells = measuring ? [] : shells;
+    const wanted = new Set(visibleShells.map((shell) => shell.id));
+    for (const id of [...baseShellRefs.current.keys()]) {
+      if (wanted.has(id) || previewOwners.current.has(id)) continue;
+      glow.clear(id);
+      baseShellRefs.current.delete(id);
+    }
+    for (const shell of visibleShells) {
+      if (previewOwners.current.has(shell.id)) continue;
+      const entity = overlay.objectEntity(shell.id);
+      if (!entity) continue; // vật chưa có entity: lần đổi objects sau sẽ thử lại
+      const key = `${shell.url}|${shell.style}`;
+      const applied = baseShellRefs.current.get(shell.id);
+      if (applied?.key === key && applied.entity === entity) continue;
+      baseShellRefs.current.set(shell.id, { key, entity });
+      glow.setShell(shell.id, shell.url, shell.style).catch(() => undefined); // vỏ lỗi thì vật không có vỏ; viewer vẫn chạy
+    }
+  }, [glow, overlay, shells, objects, measuring]);
+
+  /** Trả vỏ gốc của vật (từ `shells`) sau khi lần xem trước đóng; vật không có vỏ gốc thì không còn vỏ. */
+  const restoreBaseShell = useCallback((objectId: string) => {
+    const layer = glowRef.current;
+    if (!layer) return;
+    baseShellRefs.current.delete(objectId);
+    const spec = shellsRef.current.find((shell) => shell.id === objectId);
+    if (!spec) {
+      layer.clear(objectId);
+      return;
+    }
+    const entity = overlayRef.current?.objectEntity(objectId);
+    if (!entity) return;
+    baseShellRefs.current.set(objectId, { key: `${spec.url}|${spec.style}`, entity });
+    layer.setShell(objectId, spec.url, spec.style).catch(() => undefined);
+  }, []);
+
+  /**
+   * Vỏ và điểm của lần xem trước (vật đang chỉnh vùng). Đang tính: làm mờ vỏ cũ. Có kết quả: điểm xanh và đỏ, vỏ mới thay
+   * vỏ cũ (vỏ lỗi thì giữ vỏ cũ và đổi màu cam). Không có kết quả và không tính: trả vỏ gốc và xoá điểm.
+   */
+  const showPreview = useCallback(
+    (objectId: string, preview: RegionPreview | null, pending: boolean, options?: { restoreBase: boolean }) => {
+      const layer = glowRef.current;
+      if (!layer) return;
+      if (!preview && !pending) {
+        if (!previewOwners.current.delete(objectId)) return;
+        layer.setPointSets(objectId, EMPTY_POINTS, EMPTY_POINTS);
+        if (options?.restoreBase === false) {
+          baseShellRefs.current.delete(objectId);
+          layer.clear(objectId);
+        } else {
+          restoreBaseShell(objectId);
+        }
+        return;
+      }
+      previewOwners.current.add(objectId);
+      baseShellRefs.current.delete(objectId);
+      if (!preview) {
+        layer.setTone(objectId, "pending");
+        return;
+      }
+      layer.setPointSets(objectId, toPointArray(preview.added_sample_m), toPointArray(preview.removed_sample_m));
+      if (preview.shell_error) {
+        layer.setTone(objectId, "warning");
+      } else if (preview.shell_glb_base64) {
+        layer.setShell(objectId, decodeShellGlb(preview.shell_glb_base64), "selected").catch(() => undefined);
+      }
+    },
+    [restoreBaseShell],
+  );
+
+  useImperativeHandle(
+    regionApi,
+    (): RegionViewApi => ({
+      viewFrom: (preset) => regionRef.current?.viewFrom(preset) ?? false,
+      isGesturing: () => regionRef.current?.isGesturing() ?? false,
+      showPreview,
+    }),
+    [showPreview],
+  );
+  useEffect(
+    () => () => {
+      regionRef.current?.destroy();
+      regionRef.current = null;
+      glowRef.current?.destroy();
+      glowRef.current = null;
+    },
+    [],
+  );
+
   const transformed = useRef(onTransform);
   useEffect(() => {
     transformed.current = onTransform;
@@ -302,7 +581,12 @@ export function MetricSceneView({
   useEffect(() => {
     if (!overlay || !gizmoId) return;
     overlay.attachGizmo(gizmoId, gizmoMode, {
-      onStart: () => controls.current?.setInputEnabled(false),
+      onStart: () => {
+        // Stop Walk simulation before editing so physics cannot overwrite the dragged object pose.
+        controls.current?.setCameraMode("fly");
+        controls.current?.setInputEnabled(false);
+      },
+      onMove: (id, position, rotation) => setPreviewPose(id, position, rotation),
       onEnd: (id, position, rotation) => {
         controls.current?.setInputEnabled(true);
         transformed.current?.(id, position, rotation);
@@ -313,18 +597,27 @@ export function MetricSceneView({
       controls.current?.setInputEnabled(true);
     };
     // `objects` trong deps: gizmo gắn lại sau khi vật được tạo/đổi revision.
-  }, [overlay, gizmoId, gizmoMode, objects]);
+  }, [overlay, gizmoId, gizmoMode, objects, setPreviewPose]);
 
   useEffect(() => {
-    if (!overlay) return;
-    overlay.setSplatVisible(layers.splat);
-    // Không có 3DGS phía sau thì mesh đục cho dễ đọc hình khối.
-    overlay.setCollision(layers.collision, layers.splat ? 0.3 : 1);
-    overlay.setBoxes(layers.boxes ? boxes : []);
-  }, [overlay, layers, boxes, collisionState]);
+    overlay?.setSplatVisible(layers.splat);
+  }, [overlay, layers.splat]);
+  useEffect(() => {
+    // Environment loading must not recreate object layers from their authored pose during a drag.
+    overlay?.setCollision(layers.collision && !measuring, layers.splat ? 0.3 : 1, layers.triangles);
+  }, [overlay, layers.collision, layers.splat, layers.triangles, collisionState, measuring]);
+  useEffect(() => {
+    overlay?.setColliders(colliderBoxes, layers.collision && !measuring, layers.triangles);
+  }, [overlay, colliderBoxes, layers.collision, layers.triangles, measuring]);
+  useEffect(() => {
+    overlay?.setBoxes(layers.boxes && !measuring ? boxes.filter((box) => box.id !== regionObjectId) : []);
+  }, [overlay, boxes, layers.boxes, measuring, regionObjectId]);
+  useEffect(() => {
+    overlay?.setSurfaceMarkers(surfacePlanes,layers.collision && !measuring);
+  }, [overlay,surfacePlanes,layers.collision,measuring]);
 
   if (capability === "failed" || capability === "unavailable") {
-    return <Notice tone="rust">Trình duyệt không render được 3DGS (cần WebGL2/WebGPU).</Notice>;
+    return <Notice tone="rust">{playCanvasErrorMessage(capability)}</Notice>;
   }
   const toggle = (key: keyof typeof layers, label: string, disabled = false) => (
     <label className={cn("flex items-center gap-1.5", disabled && "opacity-50")}>
@@ -345,6 +638,37 @@ export function MetricSceneView({
       onPointerMove={onPointerMove}
       onPointerLeave={onPointerLeave}
     >
+      {surfaceToolsTarget && createPortal(
+        <section aria-label="Công cụ sàn và tường" className="space-y-3 text-xs text-on-dark/90">
+          <p className="text-on-dark/60">Đánh dấu mặt sàn hoặc tường trên lưới va chạm, rồi lấp phần trống theo mặt phẳng đã chọn.</p>
+          <div className="flex flex-wrap gap-2">
+            {onMarkSurface && (["floor","wall"] as const).map(kind => (
+              <button key={kind} type="button" aria-pressed={surfaceTool === kind} disabled={Boolean(lockedReason)} title={lockedReason ?? undefined} className="rounded border border-line-dark px-2 py-1 hover:bg-on-dark/10 disabled:cursor-not-allowed disabled:opacity-40" onClick={() => {
+                setSurfaceTool(surfaceTool === kind ? null : kind);
+                setSurfacePickError(null);
+                onTool?.("none");
+                setLayers(previous => ({...previous,collision:true}));
+                controls.current?.setCameraMode("fly");
+              }}>{kind === "floor" ? "Đánh dấu sàn" : "Đánh dấu tường"}</button>
+            ))}
+            {surfacePlanes.map((plane,index) => <span key={plane.id} className="flex items-center gap-2">
+              <button type="button" onClick={() => onRemoveSurface?.(plane.id)} disabled={Boolean(lockedReason)} title={lockedReason ?? undefined} className="rounded border border-line-dark px-2 py-1 hover:bg-on-dark/10 disabled:cursor-not-allowed disabled:opacity-40" aria-label={`Xóa mặt phẳng ${plane.kind === "floor" ? "sàn" : "tường"} ${index+1}`}>
+                {plane.kind === "floor" ? "Sàn" : "Tường"} {index+1} ×
+              </button>
+              {!plane.fill_regions && <button type="button" onClick={() => onFillSurface?.(plane.id)} disabled={Boolean(lockedReason)} title={lockedReason ?? undefined} className="rounded border border-line-dark px-2 py-1 hover:bg-on-dark/10 disabled:cursor-not-allowed disabled:opacity-40" aria-label={`Lấp theo mặt phẳng ${plane.kind === "floor" ? "sàn" : "tường"} ${index+1}`}>Lấp theo mặt phẳng</button>}
+              {plane.fill_regions && <span>Đã lấp theo mặt phẳng</span>}
+            </span>)}
+          </div>
+          {(surfaceTool || surfacePickError) && <div role="status" className="pointer-events-auto rounded-md bg-viewport-deep/90 px-3 py-2 text-xs text-on-dark">
+            {surfacePickError ?? `Bấm một tam giác ${surfaceTool === "floor" ? "sàn" : "tường"} để lưu mặt phẳng dùng vá lỗ trong vùng vật thể.`}
+            <button type="button" className="ml-3" onClick={() => {setSurfaceTool(null);setSurfacePickError(null);}}>Hủy đánh dấu</button>
+          </div>}
+        </section>, surfaceToolsTarget,
+      )}
+      {(walkBlocker || walkCollisionError) && <Notice tone="rust">Không thể dùng Walk: {walkBlocker ?? walkCollisionError}</Notice>}
+      {overlay && regionObjectId && !objects.some((item) => item.id === regionObjectId) && (
+        <Notice tone="ochre">Vật đang chỉnh vùng chưa có trên viewport, nên chưa thể kéo box.</Notice>
+      )}
       {placement && (
         <div
           role="status"
@@ -371,11 +695,18 @@ export function MetricSceneView({
         mode="VISUAL"
         capability={capability}
         onFailed={fail}
-        sourceFrame="z_up"
+        sourceFrame={sourceFrame}
+        enableInspection={inspection !== null}
+        inspectionMaxPoints={2}
+        onInspectionReady={inspection?.onReady}
+        onInspectionState={inspection ? onInspectionState : undefined}
+        cameras={cameras}
         initialCamera={initialCamera}
+        initialCameraMode="fly"
         annotations={annotations}
         onApp={onApp}
-        collisionUrl={walkCollisionUrl}
+        collisionUrl={walkBlocker || (physicsObjects.length > 0 && physics.status.state !== "ready") ? null : walkCollisionUrl}
+        onCollisionError={setWalkCollisionError}
         onRuntime={setRuntime}
         wheelFactor={wheelFactor}
         extraControls={
@@ -403,6 +734,18 @@ export function MetricSceneView({
             >
               <RotateCcw className="size-4" aria-hidden />
             </button>
+            {lockedReason && (
+              // Viewer chỉ hiện nút Đi bộ khi lưới va chạm có sẵn; trong Draft thì hiện nút khoá kèm lý do.
+              <button
+                type="button"
+                className="sse-controlButton flex items-center justify-center text-on-dark/80 opacity-40 cursor-not-allowed"
+                disabled
+                title={lockedReason}
+                aria-label="Đi bộ"
+              >
+                <Footprints className="size-4" aria-hidden />
+              </button>
+            )}
             <button
               type="button"
               className={cn(
@@ -489,12 +832,13 @@ export function MetricSceneView({
                 type="button"
                 onClick={() => onTool?.(tool === "translate" ? "none" : "translate")}
                 className={cn(
-                  "flex items-center gap-1 rounded px-2 py-1 transition-colors",
+                  "flex items-center gap-1 rounded px-2 py-1 transition-colors disabled:cursor-not-allowed disabled:opacity-40",
                   tool === "translate"
                     ? "bg-ember-soft text-ember-strong font-medium"
                     : "text-on-dark/80 hover:bg-on-dark/10 hover:text-on-dark",
                 )}
-                title="Dịch chuyển vật (G)"
+                disabled={Boolean(lockedReason)}
+                title={lockedReason ?? "Dịch chuyển vật (G)"}
                 aria-pressed={tool === "translate"}
               >
                 <Move3d className="size-3.5" aria-hidden />
@@ -504,12 +848,13 @@ export function MetricSceneView({
                 type="button"
                 onClick={() => onTool?.(tool === "rotate" ? "none" : "rotate")}
                 className={cn(
-                  "flex items-center gap-1 rounded px-2 py-1 transition-colors",
+                  "flex items-center gap-1 rounded px-2 py-1 transition-colors disabled:cursor-not-allowed disabled:opacity-40",
                   tool === "rotate"
                     ? "bg-ember-soft text-ember-strong font-medium"
                     : "text-on-dark/80 hover:bg-on-dark/10 hover:text-on-dark",
                 )}
-                title="Xoay vật (R)"
+                disabled={Boolean(lockedReason)}
+                title={lockedReason ?? "Xoay vật (R)"}
                 aria-pressed={tool === "rotate"}
               >
                 <RotateCw className="size-3.5" aria-hidden />
@@ -522,27 +867,28 @@ export function MetricSceneView({
             <button
               type="button"
               onClick={onDuplicate}
-              className="flex items-center gap-1 rounded px-2 py-1 text-on-dark/80 hover:bg-on-dark/10 hover:text-on-dark transition-colors"
-              title="Nhân bản vật thể"
+              disabled={Boolean(lockedReason)}
+              className="flex items-center gap-1 rounded px-2 py-1 text-on-dark/80 enabled:hover:bg-on-dark/10 enabled:hover:text-on-dark transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+              title={lockedReason ?? "Nhân bản vật thể"}
             >
               <Copy className="size-3.5" aria-hidden />
               <span>Nhân bản</span>
             </button>
           )}
 
-          {onToggleActive && (
+          {onToggleVisibility && (
             <button
               type="button"
-              onClick={onToggleActive}
+              onClick={onToggleVisibility}
               className={cn(
                 "flex items-center gap-1 rounded px-2 py-1 transition-colors",
-                !selectedObject.active
+                selectedObject.viewportHidden
                   ? "bg-rust/20 text-rust font-medium"
                   : "text-on-dark/80 hover:bg-on-dark/10 hover:text-on-dark",
               )}
-              title={selectedObject.active ? "Ẩn khỏi mô phỏng" : "Hiện lại trong mô phỏng"}
+              title={!selectedObject.viewportHidden ? "Ẩn trên màn hình" : "Hiện trên màn hình"}
             >
-              {selectedObject.active ? (
+              {!selectedObject.viewportHidden ? (
                 <>
                   <EyeOff className="size-3.5" aria-hidden />
                   <span>Ẩn</span>
@@ -582,16 +928,19 @@ export function MetricSceneView({
         </div>
       )}
       <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 flex max-w-[calc(100%-1.5rem)] flex-col items-center gap-2 pointer-events-none">
-        <div className="pointer-events-auto flex flex-wrap gap-3 rounded-md border border-line-dark bg-viewport-deep/85 px-3 py-1.5 text-xs text-on-dark/90 backdrop-blur-md shadow-lg">
+        <div aria-label="Chọn layer hiển thị" className="pointer-events-auto flex flex-wrap gap-3 rounded-md border border-line-dark bg-viewport-deep/85 px-3 py-1.5 text-xs text-on-dark/90 backdrop-blur-md shadow-lg">
           {toggle("splat", "3DGS màu")}
-          {toggle("collision", "Collision mesh", !collisionUrl)}
+          {toggle("collision", "Collision mesh", !collisionUrl && !colliderBoxes.length)}
+          {toggle("triangles", "Cạnh tam giác mesh", !layers.collision)}
           {toggle("boxes", "Khung vật thể", !boxes.length)}
           {lidarUrl && toggle("lidar", "Đám mây LiDAR")}
+
         </div>
+
         {walking && physics.status.state !== "off" && (
           <div className="pointer-events-auto flex flex-wrap items-center gap-2 rounded-md border border-line-dark bg-viewport-deep/85 px-3 py-1.5 text-xs text-on-dark/90 backdrop-blur-md shadow-lg" role="status">
-            {physics.status.state === "loading" && "Đang dựng vật lý cho vật động…"}
-            {physics.status.state === "ready" && `Đi vào vật để đẩy · ${physics.status.objects} vật động`}
+            {physics.status.state === "loading" && "Đang nạp collider vật thể…"}
+            {physics.status.state === "ready" && `Đi vào vật để đẩy · ${physics.status.objects} vật có collision`}
             {physics.status.state === "failed" && `Không bật được vật lý: ${physics.status.message}`}
             {physics.status.state === "ready" && (
               <button type="button" onClick={physics.reset} className="rounded px-2 py-0.5 hover:bg-on-dark/10">Đặt lại vị trí vật</button>
@@ -599,13 +948,6 @@ export function MetricSceneView({
           </div>
         )}
       </div>
-      <p className="absolute bottom-3 left-3 rounded-md border border-line-dark bg-viewport-deep/85 px-2 py-1 text-xs text-on-dark/80">
-        Hệ mét, sàn z = 0 · mở tại camera quay đầu tiên
-        {collisionState?.triangles ? ` · collision ${Math.round(collisionState.triangles).toLocaleString("vi-VN")} tam giác` : ""}
-        {collisionState?.error ? ` · không nạp được collision: ${collisionState.error}` : ""}
-        {layers.lidar && lidarState?.points ? ` · LiDAR ${lidarState.points.toLocaleString("vi-VN")} điểm` : ""}
-        {layers.lidar && lidarState?.error ? ` · không nạp được LiDAR: ${lidarState.error}` : ""}
-      </p>
     </div>
   );
 }

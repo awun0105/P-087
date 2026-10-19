@@ -57,11 +57,11 @@ def _inverse_pose(values: list[float]) -> tuple[tuple[float, ...], tuple[float, 
 
 def _pose(line: str) -> CameraPose:
     parts = line.split()
-    if len(parts) != 10 or not parts[9].endswith(".png") or not parts[9][:-4].isdigit():
+    if len(parts) != 10 or not Path(parts[9]).stem.isdigit():
         raise ValueError("invalid COLMAP image record or unexpected image name")
     center, quaternion = _inverse_pose([float(value) for value in parts[1:8]])
     return CameraPose(
-        frame_id=int(parts[9][:-4]),
+        frame_id=int(Path(parts[9]).stem),
         image_id=int(parts[0]),
         camera_id=int(parts[8]),
         image_name=parts[9],

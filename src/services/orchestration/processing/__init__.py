@@ -15,7 +15,13 @@ from src.services.orchestration.processing.models import (
     ParameterSpec,
     ProcessingPresets,
 )
-from src.services.orchestration.processing.resources import Evaluation, evaluate, maximum_for_machine
+from src.services.orchestration.processing.resources import (
+    SFM_KEYS,
+    SPLAT_KEYS,
+    Evaluation,
+    evaluate,
+    maximum_for_machine,
+)
 
 __all__ = [
     "Evaluation",
@@ -24,6 +30,8 @@ __all__ = [
     "ParameterSpec",
     "ProcessingConfigError",
     "ProcessingPresets",
+    "SFM_KEYS",
+    "SPLAT_KEYS",
     "build_job_config",
     "config_bytes",
     "evaluate",

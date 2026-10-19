@@ -106,6 +106,32 @@ def test_create_project_stores_attestation(registry: ProjectRegistry, create_inp
     assert record.source_rights_attestation["anonymization_confirmed"] is True
 
 
+def test_dataset_project_submits_video_and_preextracted_images_as_input(
+    registry: ProjectRegistry, tmp_path: Path
+) -> None:
+    from src.models.contracts.manifests import InputManifest
+
+    image_paths = (tmp_path / "000.jpg", tmp_path / "001.png")
+    for index, path in enumerate(image_paths):
+        path.write_bytes(f"image-{index}".encode())
+    video = tmp_path / "scene.mp4"
+    video.write_bytes(b"display-only-video")
+    project = registry.create_project_from_dataset_images(
+        name="dataset test", dataset_owner="Mip-NeRF 360", images=image_paths, display_video=video
+    )
+    manifest = InputManifest.model_validate_json(
+        registry.runtime_resolver.require(project.input_manifest_ref).read_bytes()
+    )
+    assert project.privacy_mode == "self_attested"
+    assert project.display_video_ref is not None and project.input_video is not None
+    assert [item.original_name for item in manifest.files] == ["000.jpg", "001.png", "scene.mp4"]
+    assert [item.media_type for item in manifest.files] == ["image/jpeg", "image/png", "video/mp4"]
+    assert manifest.preparation_provenance["input_mode"] == "video_with_preextracted_image_refs"
+    assert manifest.preparation_provenance["video_decode_skipped"] is True
+    assert registry.runtime_resolver.require(project.display_video_ref).read_bytes() == b"display-only-video"
+    assert registry.create_job(JobCreateInput(project_id=project.project_id)).status == JobStatus.QUEUED
+
+
 def test_created_project_appears_in_list(registry: ProjectRegistry, create_input) -> None:
     record = registry.create_project(create_input)
     ids = [p.project_id for p in registry.list_projects()]

@@ -1,4 +1,4 @@
-"""Đăng nhập hai role, mã mời một lần, phiên cookie và nhật ký thao tác.
+"""Đăng nhập ba role, mã mời một lần, phiên cookie và nhật ký thao tác.
 
 Mọi state nằm trong runtime DB; token phiên và mã mời chỉ lưu dạng băm SHA-256.
 Kiểm quyền nằm ở backend (route dependency); UI chỉ ẩn nút.
@@ -13,12 +13,15 @@ from src.services.orchestration.auth.models import (
     Actor,
     AuditEntry,
     InviteRecord,
+    InviteRole,
     PublicUser,
     Role,
     SessionRecord,
     UserRecord,
 )
 from src.services.orchestration.auth.passwords import hash_password, token_digest, verify_password
+from src.services.orchestration.auth.quota import GuestQuotaSummary
+from src.services.orchestration.auth.quota_ledger import guest_quota_summary
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError, RuntimeTransaction
 
 
@@ -28,6 +31,7 @@ class AuthError(PermissionError):
 
 #: Hash giả để thời gian đăng nhập sai email ≈ sai mật khẩu (tránh dò email).
 _DUMMY_HASH = hash_password("dummy-password-for-timing")
+_USER_EMAIL_LOCK_NAMESPACE = 0x523253  # "R2S" namespace for PostgreSQL registration locks.
 
 
 def public(user: UserRecord) -> PublicUser:
@@ -69,6 +73,13 @@ class AuthService:
 
     @staticmethod
     def _insert_user(tx: RuntimeTransaction, user: UserRecord) -> None:
+        # SQLite serializes writers at BEGIN IMMEDIATE. PostgreSQL locks this normalized
+        # email so concurrent registrations return a domain conflict before INSERT.
+        if tx.postgres:
+            tx.execute(
+                "SELECT pg_advisory_xact_lock(?, hashtext(?))",
+                (_USER_EMAIL_LOCK_NAMESPACE, user.email),
+            )
         if tx.execute("SELECT 1 FROM r2s_users WHERE email=?", (user.email,)).fetchone():
             raise RuntimeStateConflictError("Email đã có tài khoản")
         tx.execute(
@@ -91,8 +102,14 @@ class AuthService:
         return UserRecord.model_validate_json(row[0]) if row else None
 
     def actors(self) -> dict[str, Actor]:
-        """Mọi tài khoản dưới dạng Actor theo id, để hiện tên người thao tác từ các bản ghi chỉ lưu id."""
-        return {user.user_id: Actor(user_id=user.user_id, display_name=user.display_name) for user in self.list_users()}
+        """Tên và role hiện tại theo ID, để điền vào bản ghi cũ không có snapshot.
+
+        Chỉ dùng khi dựng phản hồi (`with_current_role`); không bao giờ ghi vào bản ghi đã lưu.
+        """
+        return {
+            user.user_id: Actor(user_id=user.user_id, display_name=user.display_name, role=user.role)
+            for user in self.list_users()
+        }
 
     def list_users(self) -> list[UserRecord]:
         """Mọi tài khoản, cũ nhất trước."""
@@ -110,7 +127,13 @@ class AuthService:
         daily_job_quota: int | None = None,
     ) -> UserRecord:
         """Reviewer đổi role/khóa/hạn mức; không tự hạ quyền hay tự khóa chính mình."""
-        if user_id == actor.user_id and (role == "editor" or active is False):
+        if not has_role(actor, "reviewer"):
+            raise AuthError("Chỉ Reviewer được quản lý thành viên")
+        if role is not None and role not in ROLE_RANK:
+            raise ValueError("Role không hợp lệ")
+        if user_id == actor.user_id and (
+            (role is not None and ROLE_RANK[role] < ROLE_RANK[actor.role]) or active is False
+        ):
             raise AuthError("Không tự hạ quyền hoặc tự khóa tài khoản của mình")
         with self.database.transaction(write=True) as tx:
             row = tx.execute("SELECT payload FROM r2s_users WHERE user_id=?" + tx.lock_suffix(), (user_id,)).fetchone()
@@ -121,7 +144,8 @@ class AuthService:
                 for key, value in {"role": role, "active": active, "daily_job_quota": daily_job_quota}.items()
                 if value is not None
             }
-            updated = UserRecord.model_validate_json(row[0]).model_copy(update=changes)
+            previous = UserRecord.model_validate_json(row[0])
+            updated = UserRecord.model_validate({**previous.model_dump(), **changes})
             tx.execute("UPDATE r2s_users SET payload=? WHERE user_id=?", (updated.model_dump_json(), user_id))
             if active is False:
                 tx.execute("DELETE FROM r2s_sessions WHERE user_id=?", (user_id,))
@@ -177,7 +201,7 @@ class AuthService:
 
     # --- mã mời ---------------------------------------------------------------
 
-    def create_invite(self, actor: UserRecord, role: Role) -> tuple[str, InviteRecord]:
+    def create_invite(self, actor: UserRecord, role: InviteRole) -> tuple[str, InviteRecord]:
         """Reviewer phát mã mời một lần; mã gốc chỉ trả về lần này."""
         if not has_role(actor, "reviewer"):
             raise AuthError("Chỉ Reviewer được mời thành viên")
@@ -197,6 +221,14 @@ class AuthService:
             )
         self.audit(actor.user_id, "invite.create", None, {"role": role})
         return code, invite
+
+    def register_guest(self, email: str, display_name: str, password: str) -> UserRecord:
+        """Tạo tài khoản Guest không cần invite; role do server gán và email chưa được xác minh."""
+        user = self._new_user(email, display_name, password, "guest")
+        with self.database.transaction(write=True) as tx:
+            self._insert_user(tx, user)
+        self.audit(user.user_id, "user.create", user.user_id, {"role": user.role, "via": "public_signup"})
+        return user
 
     def register(self, code: str, email: str, display_name: str, password: str) -> UserRecord:
         """Dùng mã mời tạo tài khoản với đúng role của mã; mã chỉ dùng được một lần."""
@@ -246,3 +278,7 @@ class AuthService:
                 (user_id, action, since.isoformat()),
             ).fetchone()
         return int(row[0]) if row else 0
+
+    def guest_quota_summary(self, user_id: str, now: datetime | None = None) -> GuestQuotaSummary:
+        """Current fixed Guest calendar-day usage; audit rows are not quota authority."""
+        return guest_quota_summary(self.database, user_id, now)

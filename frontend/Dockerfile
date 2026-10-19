@@ -4,6 +4,7 @@ FROM node:24.15.0-bookworm-slim AS dependencies
 
 WORKDIR /app
 COPY package.json package-lock.json ./
+COPY scripts/patch-viewer-collision.mjs scripts/patch-viewer-collision.mjs
 RUN npm ci --no-audit --no-fund
 
 # SuperSplat is checked into the repository as a separately licensed vendor
@@ -38,6 +39,8 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next ./.next
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules ./node_modules
 COPY --from=builder --chown=nextjs:nodejs /app/package.json ./package.json
+# next start loads runtime configuration, including the API proxy rewrites.
+COPY --from=builder --chown=nextjs:nodejs /app/next.config.ts ./next.config.ts
 
 USER nextjs
 EXPOSE 3000

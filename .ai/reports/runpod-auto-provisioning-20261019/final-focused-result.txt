@@ -1,0 +1,9 @@
+Read from the already-running test session after the user requested no further reruns.
+No new test command was started after that instruction.
+
+Command previously started:
+R2S_GPU_TEST_DATABASE_URL=<disposable-local-db> .venv/bin/pytest -q tests/test_gpu/test_runpod_lifecycle.py tests/test_gpu/test_runpod_postgres.py --disable-warnings --maxfail=2
+
+Result:
+.....................................................                    [100%]
+53 passed in 4.18s

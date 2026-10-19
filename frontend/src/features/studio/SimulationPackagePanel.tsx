@@ -23,6 +23,7 @@ const RULE_LABEL: Record<string, string> = {
   TRANSFORM_INVALID: "Vị trí/hướng hợp lệ",
   OBJECT_OUT_OF_BOUNDS: "Vật nằm trong kho, trên sàn",
   OBJECT_CONFIRMATION_INCOMPLETE: "Không còn ứng viên đang bật chưa xác nhận",
+  COLLISION_SOURCE_COVERAGE: "Coverage ownership collider nguồn",
   REQUIRED_ARTIFACT_MISSING: "Đủ file hình học/collider",
 };
 
@@ -34,10 +35,15 @@ const RULE_LABEL: Record<string, string> = {
 export function SimulationPackagePanel({
   jobId,
   sceneRevision,
+  canCreate = true,
+  lockedReason = null,
   onSceneChanged,
 }: {
   jobId: string;
   sceneRevision: string;
+  canCreate?: boolean;
+  /** Lý do khoá xuất USD khi scene chưa có hình học theo vật (Draft); null = không khoá. */
+  lockedReason?: string | null;
   onSceneChanged: () => void;
 }) {
   const [result, setResult] = useState<{ revision: string; value: SimulationPackageView | null } | null>(null);
@@ -60,6 +66,7 @@ export function SimulationPackagePanel({
   }, [jobId, sceneRevision]);
 
   async function create() {
+    if (!canCreate || lockedReason) return;
     setBusy(true);
     setError(null);
     try {
@@ -84,11 +91,24 @@ export function SimulationPackagePanel({
         <p className="flex items-center gap-1.5 text-sm font-semibold text-ink">
           <PackageOpen className="size-4" aria-hidden /> Gói mô phỏng Isaac
         </p>
-        <Button size="sm" variant={pkg?.package_ref ? "secondary" : "primary"} disabled={busy} onClick={create}>
-          {busy && <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden />}
-          {pkg?.package_ref ? "Kiểm tra lại" : "Tạo gói mô phỏng"}
-        </Button>
+        {canCreate && (
+          <Button
+            size="sm"
+            variant={pkg?.package_ref ? "secondary" : "primary"}
+            disabled={busy || Boolean(lockedReason)}
+            title={lockedReason ?? undefined}
+            onClick={create}
+          >
+            {busy && <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden />}
+            {pkg?.package_ref
+              ? "Kiểm tra lại"
+              : pkg?.export_capability?.status === "blocked"
+                ? "Thử lại xuất USD"
+                : "Tạo gói mô phỏng"}
+          </Button>
+        )}
       </div>
+      {!canCreate && <p className="text-xs text-ink-muted">Chỉ chủ sở hữu Guest, Editor hoặc Reviewer mới được tạo gói cho job này.</p>}
       {error && <p role="alert" className="text-sm text-rust">{error}</p>}
       {!pkg && !error && (
         <p className="text-sm text-ink-muted">
@@ -123,15 +143,62 @@ export function SimulationPackagePanel({
             {pkg.confirmed_objects} vật · môi trường {pkg.environment_triangles.toLocaleString("vi-VN")} tam giác (khoét{" "}
             {pkg.carved_triangles.toLocaleString("vi-VN")}) · scene {pkg.scene_revision}
           </p>
-          {pkg.package_ref ? (
+          {pkg.retained_shared_triangles > 0 && (
+            <p role="status" className="rounded-md border border-line p-3 text-ink-muted" aria-label="Tam giác nền được giữ lại">
+              Giữ lại {pkg.retained_shared_triangles.toLocaleString("vi-VN")} tam giác nền nằm trong vùng chồng giữa vật
+              bị khoét và ứng viên chưa xử lý ({pkg.retained_shared_object_ids.join(", ")}) vì chưa biết chúng thuộc vật nào.
+              Xác nhận hoặc xoá các ứng viên đó rồi tạo lại gói nếu muốn khoét hết.
+            </p>
+          )}
+          {pkg.export_capability && (
+            <div className="space-y-1 rounded-md border border-line p-3" aria-label="Khả năng xuất USD">
+              <p className={pkg.export_capability.status === "blocked" ? "font-medium text-rust" : "text-ink-muted"}>
+                Khả năng xuất USD: {pkg.export_capability.status === "blocked" ? "Bị chặn" : "Sẵn sàng"} ·{" "}
+                {pkg.export_capability.effective_mode} · builder {pkg.export_capability.builder_version}
+                {pkg.export_capability.runtime_version && ` · OpenUSD ${pkg.export_capability.runtime_version}`}
+              </p>
+              {pkg.export_capability.blockers.length > 0 && (
+                <ul className="space-y-1" role="alert">
+                  {pkg.export_capability.blockers.map((blocker, index) => (
+                    <li key={`${blocker.code}-${index}`}>
+                      <span className="font-medium">{blocker.code}</span>: {blocker.message}
+                      {blocker.affected_object_ids.length > 0 && (
+                        <span className="block text-ink-subtle">Vật liên quan: {blocker.affected_object_ids.join(", ")}</span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {pkg.export_capability.notices.length > 0 && (
+                <ul className="space-y-1 text-ink-muted" aria-label="Lưu ý khi xuất USD">
+                  {pkg.export_capability.notices.map((notice, index) => (
+                    <li key={`${notice.code}-${index}`}>
+                      {notice.message}
+                      {notice.affected_object_ids.length > 0 && (
+                        <span className="block text-ink-subtle">Vật liên quan: {notice.affected_object_ids.join(", ")}</span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {pkg.export_capability.status === "blocked" && (
+                <p className="text-ink-muted">
+                  Candidate chưa được tạo. Khắc phục điều kiện trên rồi thử lại; lần thử lại đánh giá cùng các yêu cầu của scene hiện tại.
+                </p>
+              )}
+            </div>
+          )}
+          {pkg.package_ref && pkg.export_capability?.status !== "blocked" ? (
             <a
               href={simulationPackageDownloadUrl(jobId)}
               className={cn(buttonVariants({ size: "sm", variant: "secondary" }), "w-full")}
             >
               <Download aria-hidden /> Tải gói USD cho Isaac (.zip)
             </a>
+          ) : pkg.export_capability?.status === "blocked" ? null : pkg.preflight.blocking_result !== "PASS" ? (
+            <p className="text-rust">Chưa đạt Preflight; sửa theo các mục đỏ rồi tạo lại.</p>
           ) : (
-            <p className="text-rust">Chưa đạt kiểm tra; sửa theo các mục đỏ rồi tạo lại.</p>
+            <p className="text-rust">Chưa có gói tải xuống; kiểm tra lại capability rồi thử tạo gói.</p>
           )}
         </div>
       )}

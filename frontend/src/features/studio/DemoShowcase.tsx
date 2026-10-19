@@ -1,16 +1,20 @@
 "use client";
 
-import { Aperture, Cpu, Images, ScanSearch, ShieldCheck } from "lucide-react";
+import { CircleSlash, Layers } from "lucide-react";
 import type { ReactNode } from "react";
 
-import { stageMeta } from "@/features/studio/stages";
-import { cn } from "@/lib/cn";
-import type { StageId } from "@/lib/contracts/api";
+import { ASSET_RENDERERS, STAGE_PRESENTERS, hasEvidence, type ShowcaseContext } from "@/features/studio/showcase/registry";
+import { GEOMETRY_REVIEW_STAGE, GEOMETRY_REVIEW_STAGE_ID, stageMeta, type TimelineStageId } from "@/features/studio/stages";
+import { demoReplayStages } from "@/features/studio/demoStages";
 import type { DemoManifest } from "@/lib/contracts/studio";
+import { formatDuration } from "@/lib/format";
 
 /**
- * Minh họa output của stage đang phát lại bằng chính file trong demo bundle
- * (video gốc, frame đã tách). Không vẽ dữ liệu giả thành kết quả thật.
+ * Khung xem trước kết quả của bước đang phát lại, vẽ từ chính file và số đo trong demo bundle.
+ *
+ * Khung chỉ ghép các thẻ trong `showcase/registry.tsx`: thẻ dựng sẵn của bước (video gốc, frame, 3DGS) cùng các thẻ
+ * `assets` mà bundle khai báo cho bước đó. Bước chưa có bằng chứng hoặc chưa có thẻ nào thì nói thẳng như vậy, không
+ * vẽ số liệu thay thế.
  */
 export function DemoShowcase({
   demo,
@@ -19,118 +23,58 @@ export function DemoShowcase({
   fileUrl,
 }: {
   demo: DemoManifest;
-  stage: StageId;
+  stage: TimelineStageId;
   fraction: number;
   /** URL phục vụ file của đúng video mẫu (allow-list + checksum ở backend). */
   fileUrl: (name: string) => string;
 }) {
-  const meta = stageMeta(stage);
-  const frames = demo.frames;
-  const revealed = Math.max(1, Math.ceil(frames.length * Math.min(1, fraction)));
-  const cover = frames[Math.floor(frames.length / 2)];
+  const meta = stage === GEOMETRY_REVIEW_STAGE_ID ? GEOMETRY_REVIEW_STAGE : stageMeta(stage);
+  const record = demoReplayStages(demo).find((item) => item.stage_id === stage);
+  const context: ShowcaseContext = { demo, stage, fraction, fileUrl };
+  const presenter = STAGE_PRESENTERS[stage];
+  const evidence = hasEvidence(record);
 
-  let body: ReactNode;
-  let icon: ReactNode;
-  switch (stage) {
-    case "ST-INPUT-VALIDATE":
-      icon = <ScanSearch aria-hidden />;
-      body = demo.video ? (
-        <video
-          src={fileUrl(demo.video.name)}
-          className="aspect-video w-full rounded-xl bg-viewport object-cover"
-          muted
-          loop
-          autoPlay
-          playsInline
-          aria-label="Video gốc của video mẫu"
-        />
-      ) : (
-        <FrameImage src={cover ? fileUrl(cover.name) : undefined} />
-      );
-      break;
-    case "ST-PRIVACY-GATE":
-      icon = <ShieldCheck aria-hidden />;
-      body = (
-        <div className="grid aspect-video place-items-center rounded-xl bg-paper-sunken p-6 text-center">
-          <div className="max-w-sm">
-            <ShieldCheck className="mx-auto size-10 text-sage" aria-hidden />
-            <p className="mt-3 text-sm font-medium text-ink">Dữ liệu công khai: {demo.source.dataset}</p>
-            <p className="mt-1 text-sm text-ink-muted">
-              Người tải lên xác nhận video không có khuôn mặt hay biển số chưa làm mờ. Xác nhận được ghi lại cùng scene.
-            </p>
-          </div>
-        </div>
-      );
-      break;
-    case "ST-FRAME-EXTRACT":
-    case "ST-CAMERA-POSE":
-      icon = stage === "ST-FRAME-EXTRACT" ? <Images aria-hidden /> : <Aperture aria-hidden />;
-      body = (
-        <ul className="grid grid-cols-3 gap-2 sm:grid-cols-4" aria-label="Khung hình đã tách">
-          {frames.map((frame, index) => (
-            <li
-              key={frame.name}
-              className={cn(
-                "relative aspect-video overflow-hidden rounded-lg bg-paper-sunken transition-opacity duration-300",
-                stage === "ST-FRAME-EXTRACT" && index >= revealed && "opacity-0",
-              )}
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element -- ảnh demo từ API */}
-              <img src={fileUrl(frame.name)} alt="" className="size-full object-cover" loading="lazy" decoding="async" />
-              {stage === "ST-CAMERA-POSE" && index < revealed && (
-                <span className="absolute top-1.5 left-1.5 rounded border border-line-dark bg-viewport-deep/85 px-1.5 py-0.5 font-mono text-[10px] text-on-dark">
-                  cam {index + 1}
-                </span>
-              )}
-            </li>
-          ))}
-        </ul>
-      );
-      break;
-    case "ST-METRIC-CANONICALIZE":
-    case "ST-RGB-GEOMETRY":
-    case "ST-OBJECT-EXTRACT":
-      icon = <Cpu aria-hidden />;
-      body = <p className="text-sm text-ink-muted">Mẫu có bản ghi của bước này. Bundle hiện chỉ đóng gói video, frame và 3DGS preview; kết quả tỉ lệ, collision và vật thể cần xem tại job gốc.</p>;
-      break;
-    default:
-      icon = <Cpu aria-hidden />;
-      body = (
-        <div className="relative aspect-video overflow-hidden rounded-xl bg-viewport">
-          {cover && (
-            // eslint-disable-next-line @next/next/no-img-element -- ảnh demo từ API
-            <img
-              src={fileUrl(cover.name)}
-              alt=""
-              className="size-full object-cover transition-[filter] duration-500"
-              style={{ filter: `blur(${Math.round((1 - fraction) * 14)}px) saturate(${0.6 + fraction * 0.4})` }}
-            />
-          )}
-        </div>
-      );
+  const cards: ReactNode[] = [];
+  if (evidence && presenter) {
+    const node = presenter.render(context);
+    if (node) cards.push(<div key="stage">{node}</div>);
+  }
+  if (evidence && !presenter?.handlesAssets) {
+    (record?.assets ?? []).forEach((asset, index) => {
+      const node = ASSET_RENDERERS[asset.kind]?.(asset, context);
+      if (node) {
+        cards.push(
+          <div key={`asset-${index}`} className="space-y-1.5">
+            {asset.title && <p className="text-sm font-medium text-ink">{asset.title}</p>}
+            {node}
+          </div>,
+        );
+      }
+    });
   }
 
-  const caption =
-    stage === "ST-FRAME-EXTRACT" && demo.frame_count
-      ? `${demo.frame_count} khung hình được giữ lại để dựng 3D (hiển thị ${frames.length} ảnh đại diện).`
-      : stage === "ST-CAMERA-POSE"
-        ? "COLMAP khớp điểm đặc trưng giữa các ảnh để tìm vị trí camera của từng khung hình."
-        : meta?.description;
+  let note: string | undefined;
+  if (!evidence) {
+    note = record?.summary || "Mẫu này chưa ghi kết quả của bước này.";
+  } else if (cards.length === 0) {
+    note = `Bước này đã chạy xong${record?.duration_seconds ? ` trong ${formatDuration(record.duration_seconds)}` : ""}; mẫu chưa kèm hình hay số đo để hiển thị.`;
+  }
+  const caption = evidence ? (presenter?.caption?.(context) ?? meta?.description) : meta?.description;
 
   return (
     <figure className="rounded-2xl border border-line bg-paper-raised p-4 sm:p-5">
       <figcaption className="mb-3 flex items-center gap-2 text-sm font-medium text-ink [&_svg]:size-4 [&_svg]:text-ember-strong">
-        {icon}
+        {presenter?.icon ?? <Layers aria-hidden />}
         {meta?.title}
       </figcaption>
-      {body}
+      {cards.length > 0 && <div className="space-y-4">{cards}</div>}
+      {note && (
+        <p role="status" className="flex items-start gap-2 rounded-xl bg-paper-sunken p-4 text-sm text-ink-muted">
+          <CircleSlash className="mt-0.5 size-4 shrink-0" aria-hidden />
+          {note}
+        </p>
+      )}
       <p className="mt-3 text-sm leading-relaxed text-ink-muted">{caption}</p>
     </figure>
   );
-}
-
-function FrameImage({ src }: { src?: string }) {
-  if (!src) return <div className="aspect-video rounded-xl bg-viewport" />;
-  // eslint-disable-next-line @next/next/no-img-element -- ảnh demo từ API
-  return <img src={src} alt="" className="aspect-video w-full rounded-xl object-cover" />;
 }

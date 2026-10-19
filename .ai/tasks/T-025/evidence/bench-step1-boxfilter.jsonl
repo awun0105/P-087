@@ -1,0 +1,11 @@
+{"stage": "fixture", "rows": 2000000, "sh_degree": 3, "seconds": 2.784}
+{"stage": "cold", "boxes": 1, "seconds": 4.8211, "rss_mib": 1150.3, "object_gaussian_count": 1200000, "shell_ok": true}
+{"stage": "warm", "boxes": 1, "run": 0, "seconds": 0.8829, "rss_mib": 1140.4}
+{"stage": "warm", "boxes": 1, "run": 1, "seconds": 0.8883, "rss_mib": 1140.4}
+{"stage": "warm", "boxes": 1, "run": 2, "seconds": 0.8838, "rss_mib": 1140.4}
+{"stage": "summary", "boxes": 1, "cold_s": 4.8211, "warm_p50_s": 0.8838, "warm_p95_s": 0.8883, "rss_mib": 1140.4}
+{"stage": "cold", "boxes": 16, "seconds": 4.203, "rss_mib": 1156.8, "object_gaussian_count": 1200000, "shell_ok": true}
+{"stage": "warm", "boxes": 16, "run": 0, "seconds": 1.22, "rss_mib": 1156.8}
+{"stage": "warm", "boxes": 16, "run": 1, "seconds": 1.3843, "rss_mib": 1156.8}
+{"stage": "warm", "boxes": 16, "run": 2, "seconds": 1.2059, "rss_mib": 1156.8}
+{"stage": "summary", "boxes": 16, "cold_s": 4.203, "warm_p50_s": 1.22, "warm_p95_s": 1.3843, "rss_mib": 1156.8}

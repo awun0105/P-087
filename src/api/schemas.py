@@ -7,15 +7,12 @@ thay vì dựng model song song.
 
 Request model nằm ở tầng service (`orchestration.projects.models`) vì đó là input
 của domain, không phải của HTTP — route import thẳng từ đó, không re-export ở đây.
-
-Khác `src/models/schemas.py`: file đó chỉ chứa schema của endpoint chat mẫu trong template
-ban tổ chức, không thuộc API của Real2Sim.
 """
 
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 from src.models.contracts.artifacts import Checksum, Identifier, JsonObject, ProductArtifactRef
 from src.models.contracts.manifests import (
@@ -33,6 +30,7 @@ from src.services.orchestration.projects.models import DemoBaseline, InputVideoS
 from src.services.orchestration.projects.privacy import project_block_reason
 from src.services.orchestration.review.lifecycle import has_isaac_runtime_proof
 from src.services.orchestration.scene.models import SceneEditResult, SceneRevision, VisualBinding
+from src.services.scene.representation_composition import RepresentationDisposition, scene_representations
 
 __all__ = [
     "ApiErrorResponse",
@@ -93,9 +91,10 @@ class ProjectResponse(ApiModel):
     source_rights_attestation: JsonObject
     privacy: PrivacyStateResponse
     input_video: InputVideoSummary | None = None
+    display_video_url: str | None = None
     created_at: datetime | None = None
     created_by: Actor | None = None
-    #: Mốc bản demo nếu scene được đánh dấu là bản demo (nút Khôi phục bản demo đưa scene về mốc này).
+    #: Mốc bản demo nếu scene được đánh dấu là bản demo (nút Khôi phục về mốc gốc đưa scene về mốc này).
     demo_baseline: DemoBaseline | None = None
 
 
@@ -143,6 +142,7 @@ class SceneResponse(ApiModel):
     supersedes_revision: Identifier | None = None
     scene: SceneIR
     visual: VisualBinding
+    representations: list[RepresentationDisposition] = Field(default_factory=list)
 
 
 class SceneEditResponse(ApiModel):
@@ -154,6 +154,14 @@ class SceneEditResponse(ApiModel):
     scene_uri: str
     scene_checksum: Checksum
     scene: SceneIR
+    representations: list[RepresentationDisposition] = Field(default_factory=list)
+
+
+class LidarCollisionSourceSelectionRequest(ApiModel):
+    """Select one exact, job-published LiDAR candidate against the current scene revision."""
+
+    expected_scene_revision: Identifier
+    candidate_manifest_ref: ProductArtifactRef
 
 
 class ValidationStateResponse(ApiModel):
@@ -194,7 +202,7 @@ class ObjectActionRequest(ApiModel):
     """Body cho các object action: confirm/ignore/hide/delete/rename (PRODUCT-07)."""
 
     expected_scene_revision: Identifier
-    active: bool | None = None
+    active: StrictBool | None = None
     name: str | None = None
     # action = label (ADR 0007): nhãn lớp; khối lượng người dùng nhập (bỏ trống = mặc định của nhãn).
     semantic_class: str | None = Field(default=None, max_length=64)
@@ -326,6 +334,7 @@ def project_response(record: ProjectRecord) -> ProjectResponse:
         source_rights_attestation=record.source_rights_attestation,
         privacy=privacy_state(record),
         input_video=record.input_video,
+        display_video_url=(f"/api/v1/projects/{record.project_id}/display-video" if record.display_video_ref else None),
         created_at=record.created_at,
         created_by=record.created_by,
         demo_baseline=record.demo_baseline,
@@ -343,6 +352,7 @@ def scene_response(revision: SceneRevision, visual: VisualBinding) -> SceneRespo
         supersedes_revision=revision.supersedes_revision,
         scene=revision.scene,
         visual=visual,
+        representations=scene_representations(revision.scene),
     )
 
 
@@ -375,4 +385,5 @@ def scene_edit_response(result: SceneEditResult) -> SceneEditResponse:
         scene_uri=result.revision.scene_reference.artifact_uri,
         scene_checksum=result.revision.scene_reference.artifact_checksum,
         scene=result.revision.scene,
+        representations=scene_representations(result.revision.scene),
     )

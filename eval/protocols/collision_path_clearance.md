@@ -51,3 +51,79 @@ hệ `world` (khớp cứng tâm camera theo quỹ đạo ↔ pose canonical). D
 
 Chưa đo: traversal khác, quỹ đạo không phải ground truth, và chiều ngược lại (LiDAR có bỏ sót vật cản thật không — cần
 bề mặt tham chiếu độc lập).
+
+## AUD-12.S1 — evidence contract và fixture acceptance đã khóa
+
+### Cách diễn giải các JSONL đã lưu
+
+- `blocked_positions / camera_positions` chỉ là **free-space path proxy**. Nó
+  đo hình học va vào capsule quanh các pose đầu vào; không đo vật cản thật bị bỏ
+  sót. Independent obstacle recall phải có một reference scan/CAD/contact set
+  độc lập và được lưu riêng.
+- Mọi dòng LiDAR có `trajectory_origin=ground_truth` là **GT-assisted**. Không
+  dùng các dòng này làm benchmark độc lập hoặc claim safety.
+- Dòng RGB cũ không ghi `source`, checksum hình học/profile, robot envelope,
+  hardware ID hay `trajectory_origin`; parser giữ các trường đó là thiếu và
+  đánh dấu `origin_unrecorded_free_space_proxy`, không suy từ `label` hoặc tên
+  file. Protocol xác định evaluator dùng camera path canonical nhưng JSONL chưa
+  mang metadata đó. File-level SHA-256 giữ nguyên danh tính JSONL.
+- Log 0/100 sau `min_range=2–3 m` và `floor_band=0,15 m` chứng minh riêng proxy
+  free-space trong một traversal GT-assisted. Chưa biết tỉ lệ giữ vật cản độc
+  lập, contact trong Isaac, hoặc kết quả ở capture/hardware khác.
+
+Đọc lại các file đã lưu bằng:
+
+```bash
+python -m eval.path.collision_quality \
+  eval/results/collision_path_clearance/aisle-cw-local-t2000.jsonl \
+  eval/results/collision_path_clearance/aisle-cw-100-lidar-job.jsonl
+```
+
+Mỗi report chuẩn hóa giữ units mét, counts gốc, evidence class, missing
+provenance và checksum file. Không ghi ngược vào JSONL nguồn.
+
+### Fixture matrix và split
+
+Các fixture có unit/gốc hình học biết trước. Bản test hiện tại đóng các mẫu
+tổng hợp tối thiểu dưới đây để làm tuning inputs; chưa có held-out capture thật
+trong repo. Cột held-out là ma trận đã chốt cho capture/checksum khác, không phải
+kết quả đã chạy.
+
+| Nhóm | Tuning fixture | Held-out fixture | Metrics/acceptance đã đóng cho fixture |
+| --- | --- | --- | --- |
+| Vật cản mảnh | Chân kệ và chân pallet | Dịch vị trí/chỉnh mật độ mẫu | Mỗi vật cản có reference sample; retain 100% samples ở ngưỡng sai số đã khai báo; test dương phải báo BLOCKED. |
+| Vật cản thấp | Dây/cáp và low box | Dịch cao độ trong dải capsule | Giữ từng class; low obstacle không bị coi là floor. |
+| Tường và dốc | Tường cắt đường đi, ramp edge | Đổi hướng tường/độ cao dốc | Support/wall reference được giữ; vùng capsule overlap phải báo BLOCKED. |
+| Sàn/support | Mặt sàn phẳng | Sàn có dốc và biên coverage | Retain 100% support samples đã gán; floor samples không tự bị tính thành chặn thân robot. Không chấp nhận output rỗng. |
+| Lối hẹp | Passage rộng 0,90 m | Passage rộng 1,05 m | Với capsule đường kính 0,922 m: trường hợp overlap phải BLOCKED; trường hợp clearance lớn hơn phải CLEAR. |
+| Lệch camera | Offset ngang 0,05 m tại biên capsule | Cùng vật cản với pose/yaw khác | Ghi offset/extrinsic đã đo; nếu thiếu offset hoặc không truyền được theo pose, kết quả là UNRESOLVED, không là verified clear. |
+| Motion/coverage | Static observed region | Motion-suspected và unobserved/inferred region | Flag diagnostic/state; không được nâng thành verified physics. |
+
+Ngưỡng frozen cho **synthetic fixtures** trước khi chạy test: mọi sample vật
+cản/sàn tham chiếu phải còn (100%); geometry rỗng luôn fail; known-clear fixture
+phải có 0/1 blocked; known-blocked fixture phải có 1/1 blocked. Dùng sai số mẫu
+được khai báo theo mét trong fixture (synthetic sample tolerance hiện là
+0,001 m), không đổi ngầm theo profile. Đây không phải
+production acceptance threshold. Ngưỡng production và nguồn ground truth sẽ được
+ghi/freeze trên tuning set trước khi mở held-out run trong AUD-12.S4; held-out
+không dùng để chỉnh filter.
+
+### Typed source/report boundary
+
+`CollisionSourceSelection` (version 1.0) bind mode/input mode, source artifact
+checksum, source-QA ref, LiDAR alignment-QA kind/ref theo input mode,
+profile/config checksum, effective resolution và output collision ref.
+`CollisionQualityReport` bind selection/report checksums, source/output refs,
+hardware/robot profile refs, resolution, robot capsule, frozen acceptance-profile
+result, floor/support retention, free-space proxy, independent obstacle
+reference, per-region observation/coverage, và Isaac contact ref.
+Consumer ghi selected output vào `SceneEnvironment.collider_ref`; helper kiểm
+exact URI + byte checksum và source/config/report identity trước khi tiêu thụ.
+
+`free_space_proxy` không thể thay `obstacle_retention`. `UNOBSERVED`, `INFERRED`
+hay `MOTION_SUSPECTED` region, geometry rỗng, reference cùng input/synthetic,
+thiếu floor support hoặc thiếu exact-candidate Isaac contact đều chặn
+`physics_claim=verified`. Claim cũng cần `quality_result=PASS` theo đúng
+acceptance profile được bind; chưa freeze profile thì report chỉ là
+`NOT_EVALUATED`. Contract hiện được thêm nội bộ; producer/API/SceneIR chưa bật
+source selection trong production ở S1.

@@ -1,0 +1,68 @@
+{
+  "schema_version": "1.0",
+  "cases": [
+    {
+      "case_id": "owner-01-rgb-only",
+      "supplied_roles": ["rgb_video"],
+      "unresolved_role_candidates": [],
+      "conditional_recipe_groups": ["R1"],
+      "required_facts": [],
+      "requires_user_choice": false,
+      "notes": "RGB-only route; resolution still checks the exact runtime capability before Run."
+    },
+    {
+      "case_id": "owner-02-registered-lidar",
+      "supplied_roles": ["rgb_video", "registered_lidar_map"],
+      "unresolved_role_candidates": [],
+      "conditional_recipe_groups": ["R2"],
+      "required_facts": ["same_scene", "coordinate_unit", "lidar_frame_id", "map_overlap_qa"],
+      "requires_user_choice": false,
+      "notes": "A registered map does not imply RGB alignment and does not require camera calibration, TUM, or RGB frame times."
+    },
+    {
+      "case_id": "owner-03-single-raw-cloud",
+      "supplied_roles": ["rgb_video", "static_lidar_cloud"],
+      "unresolved_role_candidates": [],
+      "conditional_recipe_groups": ["R3"],
+      "required_facts": ["same_scene", "coordinate_unit", "lidar_frame_id", "map_overlap_qa"],
+      "requires_user_choice": false,
+      "notes": "One cloud is one static observation; it cannot provide a multi-scan trajectory or prove full-site coverage."
+    },
+    {
+      "case_id": "owner-04-lidar-and-calibration",
+      "supplied_roles": ["rgb_video", "camera_lidar_calibration"],
+      "unresolved_role_candidates": ["registered_lidar_map", "static_lidar_cloud", "lidar_scan"],
+      "conditional_recipe_groups": ["R2", "R3", "R5"],
+      "required_facts": ["cloud_state", "coordinate_unit", "lidar_frame_id", "scan_order_and_timestamps_if_sequence"],
+      "requires_user_choice": true,
+      "notes": "Calibration alone is not a trajectory and does not make a cloud registered. Select the actual cloud state; R5 is a candidate only for a timestamped ordered scan sequence."
+    },
+    {
+      "case_id": "owner-05-calibration-tum-and-rgb-frame-times",
+      "supplied_roles": ["rgb_video", "camera_lidar_calibration", "sensor_trajectory", "rgb_frame_times"],
+      "unresolved_role_candidates": ["registered_lidar_map", "static_lidar_cloud", "lidar_scan"],
+      "conditional_recipe_groups": ["R6"],
+      "required_facts": ["cloud_state", "same_scene", "coordinate_unit", "lidar_frame_id", "world_frame_id", "trajectory_convention", "scan_to_pose_binding", "rgb_clock_relation", "calibration_qa", "sensor_alignment_qa"],
+      "requires_user_choice": true,
+      "notes": "R6 requires a sensor-frame trajectory and exact RGB timing/frame bindings. TUM timestamps alone do not establish the RGB clock relation."
+    },
+    {
+      "case_id": "owner-06-calibration-and-rgb-frame-times-without-tum",
+      "supplied_roles": ["rgb_video", "camera_lidar_calibration", "rgb_frame_times"],
+      "unresolved_role_candidates": ["registered_lidar_map", "static_lidar_cloud", "lidar_scan"],
+      "conditional_recipe_groups": ["R2", "R3", "R5"],
+      "required_facts": ["cloud_state", "coordinate_unit", "lidar_frame_id", "ordered_scan_sequence_and_timestamps_for_R5", "odometry_runtime_qualification"],
+      "requires_user_choice": true,
+      "notes": "R5 can estimate a sensor trajectory only from a valid timestamped sequence. If the cloud is already a map or one static cloud, R2/R3 are alternatives; calibration and RGB frame times do not replace scan poses."
+    },
+    {
+      "case_id": "owner-07-calibration-and-tum-without-rgb-frame-times",
+      "supplied_roles": ["rgb_video", "camera_lidar_calibration", "sensor_trajectory"],
+      "unresolved_role_candidates": ["registered_lidar_map", "static_lidar_cloud", "lidar_scan"],
+      "conditional_recipe_groups": ["R2", "R3", "R4"],
+      "required_facts": ["cloud_state", "coordinate_unit", "lidar_frame_id", "trajectory_convention", "scan_to_pose_binding", "same_scene"],
+      "requires_user_choice": true,
+      "notes": "A supplied sensor trajectory can support R4 fusion when scan bindings are valid; a registered map may use R2. Calibration is explicitly excluded from either map-only route unless RGB timing and sensor QA support R6."
+    }
+  ]
+}

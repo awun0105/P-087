@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { IBM_Plex_Mono, Plus_Jakarta_Sans } from "next/font/google";
 
+import { LANG_INIT_SCRIPT } from "@/lib/i18n";
 import { THEME_INIT_SCRIPT } from "@/lib/theme";
 
 import "./globals.css";
@@ -20,8 +21,15 @@ const mono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Real2Sim Studio",
-  description: "Dựng scene 3D Gaussian Splatting từ video để chỉnh sửa và đưa vào mô phỏng.",
+  title: "Real2Sim Studio — Từ video thật đến scene mô phỏng",
+  description:
+    "Biến video quay môi trường thật thành scene 3D đúng tỉ lệ mét, tách được vật thể, có collider và xuất OpenUSD. Lát cắt đầu tiên: nhà kho trong nhà và NVIDIA Isaac Sim.",
+  icons: {
+    icon: [
+      { url: "/icon.svg", type: "image/svg+xml" },
+      { url: "/favicon.ico", sizes: "any" },
+    ],
+  },
 };
 
 /**
@@ -33,7 +41,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     // Script theme gắn class `dark` lên <html> trước khi React hydrate nên phải bỏ cảnh báo lệch thuộc tính ở thẻ này.
     <html lang="vi" className={`${sans.variable} ${mono.variable} h-full antialiased`} suppressHydrationWarning>
       <head>
-        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT + LANG_INIT_SCRIPT }} />
       </head>
       <body className="min-h-full">{children}</body>
     </html>

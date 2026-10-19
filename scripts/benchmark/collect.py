@@ -7,7 +7,7 @@ Nhãn gom các lần chạy cùng mục đích (dataset + cấu hình + máy); t
 Giao thức và ý nghĩa từng field: `eval/protocols/pipeline_runtime.md`.
 
 Đọc cùng DATABASE_URL/ARTIFACT_ROOT (và kho file nếu có) như API. Bản ghi đã có
-(job + attempt) không ghi lại, nên chạy nhiều lần an toàn. Số liệu chỉ là những gì
+(job + attempt + phase) không ghi lại, nên chạy nhiều lần an toàn. Số liệu chỉ là những gì
 đo được; ô không đo được để trống, không ước đoán.
 """
 
@@ -25,26 +25,48 @@ from src.services.orchestration.projects.registry import get_project_registry
 RESULTS_ROOT = Path("eval/results")
 
 
-def _existing(path: Path) -> set[tuple[str, int]]:
+def _existing(path: Path) -> set[tuple[str, int, str]]:
     if not path.is_file():
         return set()
     keys = set()
     for line in path.read_text(encoding="utf-8").splitlines():
         if line.strip():
             record = json.loads(line)
-            keys.add((record["job_id"], record["attempt"]))
+            phase = record.get("snapshot_phase")
+            if phase not in {"partial", "terminal"}:
+                phase = "terminal" if record.get("status") in {"SUCCEEDED", "FAILED", "CANCELLED"} else "partial"
+            keys.add((record["job_id"], record["attempt"], phase))
     return keys
 
 
 def _row(benchmark: PipelineRuntimeBenchmark) -> str:
-    total = f"{benchmark.total_seconds:.0f}s" if benchmark.total_seconds is not None else "—"
+    phase = benchmark.snapshot_phase or (
+        "terminal" if benchmark.status in {"SUCCEEDED", "FAILED", "CANCELLED"} else "partial"
+    )
+    total = (
+        f"{benchmark.total_seconds:.0f}s"
+        if benchmark.total_seconds is not None
+        else "partial"
+        if phase == "partial"
+        else "—"
+    )
+    worker = f"{benchmark.worker_process_seconds:.0f}s" if benchmark.worker_process_seconds is not None else "—"
+    queue = f"{benchmark.queue_seconds:.0f}s" if benchmark.queue_seconds is not None else "—"
+    waiting = f"{benchmark.user_wait_seconds:.0f}s" if benchmark.user_wait_seconds is not None else "—"
     sog = f"{benchmark.sog_size_bytes / 1e6:.2f}MB" if benchmark.sog_size_bytes else "—"
     cost = f"${benchmark.estimated_gpu_cost_usd:.3f}" if benchmark.estimated_gpu_cost_usd is not None else "—"
     gpu = benchmark.machine.gpu_name if benchmark.machine and benchmark.machine.gpu_name else "—"
+    frames = str(benchmark.actual_frame_count) if benchmark.actual_frame_count is not None else "—"
     stages = " ".join(
-        f"{stage.stage_id.removeprefix('ST-')}={stage.seconds:.0f}s" for stage in benchmark.stages if stage.seconds
+        f"{stage.stage_id.removeprefix('ST-')}={stage.seconds:.0f}s"
+        for stage in benchmark.stages
+        if stage.seconds is not None
     )
-    return f"{benchmark.job_id:18} {benchmark.status:10} {total:>7} {sog:>9} {cost:>8}  {gpu:14} {stages}"
+    return (
+        f"{benchmark.job_id:18} {benchmark.status:10} {phase:8} {frames:>6} "
+        f"{total:>8} {worker:>8} {queue:>7} {waiting:>8} "
+        f"{sog:>9} {cost:>8}  {gpu:14} {stages}"
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -70,7 +92,11 @@ def main(argv: list[str] | None = None) -> int:
     seen = _existing(args.out)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     written = 0
-    print(f"{'job':18} {'status':10} {'tổng':>7} {'SOG':>9} {'chi phí':>8}  {'GPU':14} stage")
+    print(
+        f"{'job':18} {'status':10} {'phase':8} {'frames':>6} {'job wall':>8} {'worker':>8} "
+        f"{'queue':>7} {'user wait':>8} "
+        f"{'SOG':>9} {'chi phí':>8}  {'GPU':14} stage"
+    )
     with args.out.open("a", encoding="utf-8") as stream:
         for job_id in job_ids:
             benchmark = build_benchmark(
@@ -83,10 +109,11 @@ def main(argv: list[str] | None = None) -> int:
                 label=args.label,
             )
             print(_row(benchmark))
-            if (benchmark.job_id, benchmark.attempt) in seen:
+            phase = benchmark.snapshot_phase or "partial"
+            if (benchmark.job_id, benchmark.attempt, phase) in seen:
                 continue
             stream.write(benchmark.model_dump_json() + "\n")
-            seen.add((benchmark.job_id, benchmark.attempt))
+            seen.add((benchmark.job_id, benchmark.attempt, phase))
             written += 1
     print(f"Đã ghi {written} bản ghi mới vào {args.out}")
     return 0

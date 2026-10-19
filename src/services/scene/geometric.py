@@ -1,7 +1,7 @@
 """Tách vật thể ứng viên bằng hình học từ collision mesh canonical (EX-SCENE baseline thật).
 
 Khi chưa có SAM2 runtime, đây là đường chạy được trên bundle thật: voxel hoá đỉnh của
-collision mesh REC-05 (mét, Z-up, sàn z=0), bỏ phần sàn, tách khối liên thông 26-lân cận
+collision mesh canonical theo mét, lọc theo fitted floor plane rồi tách khối liên thông 26-lân cận
 (ý tưởng clustering + OBB theo R2G `get_aabb.py`/SAMPro3D DBSCAN, playbook: Tier-0 donor cho
 SCENE-03/06). Khối cỡ vật thể (pallet, thùng) → SceneObject CANDIDATE có hộp OBB theo yaw;
 khối lớn (kệ, tường) để lại cho môi trường. Người dùng xác nhận ứng viên (SCENE-05).
@@ -21,8 +21,10 @@ from scipy import ndimage
 
 from src.models.contracts.artifacts import ArtifactDataClass, ProductArtifactRef
 from src.models.contracts.coordinates import Transform
+from src.models.contracts.floor_model import FloorModel
 from src.models.contracts.manifests import StageId
 from src.models.contracts.scene import SceneObject, SceneObjectOrigin, SceneObjectState
+from src.services.scene.floor_model import above_floor_mask
 
 METHOD = "geometric_voxel_components_v1"
 
@@ -32,7 +34,6 @@ class GeometricConfig:
     """Ngưỡng baseline (mét)."""
 
     voxel_m: float = 0.10
-    floor_clearance_m: float = 0.06
     max_height_m: float = 2.4
     min_footprint_m: float = 0.25
     max_footprint_m: float = 2.5
@@ -72,9 +73,14 @@ def _yaw_box(points: np.ndarray) -> tuple[tuple[float, float, float], float, tup
     return (float(center_xy[0]), float(center_xy[1]), float((z_low + z_high) / 2)), yaw, dims
 
 
-def find_candidates(vertices: np.ndarray, config: GeometricConfig = GeometricConfig()) -> list[Candidate]:
-    """Khối liên thông của voxel phía trên sàn, lọc theo cỡ vật thể, lớn trước."""
-    above = vertices[(vertices[:, 2] > config.floor_clearance_m) & (vertices[:, 2] < config.max_height_m)]
+def find_candidates(
+    vertices: np.ndarray, floor_model: FloorModel, config: GeometricConfig = GeometricConfig()
+) -> list[Candidate]:
+    """Khối liên thông phía trên fitted floor plane, lọc theo cỡ vật thể, lớn trước."""
+    vertices = np.asarray(vertices)
+    if vertices.ndim != 2 or vertices.shape[1] != 3:
+        raise ValueError("collision vertices must have shape (N, 3)")
+    above = vertices[above_floor_mask(vertices, floor_model, max_height_m=config.max_height_m)]
     if not len(above):
         return []
     cells = np.floor(above / config.voxel_m).astype(np.int64)
@@ -172,11 +178,15 @@ def candidate_objects(
     job_id: str,
     vertices: np.ndarray,
     publish: Callable[[ProductArtifactRef, bytes], ProductArtifactRef],
+    floor_model: FloorModel,
     config: GeometricConfig = GeometricConfig(),
 ) -> list[SceneObject]:
     """Fallback hình học: ứng viên từ collision mesh (ADR 0006 §2)."""
     return objects_from_candidates(
-        job_id, find_candidates(vertices, config), publish, {"method": METHOD, "voxel_m": config.voxel_m}
+        job_id,
+        find_candidates(vertices, floor_model, config),
+        publish,
+        {"method": METHOD, "voxel_m": config.voxel_m, "floor_profile_checksum": floor_model.profile_checksum},
     )
 
 

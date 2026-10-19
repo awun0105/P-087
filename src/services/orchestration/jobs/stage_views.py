@@ -4,16 +4,21 @@ UI không tự suy đường dẫn artifact. Mỗi view chỉ trỏ tới artifa
 của job (stage artifacts, preview, bundle, ảnh frame); trình duyệt nạp một lớp mỗi lúc.
 """
 
+import math
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
 from src.models.contracts.artifacts import ProductArtifactRef
 from src.models.contracts.manifests import JobManifest, StageArtifact, StageId, StageStatus
+from src.models.contracts.preview import ReconstructionPreview
 from src.models.contracts.reconstruction import ReconstructionBundle
 from src.services.orchestration.artifacts import ArtifactStoreError
 from src.services.orchestration.projects.registry import ProjectRegistry
 from src.services.reconstruction import CameraMarker, camera_markers, frame_images
+from src.services.reconstruction.rgb.canonical.metric_math import compose_rotation
+from src.services.reconstruction.rgb.canonical.metric_models import MetricConfirmation
+from src.services.reconstruction.rgb.pose.camera_pose import Quaternion
 
 ViewKind = Literal["frames", "cameras", "gaussian", "mesh"]
 
@@ -33,6 +38,8 @@ class StageView(BaseModel):
     unit: Literal["meter", "arbitrary"]
     refs: list[ProductArtifactRef] = []
     cameras: list[CameraMarker] = []
+    #: Rotation source→display Y-up, không scale/translation; chỉ preview đã có xác nhận khớp nguồn.
+    display_rotation_xyzw: Quaternion | None = None
     #: Khoá của lớp LiDAR chồng lên scene (`GET /jobs/{id}/lidar-overlay`); None = scene không có LiDAR đã căn chỉnh.
     lidar_overlay: str | None = None
 
@@ -66,6 +73,25 @@ def job_bundle(registry: ProjectRegistry, job: JobManifest) -> ReconstructionBun
         return None
     path = registry.runtime_resolver.require_uri(stage.artifact_uri, stage.artifact_checksum)
     return ReconstructionBundle.model_validate_json(path.read_bytes())
+
+
+def preview_display_rotation(
+    registry: ProjectRegistry, job: JobManifest, preview: ReconstructionPreview
+) -> Quaternion | None:
+    """Hướng SfM→display của đúng preview đã được xác nhận; giữ nguyên artifact và đơn vị."""
+    if preview.camera_pose_ref is None:
+        return None
+    confirmation = _stage(job, StageId.METRIC_CANONICALIZE, "RGBMetricConfirmation")
+    if confirmation is None or not confirmation.artifact_uri or not confirmation.artifact_checksum:
+        return None
+    path = registry.runtime_resolver.require_uri(confirmation.artifact_uri, confirmation.artifact_checksum)
+    record = MetricConfirmation.model_validate_json(path.read_bytes())
+    if (
+        record.preview.request.source_visual != preview.source_visual_ref
+        or record.preview.source_camera_poses != preview.camera_pose_ref
+    ):
+        return None
+    return compose_rotation((-math.sqrt(0.5), 0, 0, math.sqrt(0.5)), record.preview.transform.rotation_xyzw)
 
 
 def job_frame_images(registry: ProjectRegistry, job: JobManifest) -> list[ProductArtifactRef]:
@@ -107,6 +133,8 @@ def stage_views(registry: ProjectRegistry, job_id: str) -> StageViewList:
     except (ArtifactStoreError, ValueError):
         preview = None
     if preview is not None:
+        cameras = camera_markers(preview.camera_pose_ref, resolve)
+        display_rotation = preview_display_rotation(registry, job, preview)
         views.append(
             StageView(
                 stage_id=StageId.CAMERA_POSE,
@@ -114,7 +142,7 @@ def stage_views(registry: ProjectRegistry, job_id: str) -> StageViewList:
                 title="Vị trí camera (COLMAP)",
                 note="Quỹ đạo camera nhìn từ trên xuống; đơn vị SfM tùy ý, chưa quy đổi mét.",
                 unit="arbitrary",
-                cameras=camera_markers(preview.camera_pose_ref, resolve),
+                cameras=cameras,
             )
         )
         views.append(
@@ -125,6 +153,8 @@ def stage_views(registry: ProjectRegistry, job_id: str) -> StageViewList:
                 note="Preview dựng từ ảnh, đơn vị tùy ý.",
                 unit="arbitrary",
                 refs=[preview.delivery_ref],
+                cameras=cameras,
+                display_rotation_xyzw=display_rotation,
             )
         )
     bundle = job_bundle(registry, job)
@@ -165,6 +195,27 @@ def view_references(registry: ProjectRegistry, job: JobManifest) -> list[Product
     if bundle is not None:
         references.extend(bundle.camera_pose_refs)
         references.extend(
-            ref for ref in (bundle.visual_artifact_ref, bundle.rgb_geometry_ref, bundle.canonical_geometry_ref) if ref
+            ref
+            for ref in (
+                bundle.visual_artifact_ref,
+                bundle.rgb_geometry_ref,
+                bundle.lidar_geometry_ref,
+                bundle.canonical_geometry_ref,
+            )
+            if ref
         )
+        if bundle.alignment_record is not None:
+            alignment = bundle.alignment_record
+            references.append(
+                ProductArtifactRef(
+                    artifact_type=alignment.artifact_type,
+                    schema_version=alignment.schema_version,
+                    artifact_uri=alignment.artifact_uri,
+                    artifact_checksum=alignment.artifact_checksum,
+                    data_class="derived",
+                    producer_stage=alignment.producer_stage,
+                    job_id=alignment.job_id,
+                    source_provenance=alignment.provenance,
+                )
+            )
     return references

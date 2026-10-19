@@ -68,7 +68,7 @@ def _setup(tmp_path: Path, shift: tuple[float, float, float] = (0.0, 0.0, 0.0)):
 
 
 def test_proposal_takes_scale_and_floor_from_the_lidar_package(tmp_path: Path) -> None:
-    arguments, _, visual, locate, floor_z, registered = _setup(tmp_path)
+    arguments, port, visual, locate, floor_z, registered = _setup(tmp_path)
     reference = propose_metric_from_lidar(*arguments)
     proposal = load_proposal(JOB, visual.reference, locate)
     assert proposal is not None and proposal.method == "lidar_trajectory_alignment"
@@ -82,6 +82,12 @@ def test_proposal_takes_scale_and_floor_from_the_lidar_package(tmp_path: Path) -
         1.5
     )
     assert propose_metric_from_lidar(*arguments) == reference  # gọi lại trả đúng artifact đã có
+    port.locate = locate
+    comparison = port.mode_comparison(JOB, visual.reference, None, None)
+    assert comparison.modes[0].status == "missing"
+    assert "không dùng đề xuất MoGe-2" in comparison.modes[0].note
+    assert comparison.modes[2].status == "estimated"
+    assert comparison.modes[2].scale_m_per_sfm_unit == proposal.scale_m_per_sfm_unit
 
 
 def test_lidar_proposal_confirms_without_any_user_point(tmp_path: Path) -> None:

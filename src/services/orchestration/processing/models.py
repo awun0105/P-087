@@ -13,7 +13,18 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from src.models.contracts.artifacts import Checksum
 
 ParamValue = int | float | str
-PresetName = Literal["minimum_quality", "maximum"]
+PresetName = str
+
+
+class ScenarioPreferences(BaseModel):
+    """User-declared capture scenario and desired worker capacity."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    input_type: Literal["video_continuous", "video_loop_360", "photo_set"]
+    environment: Literal["indoor", "outdoor"]
+    subject_scope: Literal["single_object", "full_room"]
+    target_capacity: Literal["minimum_quality", "balanced", "machine_maximum"]
 
 
 class ParameterChoice(BaseModel):
@@ -30,8 +41,8 @@ class ParameterSpec(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    key: str = Field(pattern=r"^(sampling|colmap|brush)\.[a-z_]+$")
-    group: Literal["sampling", "colmap", "brush"]
+    key: str = Field(pattern=r"^(sampling|colmap|brush|geometry|scene|simulation)\.[a-z_]+$")
+    group: Literal["sampling", "colmap", "brush", "geometry", "scene", "simulation"]
     label: str
     description: str
     kind: Literal["number", "integer", "choice"]
@@ -176,3 +187,9 @@ class JobProcessingConfig(BaseModel):
     sampling: dict[str, float | int]
     colmap: dict[str, ParamValue | bool]
     brush: dict[str, ParamValue | bool]
+    geometry: dict[str, ParamValue] = Field(default_factory=dict, exclude_if=lambda value: not value)
+    scene: dict[str, ParamValue] = Field(default_factory=dict, exclude_if=lambda value: not value)
+    simulation: dict[str, ParamValue] = Field(default_factory=dict, exclude_if=lambda value: not value)
+    #: Che khuôn mặt/biển số trên frame trước khi dựng 3D (AUD-18). Chỉ ghi khi bật, để bytes cấu hình của job
+    #: không chọn che giữ nguyên như trước.
+    anonymize: bool = Field(default=False, exclude_if=lambda value: value is False)

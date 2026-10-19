@@ -124,6 +124,13 @@ describe("bốn biến thể giao diện đều đủ tương phản (WCAG)", ()
     });
   }
 
+  it("nền video preview dùng token palette và giữ màu đen ở cả bốn biến thể", () => {
+    expect(CSS).toContain("--color-media-preview-surface: var(--studio-media-preview-surface);");
+    for (const [name, values] of Object.entries(variants)) {
+      expect(values["--studio-media-preview-surface"], name).toBe("#000000");
+    }
+  });
+
   it("Gruvbox định nghĩa đủ mọi biến màu mà bảng mặc định có", () => {
     const names = (selector: string) => {
       const start = CSS.indexOf(selector);
@@ -154,9 +161,11 @@ describe("Gruvbox chỉ dùng màu của bảng tham chiếu", () => {
   ]);
   // Nền cam nhạt: bảng tham chiếu không có sẵn, pha orange vào bg0 (16% bản sáng, 20% bản tối).
   const DERIVED = new Set(["#f5d9a9", "#533a25"]);
+  // Nền media preview là màu chức năng cố định, không đổi theo bảng màu giao diện.
+  const FIXED_THEME_TOKENS = new Set(["--studio-media-preview-surface"]);
 
   it.each([".theme-gruvbox,\n.theme-gruvbox .landing-page {", ".theme-gruvbox.dark {"])("%s", (selector) => {
-    const strangers = Object.entries(variables(selector)).filter(([, value]) => !REFERENCE.has(value) && !DERIVED.has(value));
+    const strangers = Object.entries(variables(selector)).filter(([name, value]) => !FIXED_THEME_TOKENS.has(name) && !REFERENCE.has(value) && !DERIVED.has(value));
     expect(strangers).toEqual([]);
   });
 });
@@ -184,7 +193,7 @@ describe("UI không viết cứng mã màu", () => {
   it("mọi màu đi qua biến của bảng màu", () => {
     const offenders: string[] = [];
     for (const file of files) {
-      const relative = file.slice(process.cwd().length + 1);
+      const relative = file.slice(process.cwd().length + 1).replace(/\\/g, "/");
       // Nơi định nghĩa bảng màu, ô màu mẫu của menu, và mặt nạ mờ (#000 là alpha của mask, không phải màu vẽ).
       if (relative === "src/app/globals.css" || relative === "src/features/shell/PaletteMenu.tsx" || relative === "src/styles/shadcn-variants.css") continue;
       readFileSync(file, "utf8").split("\n").forEach((line, index) => {

@@ -113,6 +113,46 @@ def test_profile_identity_and_wrong_checksum() -> None:
         RGBQualityProfile.model_validate({**profile.model_dump(), "blur_exclude_gt": 9.5})
 
 
+@pytest.mark.parametrize(
+    ("source_size", "measured_size"),
+    (("1920x1080", "640x360"), ("1080x1920", "360x640"), ("640x480", "480x360"), ("180x320", "180x320")),
+)
+def test_product_quality_v2_preserves_aspect_and_does_not_upscale(source_size: str, measured_size: str) -> None:
+    """Measurement uses an oriented long/short-edge box and leaves small input dimensions intact."""
+    profile_path = ROOT / "configs/product/upload_quality_v2.json"
+    profile = RGBQualityProfile.model_validate_json(profile_path.read_bytes())
+    legacy = RGBQualityProfile.model_validate_json((ROOT / "configs/product/upload_quality_v1.json").read_bytes())
+    assert profile.profile_id == "product.upload_rgb_quality_v2"
+    assert profile.profile_checksum != legacy.profile_checksum
+    assert profile.measurement_orientation == "fit_oriented_bounds"
+    filt = FFmpegRGBProbe._filter_prefix(profile) + ",showinfo"
+
+    result = subprocess.run(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "info",
+            "-f",
+            "lavfi",
+            "-i",
+            f"color=c=black:s={source_size}:r=25:d=0.04",
+            "-vf",
+            filt,
+            "-frames:v",
+            "1",
+            "-f",
+            "null",
+            "-",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert f"s:{measured_size}" in result.stderr
+
+
 def test_blur_mask_is_logical_and_motion_is_only_warning(tmp_path: Path) -> None:
     """Quality rejection leaves source bytes and frozen selection untouched."""
     frames = _assets(tmp_path, (b"one", b"two", b"three", b"four"))

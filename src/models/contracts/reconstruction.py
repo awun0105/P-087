@@ -1,5 +1,6 @@
 """Reconstruction artifacts published by EX-REC."""
 
+import hashlib
 import math
 from enum import StrEnum
 from typing import Literal, Self
@@ -7,6 +8,8 @@ from typing import Literal, Self
 from pydantic import Field, FiniteFloat, model_validator
 
 from src.models.contracts.artifacts import (
+    ArtifactDataClass,
+    ArtifactRef,
     ArtifactUri,
     Checksum,
     ContractModel,
@@ -16,6 +19,7 @@ from src.models.contracts.artifacts import (
     SchemaVersion,
 )
 from src.models.contracts.coordinates import CoordinateSystem, MetricScale, MetricScaleStatus, Transform
+from src.models.contracts.identity import canonical_json_bytes
 from src.models.contracts.manifests import InputConfiguration, StageId
 
 
@@ -84,6 +88,396 @@ class LiDARGeometryArtifact(ContractModel):
     source_frame: Identifier
     declared_transform_to_canonical: Transform | None = None
     preprocessing_provenance: PreprocessingProvenance
+
+
+class EstimatedTrajectoryPose(ContractModel):
+    """One estimated sensor pose bound to the exact source scan and timestamp row."""
+
+    scan_index: int = Field(ge=0)
+    source_scan_file_id: Identifier
+    source_scan_checksum: Checksum
+    timestamp_seconds: FiniteFloat
+    map_from_sensor: Transform
+
+    @model_validator(mode="after")
+    def _require_finite_translation(self) -> Self:
+        if not all(math.isfinite(component) for component in self.map_from_sensor.translation_xyz):
+            raise ValueError("trajectory pose translation must be finite")
+        return self
+
+
+class EstimatedTrajectoryExecutionMetrics(ContractModel):
+    """Measured per-attempt resource use; metrics describe only the provider child."""
+
+    process_elapsed_seconds: FiniteFloat = Field(ge=0)
+    provider_elapsed_seconds: FiniteFloat = Field(ge=0)
+    provider_cpu_seconds: FiniteFloat = Field(ge=0)
+    provider_peak_rss_bytes: int = Field(gt=0)
+    scan_point_counts: list[int] = Field(min_length=2)
+
+    @model_validator(mode="after")
+    def _validate_point_counts(self) -> Self:
+        if any(count < 1 for count in self.scan_point_counts):
+            raise ValueError("odometry point counts must be positive")
+        return self
+
+
+class EstimatedTrajectoryDiagnostics(ContractModel):
+    """Observed odometry diagnostics; absolute drift remains unknown without a reference."""
+
+    scan_count: int = Field(ge=2)
+    valid_pose_count: int = Field(ge=0)
+    coverage_ratio: FiniteFloat = Field(ge=0, le=1)
+    timestamp_gap_threshold_seconds: FiniteFloat = Field(gt=0)
+    timestamp_gap_count: int = Field(ge=0)
+    maximum_timestamp_gap_seconds: FiniteFloat = Field(ge=0)
+    converged_scan_count: int | None = Field(default=None, ge=0)
+    convergence_method: Identifier | None = None
+    degenerate_scan_count: int | None = Field(default=None, ge=0)
+    degeneracy_method: Identifier | None = None
+    execution_metrics: EstimatedTrajectoryExecutionMetrics | None = None
+    absolute_drift_status: Literal["not_measured"] = "not_measured"
+
+    @model_validator(mode="after")
+    def _validate_diagnostic_counts(self) -> Self:
+        expected_coverage = self.valid_pose_count / self.scan_count
+        if self.valid_pose_count > self.scan_count or not math.isclose(
+            self.coverage_ratio, expected_coverage, rel_tol=1e-6, abs_tol=1e-6
+        ):
+            raise ValueError("trajectory coverage must match the valid pose count")
+        if self.timestamp_gap_count > self.scan_count - 1:
+            raise ValueError("timestamp gap count cannot exceed the scan interval count")
+        if self.timestamp_gap_count == 0 and self.maximum_timestamp_gap_seconds > self.timestamp_gap_threshold_seconds:
+            raise ValueError("maximum timestamp gap exceeds the threshold but is not counted")
+        if self.timestamp_gap_count > 0 and self.maximum_timestamp_gap_seconds <= self.timestamp_gap_threshold_seconds:
+            raise ValueError("timestamp gap count requires a maximum gap above the threshold")
+        if (self.converged_scan_count is None) != (self.convergence_method is None):
+            raise ValueError("convergence count and method must be reported together")
+        if self.converged_scan_count is not None and self.converged_scan_count > self.scan_count:
+            raise ValueError("converged scan count cannot exceed the scan count")
+        if (self.degenerate_scan_count is None) != (self.degeneracy_method is None):
+            raise ValueError("degeneracy count and method must be reported together")
+        if self.degenerate_scan_count is not None and self.degenerate_scan_count > self.scan_count:
+            raise ValueError("degenerate scan count cannot exceed the scan count")
+        if self.execution_metrics is not None and len(self.execution_metrics.scan_point_counts) != self.scan_count:
+            raise ValueError("execution point counts must match the trajectory scan count")
+        return self
+
+
+class EstimatedTrajectoryArtifact(ContractModel):
+    """Immutable local LiDAR odometry result, never equivalent to supplied or GT poses."""
+
+    artifact_type: Literal["EstimatedTrajectoryArtifact"]
+    schema_version: Literal["1.0", "1.1"]
+    artifact_uri: ArtifactUri
+    artifact_checksum: Checksum
+    job_id: Identifier
+    assembly_id: Identifier
+    assembly_revision: int = Field(gt=0)
+    assembly_checksum: Checksum
+    recipe_checksum: Checksum
+    provider_id: Identifier
+    provider_version: Identifier
+    adapter_protocol_version: Identifier
+    runtime_qualification_checksum: Checksum
+    config_checksum: Checksum
+    timestamp_file_checksum: Checksum
+    coordinate_unit: Literal["meter"]
+    sensor_frame_id: Identifier
+    odometry_map_frame_id: Identifier
+    world_from_map: Transform | None = None
+    trajectory_origin: Literal["estimated"] = "estimated"
+    runtime_qualification_status: Literal["wired_unqualified", "qualified"] = "wired_unqualified"
+    runtime_qualification_evidence_checksum: Checksum | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    poses: list[EstimatedTrajectoryPose] = Field(min_length=2)
+    diagnostics: EstimatedTrajectoryDiagnostics
+
+    @model_validator(mode="after")
+    def _bind_poses_to_scan_sequence(self) -> Self:
+        if self.sensor_frame_id == self.odometry_map_frame_id:
+            raise ValueError("sensor and odometry map frame IDs must differ")
+        if self.diagnostics.scan_count != len(self.poses):
+            raise ValueError("trajectory artifact must contain one pose per source scan")
+        if self.diagnostics.valid_pose_count != len(self.poses) or self.diagnostics.coverage_ratio != 1.0:
+            raise ValueError("incomplete trajectories cannot be published as complete artifacts")
+        scan_ids = [pose.source_scan_file_id for pose in self.poses]
+        if len(scan_ids) != len(set(scan_ids)):
+            raise ValueError("trajectory source scans must be unique")
+        previous_timestamp = -math.inf
+        for index, pose in enumerate(self.poses):
+            if pose.scan_index != index:
+                raise ValueError("trajectory pose order must match the selected scan order")
+            if pose.timestamp_seconds <= previous_timestamp:
+                raise ValueError("trajectory timestamps must increase strictly")
+            previous_timestamp = pose.timestamp_seconds
+            if (
+                pose.map_from_sensor.parent_frame != self.odometry_map_frame_id
+                or pose.map_from_sensor.local_frame != self.sensor_frame_id
+            ):
+                raise ValueError("trajectory pose transform must be map_from_sensor in the declared frames")
+        if self.world_from_map is not None and (
+            self.world_from_map.parent_frame != "world" or self.world_from_map.local_frame != self.odometry_map_frame_id
+        ):
+            raise ValueError("world_from_map must map the declared odometry map into canonical world")
+        if self.world_from_map is not None and not all(
+            math.isfinite(component) for component in self.world_from_map.translation_xyz
+        ):
+            raise ValueError("world_from_map translation must be finite")
+        if self.runtime_qualification_status == "qualified":
+            if self.schema_version != "1.1" or self.runtime_qualification_evidence_checksum is None:
+                raise ValueError("qualified odometry requires schema 1.1 and exact runtime qualification evidence")
+        elif self.schema_version == "1.0" and self.runtime_qualification_evidence_checksum is not None:
+            raise ValueError("schema 1.0 odometry cannot carry a runtime qualification extension")
+        return self
+
+
+class EstimatedTrajectoryIngestBinding(ContractModel):
+    """Verified scan-to-pose lineage awaiting an explicit world-frame bridge."""
+
+    schema_version: Literal["1.0"] = "1.0"
+    trajectory_ref: ArtifactRef
+    timestamp_file_ref: ArtifactRef
+    assembly_checksum: Checksum
+    recipe_checksum: Checksum
+    source_scan_file_ids: list[Identifier] = Field(min_length=2)
+    source_scan_checksums: list[Checksum] = Field(min_length=2)
+    sensor_frame_id: Identifier
+    odometry_map_frame_id: Identifier
+    world_frame_status: Literal["pending_world_from_map_confirmation"] = "pending_world_from_map_confirmation"
+
+    @model_validator(mode="after")
+    def _validate_ingest_binding(self) -> Self:
+        if self.trajectory_ref.artifact_type != "EstimatedTrajectoryArtifact":
+            raise ValueError("ingest binding must reference an estimated trajectory artifact")
+        if self.trajectory_ref.data_class != ArtifactDataClass.DERIVED:
+            raise ValueError("estimated trajectory reference must be derived data")
+        if self.timestamp_file_ref.data_class != ArtifactDataClass.PRODUCT_INPUT:
+            raise ValueError("ingest binding timestamp reference must be a product input")
+        provenance = self.trajectory_ref.source_provenance or {}
+        if (
+            provenance.get("assembly_checksum") != self.assembly_checksum
+            or provenance.get("recipe_checksum") != self.recipe_checksum
+            or provenance.get("timestamp_file_checksum") != self.timestamp_file_ref.artifact_checksum
+        ):
+            raise ValueError("ingest binding checksums must match the trajectory reference")
+        if len(self.source_scan_file_ids) != len(self.source_scan_checksums):
+            raise ValueError("scan file IDs and checksums must have equal lengths")
+        if len(self.source_scan_file_ids) != len(set(self.source_scan_file_ids)):
+            raise ValueError("ingest binding scan file IDs must be unique")
+        if self.sensor_frame_id == self.odometry_map_frame_id:
+            raise ValueError("sensor and odometry map frame IDs must differ")
+        return self
+
+
+class EstimatedTrajectoryConsumerEvidence(ContractModel):
+    """Durable R5/R6 source binding; local poses remain outside canonical world/floor geometry."""
+
+    artifact_type: Literal["EstimatedTrajectoryConsumerEvidence"] = "EstimatedTrajectoryConsumerEvidence"
+    schema_version: Literal["1.0"] = "1.0"
+    job_id: Identifier
+    recipe_group: Literal["R5", "R6"]
+    assembly_ref: ArtifactRef
+    resolution_ref: ArtifactRef
+    runtime_registry_ref: ArtifactRef
+    recipe_ref: ArtifactRef
+    trajectory_ref: ArtifactRef
+    ingest_binding: EstimatedTrajectoryIngestBinding
+    lidar_scan_times_ref: ArtifactRef
+    camera_lidar_calibration_ref: ArtifactRef | None = None
+    rgb_frame_times_ref: ArtifactRef | None = None
+    odometry_runtime_id: Identifier
+    odometry_runtime_version: Identifier
+    odometry_profile_checksum: Checksum
+    runtime_qualification_status: Literal["wired_unqualified", "qualified"]
+    runtime_qualification_evidence_checksum: Checksum | None = None
+    sensor_guided_runtime_id: Identifier | None = None
+    sensor_guided_runtime_version: Identifier | None = None
+    sensor_guided_runtime_evidence_checksum: Checksum | None = None
+    world_frame_status: Literal["pending_world_from_map_confirmation"] = "pending_world_from_map_confirmation"
+    floor_status: Literal["pending_floor_and_up_axis_evidence"] = "pending_floor_and_up_axis_evidence"
+    alignment_status: Literal["not_registered"] = "not_registered"
+
+    @model_validator(mode="after")
+    def _bind_consumer_evidence(self) -> Self:
+        if self.trajectory_ref.artifact_type != "EstimatedTrajectoryArtifact":
+            raise ValueError("consumer evidence must bind an estimated trajectory")
+        if self.trajectory_ref.job_id != self.job_id or self.trajectory_ref.data_class != ArtifactDataClass.DERIVED:
+            raise ValueError("estimated trajectory must be a derived artifact in the same job")
+        if self.ingest_binding.trajectory_ref != self.trajectory_ref:
+            raise ValueError("consumer evidence and ingest binding must reference the same trajectory")
+        for reference, artifact_type in (
+            (self.assembly_ref, "InputAssemblySnapshot"),
+            (self.resolution_ref, "InputResolutionReport"),
+            (self.runtime_registry_ref, "RuntimeQualificationRegistry"),
+            (self.recipe_ref, "InputRecipe"),
+        ):
+            if reference.artifact_type != artifact_type or reference.job_id != self.job_id:
+                raise ValueError("accepted input evidence must be job-scoped and use its declared artifact type")
+        if (
+            self.lidar_scan_times_ref.artifact_type != "InputAssemblyMember"
+            or self.lidar_scan_times_ref.data_class != ArtifactDataClass.PRODUCT_INPUT
+        ):
+            raise ValueError("LiDAR scan timestamps must remain a bound product input")
+        if self.lidar_scan_times_ref.job_id != self.job_id:
+            raise ValueError("LiDAR scan timestamp member must be copied into this job's immutable input namespace")
+        if self.recipe_group == "R6":
+            if self.camera_lidar_calibration_ref is None or self.rgb_frame_times_ref is None:
+                raise ValueError("R6 consumer evidence requires calibration and RGB frame timestamps")
+            if (
+                self.camera_lidar_calibration_ref.artifact_type != "InputAssemblyMember"
+                or self.rgb_frame_times_ref.artifact_type != "InputAssemblyMember"
+                or self.camera_lidar_calibration_ref.data_class != ArtifactDataClass.PRODUCT_INPUT
+                or self.rgb_frame_times_ref.data_class != ArtifactDataClass.PRODUCT_INPUT
+                or self.camera_lidar_calibration_ref.job_id != self.job_id
+                or self.rgb_frame_times_ref.job_id != self.job_id
+            ):
+                raise ValueError("R6 calibration and RGB frame timestamps must be job-scoped product inputs")
+            if (
+                self.sensor_guided_runtime_id is None
+                or self.sensor_guided_runtime_version is None
+                or self.sensor_guided_runtime_evidence_checksum is None
+            ):
+                raise ValueError("R6 consumer evidence requires exact sensor-guided runtime qualification")
+        elif any(
+            value is not None
+            for value in (
+                self.camera_lidar_calibration_ref,
+                self.rgb_frame_times_ref,
+                self.sensor_guided_runtime_id,
+                self.sensor_guided_runtime_version,
+                self.sensor_guided_runtime_evidence_checksum,
+            )
+        ):
+            raise ValueError("R5 scan-only evidence cannot carry R6 calibration or runtime fields")
+        if self.runtime_qualification_status == "qualified" and self.runtime_qualification_evidence_checksum is None:
+            raise ValueError("qualified consumer evidence requires exact runtime qualification evidence")
+        if (
+            self.runtime_qualification_status == "wired_unqualified"
+            and self.runtime_qualification_evidence_checksum is not None
+        ):
+            raise ValueError("unqualified consumer evidence cannot claim qualification evidence")
+        return self
+
+
+class EstimatedTrajectoryMapStats(ContractModel):
+    """Deterministic fusion summary for a map still expressed in its local odometry frame."""
+
+    scan_count: int = Field(gt=1)
+    input_points: int = Field(gt=0)
+    removed_points: int = Field(ge=0)
+    point_count: int = Field(gt=0)
+    bounds_min: tuple[FiniteFloat, FiniteFloat, FiniteFloat]
+    bounds_max: tuple[FiniteFloat, FiniteFloat, FiniteFloat]
+
+    @model_validator(mode="after")
+    def _validate_bounds(self) -> Self:
+        if any(low > high for low, high in zip(self.bounds_min, self.bounds_max, strict=True)):
+            raise ValueError("estimated LiDAR map bounds cannot be inverted")
+        if self.input_points < self.point_count + self.removed_points:
+            raise ValueError("estimated LiDAR map counts exceed their input point inventory")
+        return self
+
+
+class EstimatedTrajectoryMapEvidence(ContractModel):
+    """Source-bound fused cloud; pending world/floor/alignment states are deliberate."""
+
+    artifact_type: Literal["EstimatedTrajectoryMapEvidence"] = "EstimatedTrajectoryMapEvidence"
+    schema_version: Literal["1.0"] = "1.0"
+    job_id: Identifier
+    trajectory_ref: ArtifactRef
+    ingest_binding: EstimatedTrajectoryIngestBinding
+    map_cloud_ref: ArtifactRef | None = None
+    map_frame_id: Identifier
+    coordinate_unit: Literal["meter"] = "meter"
+    map_status: Literal["ready", "blocked"]
+    point_count: int | None = Field(default=None, gt=0)
+    fusion_profile_checksum: Checksum
+    fusion_stats: EstimatedTrajectoryMapStats | None = None
+    diagnostic_code: Literal["MAP_FUSION_FAILED"] | None = None
+    world_frame_status: Literal["pending_world_from_map_confirmation"] = "pending_world_from_map_confirmation"
+    floor_status: Literal["pending_floor_and_up_axis_evidence"] = "pending_floor_and_up_axis_evidence"
+    alignment_status: Literal["not_registered"] = "not_registered"
+
+    @model_validator(mode="after")
+    def _bind_estimated_map(self) -> Self:
+        binding = self.ingest_binding
+        if self.job_id != binding.trajectory_ref.job_id or self.trajectory_ref != binding.trajectory_ref:
+            raise ValueError("estimated map must bind the same job-scoped trajectory as its ingest binding")
+        if self.map_frame_id != binding.odometry_map_frame_id:
+            raise ValueError("estimated map frame must match the trajectory's local odometry map")
+        if self.world_frame_status != binding.world_frame_status:
+            raise ValueError("estimated map must preserve the pending world-frame state")
+        if self.map_status == "ready":
+            if self.map_cloud_ref is None or self.point_count is None or self.fusion_stats is None:
+                raise ValueError("ready estimated map requires its cloud ref, point count and fusion statistics")
+            reference = self.map_cloud_ref
+            trajectory_uri = self.trajectory_ref.artifact_uri
+            expected_cloud_uri = f"{trajectory_uri.rsplit('/', 1)[0]}/estimated-map.ply"
+            if (
+                reference.artifact_type != "EstimatedTrajectoryMapCloud"
+                or reference.producer_stage != StageId.LIDAR_ODOMETRY
+                or reference.data_class != ArtifactDataClass.DERIVED
+                or reference.job_id != self.job_id
+                or not trajectory_uri.endswith("/lidar-odometry/trajectory.json")
+                or reference.artifact_uri != expected_cloud_uri
+            ):
+                raise ValueError("estimated map cloud ref must be an attempt-scoped LiDAR odometry output")
+            provenance = reference.source_provenance or {}
+            if (
+                provenance.get("assembly_checksum") != binding.assembly_checksum
+                or provenance.get("recipe_checksum") != binding.recipe_checksum
+                or provenance.get("trajectory_checksum") != self.trajectory_ref.artifact_checksum
+                or provenance.get("timestamp_file_checksum") != binding.timestamp_file_ref.artifact_checksum
+                or provenance.get("map_frame_id") != self.map_frame_id
+                or provenance.get("fusion_profile_checksum") != self.fusion_profile_checksum
+                or provenance.get("source_scan_file_ids") != binding.source_scan_file_ids
+                or provenance.get("source_scan_checksums") != binding.source_scan_checksums
+            ):
+                raise ValueError("estimated map cloud provenance differs from its source trajectory binding")
+            if self.point_count != self.fusion_stats.point_count or self.fusion_stats.scan_count != len(
+                binding.source_scan_file_ids
+            ):
+                raise ValueError("estimated map counts differ from the fused source scan inventory")
+            if self.diagnostic_code is not None:
+                raise ValueError("ready estimated map cannot carry a fusion failure")
+        elif (
+            self.map_cloud_ref is not None
+            or self.point_count is not None
+            or self.fusion_stats is not None
+            or self.diagnostic_code != "MAP_FUSION_FAILED"
+        ):
+            raise ValueError("blocked estimated map must expose only its explicit fusion diagnostic")
+        if self.alignment_status != "not_registered" or self.floor_status != "pending_floor_and_up_axis_evidence":
+            raise ValueError("fused local map cannot claim floor confirmation or RGB alignment")
+        return self
+
+
+class EstimatedTrajectoryProductEvidence(ContractModel):
+    """One stage receipt tying local trajectory and fused-map products to accepted inputs."""
+
+    artifact_type: Literal["EstimatedTrajectoryProductEvidence"] = "EstimatedTrajectoryProductEvidence"
+    schema_version: Literal["1.0"] = "1.0"
+    job_id: Identifier
+    consumer_evidence: EstimatedTrajectoryConsumerEvidence
+    map_evidence: EstimatedTrajectoryMapEvidence
+
+    @model_validator(mode="after")
+    def _bind_products(self) -> Self:
+        consumer = self.consumer_evidence
+        map_evidence = self.map_evidence
+        if self.job_id != consumer.job_id or self.job_id != map_evidence.job_id:
+            raise ValueError("trajectory products must belong to the same job")
+        if (
+            map_evidence.trajectory_ref != consumer.trajectory_ref
+            or map_evidence.ingest_binding != consumer.ingest_binding
+            or map_evidence.world_frame_status != consumer.world_frame_status
+            or map_evidence.floor_status != consumer.floor_status
+            or map_evidence.alignment_status != consumer.alignment_status
+        ):
+            raise ValueError("fused map evidence differs from the trajectory consumer evidence")
+        return self
 
 
 class VoxelGridSummary(ContractModel):
@@ -156,6 +550,87 @@ class CapsuleFootprint(ContractModel):
         return self
 
 
+class GeometryStatisticalFilterEvidence(ContractModel):
+    """Exact diagnostic evidence for an opt-in pre-mesh Gaussian SOR pass."""
+
+    schema_version: Literal["1.0"] = "1.0"
+    algorithm: Literal["statistical_outlier_v1"] = "statistical_outlier_v1"
+    input_checksum: Checksum
+    output_checksum: Checksum
+    input_gaussian_count: int = Field(gt=0)
+    retained_gaussian_count: int = Field(gt=0)
+    removed_gaussian_count: int = Field(ge=0)
+    neighbors: int = Field(ge=2, le=64, strict=True)
+    standard_deviation_ratio: FiniteFloat = Field(gt=0)
+    max_gaussians: int = Field(ge=3, le=5_000_000, strict=True)
+    mean_neighbor_distance_m: FiniteFloat = Field(ge=0)
+    standard_deviation_m: FiniteFloat = Field(ge=0)
+    threshold_m: FiniteFloat = Field(ge=0)
+    quality_status: Literal["diagnostic_only"] = "diagnostic_only"
+
+    @model_validator(mode="after")
+    def _conserve_gaussian_rows(self) -> Self:
+        if self.input_gaussian_count != self.retained_gaussian_count + self.removed_gaussian_count:
+            raise ValueError("statistical filter Gaussian counts must conserve input records")
+        if self.input_gaussian_count > self.max_gaussians or self.max_gaussians <= self.neighbors:
+            raise ValueError("statistical filter evidence exceeds its configured resource bound")
+        if not math.isclose(
+            self.threshold_m,
+            self.mean_neighbor_distance_m + self.standard_deviation_ratio * self.standard_deviation_m,
+            rel_tol=1e-6,
+            abs_tol=1e-9,
+        ):
+            raise ValueError("statistical filter threshold differs from its recorded criteria")
+        return self
+
+
+class GeometryCleanupEvidence(ContractModel):
+    """Measured Gaussian removal and exact cleanup configuration for one RGB collision mesh."""
+
+    schema_version: Literal["1.0"] = "1.0"
+    job_id: Identifier
+    mode: Literal["cluster", "floaters"]
+    source_checksum: Checksum
+    metric_input_checksum: Checksum
+    retained_gaussian_checksum: Checksum
+    collision_mesh_checksum: Checksum
+    effective_config: JsonObject
+    config_checksum: Checksum
+    statistical_filter_evidence: GeometryStatisticalFilterEvidence | None = None
+    input_gaussian_count: int = Field(gt=0)
+    retained_gaussian_count: int = Field(gt=0)
+    removed_gaussian_count: int = Field(ge=0)
+    qualification_status: Literal["diagnostic_only"] = "diagnostic_only"
+
+    @model_validator(mode="after")
+    def _bind_counts_and_config(self) -> Self:
+        if self.input_gaussian_count != self.retained_gaussian_count + self.removed_gaussian_count:
+            raise ValueError("cleanup Gaussian counts must conserve input records")
+        if self.effective_config.get("cleanup") != self.mode:
+            raise ValueError("cleanup mode differs from effective configuration")
+        filter_config = self.effective_config.get("statistical_outlier_removal")
+        if (filter_config is None) != (self.statistical_filter_evidence is None):
+            raise ValueError("statistical filter evidence must match the effective cleanup configuration")
+        if self.statistical_filter_evidence is not None:
+            evidence = self.statistical_filter_evidence
+            if evidence.input_checksum != self.metric_input_checksum:
+                raise ValueError("statistical filter source differs from metric input")
+            if evidence.input_gaussian_count != self.input_gaussian_count:
+                raise ValueError("statistical filter count differs from the inspected metric input")
+            if evidence.retained_gaussian_count < self.retained_gaussian_count:
+                raise ValueError("cluster cleanup cannot retain more Gaussians than the SOR stage")
+            if filter_config != {
+                "neighbors": evidence.neighbors,
+                "standard_deviation_ratio": evidence.standard_deviation_ratio,
+                "max_gaussians": evidence.max_gaussians,
+            }:
+                raise ValueError("statistical filter evidence differs from the effective configuration")
+        digest = hashlib.sha256(canonical_json_bytes(self.effective_config)).hexdigest()
+        if self.config_checksum != f"sha256:{digest}":
+            raise ValueError("cleanup configuration checksum mismatch")
+        return self
+
+
 class GeometryArtifact(ContractModel):
     """Collision mesh canonical từ RGB 3DGS; EX-REC produce, EX-SIM consume làm collider.
 
@@ -164,7 +639,7 @@ class GeometryArtifact(ContractModel):
     """
 
     artifact_type: Literal["GeometryArtifact"]
-    schema_version: Literal["1.0", "1.1"]
+    schema_version: Literal["1.0", "1.1", "1.2"]
     artifact_uri: ArtifactUri
     artifact_checksum: Checksum
     producer_stage: Literal[StageId.RGB_GEOMETRY]
@@ -181,6 +656,7 @@ class GeometryArtifact(ContractModel):
     seed: SeedDecision
     capsule: CapsuleFootprint
     provenance: PreprocessingProvenance
+    cleanup_evidence: GeometryCleanupEvidence | None = None
 
     @model_validator(mode="after")
     def _require_confirmed_metric_scale(self) -> Self:
@@ -190,6 +666,17 @@ class GeometryArtifact(ContractModel):
             raise ValueError("canonical collision geometry must use meters_per_unit=1")
         if any(item.origin == DependencyOrigin.GROUND_TRUTH for item in self.provenance.dependencies):
             raise ValueError("product collision geometry must not depend on evaluation ground truth")
+        if self.schema_version == "1.2" and self.cleanup_evidence is None:
+            raise ValueError("GeometryArtifact 1.2 requires cleanup evidence")
+        if self.cleanup_evidence is not None:
+            if self.schema_version != "1.2":
+                raise ValueError("cleanup evidence requires GeometryArtifact 1.2")
+            if self.cleanup_evidence.job_id != self.job_id:
+                raise ValueError("cleanup evidence belongs to a different job")
+            if self.cleanup_evidence.source_checksum != self.source_master_checksum:
+                raise ValueError("cleanup evidence source differs from geometry source")
+            if self.cleanup_evidence.collision_mesh_checksum != self.artifact_checksum:
+                raise ValueError("cleanup evidence mesh differs from geometry artifact")
         return self
 
 

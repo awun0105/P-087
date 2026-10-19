@@ -55,13 +55,12 @@ Dưới đây là các độ đo (metrics) được sử dụng để đánh gi�
 * **Metric sử dụng:** Thời gian chạy thực tế của toàn bộ pipeline ngầm.
 * **Lý do sử dụng:** Đánh giá năng lực đáp ứng và hiệu suất (Throughput) của hệ thống trước khi scale up cho người dùng thật.
 * **Đơn vị & Khoảng:** Giây (s). Khoảng: `[0, ∞)`.
-* **Ngưỡng đạt:** < 3600s (1 tiếng) cho đoạn video trung bình (~300-500 frames).
-* **Kết quả hiện tại:** `2200s - 2800s` (~40 - 45 phút) cho 1 job.
-* **Đánh giá & Suy luận:**
-  * **Tình trạng:** **✅ Đạt**. 
-  * **Điểm mạnh:** Tốc độ ổn định, không bị crash Out-Of-Memory, tận dụng tốt tài nguyên GPU hạn chế (Quadro T2000).
-  * **Điểm yếu:** Vẫn tương đối lâu đối với trải nghiệm chờ đợi của người dùng UI trực tiếp.
-  * **Hướng cải thiện:** Triển khai cơ chế Multi-GPU / Cluster Worker để chạy song song. Có thể cung cấp tính năng "Preview Mode" (chỉ chạy 7000 iterations) trong vòng 5-10 phút để người dùng xem trước, sau đó mới huấn luyện tiếp High-Quality Mode.
+* **Ngưỡng đạt:** Chưa có benchmark paired lặp lại đủ điều kiện để xác nhận ngưỡng một giờ cho 300–500 frame. Các log được trích dẫn dưới đây chỉ chứa 50 frame thực tế; `sampling.max_frames=300` là giới hạn cấu hình, không phải số frame đã xử lý.
+* **Kết quả hiện tại:** Một job hoàn tất `job-6bc02e5de4ed` có tổng `ResourceUsage.duration_seconds` là **5.046,05 giây** (~84 phút worker-process time) với 50 frame. Job chạy từ `2026-10-05 12:04:20.622 UTC` đến `2026-10-06 04:00:49.320 UTC` (**15 giờ 56 phút 28,7 giây** wall time), trong đó metric-confirmation wait kéo dài **14 giờ 32 phút 18,9 giây**. Thời gian worker-process và vòng đời job là hai đại lượng khác nhau.
+* **Định danh run:** input `sha256:bfa8ad…`, config `sha256:55d779…`, runtime manifest `sha256:861c5b…`; Quadro T2000, 30.000 Brush iterations, 1280 px, tối đa 1.000.000 splats. Snapshot benchmark cũ được lưu khi job còn `RUNNING`, nên `total_seconds=4147,63` chỉ là thời điểm chụp, không phải total cuối.
+* **Đánh giá & giới hạn:** Chưa đủ bằng chứng để đánh dấu đạt hoặc suy ra phân phối thời gian. Đây là một run đơn và không lưu GPU power/thermal state. Một benchmark khác có stage Brush ~2.696 giây (~45 phút), nhưng cũng là snapshot `RUNNING`, khác input/config identity và không phải đối chứng paired. Do đó các con số `40–45 phút cho toàn job 300–500 frame` và trạng thái “Đạt” trước đây đã bị loại bỏ.
+* **Target AUD-15 đã đóng băng:** trên cùng input/config/runtime, frame inventory, GPU/tool identity và selected quality, đạt median `worker_process_seconds ≤ 4.541,45 giây` (giảm tối thiểu 10% so với mốc đơn 5.046,05 giây), qua tối thiểu ba cặp baseline/optimized. Đây là target cho lần đo paired tương lai, chưa phải kết quả đã đạt. Ghi power/thermal condition hoặc đánh dấu chưa kiểm soát.
+* **Hướng cải thiện:** Chỉ tối ưu stage có measured bottleneck; giữ nguyên cấu hình và kiểm tra visual, pose, metric, collision cùng scene-quality gates trên cùng dữ liệu trước khi công nhận tốc độ.
 
 ### 1.5 Độ chính xác Vị trí Không gian (`recon_pose`)
 * **Metric sử dụng:** ATE (Absolute Trajectory Error) và RPE (Relative Pose Error) - tính bằng độ lệch căn quân phương (RMSE).
@@ -90,7 +89,7 @@ Dưới đây là các độ đo (metrics) được sử dụng để đánh gi�
 - **Evidences:** Mesh mức 0.05m (224,745 tam giác) chặn 33/50 vị trí (66%). Phản ánh rõ ràng khuyết điểm nhiễu (noise) lơ lửng của 3DGS khi chuyển sang lưới rắn. Cần ưu tiên khắc phục trong pha tới.
 
 ### Test Case 4: Đánh giá Thời gian & Độ ổn định (`pipeline_runtime`)
-- **Evidences:** Stress-test với video `seg-3fps` / `seg-5fps` chạy liên tục. Kết thúc trong ~45 phút / luồng, memory GPU ổn định, không sụt giảm.
+- **Evidences:** `job-6bc02e5de4ed` hoàn tất với 50 frame; cộng các process records đã lưu là 5.046,05 giây. Benchmark artifact tại thời điểm chạy còn ghi `RUNNING`, nên chỉ là partial snapshot. Không có paired repeat hoặc GPU power/thermal record; kết quả này không chứng minh ngưỡng thời gian đã đạt.
 
 ### Test Case 5: Tách vật thể khỏi cảnh nền (`ST-OBJECT-EXTRACT`)
 - **Evidences:** Pipeline v2 với SAM2/LaMa tách thành công mảng `SceneObject`. Inpaint chạy tự động, cho kết quả vật thể độc lập sẵn sàng đẩy sang Isaac Sim.

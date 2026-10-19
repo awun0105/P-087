@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.api import schemas
-from src.api.auth import require_editor, require_reviewer
+from src.api.auth import require_contributor, require_reviewer
 from src.api.studio import deps
 from src.services.orchestration.auth.models import UserRecord
 from src.services.orchestration.jobs.database import RuntimeStateConflictError
@@ -20,9 +20,11 @@ from src.services.orchestration.projects.deletion import (
     DeletionRecord,
     DeletionRefusedError,
     DeletionRequest,
+    GuestOwnershipError,
     SummaryLine,
     apply_deletion,
     context_from_settings,
+    guest_owns_deletion_plan,
     list_trash,
     purge_deletion,
     purge_expired,
@@ -31,6 +33,15 @@ from src.services.orchestration.projects.deletion import (
 
 router = APIRouter()
 _ERRORS = {404: {"model": schemas.ApiErrorResponse}, 409: {"model": schemas.ApiErrorResponse}}
+
+
+class TrashCapabilities(BaseModel):
+    """Caller-specific restore/purge hints; mutation endpoints still enforce policy."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    can_restore: bool
+    can_purge: bool
 
 
 class TrashEntry(BaseModel):
@@ -46,6 +57,7 @@ class TrashEntry(BaseModel):
     deleted_by: str | None
     size_bytes: int
     items: list[SummaryLine]
+    capabilities: TrashCapabilities
 
 
 class TrashListResponse(BaseModel):
@@ -86,7 +98,7 @@ def _context() -> DeletionContext:
     return context_from_settings(deps.settings())
 
 
-def _entry(context: DeletionContext, record: DeletionRecord) -> TrashEntry:
+def _entry(context: DeletionContext, record: DeletionRecord, user: UserRecord | None) -> TrashEntry:
     primary = next((line for line in record.plan.summary if line.kind != "upload"), record.plan.summary[0])
     return TrashEntry(
         entry_id=record.entry_id,
@@ -96,14 +108,30 @@ def _entry(context: DeletionContext, record: DeletionRecord) -> TrashEntry:
         deleted_by=record.deleted_by,
         size_bytes=record.plan.size_bytes,
         items=record.plan.summary,
+        capabilities=TrashCapabilities(
+            can_restore=(user is None or user.role != "guest" or guest_owns_deletion_plan(record.plan, user.user_id)),
+            can_purge=user is None or user.role == "reviewer",
+        ),
     )
 
 
 def _move_to_trash(request: DeletionRequest, user: UserRecord | None) -> TrashEntry:
     context = _context()
-    purge_expired(context)
     try:
-        return _entry(context, apply_deletion(context, request, user.user_id if user else None))
+        result = _entry(
+            context,
+            apply_deletion(
+                context,
+                request,
+                user.user_id if user else None,
+                guest_owner_user_id=user.user_id if user is not None and user.role == "guest" else None,
+            ),
+            user,
+        )
+        purge_expired(context)
+        return result
+    except GuestOwnershipError as error:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(error)) from error
     except DeletionRefusedError as error:
         missing = all("không tìm thấy" in reason for reason in error.reasons)
         code = status.HTTP_404_NOT_FOUND if missing else status.HTTP_409_CONFLICT
@@ -113,23 +141,23 @@ def _move_to_trash(request: DeletionRequest, user: UserRecord | None) -> TrashEn
 
 
 @router.delete("/scenes/{project_id}", response_model=TrashEntry, responses=_ERRORS)
-def delete_scene(project_id: str, user: UserRecord | None = Depends(require_editor)) -> TrashEntry:
+def delete_scene(project_id: str, user: UserRecord | None = Depends(require_contributor)) -> TrashEntry:
     """Chuyển scene vào thùng rác; scene đang được worker xử lý hoặc đã phát hành thì từ chối (409)."""
     return _move_to_trash(DeletionRequest(project_ids=[project_id]), user)
 
 
 @router.delete("/imports/{import_id}", response_model=TrashEntry, responses=_ERRORS)
-def delete_import(import_id: str, user: UserRecord | None = Depends(require_editor)) -> TrashEntry:
+def delete_import(import_id: str, user: UserRecord | None = Depends(require_contributor)) -> TrashEntry:
     """Chuyển scene nhập vào thùng rác."""
     return _move_to_trash(DeletionRequest(import_ids=[import_id]), user)
 
 
 @router.get("/trash", response_model=TrashListResponse)
-def get_trash() -> TrashListResponse:
+def get_trash(user: UserRecord | None = Depends(require_contributor)) -> TrashListResponse:
     """Các mục đang nằm trong thùng rác; mục quá hạn bị xoá hẳn trước khi trả danh sách."""
     context = _context()
     purge_expired(context)
-    return TrashListResponse(entries=[_entry(context, record) for record in list_trash(context.database)])
+    return TrashListResponse(entries=[_entry(context, record, user) for record in list_trash(context.database)])
 
 
 def _each(
@@ -142,15 +170,26 @@ def _each(
         try:
             action(context, entry_id, user.user_id if user else None)
             done.append(entry_id)
-        except (DeletionRefusedError, RuntimeStateConflictError) as error:
+        except (DeletionRefusedError, GuestOwnershipError, RuntimeStateConflictError) as error:
             failed.append(TrashFailure(entry_id=entry_id, reason=str(error)))
     return TrashActionResponse(done=done, failed=failed)
 
 
 @router.post("/trash/restore", response_model=TrashActionResponse)
-def restore_trash(selection: TrashSelection, user: UserRecord | None = Depends(require_editor)) -> TrashActionResponse:
+def restore_trash(
+    selection: TrashSelection, user: UserRecord | None = Depends(require_contributor)
+) -> TrashActionResponse:
     """Khôi phục các mục đã chọn về đúng trạng thái lúc gỡ."""
-    return _each(selection, restore_deletion, user)
+
+    def restore_one(context: DeletionContext, entry_id: str, actor: str | None) -> DeletionRecord:
+        return restore_deletion(
+            context,
+            entry_id,
+            actor,
+            guest_owner_user_id=user.user_id if user is not None and user.role == "guest" else None,
+        )
+
+    return _each(selection, restore_one, user)
 
 
 @router.post("/trash/purge", response_model=TrashActionResponse)

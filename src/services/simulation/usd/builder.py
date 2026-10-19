@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from src.models.contracts.artifacts import Checksum, ProductArtifactRef
 from src.models.contracts.identity import (
@@ -25,6 +25,15 @@ from src.models.contracts.validation import (
     PreflightReport,
     RuleResult,
 )
+from src.services.simulation.usd.capabilities import (
+    EffectiveExportMode,
+    ExportCapabilityReport,
+    ExportCapabilityStatus,
+    RuntimeQualificationStatus,
+    export_requirements,
+    validate_builder_mode,
+)
+from src.services.simulation.usd.physics_config import physics_build_config
 from src.services.simulation.usd.usda import generate_scene_usda
 
 
@@ -45,6 +54,13 @@ class CandidateBuildRequest(BaseModel):
     #: các layer của nó; cả hai đi vào inventory nên `candidate_checksum` phủ toàn bộ gói.
     entrypoint_bytes: bytes | None = None
     extra_assets: list[ProductArtifactRef] = Field(default_factory=list)
+    export_mode: EffectiveExportMode = EffectiveExportMode.LEGACY_BOX
+    export_capability: ExportCapabilityReport | None = None
+
+    @model_validator(mode="after")
+    def _validate_physics_config(self) -> "CandidateBuildRequest":
+        physics_build_config(self.build_config)
+        return self
 
 
 def _validate_preflight_gate(scene: SceneIR, report: PreflightReport) -> None:
@@ -72,11 +88,15 @@ def _collect_scene_refs(
 
     if scene.environment.collider_ref is not None:
         colliders.append(scene.environment.collider_ref)
+    if scene.environment.collision_source_ref is not None and scene.environment.collision_source_ref not in colliders:
+        colliders.append(scene.environment.collision_source_ref)
 
     for obj in scene.objects:
         if not obj.active:
             continue
         geometry.append(obj.geometry_ref)
+        if obj.surface_mesh_ref is not None:
+            geometry.append(obj.surface_mesh_ref)
         if obj.asset_ref is not None:
             assets.append(obj.asset_ref)
         if obj.collider is not None and obj.collider.geometry_ref is not None:
@@ -108,8 +128,40 @@ def _compute_config_checksum(config: dict[str, Any]) -> str:
 def build_candidate_package(req: CandidateBuildRequest) -> CandidatePackage:
     """Xây dựng và niêm phong CandidatePackage từ SceneIR đã qua Preflight PASS."""
     _validate_preflight_gate(req.scene, req.preflight_report)
+    validate_builder_mode(req.scene, req.export_mode)
+    if req.export_capability is not None:
+        capability = req.export_capability
+        if capability.status != ExportCapabilityStatus.SUPPORTED:
+            raise ValueError("Không thể build CandidatePackage khi export capability bị chặn")
+        if capability.blockers:
+            raise ValueError("export capability báo SUPPORTED nhưng vẫn chứa blocker")
+        if capability.builder_version != "usd-export-capabilities-v3":
+            raise ValueError("export capability builder version không được hỗ trợ")
+        if capability.scene_revision != req.scene.scene_revision:
+            raise ValueError("export capability scene_revision không khớp với SceneIR")
+        if capability.scene_ir_checksum != req.scene.scene_ir_checksum:
+            raise ValueError("export capability scene_ir_checksum không khớp với SceneIR")
+        if capability.effective_mode != req.export_mode:
+            raise ValueError("export capability mode không khớp với CandidateBuildRequest")
+        if (
+            req.export_mode == EffectiveExportMode.HYBRID
+            and capability.runtime_qualification != RuntimeQualificationStatus.QUALIFIED
+        ):
+            raise ValueError("hybrid CandidatePackage requires a qualified USD runtime")
+        if req.export_mode == EffectiveExportMode.HYBRID and not capability.runtime_version:
+            raise ValueError("hybrid CandidatePackage requires the qualified USD runtime version")
+        if capability.requirements != export_requirements(req.scene):
+            raise ValueError("export capability requirements không khớp với SceneIR")
+    elif req.export_mode == EffectiveExportMode.HYBRID:
+        raise ValueError("hybrid CandidatePackage requires a qualified export capability report")
+    if req.export_mode == EffectiveExportMode.HYBRID and req.entrypoint_bytes is None:
+        raise ValueError("hybrid CandidatePackage requires a generated USD entrypoint")
+    if req.export_mode == EffectiveExportMode.LEGACY_BOX and req.entrypoint_bytes is not None:
+        raise ValueError("legacy CandidatePackage cannot receive a hybrid USD entrypoint")
 
-    usda_bytes = req.entrypoint_bytes or generate_scene_usda(req.scene, req.environment_layer).encode("utf-8")
+    usda_bytes = req.entrypoint_bytes or generate_scene_usda(
+        req.scene, req.environment_layer, build_config=req.build_config
+    ).encode("utf-8")
     entrypoint_usd = _create_entrypoint_ref(req.job_id or req.scene.scene_id, usda_bytes)
 
     assets, geometry, colliders = _collect_scene_refs(req.scene)
@@ -117,6 +169,10 @@ def build_candidate_package(req: CandidateBuildRequest) -> CandidatePackage:
     if req.environment_layer_ref is not None:
         colliders.append(req.environment_layer_ref)
     ordered_refs = [entrypoint_usd, *assets, *geometry, *colliders]
+    if req.scene.environment.collision_selection_ref is not None:
+        ordered_refs.append(req.scene.environment.collision_selection_ref)
+    if req.scene.environment.object_aware_collision_ref is not None:
+        ordered_refs.append(req.scene.environment.object_aware_collision_ref)
     artifact_checksums = [ref.artifact_checksum for ref in ordered_refs]
 
     obj_transforms = [
@@ -135,6 +191,9 @@ def build_candidate_package(req: CandidateBuildRequest) -> CandidatePackage:
         collider_refs=colliders,
         artifact_checksums=artifact_checksums,
         build_config_checksum=_compute_config_checksum(req.build_config),
+        collision_source_ref=req.scene.environment.collision_source_ref,
+        collision_selection_ref=req.scene.environment.collision_selection_ref,
+        object_aware_collision_ref=req.scene.environment.object_aware_collision_ref,
     )
 
     temp_pkg = CandidatePackage(

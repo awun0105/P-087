@@ -1,14 +1,16 @@
-"""Đăng nhập hai role Editor/Reviewer cho Studio (ADR 0003 §3)."""
+"""Tài khoản Guest/Editor/Reviewer cho Studio; invite chỉ cấp Editor/Reviewer."""
 
 from src.services.orchestration.auth.models import (
     ROLE_RANK,
     Actor,
     AuditEntry,
     InviteRecord,
+    InviteRole,
     PublicUser,
     Role,
     UserRecord,
     actor_of,
+    with_current_role,
 )
 from src.services.orchestration.auth.passwords import MIN_PASSWORD_LENGTH, hash_password, verify_password
 from src.services.orchestration.auth.service import AuthError, AuthService, has_role, has_unlimited_quota, public
@@ -21,6 +23,7 @@ __all__ = [
     "AuthError",
     "AuthService",
     "InviteRecord",
+    "InviteRole",
     "PublicUser",
     "Role",
     "UserRecord",
@@ -30,4 +33,5 @@ __all__ = [
     "hash_password",
     "public",
     "verify_password",
+    "with_current_role",
 ]

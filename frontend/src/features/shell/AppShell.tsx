@@ -1,11 +1,11 @@
 "use client";
 
-import { ArrowLeft, Box, ChevronsUpDown, Clapperboard, LayoutDashboard, LogIn, LogOut, PanelLeftClose, PanelLeftOpen, PlusCircle, Trash2, Users, UserRound } from "lucide-react";
+import { ArrowLeft, ChartBarBig, ChevronsUpDown, Clapperboard, FolderDown, LayoutDashboard, Loader2, LogIn, LogOut, PanelLeftClose, PanelLeftOpen, PlusCircle, Trash2, Users, UserRound } from "lucide-react";
 import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
-import { usePathname } from "next/navigation";
-import { useState, type ReactNode } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ErrorFeedback } from "@/components/studio/feedback";
-import { BrandWordmark } from "@/components/studio/primitives";
+import { BrandIcon, BrandWordmark } from "@/components/studio/primitives";
 import { errorMessage } from "@/lib/ui-error";
 import { useNavigationGuard } from "@/features/shell/NavigationGuard";
 
@@ -39,7 +39,8 @@ import { backHref, Breadcrumbs, PageTitleProvider } from "@/features/shell/Bread
 import { PaletteMenu } from "@/features/shell/PaletteMenu";
 import { ThemeToggle } from "@/features/shell/ThemeToggle";
 import { useAuth } from "@/features/studio/AuthProvider";
-import { isReviewer } from "@/lib/api/auth";
+import { GuestQuotaStatus } from "@/features/studio/auth/GuestQuotaStatus";
+import { canEdit, isReviewer } from "@/lib/api/auth";
 import { APP_HOME } from "@/lib/routes";
 
 /** IA Tổng quan/Scenes theo STUDIO_UX_SPEC.md §3.1; mục tạo scene mới và quản lý scenes nằm trong Công việc. */
@@ -49,7 +50,9 @@ const NAV = [
   ] },
   { heading: "Công việc", items: [
     { href: "/new", label: "Tạo scene mới", icon: PlusCircle, reviewerOnly: false },
-    { href: "/scenes", label: "Scenes", icon: Clapperboard, reviewerOnly: false },
+    { href: "/scenes", label: "Scenes từ video", icon: Clapperboard, reviewerOnly: false },
+    { href: "/imports", label: "Scenes đã import", icon: FolderDown, reviewerOnly: false },
+    { href: "/benchmark", label: "Benchmark", icon: ChartBarBig, reviewerOnly: false },
     { href: "/trash", label: "Thùng rác", icon: Trash2, reviewerOnly: false },
   ] },
   { heading: "Quản lý", items: [
@@ -60,9 +63,17 @@ const NAV = [
 /** Trang không cần khung ứng dụng (đăng nhập/đăng ký có layout riêng). */
 const BARE_ROUTES = ["/login", "/register"];
 
+/** Route cho phép khách trải nghiệm mà không cần đăng nhập. */
+export function isGuestAllowedRoute(pathname: string): boolean {
+  if (pathname === "/new/try-demo" || pathname.startsWith("/new/try-demo")) return true;
+  if (pathname.startsWith("/samples/")) return true;
+  return false;
+}
+
 export function isActive(pathname: string, href: string): boolean {
   if (href === "/new") return pathname === "/new" || pathname.startsWith("/new/");
-  if (href === "/scenes") return pathname === "/scenes" || ["/scenes/", "/imports/", "/samples/"].some((route) => pathname.startsWith(route));
+  if (href === "/scenes") return pathname === "/scenes" || ["/scenes/", "/samples/"].some((route) => pathname.startsWith(route));
+  if (href === "/imports") return pathname === "/imports" || pathname.startsWith("/imports/");
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
@@ -73,17 +84,49 @@ export function isActive(pathname: string, href: string): boolean {
  */
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  if (BARE_ROUTES.some((route) => pathname.startsWith(route))) return <>{children}</>;
+  const router = useRouter();
+  const { me } = useAuth();
+  const navigated = useRef(false);
+
+  const isBare = BARE_ROUTES.some((route) => pathname.startsWith(route));
+  const guestAllowed = isGuestAllowedRoute(pathname);
+  const signedIn = canEdit(me);
+
+  // Khi hệ thống yêu cầu đăng nhập và người dùng chưa có phiên:
+  // Nếu vào trang workspace (không thuộc guestAllowed và không phải bare route), chuyển hướng về /login.
+  const requiresAuthRedirect = !isBare && me !== null && me.auth_required && !me.user && !guestAllowed;
+
+  useEffect(() => {
+    if (requiresAuthRedirect && !navigated.current) {
+      navigated.current = true;
+      router.replace(`/login?next=${encodeURIComponent(pathname)}`);
+    }
+  }, [requiresAuthRedirect, pathname, router]);
+
+  if (isBare) return <>{children}</>;
+
+  // Đang kiểm tra phiên trên route yêu cầu đăng nhập, hoặc đang chuyển hướng tới /login
+  if ((me === null || requiresAuthRedirect) && !guestAllowed) {
+    return (
+      <div className="grid min-h-screen place-items-center bg-paper text-sm text-ink-muted" role="status">
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="size-6 animate-spin text-primary motion-reduce:animate-none" aria-hidden />
+          <p>Đang kiểm tra quyền truy cập…</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <SidebarProvider>
       <PageTitleProvider key={pathname}>
-        <AppSidebar pathname={pathname} />
+        <AppSidebar pathname={pathname} signedIn={signedIn} />
         <SidebarInset className="min-w-0">
           <header className="sticky top-0 z-30 flex h-12 shrink-0 items-center gap-2 border-b border-border bg-background/80 px-3 backdrop-blur-md">
             {/* Màn hẹp: thanh bên là ngăn trượt nên header giữ nút mở; màn rộng thì nút thu gọn nằm trong thanh bên. */}
             <SidebarTrigger className="-ml-1 md:hidden" aria-label="Mở thanh bên" />
-            <BackButton pathname={pathname} />
-            <Breadcrumbs pathname={pathname} />
+            <BackButton pathname={pathname} signedIn={signedIn} />
+            <Breadcrumbs pathname={pathname} signedIn={signedIn} />
             <PaletteMenu className="ml-auto size-8 [&_svg]:size-4" />
             <ThemeToggle className="size-8 [&_svg]:size-4" />
           </header>
@@ -95,8 +138,8 @@ export function AppShell({ children }: { children: ReactNode }) {
 }
 
 /** Nút "Quay lại" ở đầu header; chỉ hiện trên trang con (có cấp cha trong breadcrumb). */
-function BackButton({ pathname }: { pathname: string }) {
-  const href = backHref(pathname);
+function BackButton({ pathname, signedIn }: { pathname: string; signedIn: boolean }) {
+  const href = backHref(pathname, signedIn);
   if (!href) return null;
   return (
     <>
@@ -114,7 +157,7 @@ function BackButton({ pathname }: { pathname: string }) {
 /**
  * Đầu thanh bên: logo + nút thu gọn. Khi thu gọn chỉ còn nút mở lại, đứng ở vị trí của logo và trên các mục điều hướng.
  */
-function SidebarBrand() {
+function SidebarBrand({ signedIn }: { signedIn: boolean }) {
   const { state, isMobile, toggleSidebar } = useSidebar();
   const collapsed = state === "collapsed" && !isMobile;
   const label = collapsed ? "Mở thanh bên" : "Thu gọn thanh bên";
@@ -123,10 +166,8 @@ function SidebarBrand() {
       <SidebarMenuItem className="flex items-center gap-1">
         {!collapsed && (
           <SidebarMenuButton asChild size="lg" className="min-w-0 flex-1">
-            <Link href={APP_HOME}>
-              <span className="grid size-8 place-items-center rounded-lg bg-primary text-primary-foreground">
-                <Box className="size-4" aria-hidden />
-              </span>
+            <Link href={signedIn ? APP_HOME : "/"}>
+              <BrandIcon className="size-8 shrink-0" />
               <BrandWordmark />
             </Link>
           </SidebarMenuButton>
@@ -145,37 +186,55 @@ function SidebarBrand() {
   );
 }
 
-function AppSidebar({ pathname }: { pathname: string }) {
+function AppSidebar({ pathname, signedIn }: { pathname: string; signedIn: boolean }) {
   const { me } = useAuth();
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
-        <SidebarBrand />
+        <SidebarBrand signedIn={signedIn} />
       </SidebarHeader>
       <SidebarContent>
-        {NAV.map((group) => {
-          const items = group.items.filter((item) => !item.reviewerOnly || (me?.auth_required && isReviewer(me)));
-          if (items.length === 0) return null;
-          return (
-            <SidebarGroup key={group.heading}>
-              <SidebarGroupLabel>{group.heading}</SidebarGroupLabel>
-              <SidebarGroupContent>
-                <SidebarMenu>
-                  {items.map((item) => (
-                    <SidebarMenuItem key={item.href}>
-                      <SidebarMenuButton asChild isActive={isActive(pathname, item.href)} tooltip={item.label}>
-                        <Link href={item.href} aria-current={isActive(pathname, item.href) ? "page" : undefined}>
-                          <item.icon aria-hidden />
-                          <span>{item.label}</span>
-                        </Link>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  ))}
-                </SidebarMenu>
-              </SidebarGroupContent>
-            </SidebarGroup>
-          );
-        })}
+        {signedIn ? (
+          NAV.map((group) => {
+            const items = group.items.filter((item) => !item.reviewerOnly || (me?.auth_required && isReviewer(me)));
+            if (items.length === 0) return null;
+            return (
+              <SidebarGroup key={group.heading}>
+                <SidebarGroupLabel>{group.heading}</SidebarGroupLabel>
+                <SidebarGroupContent>
+                  <SidebarMenu>
+                    {items.map((item) => (
+                      <SidebarMenuItem key={item.href}>
+                        <SidebarMenuButton asChild isActive={isActive(pathname, item.href)} tooltip={item.label}>
+                          <Link href={item.href} aria-current={isActive(pathname, item.href) ? "page" : undefined}>
+                            <item.icon aria-hidden />
+                            <span>{item.label}</span>
+                          </Link>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    ))}
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              </SidebarGroup>
+            );
+          })
+        ) : (
+          <SidebarGroup>
+            <SidebarGroupLabel>Chế độ xem mẫu</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild isActive={pathname.startsWith("/new/try-demo") || pathname.startsWith("/samples/")} tooltip="Thử video mẫu">
+                    <Link href="/new/try-demo">
+                      <Clapperboard aria-hidden />
+                      <span>Thử video mẫu</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
       </SidebarContent>
       <SidebarFooter>
         <AccountMenu pathname={pathname} />
@@ -193,7 +252,10 @@ function AccountMenu({ pathname }: { pathname: string }) {
     setBusy(true); setError(null);
     try { await logout(); } catch (cause) { setError(errorMessage(cause)); } finally { setBusy(false); }
   }
-  if (!me?.auth_required) {
+  if (me === null) {
+    return null;
+  }
+  if (!me.auth_required) {
     // Deployment local không bật đăng nhập: không có tài khoản để hiện, không giả một user.
     return <p className="px-2 text-xs text-sidebar-foreground/60 group-data-[collapsible=icon]:hidden">Chế độ local · không đăng nhập</p>;
   }
@@ -212,7 +274,7 @@ function AccountMenu({ pathname }: { pathname: string }) {
     );
   }
   const user = me.user;
-  const role = user.role === "reviewer" ? "Reviewer" : "Editor";
+  const role = user.role === "reviewer" ? "Reviewer" : user.role === "editor" ? "Editor" : "Guest";
   return (
     <SidebarMenu>
       <SidebarMenuItem>
@@ -235,8 +297,13 @@ function AccountMenu({ pathname }: { pathname: string }) {
               <p className="text-xs text-muted-foreground">{user.email}</p>
               <p className="mt-1 text-xs text-muted-foreground">
                 {role}
-                {user.role === "editor" ? ` · hạn mức ${user.daily_job_quota} lần xử lý/ngày` : " · không giới hạn lần xử lý"}
+                {user.role === "guest"
+                  ? " · tối đa 3 lượt chạy/ngày"
+                  : user.role === "editor"
+                    ? ` · hạn mức ${user.daily_job_quota} lần xử lý/ngày`
+                    : " · không giới hạn lần xử lý"}
               </p>
+              {user.role === "guest" && <GuestQuotaStatus quota={me.quota} className="mt-2" />}
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem asChild><Link href="/account"><UserRound aria-hidden />Tài khoản của tôi</Link></DropdownMenuItem>

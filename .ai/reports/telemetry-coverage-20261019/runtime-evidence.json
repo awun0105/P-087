@@ -1,0 +1,758 @@
+[
+  {
+    "job_id": "job-7c9820b4834f",
+    "job_started_at": "2026-10-16T23:02:23.360826+00:00",
+    "job_completed_at": "2026-10-18T00:44:31.992583+00:00",
+    "first_ready_event_at": null,
+    "ready_after_terminal_seconds": null,
+    "wall_to_first_ready_seconds": null,
+    "benchmark": {
+      "schema_version": "1.1",
+      "benchmark_kind": "pipeline_runtime",
+      "job_id": "job-7c9820b4834f",
+      "project_id": "project-33a00be63d0f",
+      "attempt": 3,
+      "label": null,
+      "recorded_at": "2026-10-19T05:12:14.398200Z",
+      "status": "SUCCEEDED",
+      "snapshot_phase": "terminal",
+      "stages": [
+        {
+          "stage_id": "ST-INPUT-VALIDATE",
+          "state": "succeeded",
+          "seconds": null,
+          "started_at": "2026-10-16T23:02:25.282907Z",
+          "completed_at": "2026-10-16T23:02:38.170871Z",
+          "scope": "reused",
+          "waiting_seconds": null
+        },
+        {
+          "stage_id": "ST-PRIVACY-GATE",
+          "state": "succeeded",
+          "seconds": null,
+          "started_at": "2026-10-16T23:02:38.170938Z",
+          "completed_at": "2026-10-16T23:02:38.174217Z",
+          "scope": "reused",
+          "waiting_seconds": null
+        },
+        {
+          "stage_id": "ST-FRAME-EXTRACT",
+          "state": "succeeded",
+          "seconds": null,
+          "started_at": "2026-10-16T23:02:38.174266Z",
+          "completed_at": "2026-10-16T23:02:38.801870Z",
+          "scope": "reused",
+          "waiting_seconds": null
+        },
+        {
+          "stage_id": "ST-CAMERA-POSE",
+          "state": "succeeded",
+          "seconds": null,
+          "started_at": null,
+          "completed_at": "2026-10-17T03:41:58.323141Z",
+          "scope": "reused",
+          "waiting_seconds": null
+        },
+        {
+          "stage_id": "ST-VISUAL-RECON",
+          "state": "succeeded",
+          "seconds": null,
+          "started_at": null,
+          "completed_at": "2026-10-17T05:08:13.642261Z",
+          "scope": "reused",
+          "waiting_seconds": null
+        },
+        {
+          "stage_id": "ST-METRIC-CANONICALIZE",
+          "state": "succeeded",
+          "seconds": null,
+          "started_at": null,
+          "completed_at": "2026-10-18T00:36:17.066758Z",
+          "scope": "reused",
+          "waiting_seconds": null
+        },
+        {
+          "stage_id": "ST-RGB-GEOMETRY",
+          "state": "succeeded",
+          "seconds": 0.231043,
+          "started_at": "2026-10-18T00:36:17.505229Z",
+          "completed_at": "2026-10-18T00:36:17.736272Z",
+          "scope": "attempt",
+          "waiting_seconds": null
+        },
+        {
+          "stage_id": "ST-OBJECT-EXTRACT",
+          "state": "succeeded",
+          "seconds": 494.150441,
+          "started_at": "2026-10-18T00:36:17.836293Z",
+          "completed_at": "2026-10-18T00:44:31.986734Z",
+          "scope": "attempt",
+          "waiting_seconds": null
+        }
+      ],
+      "total_seconds": 92528.631757,
+      "attempt_started_at": "2026-10-18T00:36:17.505229Z",
+      "attempt_completed_at": "2026-10-18T00:44:31.992583Z",
+      "attempt_wall_seconds": 494.487354,
+      "queue_seconds": 0.008705,
+      "user_wait_seconds": 1671.179263,
+      "critical_path_seconds": 494.481505,
+      "worker_process_seconds": 494.1517130440043,
+      "worker_wall_seconds": 494.151715,
+      "worker_measurement_count": 1,
+      "timing_coverage": {
+        "worker_stage_count": 2,
+        "measured_worker_stage_count": 2,
+        "missing_worker_stage_ids": []
+      },
+      "timing_issues": [],
+      "first_preview_ready_at": "2026-10-17T05:08:13.642261Z",
+      "first_preview_time_source": "verified",
+      "time_to_first_preview_seconds": 21950.281435,
+      "actual_frame_count": 225,
+      "input_manifest_checksum": "sha256:debda358c399268a35b0fb779b3108c13d5d10d10fb47c9e97d6c39a2218baf5",
+      "runtime_manifest_checksum": "sha256:77e78f272b2d26ca94aa537e9a51d640219f4247381d2cbd3c7d25113d502ddc",
+      "config_checksum": "sha256:cf0ba5b1f6d25445d9295f47c374508fa6d01cdd6fe1bfeabc75ea2657cb1813",
+      "gpu_power_limit_watts": null,
+      "input_size_bytes": 19205794,
+      "sog_size_bytes": 16743234,
+      "gpu_allocated_seconds": null,
+      "gpu_hourly_usd": null,
+      "estimated_gpu_cost_usd": null,
+      "active_compute_seconds": null,
+      "io_seconds": null,
+      "publication_seconds": null
+    },
+    "resource_tools": {
+      "prepare": {
+        "records": 1,
+        "outcomes": {
+          "completed": 1
+        },
+        "total_seconds_all_outcomes": 14.834,
+        "config_matches_job": 1,
+        "latest_end": "2026-10-16T23:02:39.436389+00:00"
+      },
+      "preview": {
+        "records": 2,
+        "outcomes": {
+          "cancelled": 1,
+          "completed": 1
+        },
+        "total_seconds_all_outcomes": 5586.519,
+        "config_matches_job": 2,
+        "latest_end": "2026-10-17T05:08:10.763693+00:00"
+      },
+      "metric_proposal": {
+        "records": 1,
+        "outcomes": {
+          "completed": 1
+        },
+        "total_seconds_all_outcomes": 210.713,
+        "config_matches_job": 1,
+        "latest_end": "2026-10-17T05:11:44.447810+00:00"
+      },
+      "finalize": {
+        "records": 1,
+        "outcomes": {
+          "failed": 1
+        },
+        "total_seconds_all_outcomes": 248.52,
+        "config_matches_job": 1,
+        "latest_end": "2026-10-17T05:43:45.739930+00:00"
+      },
+      "scene_extract": {
+        "records": 1,
+        "outcomes": {
+          "completed": 1
+        },
+        "total_seconds_all_outcomes": 494.152,
+        "config_matches_job": 1,
+        "latest_end": "2026-10-18T00:44:31.987635+00:00"
+      }
+    },
+    "post_terminal_usage_count": 0,
+    "post_terminal_tools": {},
+    "post_terminal_config_matches": 0,
+    "processing_seconds": 5901.516033630003,
+    "raw_resource_seconds_all_outcomes": 6554.737633099023,
+    "billed_count": 4,
+    "operator_batches": 60,
+    "operator_surface_counts": {
+      "studio": 41,
+      "progress": 19
+    },
+    "operator_active_seconds": 1372.54,
+    "operator_actor_count": 1,
+    "operator_session_count": 15
+  },
+  {
+    "job_id": "job-a14981f78f85",
+    "job_started_at": "2026-10-12T09:12:46.264115+00:00",
+    "job_completed_at": "2026-10-12T11:19:53.879109+00:00",
+    "first_ready_event_at": null,
+    "ready_after_terminal_seconds": null,
+    "wall_to_first_ready_seconds": null,
+    "benchmark": {
+      "schema_version": "1.1",
+      "benchmark_kind": "pipeline_runtime",
+      "job_id": "job-a14981f78f85",
+      "project_id": "project-04f45f45ee67",
+      "attempt": 2,
+      "label": null,
+      "recorded_at": "2026-10-19T05:12:14.498586Z",
+      "status": "SUCCEEDED",
+      "snapshot_phase": "terminal",
+      "stages": [
+        {
+          "stage_id": "ST-INPUT-VALIDATE",
+          "state": "succeeded",
+          "seconds": null,
+          "started_at": "2026-10-12T09:12:46.264115Z",
+          "completed_at": "2026-10-12T09:12:46.264115Z",
+          "scope": "reused",
+          "waiting_seconds": null
+        },
+        {
+          "stage_id": "ST-PRIVACY-GATE",
+          "state": "succeeded",
+          "seconds": null,
+          "started_at": "2026-10-12T09:12:46.264115Z",
+          "completed_at": "2026-10-12T09:12:46.264115Z",
+          "scope": "reused",
+          "waiting_seconds": null
+        },
+        {
+          "stage_id": "ST-FRAME-EXTRACT",
+          "state": "succeeded",
+          "seconds": null,
+          "started_at": "2026-10-12T09:12:46.264115Z",
+          "completed_at": "2026-10-12T09:12:46.264115Z",
+          "scope": "reused",
+          "waiting_seconds": null
+        },
+        {
+          "stage_id": "ST-CAMERA-POSE",
+          "state": "succeeded",
+          "seconds": 26.418653,
+          "started_at": "2026-10-12T09:30:29.193919Z",
+          "completed_at": "2026-10-12T09:30:55.612572Z",
+          "scope": "attempt",
+          "waiting_seconds": null
+        },
+        {
+          "stage_id": "ST-VISUAL-RECON",
+          "state": "succeeded",
+          "seconds": 3811.691245,
+          "started_at": "2026-10-12T09:30:55.620020Z",
+          "completed_at": "2026-10-12T10:34:27.311265Z",
+          "scope": "attempt",
+          "waiting_seconds": null
+        },
+        {
+          "stage_id": "ST-METRIC-CANONICALIZE",
+          "state": "succeeded",
+          "seconds": null,
+          "started_at": "2026-10-12T10:36:53.283443Z",
+          "completed_at": "2026-10-12T10:45:45.893908Z",
+          "scope": "attempt",
+          "waiting_seconds": 532.610465
+        },
+        {
+          "stage_id": "ST-RGB-GEOMETRY",
+          "state": "succeeded",
+          "seconds": 174.033119,
+          "started_at": "2026-10-12T10:39:27.965014Z",
+          "completed_at": "2026-10-12T10:42:21.998133Z",
+          "scope": "attempt",
+          "waiting_seconds": null
+        },
+        {
+          "stage_id": "ST-OBJECT-EXTRACT",
+          "state": "succeeded",
+          "seconds": 2046.886044,
+          "started_at": "2026-10-12T10:45:46.983719Z",
+          "completed_at": "2026-10-12T11:19:53.869763Z",
+          "scope": "attempt",
+          "waiting_seconds": null
+        }
+      ],
+      "total_seconds": 7627.614994,
+      "attempt_started_at": "2026-10-12T09:30:12.851453Z",
+      "attempt_completed_at": "2026-10-12T11:19:53.879109Z",
+      "attempt_wall_seconds": 6581.027656,
+      "queue_seconds": 63.279055,
+      "user_wait_seconds": 128.688861,
+      "critical_path_seconds": null,
+      "worker_process_seconds": 6411.137674014999,
+      "worker_wall_seconds": 6411.137677,
+      "worker_measurement_count": 4,
+      "timing_coverage": {
+        "worker_stage_count": 4,
+        "measured_worker_stage_count": 4,
+        "missing_worker_stage_ids": []
+      },
+      "timing_issues": [
+        "overlapping_serial_stage_intervals"
+      ],
+      "first_preview_ready_at": "2026-10-12T10:34:27.311265Z",
+      "first_preview_time_source": "verified",
+      "time_to_first_preview_seconds": 4901.04715,
+      "actual_frame_count": null,
+      "input_manifest_checksum": "sha256:803cdccfddb91f2d2f82c7b8996fe6051144093dcc44610ff59866c1498b4458",
+      "runtime_manifest_checksum": "sha256:861c5b2a56b9b0201383c3aaa902e23288030f845acdb5fd73231938887dbf53",
+      "config_checksum": "sha256:ccb1204414d43bd8eb2763a6ccec6ae8d61d9b6834e515bbb4c2898cd61d99ee",
+      "gpu_power_limit_watts": null,
+      "input_size_bytes": 113382964,
+      "sog_size_bytes": 14317958,
+      "gpu_allocated_seconds": null,
+      "gpu_hourly_usd": null,
+      "estimated_gpu_cost_usd": null,
+      "active_compute_seconds": null,
+      "io_seconds": null,
+      "publication_seconds": null
+    },
+    "resource_tools": {
+      "preview": {
+        "records": 1,
+        "outcomes": {
+          "completed": 1
+        },
+        "total_seconds_all_outcomes": 3839.885,
+        "config_matches_job": 1,
+        "latest_end": "2026-10-12T10:34:12.846973+00:00"
+      },
+      "metric_proposal": {
+        "records": 1,
+        "outcomes": {
+          "completed": 1
+        },
+        "total_seconds_all_outcomes": 145.834,
+        "config_matches_job": 1,
+        "latest_end": "2026-10-12T10:36:53.246728+00:00"
+      },
+      "finalize": {
+        "records": 1,
+        "outcomes": {
+          "completed": 1
+        },
+        "total_seconds_all_outcomes": 378.531,
+        "config_matches_job": 1,
+        "latest_end": "2026-10-12T10:45:46.580986+00:00"
+      },
+      "scene_extract": {
+        "records": 1,
+        "outcomes": {
+          "completed": 1
+        },
+        "total_seconds_all_outcomes": 2046.887,
+        "config_matches_job": 1,
+        "latest_end": "2026-10-12T11:19:53.870617+00:00"
+      }
+    },
+    "post_terminal_usage_count": 0,
+    "post_terminal_tools": {},
+    "post_terminal_config_matches": 0,
+    "processing_seconds": 6411.137674014999,
+    "raw_resource_seconds_all_outcomes": 6411.137674014999,
+    "billed_count": 4,
+    "operator_batches": 38,
+    "operator_surface_counts": {
+      "studio": 11,
+      "progress": 27
+    },
+    "operator_active_seconds": 612.97,
+    "operator_actor_count": 1,
+    "operator_session_count": 16
+  },
+  {
+    "job_id": "job-bfc7d73f0dbf",
+    "job_started_at": "2026-10-18T07:32:34.520159+00:00",
+    "job_completed_at": "2026-10-18T10:50:50.948530+00:00",
+    "first_ready_event_at": null,
+    "ready_after_terminal_seconds": null,
+    "wall_to_first_ready_seconds": null,
+    "benchmark": {
+      "schema_version": "1.1",
+      "benchmark_kind": "pipeline_runtime",
+      "job_id": "job-bfc7d73f0dbf",
+      "project_id": "project-8f8407859c17",
+      "attempt": 1,
+      "label": null,
+      "recorded_at": "2026-10-19T05:12:14.631211Z",
+      "status": "SUCCEEDED",
+      "snapshot_phase": "terminal",
+      "stages": [
+        {
+          "stage_id": "ST-INPUT-VALIDATE",
+          "state": "succeeded",
+          "seconds": 16.715816,
+          "started_at": "2026-10-18T07:52:31.302222Z",
+          "completed_at": "2026-10-18T07:52:48.018038Z",
+          "scope": "attempt",
+          "waiting_seconds": null
+        },
+        {
+          "stage_id": "ST-PRIVACY-GATE",
+          "state": "succeeded",
+          "seconds": 0.003168,
+          "started_at": "2026-10-18T07:52:48.018096Z",
+          "completed_at": "2026-10-18T07:52:48.021264Z",
+          "scope": "attempt",
+          "waiting_seconds": null
+        },
+        {
+          "stage_id": "ST-FRAME-EXTRACT",
+          "state": "succeeded",
+          "seconds": 1.129042,
+          "started_at": "2026-10-18T07:52:48.021292Z",
+          "completed_at": "2026-10-18T07:52:49.150334Z",
+          "scope": "attempt",
+          "waiting_seconds": null
+        },
+        {
+          "stage_id": "ST-CAMERA-POSE",
+          "state": "succeeded",
+          "seconds": 930.980398,
+          "started_at": "2026-10-18T07:52:51.514815Z",
+          "completed_at": "2026-10-18T08:08:22.495213Z",
+          "scope": "attempt",
+          "waiting_seconds": null
+        },
+        {
+          "stage_id": "ST-VISUAL-RECON",
+          "state": "succeeded",
+          "seconds": 3236.195677,
+          "started_at": "2026-10-18T08:08:22.578192Z",
+          "completed_at": "2026-10-18T09:02:18.773869Z",
+          "scope": "attempt",
+          "waiting_seconds": null
+        },
+        {
+          "stage_id": "ST-METRIC-CANONICALIZE",
+          "state": "succeeded",
+          "seconds": null,
+          "started_at": "2026-10-18T09:04:48.391976Z",
+          "completed_at": "2026-10-18T10:17:41.002865Z",
+          "scope": "attempt",
+          "waiting_seconds": 4372.610889
+        },
+        {
+          "stage_id": "ST-RGB-GEOMETRY",
+          "state": "succeeded",
+          "seconds": 147.128825,
+          "started_at": "2026-10-18T10:13:33.050503Z",
+          "completed_at": "2026-10-18T10:16:00.179328Z",
+          "scope": "attempt",
+          "waiting_seconds": null
+        },
+        {
+          "stage_id": "ST-OBJECT-EXTRACT",
+          "state": "succeeded",
+          "seconds": 1988.937827,
+          "started_at": "2026-10-18T10:17:41.960868Z",
+          "completed_at": "2026-10-18T10:50:50.898695Z",
+          "scope": "attempt",
+          "waiting_seconds": null
+        }
+      ],
+      "total_seconds": 11896.428371,
+      "attempt_started_at": "2026-10-18T07:52:29.983355Z",
+      "attempt_completed_at": "2026-10-18T10:50:50.948530Z",
+      "attempt_wall_seconds": 10700.965175,
+      "queue_seconds": 1195.463196,
+      "user_wait_seconds": 4124.459325,
+      "critical_path_seconds": null,
+      "worker_process_seconds": 6572.890544448998,
+      "worker_wall_seconds": 6572.8905460000005,
+      "worker_measurement_count": 5,
+      "timing_coverage": {
+        "worker_stage_count": 7,
+        "measured_worker_stage_count": 7,
+        "missing_worker_stage_ids": []
+      },
+      "timing_issues": [
+        "overlapping_serial_stage_intervals"
+      ],
+      "first_preview_ready_at": "2026-10-18T09:02:18.773869Z",
+      "first_preview_time_source": "verified",
+      "time_to_first_preview_seconds": 5384.25371,
+      "actual_frame_count": 311,
+      "input_manifest_checksum": "sha256:138b884313208cae553ee388479c9fe5dc48ed2a028968f6da76614dd93de2f2",
+      "runtime_manifest_checksum": "sha256:77e78f272b2d26ca94aa537e9a51d640219f4247381d2cbd3c7d25113d502ddc",
+      "config_checksum": "sha256:6474b9302e45dc3c0f4c812ad9a256209de3712c33b4a69b65f06ad88090e937",
+      "gpu_power_limit_watts": null,
+      "input_size_bytes": 11366132,
+      "sog_size_bytes": 10318556,
+      "gpu_allocated_seconds": null,
+      "gpu_hourly_usd": null,
+      "estimated_gpu_cost_usd": null,
+      "active_compute_seconds": null,
+      "io_seconds": null,
+      "publication_seconds": null
+    },
+    "resource_tools": {
+      "prepare": {
+        "records": 1,
+        "outcomes": {
+          "completed": 1
+        },
+        "total_seconds_all_outcomes": 19.594,
+        "config_matches_job": 1,
+        "latest_end": "2026-10-18T07:52:49.966168+00:00"
+      },
+      "preview": {
+        "records": 1,
+        "outcomes": {
+          "completed": 1
+        },
+        "total_seconds_all_outcomes": 4166.221,
+        "config_matches_job": 1,
+        "latest_end": "2026-10-18T09:02:16.553183+00:00"
+      },
+      "metric_proposal": {
+        "records": 1,
+        "outcomes": {
+          "completed": 1
+        },
+        "total_seconds_all_outcomes": 149.489,
+        "config_matches_job": 1,
+        "latest_end": "2026-10-18T09:04:48.361926+00:00"
+      },
+      "finalize": {
+        "records": 1,
+        "outcomes": {
+          "completed": 1
+        },
+        "total_seconds_all_outcomes": 248.609,
+        "config_matches_job": 1,
+        "latest_end": "2026-10-18T10:17:41.811538+00:00"
+      },
+      "scene_extract": {
+        "records": 1,
+        "outcomes": {
+          "completed": 1
+        },
+        "total_seconds_all_outcomes": 1988.978,
+        "config_matches_job": 1,
+        "latest_end": "2026-10-18T10:50:50.938194+00:00"
+      }
+    },
+    "post_terminal_usage_count": 0,
+    "post_terminal_tools": {},
+    "post_terminal_config_matches": 0,
+    "processing_seconds": 6572.890544448998,
+    "raw_resource_seconds_all_outcomes": 6572.890544448998,
+    "billed_count": 5,
+    "operator_batches": 81,
+    "operator_surface_counts": {
+      "progress": 63,
+      "studio": 18
+    },
+    "operator_active_seconds": 1473.946,
+    "operator_actor_count": 1,
+    "operator_session_count": 23
+  },
+  {
+    "job_id": "job-f9f14e7fbfb1",
+    "job_started_at": "2026-10-17T06:39:07.678574+00:00",
+    "job_completed_at": "2026-10-17T10:57:07.169876+00:00",
+    "first_ready_event_at": "2026-10-18T00:31:50.095179+00:00",
+    "ready_after_terminal_seconds": 48882.925303,
+    "wall_to_first_ready_seconds": 64362.416605,
+    "benchmark": {
+      "schema_version": "1.1",
+      "benchmark_kind": "pipeline_runtime",
+      "job_id": "job-f9f14e7fbfb1",
+      "project_id": "project-27b54d5fda4b",
+      "attempt": 1,
+      "label": null,
+      "recorded_at": "2026-10-19T05:12:15.154443Z",
+      "status": "SUCCEEDED",
+      "snapshot_phase": "terminal",
+      "stages": [
+        {
+          "stage_id": "ST-INPUT-VALIDATE",
+          "state": "succeeded",
+          "seconds": 13.536445,
+          "started_at": "2026-10-17T06:44:58.306318Z",
+          "completed_at": "2026-10-17T06:45:11.842763Z",
+          "scope": "attempt",
+          "waiting_seconds": null
+        },
+        {
+          "stage_id": "ST-PRIVACY-GATE",
+          "state": "succeeded",
+          "seconds": 0.003316,
+          "started_at": "2026-10-17T06:45:11.842854Z",
+          "completed_at": "2026-10-17T06:45:11.846170Z",
+          "scope": "attempt",
+          "waiting_seconds": null
+        },
+        {
+          "stage_id": "ST-FRAME-EXTRACT",
+          "state": "succeeded",
+          "seconds": 1.698887,
+          "started_at": "2026-10-17T06:45:11.846240Z",
+          "completed_at": "2026-10-17T06:45:13.545127Z",
+          "scope": "attempt",
+          "waiting_seconds": null
+        },
+        {
+          "stage_id": "ST-CAMERA-POSE",
+          "state": "succeeded",
+          "seconds": 3116.517217,
+          "started_at": "2026-10-17T06:45:18.743448Z",
+          "completed_at": "2026-10-17T07:37:15.260665Z",
+          "scope": "attempt",
+          "waiting_seconds": null
+        },
+        {
+          "stage_id": "ST-VISUAL-RECON",
+          "state": "succeeded",
+          "seconds": 10407.177368,
+          "started_at": "2026-10-17T07:37:15.431925Z",
+          "completed_at": "2026-10-17T10:30:42.609293Z",
+          "scope": "attempt",
+          "waiting_seconds": null
+        },
+        {
+          "stage_id": "ST-METRIC-CANONICALIZE",
+          "state": "succeeded",
+          "seconds": null,
+          "started_at": "2026-10-17T10:32:38.218822Z",
+          "completed_at": "2026-10-17T10:43:35.646618Z",
+          "scope": "attempt",
+          "waiting_seconds": 657.427796
+        },
+        {
+          "stage_id": "ST-RGB-GEOMETRY",
+          "state": "succeeded",
+          "seconds": 374.733211,
+          "started_at": "2026-10-17T10:34:45.017624Z",
+          "completed_at": "2026-10-17T10:40:59.750835Z",
+          "scope": "attempt",
+          "waiting_seconds": null
+        },
+        {
+          "stage_id": "ST-OBJECT-EXTRACT",
+          "state": "succeeded",
+          "seconds": 810.488658,
+          "started_at": "2026-10-17T10:43:36.672988Z",
+          "completed_at": "2026-10-17T10:57:07.161646Z",
+          "scope": "attempt",
+          "waiting_seconds": null
+        }
+      ],
+      "total_seconds": 15479.491302,
+      "attempt_started_at": "2026-10-17T06:44:57.436026Z",
+      "attempt_completed_at": "2026-10-17T10:57:07.169876Z",
+      "attempt_wall_seconds": 15129.73385,
+      "queue_seconds": 349.757452,
+      "user_wait_seconds": 125.988682,
+      "critical_path_seconds": null,
+      "worker_process_seconds": 14996.08741459297,
+      "worker_wall_seconds": 14996.087405999999,
+      "worker_measurement_count": 5,
+      "timing_coverage": {
+        "worker_stage_count": 7,
+        "measured_worker_stage_count": 7,
+        "missing_worker_stage_ids": []
+      },
+      "timing_issues": [
+        "overlapping_serial_stage_intervals"
+      ],
+      "first_preview_ready_at": "2026-10-17T10:30:42.609293Z",
+      "first_preview_time_source": "verified",
+      "time_to_first_preview_seconds": 13894.930719,
+      "actual_frame_count": 263,
+      "input_manifest_checksum": "sha256:58b2a527a9a731cf57bfab1d1e112eb2318acd230a99ac9550623a22ffcee366",
+      "runtime_manifest_checksum": "sha256:77e78f272b2d26ca94aa537e9a51d640219f4247381d2cbd3c7d25113d502ddc",
+      "config_checksum": "sha256:2877584f84297799197c6155a0d6acc034c53e2fff3a0d9e3384203e99cac020",
+      "gpu_power_limit_watts": null,
+      "input_size_bytes": 21833889,
+      "sog_size_bytes": 31196996,
+      "gpu_allocated_seconds": null,
+      "gpu_hourly_usd": null,
+      "estimated_gpu_cost_usd": null,
+      "active_compute_seconds": null,
+      "io_seconds": null,
+      "publication_seconds": null
+    },
+    "resource_tools": {
+      "prepare": {
+        "records": 1,
+        "outcomes": {
+          "completed": 1
+        },
+        "total_seconds_all_outcomes": 15.939,
+        "config_matches_job": 1,
+        "latest_end": "2026-10-17T06:45:13.871187+00:00"
+      },
+      "preview": {
+        "records": 1,
+        "outcomes": {
+          "completed": 1
+        },
+        "total_seconds_all_outcomes": 13522.91,
+        "config_matches_job": 1,
+        "latest_end": "2026-10-17T10:30:37.360132+00:00"
+      },
+      "metric_proposal": {
+        "records": 1,
+        "outcomes": {
+          "completed": 1
+        },
+        "total_seconds_all_outcomes": 115.411,
+        "config_matches_job": 1,
+        "latest_end": "2026-10-17T10:32:38.108537+00:00"
+      },
+      "finalize": {
+        "records": 1,
+        "outcomes": {
+          "completed": 1
+        },
+        "total_seconds_all_outcomes": 531.338,
+        "config_matches_job": 1,
+        "latest_end": "2026-10-17T10:43:36.441427+00:00"
+      },
+      "scene_extract": {
+        "records": 1,
+        "outcomes": {
+          "completed": 1
+        },
+        "total_seconds_all_outcomes": 810.49,
+        "config_matches_job": 1,
+        "latest_end": "2026-10-17T10:57:07.162437+00:00"
+      },
+      "scene.geometry": {
+        "records": 12,
+        "outcomes": {
+          "failed": 11,
+          "completed": 1
+        },
+        "total_seconds_all_outcomes": 897.504,
+        "config_matches_job": 0,
+        "latest_end": "2026-10-18T00:31:50.143271+00:00"
+      }
+    },
+    "post_terminal_usage_count": 12,
+    "post_terminal_tools": {
+      "scene.geometry": 12
+    },
+    "post_terminal_config_matches": 0,
+    "processing_seconds": 15308.898800724972,
+    "raw_resource_seconds_all_outcomes": 15893.591430612985,
+    "billed_count": 6,
+    "operator_batches": 414,
+    "operator_surface_counts": {
+      "progress": 79,
+      "studio": 324,
+      "evaluation": 9,
+      "other": 2
+    },
+    "operator_active_seconds": 9376.283,
+    "operator_actor_count": 1,
+    "operator_session_count": 55
+  }
+]

@@ -10,4 +10,10 @@ uv pip compile --generate-hashes --python-version 3.12.14 requirements-dev.in -o
 echo "Generating requirements-offline.lock.txt (Offline dataset tooling)..."
 uv pip compile --generate-hashes --python-version 3.12.14 requirements-offline.in -o requirements-offline.lock.txt
 
+echo "Generating requirements-lidar-odometry.lock.txt (LiDAR odometry runtime)..."
+uv pip compile --generate-hashes --python-version 3.12.14 requirements-lidar-odometry.in -o requirements-lidar-odometry.lock.txt
+
+echo "Generating requirements-usd.lock.txt (API USD runtime)..."
+uv pip compile --generate-hashes --python-version 3.12.14 requirements-usd.in -o requirements-usd.lock.txt
+
 echo "Lock files generated successfully."

@@ -85,3 +85,23 @@ def test_candidate_inventory_binds_exact_package_refs() -> None:
     changed.candidate_manifest.artifact_checksums.pop()
     with pytest.raises(ValueError, match="artifact_checksums"):
         verify_candidate_inventory(changed)
+
+
+def test_object_aware_manifest_is_bound_by_candidate_inventory() -> None:
+    candidate = _model(CandidatePackage, "candidate/candidate_package.json")
+    reference = candidate.entrypoint_usd.model_copy(
+        update={
+            "artifact_type": "ObjectAwareEnvironmentManifest",
+            "artifact_uri": "artifact://jobs/job-fixture-001/collision/object-aware.json",
+            "artifact_checksum": "sha256:" + "f" * 64,
+        }
+    )
+    candidate.candidate_manifest.object_aware_collision_ref = reference
+    with pytest.raises(ValueError, match="artifact_checksums"):
+        verify_candidate_inventory(candidate)
+    candidate.candidate_manifest.artifact_checksums.append(reference.artifact_checksum)
+    verify_candidate_inventory(candidate)
+    changed = reference.model_copy(update={"artifact_checksum": "sha256:" + "e" * 64})
+    candidate.candidate_manifest.object_aware_collision_ref = changed
+    with pytest.raises(ValueError, match="artifact_checksums"):
+        verify_candidate_inventory(candidate)

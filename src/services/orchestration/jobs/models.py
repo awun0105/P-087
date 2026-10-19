@@ -5,12 +5,26 @@ attempt. Lịch sử attempt là khái niệm product, nên nằm ở đây.
 """
 
 from datetime import datetime
-from typing import Self
+from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.models.contracts.artifacts import ArtifactUri, Checksum, Identifier, ProductArtifactRef
 from src.models.contracts.manifests import ExecutionError, JobStatus, StageArtifact, StageId, StageStatus
+from src.services.orchestration.auth.models import Actor
+
+
+class RuntimeRebound(BaseModel):
+    """Job QUEUED chưa có stage được gắn sang runtime của worker đang sống (T-040).
+
+    Khoá là `from_checksum`/`to_checksum` (không dùng `from`/`to`: tên dành riêng trong Python).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    from_checksum: Checksum
+    to_checksum: Checksum
+    reason: Literal["no_live_worker"]
 
 
 class JobAttemptRecord(BaseModel):
@@ -29,6 +43,19 @@ class JobAttemptRecord(BaseModel):
     job_manifest_uri: ArtifactUri | None = None
     job_manifest_checksum: Checksum | None = None
     error: ExecutionError | None = None
+    actual_frame_count: int | None = Field(default=None, ge=2)
+    stage_started_at: datetime | None = None
+    preview_verified_at: datetime | None = None
+    #: Person who accepted this run/retry; old events remain unknown and never infer today's role.
+    requested_by: Actor | None = Field(default=None, exclude_if=lambda value: value is None)
+    #: Chỉ có trên event gắn lại runtime; lịch sử hai runtime đọc được từ đây.
+    runtime_rebound: RuntimeRebound | None = Field(default=None, exclude_if=lambda value: value is None)
+
+    @model_validator(mode="after")
+    def _requester_only_on_queued_run(self) -> Self:
+        if self.requested_by is not None and self.status != JobStatus.QUEUED:
+            raise ValueError("requested_by chỉ được gắn với event bắt đầu lượt chạy QUEUED")
+        return self
 
 
 class TransitionRequest(BaseModel):
@@ -53,8 +80,8 @@ class JobDetail(BaseModel):
 class PreparedInputReceipt(BaseModel):
     """Phần PRODUCT đọc từ kết quả `prepare` của EX-REC, chỉ qua shared contracts.
 
-    Field khác trong payload của REC (stride, số frame) bị bỏ qua: PRODUCT không
-    phụ thuộc model nội bộ của track khác.
+    PRODUCT chỉ nhận số frame thực tế cần cho benchmark; các chi tiết chuẩn bị
+    nội bộ khác như stride vẫn thuộc EX-REC.
     """
 
     model_config = ConfigDict(extra="ignore")
@@ -63,6 +90,7 @@ class PreparedInputReceipt(BaseModel):
     input_manifest_checksum: Checksum
     stage_artifacts: list[StageArtifact]
     frame_set_ref: ProductArtifactRef | None = None
+    extracted_frame_count: int | None = Field(default=None, ge=2)
     error: ExecutionError | None = None
 
     @model_validator(mode="after")

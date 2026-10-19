@@ -187,6 +187,56 @@ def test_accepting_the_estimate_confirms_with_recorded_provenance(
     assert declaration.estimate.relative_uncertainty == pytest.approx(proposal.relative_uncertainty)
 
 
+def test_comparison_reports_real_moge_proposal_and_confirmed_estimate_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    arguments, calls, locate, visual, writer, _, _, _, store_root = _setup(tmp_path, monkeypatch)
+    propose_metric(*arguments)
+    port = user_metric_port(
+        arguments[2], writer, lambda uri: (store_root / uri.removeprefix("artifact://")).is_file(), locate
+    )
+    proposal = port.auto_proposal(JOB, visual.reference)
+    assert proposal is not None
+    pending = port.mode_comparison(JOB, visual.reference, None, None)
+    assert pending.modes[0].status == "estimated"
+    assert pending.modes[0].scale_m_per_sfm_unit == proposal.scale_m_per_sfm_unit
+    assert pending.modes[0].relative_uncertainty == proposal.relative_uncertainty
+    assert pending.modes[0].frames_used == proposal.frames_used
+    assert pending.modes[1].status == "missing"
+
+    data = _estimated_input(proposal)
+    summary = port.preview(JOB, visual.reference, data)
+    decision = publish_json(writer, lambda _: False, JOB, "decisions", data, "TestDecision")
+    confirmed = port.confirm(JOB, visual.reference, data, summary.preview_checksum, decision, lambda *_: True)
+    result = port.mode_comparison(JOB, visual.reference, confirmed, None)
+    rgb, accepted, lidar = result.modes
+    assert accepted.status == "confirmed" and accepted.title == "Kết quả đã xác nhận"
+    assert "ước lượng MoGe-2" in accepted.note and "không phải số đo độc lập" in accepted.note
+    assert accepted.scale_m_per_sfm_unit == pytest.approx(rgb.scale_m_per_sfm_unit)
+    assert accepted.relative_uncertainty == proposal.relative_uncertainty
+    assert lidar.status == "missing"
+    assert len(calls) == 1  # Viewing the comparison must never rerun inference.
+
+    # The confirmation preserves its provenance even if the proposal file is no longer available.
+    no_proposal = user_metric_port(arguments[2], writer, lambda _: False)
+    preserved = no_proposal.mode_comparison(JOB, visual.reference, confirmed, None)
+    assert preserved.modes[0].status == "missing"
+    assert preserved.modes[1].status == "confirmed" and "ước lượng MoGe-2" in preserved.modes[1].note
+    assert preserved.modes[1].relative_uncertainty == proposal.relative_uncertainty
+
+
+def test_comparison_keeps_manually_measured_confirmation_distinct(tmp_path: Path) -> None:
+    port, visual, data, _, writer = _world(tmp_path)
+    summary = port.preview(JOB, visual.reference, data)
+    decision = publish_json(writer, lambda _: False, JOB, "decisions", data, "TestDecision")
+    confirmed = port.confirm(JOB, visual.reference, data, summary.preview_checksum, decision, lambda *_: True)
+    result = port.mode_comparison(JOB, visual.reference, confirmed, None)
+    assert result.modes[0].status == "missing"
+    assert result.modes[1].status == "confirmed"
+    assert "đo ngoài đời" in result.modes[1].note
+    assert result.modes[1].relative_uncertainty is None
+
+
 def test_estimated_source_cannot_carry_made_up_distances(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     arguments, _, locate, visual, writer, plain_port, plain_data, _, store_root = _setup(tmp_path, monkeypatch)
     exists = lambda uri: (store_root / uri.removeprefix("artifact://")).is_file()  # noqa: E731

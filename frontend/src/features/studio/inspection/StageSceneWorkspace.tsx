@@ -8,11 +8,11 @@ import { useEffect, useState } from "react";
 import { Button, Notice } from "@/components/studio/primitives";
 import { PreviewScene } from "@/features/studio/scene/PreviewScene";
 import { useUrlState } from "@/features/studio/useUrlState";
-import { progressHref } from "@/features/studio/inspection";
 import { getPreview, jobArtifactContentUrl } from "@/lib/api/endpoints";
 import { getTrainingRecording } from "@/lib/api/studio";
 import type { StageId } from "@/lib/contracts/api";
 import type { ReconstructionPreview } from "@/lib/contracts/preview";
+import { demoSessionId } from "@/lib/api/demo-session";
 
 const StageViewer = dynamic(() => import("@/features/studio/StageViewer").then((m) => m.StageViewer), { ssr: false });
 const ObjectReview = dynamic(() => import("@/features/studio/ObjectReviewView").then((m) => m.ObjectReviewView), { ssr: false });
@@ -37,19 +37,14 @@ export function StageSceneWorkspace({ jobId, stageId, title }: { jobId: string; 
   const mode = view === "comparison" ? "comparison" : view === "training" && hasRecording ? "training" : "scene";
   const setMode = (next: string) => update({ view: next });
   return <div className="flex h-full min-h-[24rem] flex-col">
-    <div className="flex flex-wrap items-center gap-3 border-b border-line bg-paper-raised px-4 py-2">
-      <p className="min-w-0 flex-1 text-xs text-ink-muted">{mode === "training" ? "Bản ghi Rerun của một lượt train đánh giá (giữ lại 1/8 ảnh để so) · chỉ xem, không phải scene đang dùng"
-        : stageId === "ST-VISUAL-RECON" ? "Gaussian gốc · chưa quy đổi mét · bản xem 3DGS"
-        : stageId === "ST-METRIC-CANONICALIZE" ? "Kết quả hệ mét · xác nhận đã publish, không đo lại hoặc ghi đè bản xác nhận"
-          : stageId === "ST-RGB-GEOMETRY" ? "Scene hệ mét + collision · bật/tắt lớp để kiểm tra hình học"
-            : "SceneObject hiện tại · chọn vật thể trong 3D, xác nhận/loại, chỉnh inspector; thao tác lưu revision mới"}</p>
+    {(hasRecording || stageId === "ST-METRIC-CANONICALIZE") && <div className="flex flex-wrap items-center gap-3 border-b border-line bg-paper-raised px-4 py-2">
       {hasRecording && <div role="group" aria-label="Chế độ xem 3DGS"><Button size="sm" variant={mode === "scene" ? "secondary" : "ghost"} onClick={() => setMode("scene")}>Scene 3D</Button><Button size="sm" variant={mode === "training" ? "secondary" : "ghost"} onClick={() => setMode("training")}>Quá trình train (Rerun)</Button></div>}
       {stageId === "ST-METRIC-CANONICALIZE" && <div role="group" aria-label="Công cụ hệ mét"><Button size="sm" variant={mode === "scene" ? "secondary" : "ghost"} onClick={() => setMode("scene")}>Scene 3D</Button><Button size="sm" variant={mode === "comparison" ? "secondary" : "ghost"} onClick={() => setMode("comparison")}>Xem số đo & so sánh</Button></div>}
-    </div>
+    </div>}
     <div className="relative min-h-0 flex-1">
       {mode === "training" ? <RerunTraining jobId={jobId} />
         : stageId === "ST-VISUAL-RECON" ? <GaussianWorkspace jobId={jobId} title={title} />
-        : stageId === "ST-OBJECT-EXTRACT" ? <ObjectReview jobId={jobId} />
+        : stageId === "ST-OBJECT-EXTRACT" ? <ObjectReview jobId={jobId} canMutateJob={Boolean(demoSessionId())} />
           : mode === "comparison" ? <Comparison jobId={jobId} />
             : <StageViewer jobId={jobId} stageId={stageId} fallbackStageId={stageId === "ST-METRIC-CANONICALIZE" ? "ST-VISUAL-RECON" : undefined} />}
     </div>
@@ -71,5 +66,6 @@ function GaussianWorkspace({ jobId, title }: { jobId: string; title: string }) {
   }, [jobId, reload]);
   if (error) return <Notice tone="rust" className="m-4">Không mở được bản 3DGS: {error} <Button size="sm" variant="secondary" onClick={() => setReload((value) => value + 1)}>Thử lại</Button></Notice>;
   if (!preview) return <p role="status" className="p-6 text-sm text-ink-muted">Đang tải bản 3DGS…</p>;
-  return <PreviewScene contentUrl={jobArtifactContentUrl(jobId, preview.delivery_ref)} filename={preview.delivery_ref.artifact_uri.split("/").pop() ?? "scene.sog"} title={`5. 3DGS: ${title}`} />;
+  // `jobId` để viewer lấy quỹ đạo camera của job: mở đầu bên trong scene và có replay theo quỹ đạo quay.
+  return <PreviewScene jobId={jobId} contentUrl={jobArtifactContentUrl(jobId, preview.delivery_ref)} filename={preview.delivery_ref.artifact_uri.split("/").pop() ?? "scene.sog"} title={`5. 3DGS: ${title}`} />;
 }

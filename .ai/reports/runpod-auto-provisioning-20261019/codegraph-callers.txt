@@ -1,0 +1,174 @@
+
+Callers of "job_profile" (13):
+
+method ProjectRegistry::job_profile (python) — src/services/orchestration/projects/registry.py:1877
+function    run_input_assembly
+  src/api/studio/assemblies.py:403
+
+function    create_scene_from_upload
+  src/api/studio/scenes.py:149
+
+function    inspect
+  src/main.py:110
+
+function    test_worker_runtime_for_another_seed_is_not_used
+  tests/test_orchestration/test_worker_runtime_selection.py:103
+
+function    _registry
+  src/services/orchestration/samples/sessions.py:101
+
+function    test_pinned_profile_wins_over_published_workers
+  tests/test_orchestration/test_worker_runtime_selection.py:76
+
+function    load_runtime
+  src/services/orchestration/samples/sessions.py:287
+
+function    test_cold_api_can_create_job_without_previous_worker
+  tests/test_gpu/test_runpod_lifecycle.py:449
+
+function    observed_resource_budget
+  src/api/studio/deps.py:112
+
+function    test_a_runtime_from_a_worker_that_went_away_is_still_used
+  tests/test_orchestration/test_worker_runtime_selection.py:91
+
+function    test_flag_off_ignores_published_workers
+  tests/test_orchestration/test_worker_runtime_selection.py:111
+
+function    test_no_worker_has_published_yet_means_no_runtime
+  tests/test_orchestration/test_worker_runtime_selection.py:85
+
+method      _build_queued_job
+  src/services/orchestration/projects/registry.py:1907
+
+
+Callers of "claim_next" — 2 distinct definitions (narrow with --file):
+
+method RegistrationOperationStore::claim_next (python) — src/services/orchestration/jobs/registration_operations.py:537 (20 of 23):
+
+function    test_heartbeat_and_finish_require_current_lease_and_bind_outputs
+  tests/test_orchestration/test_registration_operations.py:864
+
+function    test_expired_lease_fails_closed_and_old_worker_cannot_publish
+  tests/test_orchestration/test_registration_operations.py:920
+
+function    _persist_proposed_operation
+  tests/test_api/test_registration_routes.py:351
+
+function    test_resource_wait_reason_must_be_nonempty_and_bounded
+  tests/test_orchestration/test_registration_operations.py:509
+
+function    test_confirmed_operation_commits_exact_bundle_and_alignment_once
+  tests/test_orchestration/test_registration_operations.py:253
+
+function    test_running_registration_cancellation_waits_for_worker_ack_and_fences_proposal
+  tests/test_orchestration/test_registration_operations.py:729
+
+function    test_resource_wait_releases_lease_and_can_be_claimed_again
+  tests/test_orchestration/test_registration_operations.py:424
+
+function    test_resource_wait_reason_is_checksum_bound
+  tests/test_orchestration/test_registration_operations.py:528
+
+function    test_expired_running_cancellation_fails_instead_of_claiming_cancel_success
+  tests/test_orchestration/test_registration_operations.py:800
+
+function    test_running_cancellation_flag_is_bound_by_operation_checksum
+  tests/test_orchestration/test_registration_operations.py:775
+
+function    claim
+  tests/test_orchestration/test_registration_operations.py:658
+
+function    test_confirmation_persists_exact_decision_and_replays_after_reload
+  tests/test_orchestration/test_registration_operations.py:207
+
+function    test_running_cancel_racing_resource_requeue_always_ends_cancelled
+  tests/test_orchestration/test_registration_operations.py:606
+
+function    test_two_workers_cannot_claim_the_same_registration_operation
+  tests/test_orchestration/test_registration_operations.py:853
+
+function    test_running_cancel_is_acknowledged_if_worker_requeues_for_resources
+  tests/test_orchestration/test_registration_operations.py:582
+
+function    test_confirmation_rejects_stale_checksum_and_conflicting_replay
+  tests/test_orchestration/test_registration_operations.py:317
+
+function    test_resource_wait_reason_is_required_only_in_the_waiting_state
+  tests/test_orchestration/test_registration_operations.py:485
+
+function    test_queued_registration_cancellation_is_terminal_and_idempotent
+  tests/test_orchestration/test_registration_operations.py:410
+
+function    test_concurrent_candidate_confirmations_have_one_compare_and_swap_winner
+  tests/test_orchestration/test_registration_operations.py:368
+
+function    test_running_cancel_racing_proposal_is_linearized
+  tests/test_orchestration/test_registration_operations.py:680
+
+Showing 20 of 23; pass --limit to widen.
+
+method ValidationQueue::claim_next (python) — src/services/orchestration/review/validation_queue.py:342 (5):
+
+function    test_resource_wait_requeues_and_only_retryable_worker_failure_can_retry
+  tests/test_orchestration/test_validation_queue.py:236
+
+function    test_two_workers_cannot_claim_one_run_and_expired_claim_is_fenced
+  tests/test_orchestration/test_validation_queue.py:178
+
+function    test_worker_rechecks_candidate_before_starting_and_stale_run_is_cancelled
+  tests/test_orchestration/test_validation_queue.py:195
+
+function    test_retry_endpoint_reuses_bound_profile_only_for_retryable_failure
+  tests/test_api/test_validation_routes.py:259
+
+function    test_queued_cancel_and_running_cancel_wait_for_worker_acknowledgement
+  tests/test_orchestration/test_validation_queue.py:209
+
+
+Callers of "_serve" (2):
+
+function _serve (python) — scripts/studio/container_entrypoint.py:270
+function    main
+  scripts/studio/container_entrypoint.py:314
+
+function    test_serve_rejects_archive_before_restore_when_volume_drop_is_enabled
+  tests/test_packaging/test_compose_config.py:360
+
+
+Callers of "runtime_registry" (2):
+
+method InputAssemblyService::runtime_registry (python) — src/services/orchestration/inputs/assembly.py:364
+function    test_input_registry_available_from_release_at_gpu_zero
+  tests/test_gpu/test_runpod_lifecycle.py:524
+
+method      resolve
+  src/services/orchestration/inputs/assembly.py:412
+
+
+Callers of "acquire" (8):
+
+function acquire (python) — src/services/orchestration/jobs/lease.py:70
+function    test_renew_extends_only_the_holder_token
+  tests/test_orchestration/test_job_lease.py:62
+
+function    leased
+  src/services/orchestration/jobs/lease.py:126
+
+function    test_busy_marker_survives_lease_release_until_publication_returns
+  tests/test_gpu/test_runpod_lifecycle.py:552
+
+function    test_worker_that_lost_its_lease_cannot_write_revisions
+  tests/test_orchestration/test_job_lease.py:89
+
+function    test_lease_is_released_when_the_attempt_ends
+  tests/test_orchestration/test_job_lease.py:115
+
+function    test_live_lease_refuses_another_worker_and_an_expired_one_is_taken
+  tests/test_orchestration/test_job_lease.py:51
+
+function    test_expired_lease_fails_the_running_job_as_retryable_on_another_worker
+  tests/test_orchestration/test_job_lease.py:73
+
+file        test_job_lease.py [imports]
+  tests/test_orchestration/test_job_lease.py:1

@@ -1,0 +1,216 @@
+{
+  "profile": {
+    "min_range_m": 0.0,
+    "max_range_m": 80.0,
+    "voxel_size_m": 0.5,
+    "min_points_per_scan": 100,
+    "max_points_per_scan": 5000000,
+    "max_total_points": 100000000,
+    "max_num_threads": 4,
+    "timestamp_gap_threshold_seconds": 0.5
+  },
+  "scenes": [
+    {
+      "scene": "01_LoiDi_Kho_Thuan_Aisle_CW",
+      "scans_used": 600,
+      "points_per_scan": 83751,
+      "duration_s": 59.9,
+      "trajectory": {
+        "path_length_m": 43.8,
+        "ate_mean_m": 0.286,
+        "ate_max_m": 0.613,
+        "ate_end_m": 0.459,
+        "drift_percent": 1.05,
+        "fullpath_rigid_ate_mean_m": 0.071,
+        "fullpath_rigid_ate_max_m": 0.161,
+        "fullpath_sim3_ate_mean_m": 0.062,
+        "fullpath_sim3_scale": 1.0031,
+        "rpe1_translation_m": 0.0184,
+        "rpe1_rotation_deg": 0.197,
+        "rpe10_translation_m": 0.029,
+        "rpe10_rotation_deg": 0.311
+      },
+      "map_with_truth_trajectory": {
+        "points": 91789,
+        "mean_cm": 15.9,
+        "median_cm": 9.5,
+        "p95_cm": 50.7,
+        "within_10cm_percent": 51.9,
+        "within_20cm_percent": 75.5
+      },
+      "map_with_kiss_icp": {
+        "points": 90313,
+        "mean_cm": 22.6,
+        "median_cm": 17.3,
+        "p95_cm": 57.2,
+        "within_10cm_percent": 29.6,
+        "within_20cm_percent": 56.1
+      },
+      "kiss_icp_seconds": 4.5,
+      "kiss_icp_peak_rss_gb": 0.17,
+      "provider_version": "1.3.0"
+    },
+    {
+      "scene": "02_HanhLang_Thang_Hallway_Straight_CW",
+      "scans_used": 600,
+      "points_per_scan": 84374,
+      "duration_s": 59.9,
+      "trajectory": {
+        "path_length_m": 46.7,
+        "ate_mean_m": 0.373,
+        "ate_max_m": 0.776,
+        "ate_end_m": 0.424,
+        "drift_percent": 0.91,
+        "fullpath_rigid_ate_mean_m": 0.111,
+        "fullpath_rigid_ate_max_m": 0.355,
+        "fullpath_sim3_ate_mean_m": 0.07,
+        "fullpath_sim3_scale": 1.0076,
+        "rpe1_translation_m": 0.0279,
+        "rpe1_rotation_deg": 0.379,
+        "rpe10_translation_m": 0.0483,
+        "rpe10_rotation_deg": 0.681
+      },
+      "map_with_truth_trajectory": {
+        "points": 62987,
+        "mean_cm": 17.0,
+        "median_cm": 9.8,
+        "p95_cm": 55.2,
+        "within_10cm_percent": 50.8,
+        "within_20cm_percent": 77.3
+      },
+      "map_with_kiss_icp": {
+        "points": 60916,
+        "mean_cm": 30.5,
+        "median_cm": 22.4,
+        "p95_cm": 76.0,
+        "within_10cm_percent": 20.3,
+        "within_20cm_percent": 44.8
+      },
+      "kiss_icp_seconds": 4.4,
+      "kiss_icp_peak_rss_gb": 0.17,
+      "provider_version": "1.3.0"
+    },
+    {
+      "scene": "03_LoiDi_Kho_Nguoc_Aisle_CCW",
+      "scans_used": 600,
+      "points_per_scan": 84573,
+      "duration_s": 59.9,
+      "trajectory": {
+        "path_length_m": 45.9,
+        "ate_mean_m": 0.225,
+        "ate_max_m": 0.98,
+        "ate_end_m": 0.399,
+        "drift_percent": 0.87,
+        "fullpath_rigid_ate_mean_m": 0.073,
+        "fullpath_rigid_ate_max_m": 0.872,
+        "fullpath_sim3_ate_mean_m": 0.064,
+        "fullpath_sim3_scale": 0.9969,
+        "rpe1_translation_m": 0.0207,
+        "rpe1_rotation_deg": 0.198,
+        "rpe10_translation_m": 0.0512,
+        "rpe10_rotation_deg": 0.303
+      },
+      "map_with_truth_trajectory": {
+        "points": 94740,
+        "mean_cm": 16.4,
+        "median_cm": 10.0,
+        "p95_cm": 52.5,
+        "within_10cm_percent": 50.2,
+        "within_20cm_percent": 74.3
+      },
+      "map_with_kiss_icp": {
+        "points": 93106,
+        "mean_cm": 20.1,
+        "median_cm": 14.4,
+        "p95_cm": 54.0,
+        "within_10cm_percent": 35.6,
+        "within_20cm_percent": 62.6
+      },
+      "kiss_icp_seconds": 5.4,
+      "kiss_icp_peak_rss_gb": 0.17,
+      "provider_version": "1.3.0"
+    },
+    {
+      "scene": "04_HanhLang_ToanKhu_Hallway_Full_CW",
+      "scans_used": 600,
+      "points_per_scan": 93611,
+      "duration_s": 59.9,
+      "trajectory": {
+        "path_length_m": 45.6,
+        "ate_mean_m": 0.164,
+        "ate_max_m": 0.475,
+        "ate_end_m": 0.468,
+        "drift_percent": 1.03,
+        "fullpath_rigid_ate_mean_m": 0.079,
+        "fullpath_rigid_ate_max_m": 0.179,
+        "fullpath_sim3_ate_mean_m": 0.071,
+        "fullpath_sim3_scale": 1.0025,
+        "rpe1_translation_m": 0.0172,
+        "rpe1_rotation_deg": 0.192,
+        "rpe10_translation_m": 0.0293,
+        "rpe10_rotation_deg": 0.31
+      },
+      "map_with_truth_trajectory": {
+        "points": 96476,
+        "mean_cm": 15.7,
+        "median_cm": 9.0,
+        "p95_cm": 52.2,
+        "within_10cm_percent": 54.2,
+        "within_20cm_percent": 76.6
+      },
+      "map_with_kiss_icp": {
+        "points": 94493,
+        "mean_cm": 20.5,
+        "median_cm": 15.1,
+        "p95_cm": 55.6,
+        "within_10cm_percent": 32.2,
+        "within_20cm_percent": 63.7
+      },
+      "kiss_icp_seconds": 4.6,
+      "kiss_icp_peak_rss_gb": 0.17,
+      "provider_version": "1.3.0"
+    },
+    {
+      "scene": "05_LoiDi_Kho_Dot2_Aisle_CW_Run1",
+      "scans_used": 470,
+      "points_per_scan": 191186,
+      "duration_s": 46.9,
+      "trajectory": {
+        "path_length_m": 34.1,
+        "ate_mean_m": 0.102,
+        "ate_max_m": 0.295,
+        "ate_end_m": 0.268,
+        "drift_percent": 0.79,
+        "fullpath_rigid_ate_mean_m": 0.031,
+        "fullpath_rigid_ate_max_m": 0.086,
+        "fullpath_sim3_ate_mean_m": 0.03,
+        "fullpath_sim3_scale": 0.9993,
+        "rpe1_translation_m": 0.0107,
+        "rpe1_rotation_deg": 0.095,
+        "rpe10_translation_m": 0.0183,
+        "rpe10_rotation_deg": 0.208
+      },
+      "map_with_truth_trajectory": {
+        "points": 128341,
+        "mean_cm": 15.0,
+        "median_cm": 8.9,
+        "p95_cm": 49.0,
+        "within_10cm_percent": 55.2,
+        "within_20cm_percent": 80.0
+      },
+      "map_with_kiss_icp": {
+        "points": 127978,
+        "mean_cm": 16.0,
+        "median_cm": 10.0,
+        "p95_cm": 50.3,
+        "within_10cm_percent": 50.0,
+        "within_20cm_percent": 77.4
+      },
+      "kiss_icp_seconds": 12.8,
+      "kiss_icp_peak_rss_gb": 0.18,
+      "provider_version": "1.3.0"
+    }
+  ],
+  "run_note": "Chạy 2026-10-11 bằng `--prefilter-cell 0.2` (voxel 0,5, max_total_points 100 triệu). Phiên bản script lúc đó chưa ghi khoá prefilter vào `profile`; trường này được thêm sau khi chạy, dựa trên tham số dòng lệnh đã dùng.",
+  "prefilter_cell_m": 0.2
+}

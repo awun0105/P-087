@@ -1,0 +1,28 @@
+{
+  "at": "2026-10-18T14:46:18.769098+00:00",
+  "job_id": "job-f9f14e7fbfb1",
+  "previous_revision": "rev-185",
+  "restored_from": "rev-121",
+  "new_revision": "rev-186",
+  "scene_ir_checksum": "sha256:ab4e84a258a3fc98fc48fbe17236a4169c729bb669a4421a0ed3b0c7e7dd6e1d",
+  "scene_reference": {
+    "artifact_type": "SceneIR",
+    "schema_version": "1.0",
+    "artifact_uri": "artifact://jobs/job-f9f14e7fbfb1/scene/scene_ir.rev-186.json",
+    "artifact_checksum": "sha256:fd34bf3f391befd7f7855a0f78974145e50a2bf39be4dd1735e72fdaa714688c",
+    "data_class": "derived",
+    "producer_stage": "ST-EDIT",
+    "job_id": "job-f9f14e7fbfb1",
+    "source_provenance": null
+  },
+  "object_geometry": "ready",
+  "objects": 60,
+  "objects_with_colliders": 22,
+  "verified_artifact_references": 149,
+  "target_environment_and_objects_equal": true,
+  "previous_manifest_hashes_unchanged": {
+    "rev-185": "sha256:40a262a15284b38b8951ea1eb6a0622c5724a189d00caac6bc16c27e63c57834",
+    "rev-121": "sha256:73400939e1ef998742d44ee99b76aa6954c049ce26c14fb58ab0020545123685"
+  },
+  "reconstruction_or_mesh_build_started": false
+}

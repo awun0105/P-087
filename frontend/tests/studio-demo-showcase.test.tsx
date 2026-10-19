@@ -1,0 +1,143 @@
+/** Khung xem trước của phát lại mẫu: chỉ vẽ bằng chứng có thật trong bundle, ghép thẻ theo registry. */
+import { render, screen } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
+
+import { DemoShowcase } from "@/features/studio/DemoShowcase";
+import { parseDemoManifest, type DemoManifest, type DemoStage } from "@/lib/contracts/studio";
+
+const file = (name: string) => ({ name, media_type: "image/png", size_bytes: 10, checksum: "sha256:" + "0".repeat(64) });
+const fileUrl = (name: string) => `/files/${name}`;
+
+function manifest(stages: DemoStage[]): DemoManifest {
+  return {
+    schema_version: "1.0", demo_id: "d", title: "Mẫu", description: "", origin: "pipeline_job",
+    source: { dataset: "TorWIC", sequence: "Aisle", note: "" }, produced_at: "2026-10-10T00:00:00Z", provenance: {},
+    stages, video: null, frames: [file("frame-1.png"), file("frame-2.png")], frame_count: 40,
+    splat: { ...file("scene.sog"), media_type: "application/octet-stream" },
+  };
+}
+const stage = (stage_id: DemoStage["stage_id"], extra: Partial<DemoStage> = {}): DemoStage => ({ stage_id, duration_seconds: 12, summary: "", ...extra });
+
+describe("khung xem trước phát lại", () => {
+  it("bước chưa có bằng chứng nói thẳng và không vẽ số liệu", () => {
+    const demo = manifest([stage("ST-METRIC-CANONICALIZE", { state: "pending", duration_seconds: null, summary: "Mẫu này chưa ghi kết quả của bước này." })]);
+    render(<DemoShowcase demo={demo} stage="ST-METRIC-CANONICALIZE" fraction={1} fileUrl={fileUrl} />);
+    expect(screen.getByRole("status")).toHaveTextContent("chưa ghi kết quả");
+    for (const invented of [/1\.20 m/, /Voxel/, /SAM2/, /Kệ hàng/, /Δ/]) expect(screen.queryByText(invented)).toBeNull();
+  });
+
+  it("bước đã chạy nhưng bundle không kèm thẻ nào thì báo chưa có hình/số đo", () => {
+    const demo = manifest([stage("ST-RGB-GEOMETRY")]);
+    render(<DemoShowcase demo={demo} stage="ST-RGB-GEOMETRY" fraction={1} fileUrl={fileUrl} />);
+    expect(screen.getByRole("status")).toHaveTextContent("mẫu chưa kèm hình hay số đo");
+  });
+
+  it("ghép thẻ asset của bundle: số đo và ảnh lấy từ dữ liệu khai báo", () => {
+    const demo = manifest([
+      stage("ST-METRIC-CANONICALIZE", {
+        assets: [
+          { kind: "facts", title: "Số đo đã xác nhận", facts: [{ label: "Khoảng cách A–B", value: "1.35 m" }] },
+          { kind: "image", title: "Điểm đo", file: file("metric-1.png"), caption: "A, B và mặt sàn" },
+        ],
+      }),
+    ]);
+    render(<DemoShowcase demo={demo} stage="ST-METRIC-CANONICALIZE" fraction={1} fileUrl={fileUrl} />);
+    expect(screen.getByText("Khoảng cách A–B")).toBeInTheDocument();
+    expect(screen.getByText("1.35 m")).toBeInTheDocument();
+    expect(screen.getByAltText("Điểm đo")).toHaveAttribute("src", "/files/metric-1.png");
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("thẻ dựng sẵn của bước tách frame dùng frame của bundle", () => {
+    const demo = manifest([stage("ST-FRAME-EXTRACT")]);
+    render(<DemoShowcase demo={demo} stage="ST-FRAME-EXTRACT" fraction={1} fileUrl={fileUrl} />);
+    expect(screen.getByLabelText("Khung hình đã tách").querySelectorAll("img")).toHaveLength(2);
+    expect(screen.getByText(/40 khung hình được giữ lại/)).toBeInTheDocument();
+  });
+
+  it("video ghép từ ảnh được ghi rõ là chỉ để xem lại", () => {
+    const demo = manifest([stage("ST-INPUT-VALIDATE")]);
+    demo.video = { ...file("display.mp4"), media_type: "video/mp4" };
+    demo.video_caption = "Video ghép từ ảnh gốc, chỉ để xem lại";
+    render(<DemoShowcase demo={demo} stage="ST-INPUT-VALIDATE" fraction={1} fileUrl={fileUrl} />);
+    expect(screen.getByLabelText("Video ghép từ ảnh gốc, chỉ để xem lại")).toHaveAttribute("src", "/files/display.mp4");
+    expect(screen.getByText("Video ghép từ ảnh gốc, chỉ để xem lại")).toBeInTheDocument();
+  });
+});
+
+describe("parseDemoManifest với asset", () => {
+  const base = () => JSON.parse(JSON.stringify(manifest([stage("ST-METRIC-CANONICALIZE")])));
+
+  it("chấp nhận asset hợp lệ và bundle cũ không có asset", () => {
+    const value = base();
+    expect(parseDemoManifest(value).stages).toHaveLength(1);
+    value.stages[0].assets = [{ kind: "facts", facts: [{ label: "a", value: "b" }] }, { kind: "image", file: file("ok.png") }];
+    expect(parseDemoManifest(value).stages[0].assets).toHaveLength(2);
+  });
+
+  it("từ chối kind lạ, facts rỗng và tên file không an toàn", () => {
+    for (const bad of [
+      { kind: "facts", facts: [] },
+      { kind: "image", file: file("../x.png") },
+      { kind: "facts", facts: [{ label: "a", value: "b" }], file: file("x.png") },
+    ]) {
+      const value = base();
+      value.stages[0].assets = [bad];
+      expect(() => parseDemoManifest(value)).toThrow();
+    }
+  });
+
+  it("backend mới hơn có loại thẻ lạ: bỏ riêng thẻ đó, không làm hỏng cả mẫu", () => {
+    const value = base();
+    value.stages[0].assets = [{ kind: "hologram", file: file("x.png") }, { kind: "facts", facts: [{ label: "a", value: "b" }] }];
+    const parsed = parseDemoManifest(value);
+    expect(parsed.stages[0].assets).toEqual([{ kind: "facts", facts: [{ label: "a", value: "b" }] }]);
+  });
+});
+
+describe("thẻ ba bước cuối", () => {
+  for (const id of ["ST-METRIC-CANONICALIZE", "ST-RGB-GEOMETRY", "ST-OBJECT-EXTRACT"] as const) {
+    it(id, () => {
+      const demo = manifest([stage(id, { assets: [{kind: "facts", facts: [{label: "Kết quả thật", value: "42"}]}] })]);
+      render(<DemoShowcase demo={demo} stage={id} fraction={1} fileUrl={fileUrl} />);
+      expect(screen.getByText("42")).toBeInTheDocument();
+      expect(screen.queryByRole("status")).toBeNull();
+    });
+  }
+});
+
+describe("kết quả duyệt vật của mẫu", () => {
+  it("chỉ thêm bước khi manifest có mục object_geometry, phát lại và hiện số liệu", async () => {
+    const { demoReplayStages, demoStageList } = await import("@/features/studio/demoStages");
+    const { replayPlan, replayState } = await import("@/features/studio/useDemoReplay");
+    const demo = manifest([stage("ST-OBJECT-EXTRACT")]);
+    expect(demoStageList(demo).some((row) => row.id === "UI-GEOMETRY-REVIEW")).toBe(false);
+    demo.object_geometry = { state: "succeeded", duration_seconds: 10, objectgs_count: 2, shell_count: 3, collider_count: 5 };
+    const parsed = parseDemoManifest(demo);
+    const rows = demoReplayStages(parsed);
+    const list = demoStageList(parsed);
+    expect(list.at(-1)?.id).toBe("UI-GEOMETRY-REVIEW");
+    expect(replayState(rows, replayPlan(rows, list), 999999, list).at(-1)?.state).toBe("succeeded");
+    render(<DemoShowcase demo={parsed} stage="UI-GEOMETRY-REVIEW" fraction={1} fileUrl={fileUrl} />);
+    expect(screen.getByText("Bề mặt từ ObjectGS")).toBeInTheDocument();
+    expect(screen.getByText("5")).toBeInTheDocument();
+  });
+  it("từ chối số đếm hoặc thời lượng tạo mesh sai", () => {
+    const demo = manifest([]);
+    for (const extra of [{objectgs_count: -1}, {duration_seconds: 0}, {shell_count: "2"}]) {
+      expect(() => parseDemoManifest({...demo, object_geometry: {state: "succeeded", duration_seconds: null, objectgs_count: null, shell_count: null, collider_count: null, ...extra}})).toThrow();
+    }
+  });
+});
+
+it("thời gian không đo được hiển thị chưa đo trên timeline", async () => {
+  const { demoReplayStages, demoStageList } = await import("@/features/studio/demoStages");
+  const { replayPlan, replayState } = await import("@/features/studio/useDemoReplay");
+  const { PipelineTimeline } = await import("@/features/studio/PipelineTimeline");
+  const demo = manifest([stage("ST-INPUT-VALIDATE", {duration_seconds: 12, summary: "gộp chung 3 bước"}), stage("ST-FRAME-EXTRACT", {duration_seconds: null})]);
+  const rows = demoReplayStages(demo), list = demoStageList(demo);
+  render(<PipelineTimeline stages={replayState(rows, replayPlan(rows, list), 999999, list)} stageList={list} />);
+  expect(screen.getByText("gộp chung 3 bước")).toBeInTheDocument();
+  expect(screen.getByText("Thời gian: chưa đo")).toBeInTheDocument();
+  expect(screen.queryByText("0 giây")).toBeNull();
+});

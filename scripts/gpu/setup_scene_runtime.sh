@@ -13,6 +13,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+export REPO="$ROOT"
+source "$ROOT/scripts/gpu/install.d/_lib.sh"
 RUNTIME="${1:-$ROOT/data/scene_runtime}"
 SAM2_COMMIT="2b90b9f5ceec907a1c18123530e92e794ad901a4"
 SAM2_CHECKPOINT_URL="https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_tiny.pt"
@@ -25,6 +27,11 @@ MOGE_COMMIT="b942f00bdc2a2a23ebb474fbe034d487e6dcceec"
 UTILS3D_COMMIT="3fab839f0be9931dac7c8488eb0e1600c236e183"
 MOGE_URL="https://huggingface.co/Ruicheng/moge-2-vitb-normal/resolve/main/model.pt"
 MOGE_SHA="16b8110e86d5dc5a849db120ca96ef3a223fd30b0c9146d1d81db504073da5f6"
+# EgoBlur Gen2 (che khuôn mặt/biển số, AUD-18; Apache-2.0). Trọng số chỉ tải được từ
+# https://www.projectaria.com/tools/egoblur/ sau khi nhập email và đồng ý giấy phép, nên script không tự tải:
+# đặt R2S_EGOBLUR_WEIGHTS trỏ tới thư mục chứa hai file .jit đã tải. Không đặt thì bước ẩn danh không dùng được.
+EGOBLUR_FACE_SHA="2ba183ff74a66752f6457846efb4379b351727d1c9eaef461ed4be8db18cc2e8"
+EGOBLUR_LP_SHA="1d6b3fc37fce4158d3b7d4a364290cfeeccc86a9cd84a376c443d560f11497f4"
 
 need() { command -v "$1" >/dev/null || { echo "[!] Thiếu lệnh: $1" >&2; exit 1; }; }
 need uv; need git; need curl
@@ -35,14 +42,7 @@ python3.12 -c "import sysconfig, os, sys; sys.exit(0 if os.path.isfile(os.path.j
   || [ -f "${CPATH:-/nonexistent}/Python.h" ] || {
   echo "[!] Thiếu header Python 3.12 (Python.h). Cài: sudo apt install python3.12-dev" >&2; exit 1; }
 
-fetch() {  # fetch <url> <đích> <sha256>
-  if [ ! -f "$2" ] || [ "$(sha256sum "$2" | cut -d' ' -f1)" != "$3" ]; then
-    echo "[tải] $(basename "$2")"; curl -L --fail -o "$2" "$1"
-  fi
-  [ "$(sha256sum "$2" | cut -d' ' -f1)" = "$3" ] || { echo "[!] Sai checksum: $2" >&2; exit 1; }
-}
-
-[ -x "$RUNTIME/bin/python" ] || uv venv --python 3.12 "$RUNTIME"
+[ -x "$RUNTIME/bin/python" ] || uv venv --python 3.12.14 "$RUNTIME"
 PY="$RUNTIME/bin/python"
 uv pip install --python "$PY" --index-url https://download.pytorch.org/whl/cu126 \
   torch==2.7.1 torchvision==0.22.1
@@ -53,13 +53,26 @@ uv pip install --python "$PY" \
 uv pip install --python "$PY" --no-deps \
   "moge @ git+https://github.com/microsoft/MoGe.git@${MOGE_COMMIT}" \
   "utils3d @ git+https://github.com/EasternJournalist/utils3d.git@${UTILS3D_COMMIT}"
-uv pip install --python "$PY" huggingface_hub click
+uv pip install --python "$PY" huggingface_hub==2.1.1 click==8.5.0
+# Gói egoblur ghim torch 2.9.1 và kéo moviepy/av/vrs; chỉ cần phần detector nên cài --no-deps. Hai model đã
+# chạy trên torch 2.7.1 của runtime này (kiểm 2026-10-09).
+uv pip install --python "$PY" --no-deps egoblur==2.0.1
 
 mkdir -p "$RUNTIME/checkpoints" "$RUNTIME/weights"
 fetch "$SAM2_CHECKPOINT_URL" "$RUNTIME/checkpoints/sam2.1_hiera_tiny.pt" "$SAM2_CHECKPOINT_SHA"
 fetch "$LAMA_URL" "$RUNTIME/weights/big-lama.pt" "$LAMA_SHA"
 fetch "$MOGE_URL" "$RUNTIME/weights/moge-2-vitb-normal.pt" "$MOGE_SHA"
 "$PY" -c "from moge.model.v2 import MoGeModel"
+if [ -n "${R2S_EGOBLUR_WEIGHTS:-}" ]; then
+  for pair in "ego_blur_face_gen2.jit:$EGOBLUR_FACE_SHA" "ego_blur_lp_gen2.jit:$EGOBLUR_LP_SHA"; do
+    name="${pair%%:*}"
+    [ -f "$RUNTIME/weights/$name" ] || cp "$R2S_EGOBLUR_WEIGHTS/$name" "$RUNTIME/weights/$name"
+    [ "$(sha256sum "$RUNTIME/weights/$name" | cut -d' ' -f1)" = "${pair##*:}" ] \
+      || { echo "[!] Sai checksum: $RUNTIME/weights/$name" >&2; exit 1; }
+  done
+else
+  echo "[bỏ qua] EgoBlur: chưa đặt R2S_EGOBLUR_WEIGHTS, bước ẩn danh khuôn mặt/biển số sẽ không dùng được."
+fi
 
 if [ "${R2S_SKIP_GPU_CHECK:-0}" = "1" ]; then
   # Lúc build image Docker không có GPU: chỉ kiểm import và biên dịch sẵn kernel gsplat (cần nvcc, không cần GPU).
@@ -97,9 +110,9 @@ PY
 fi
 
 # LPIPS chấm ảnh giữ lại sau khi train 3DGS: tải sẵn trọng số VGG vào cache của torch để worker không cần mạng lúc
-# chạy job. Tải lỗi thì bỏ qua — bảng chỉ số sẽ ghi LPIPS "chưa đo", PSNR/SSIM vẫn có.
-"$PY" -c "import lpips; lpips.LPIPS(net='vgg', verbose=False)" >/dev/null 2>&1 \
-  || echo "[cảnh báo] chưa tải được trọng số LPIPS-VGG; LPIPS sẽ không được chấm cho tới khi tải được."
+# chạy job. Không phát hành image thiếu trọng số rồi mới tải lúc đang xử lý scene.
+"$PY" -c "import lpips; lpips.LPIPS(net='vgg', verbose=False)"
+uv pip freeze --python "$PY" > "$RUNTIME/installed.txt"
 
 cat <<EOF
 
@@ -107,7 +120,7 @@ Runtime sẵn sàng. Thêm vào file env của stack (vd scripts/gpu/studio.env)
   PRODUCT_SCENE_RUNTIME_PYTHON=$PY
   PRODUCT_SAM2_CHECKPOINT=$RUNTIME/checkpoints/sam2.1_hiera_tiny.pt
   PRODUCT_LAMA_CHECKPOINT=$RUNTIME/weights/big-lama.pt
-  REC06_MOGE_PYTHON=$PY
-  REC06_MOGE_MODEL=$RUNTIME/weights/moge-2-vitb-normal.pt
-  REC04_BRUSH_LPIPS_PYTHON=$PY
+  R2S_MOGE_PYTHON=$PY
+  R2S_MOGE_MODEL=$RUNTIME/weights/moge-2-vitb-normal.pt
+  R2S_BRUSH_LPIPS_PYTHON=$PY
 EOF

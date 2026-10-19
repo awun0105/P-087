@@ -8,7 +8,7 @@ import { ApiError } from "@/lib/api/client";
 import type { Me } from "@/lib/api/auth";
 import { listImports, listSamples, listScenes } from "@/lib/api/studio";
 import type { JobManifest } from "@/lib/contracts/api";
-import type { SceneSummary } from "@/lib/contracts/studio";
+import type { ImportedScene, SceneSummary } from "@/lib/contracts/studio";
 
 const auth = vi.hoisted(() => ({ me: { auth_required: false, user: null } as Me | null }));
 vi.mock("@/features/studio/AuthProvider", () => ({ useAuth: () => auth }));
@@ -23,6 +23,7 @@ function scene(id: string, status: JobManifest["status"], waiting = false): Scen
     project: { project_id: `project-${id}`, name: `Kho ${id}`, source_type: "upload", privacy: { result: "VERIFIED_ANONYMIZED", dispatch_allowed: true, block_reason: null, privacy_mode: "qa_verified" }, input_video: null, created_at: "2026-10-01T00:00:00Z" },
     latest_job: { schema_version: "1.0", job_id: id, project_id: `project-${id}`, status, current_stage: waiting ? "ST-METRIC-CANONICALIZE" : "ST-VISUAL-RECON", seed: 1, scene_revision: "rev-001", stage_artifacts: [], input_manifest_checksum: sha, config_checksum: sha, runtime_manifest_checksum: sha, job_manifest_checksum: sha, started_at: "2026-10-01T00:00:00Z", completed_at: null },
     preview_ready: waiting,
+    capabilities: { can_delete_project: true },
   };
 }
 beforeEach(() => {
@@ -34,22 +35,33 @@ beforeEach(() => {
 });
 
 describe("Tổng quan và thư viện riêng", () => {
-  it("giới thiệu và số liệu từ API; không có nút tạo scene trên Tổng quan", async () => {
+  it("số liệu từ API; nút chính là Tạo scene mới; việc chờ bạn nằm trên cùng", async () => {
     render(<OverviewPage />);
-    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Từ dữ liệu thực");
-    expect(screen.getByRole("link", { name: "Mở Scenes" })).toHaveAttribute("href", "/scenes");
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Tổng quan");
+    expect(screen.getByRole("link", { name: /Tạo scene mới/ })).toHaveAttribute("href", "/new");
+    expect(screen.getByRole("link", { name: "Tất cả scene" })).toHaveAttribute("href", "/scenes");
     await waitFor(() => expect(within(screen.getByText("Scene từ video").parentElement!).getByText("3")).toBeInTheDocument());
     expect(within(screen.getByText("Đang xử lý").parentElement!).getByText("1")).toBeInTheDocument();
-    expect(within(screen.getByText("Cần xác nhận tỉ lệ", { selector: "dt" }).parentElement!).getByText("1")).toBeInTheDocument();
+    expect(within(screen.getByText("Cần bạn xử lý", { selector: "dt" }).parentElement!).getByText("1")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Kho job-b/ })).toHaveAttribute("href", "/scenes/job-b");
-    expect(document.querySelector('a[href="/new"]')).toBeNull();
+    expect(screen.queryByText(/Một hành trình/)).toBeNull();
+  });
+
+  it("job chờ xem bản đã che được tính là cần xử lý, không phải đang chạy", async () => {
+    const reviewing = { ...scene("job-r", "RUNNING"), awaiting_anonymization_review: true };
+    vi.mocked(listScenes).mockResolvedValue({ ok: true, data: { scenes: [reviewing] } });
+    render(<OverviewPage />);
+    expect(await screen.findByRole("link", { name: /Kho job-r/ })).toHaveTextContent("Cần xem bản đã che");
+    expect(within(screen.getByText("Đang xử lý").parentElement!).getByText("0")).toBeInTheDocument();
+    expect(within(screen.getByText("Cần bạn xử lý", { selector: "dt" }).parentElement!).getByText("1")).toBeInTheDocument();
   });
 
   it("guest chỉ thấy giới thiệu và đường đăng nhập, không gọi API private", () => {
     auth.me = { auth_required: true, user: null };
     render(<OverviewPage />);
-    expect(screen.getByText("Khám phá Studio với mẫu đã xử lý sẵn")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Đăng nhập để xem tổng hợp" })).toHaveAttribute("href", "/login?next=%2Foverview");
+    expect(screen.getByText("Đăng nhập để xem công việc của nhóm")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Thử với mẫu/ })).toHaveAttribute("href", "/new/try-demo");
+    expect(screen.getByRole("link", { name: "Đăng nhập" })).toHaveAttribute("href", "/login?next=%2Foverview");
     expect(listScenes).not.toHaveBeenCalled();
     expect(listImports).not.toHaveBeenCalled();
   });
@@ -72,16 +84,148 @@ describe("Tổng quan và thư viện riêng", () => {
   });
 
   it("thẻ scene ghi rõ ai tạo và ai chạy lại gần nhất; không biết thì không ghi", async () => {
-    const mine = { ...scene("job-a", "RUNNING"), requested_by: { user_id: "u-2", display_name: "Bình" } };
-    mine.project = { ...mine.project, name: "Kho có chủ", created_by: { user_id: "u-1", display_name: "An" } };
+    const mine = {
+      ...scene("job-a", "RUNNING"),
+      requested_by: { user_id: "u-2", display_name: "Bình", role: "reviewer" as const },
+    };
+    mine.project = {
+      ...mine.project,
+      name: "Kho có chủ",
+      created_by: { user_id: "u-1", display_name: "An", role: "editor" },
+    };
     const anonymous = scene("job-b", "QUEUED");
     anonymous.project = { ...anonymous.project, name: "Kho không rõ" };
-    vi.mocked(listScenes).mockResolvedValue({ ok: true, data: { scenes: [mine, anonymous] } });
+    const legacy = scene("job-c", "FAILED");
+    legacy.project = {
+      ...legacy.project,
+      name: "Kho thiếu role",
+      created_by: { user_id: "u-3", display_name: "Chi" },
+    };
+    vi.mocked(listScenes).mockResolvedValue({ ok: true, data: { scenes: [mine, anonymous, legacy] } });
     render(<ScenesHome />);
     const owned = (await screen.findByRole("heading", { name: "Kho có chủ" })).closest("a")!;
-    expect(owned).toHaveTextContent("tạo bởi An");
-    expect(owned).toHaveTextContent("chạy bởi Bình");
+    expect(owned).toHaveTextContent(/Tạo bởi:\s*An/i);
+    expect(owned).toHaveTextContent(/Chạy bởi:\s*Bình/i);
+    expect(owned).toHaveTextContent("Editor");
+    expect(owned).toHaveTextContent("Reviewer");
     const unknown = screen.getByRole("heading", { name: "Kho không rõ" }).closest("a")!;
     expect(unknown).not.toHaveTextContent("tạo bởi");
+    const old = screen.getByRole("heading", { name: "Kho thiếu role" }).closest("a")!;
+    expect(old).toHaveTextContent("Vai trò chưa xác định");
+
+    fireEvent.click(screen.getByRole("radio", { name: "Danh sách" }));
+    const row = await screen.findByRole("row", { name: /Kho có chủ/ });
+    expect(row).toHaveTextContent("Editor");
+    expect(row).toHaveTextContent("Reviewer");
+    expect(row).toHaveTextContent(/Chạy bởi:\s*Bình/i);
+  });
+
+  it.each([
+    { role: "guest" as const, own: true, foreign: false },
+    { role: "editor" as const, own: true, foreign: true },
+    { role: "reviewer" as const, own: true, foreign: true },
+  ])("$role chỉ hiện thao tác xoá theo capability của server ở cả lưới và danh sách", async ({ role, own, foreign }) => {
+    auth.me = { auth_required: true, user: { user_id: "user-guest", email: "guest@example.test", display_name: "Guest Test", role, active: true, daily_job_quota: 10 } };
+    const mine = {
+      ...scene("mine", "SUCCEEDED"),
+      project: { ...scene("mine", "SUCCEEDED").project, name: "Scene của tôi", created_by: { user_id: "user-guest", display_name: "Guest Test", role } },
+      capabilities: { can_delete_project: own },
+    };
+    const other = {
+      ...scene("other", "SUCCEEDED"),
+      project: { ...scene("other", "SUCCEEDED").project, name: "Scene của nhóm" },
+      capabilities: { can_delete_project: foreign },
+    };
+    vi.mocked(listScenes).mockResolvedValue({ ok: true, data: { scenes: [mine, other] } });
+    vi.mocked(listImports).mockResolvedValue({
+      ok: true,
+      data: {
+        imports: [
+          { import_id: "import-mine", upload_id: "upload-mine", name: "PLY của tôi", input_kind: "gaussian_ply", status: "READY", delivery_ref: null, error: null, created_at: "2026-10-01T00:00:00Z", capabilities: { can_delete: own } },
+          { import_id: "import-other", upload_id: "upload-other", name: "PLY của nhóm", input_kind: "gaussian_ply", status: "READY", delivery_ref: null, error: null, created_at: "2026-10-01T00:00:00Z", capabilities: { can_delete: foreign } },
+        ],
+      },
+    });
+    render(<ScenesHome />);
+
+    await screen.findByText("Scene của tôi");
+    expect(screen.getByText(role === "guest" ? "Guest" : role === "editor" ? "Editor" : "Reviewer")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Chuyển Scene của tôi vào thùng rác" }) !== null).toBe(own);
+    expect(screen.queryByRole("button", { name: "Chuyển Scene của nhóm vào thùng rác" }) !== null).toBe(foreign);
+
+    fireEvent.click(screen.getByRole("radio", { name: "Danh sách" }));
+    const ownRow = await screen.findByRole("row", { name: /Scene của tôi/ });
+    const foreignRow = screen.getByRole("row", { name: /Scene của nhóm/ });
+    expect(within(ownRow).queryByRole("button", { name: "Chuyển Scene của tôi vào thùng rác" }) !== null).toBe(own);
+    expect(within(foreignRow).queryByRole("button", { name: "Chuyển Scene của nhóm vào thùng rác" }) !== null).toBe(foreign);
+  });
+
+  it.each(["guest", "editor", "reviewer"] as const)("legacy Scenes response fails closed for Guest and preserves %s access", async (role) => {
+    auth.me = { auth_required: true, user: { user_id: "user-guest", email: "guest@example.test", display_name: "Guest Test", role, active: true, daily_job_quota: 10 } };
+    const legacyScene = scene("legacy", "SUCCEEDED");
+    Reflect.deleteProperty(legacyScene, "capabilities");
+    vi.mocked(listScenes).mockResolvedValue({ ok: true, data: { scenes: [legacyScene] } });
+    render(<ScenesHome />);
+
+    await screen.findByText("Kho legacy");
+    const allowed = role !== "guest";
+    expect(screen.queryByRole("button", { name: "Chuyển Kho legacy vào thùng rác" }) !== null).toBe(allowed);
+  });
+});
+
+describe("job xong nhưng tách vật thể chờ người dùng chọn", () => {
+  it("trạng thái là cần xử lý, không phải 'Đã dựng scene', và chỉ khi job đã SUCCEEDED", async () => {
+    const { sceneStatus, sceneSummaryStatus } = await import("@/features/studio/sceneStatus");
+    const finished = scene("job-o", "SUCCEEDED");
+    expect(sceneSummaryStatus({ ...finished, awaiting_object_choice: true })).toMatchObject({ label: "Cần chọn cách tách vật thể", group: "action", active: false });
+    expect(sceneSummaryStatus(finished)).toMatchObject({ label: "Đã dựng scene", group: "done" });
+    // Job còn đang chạy thì trạng thái pipeline mới là điều đúng.
+    expect(sceneStatus(scene("job-r", "RUNNING").latest_job, false, false, true).group).toBe("running");
+  });
+
+  it("Tổng quan đưa scene đó vào 'Scene đang chờ bạn'", async () => {
+    const waiting = { ...scene("job-o", "SUCCEEDED"), awaiting_object_choice: true };
+    vi.mocked(listScenes).mockResolvedValue({ ok: true, data: { scenes: [waiting] } });
+    render(<OverviewPage />);
+    expect(await screen.findByRole("link", { name: /Kho job-o/ })).toHaveTextContent("Cần chọn cách tách vật thể");
+    expect(within(screen.getByText("Cần bạn xử lý", { selector: "dt" }).parentElement!).getByText("1")).toBeInTheDocument();
+  });
+});
+
+describe("scene Draft: job xong nhưng còn bước Duyệt vật & Tạo mesh", () => {
+  it("danh sách ghi đúng bước còn lại, không ghi 'Đã dựng scene', chỉ khi job đã SUCCEEDED", async () => {
+    const { sceneStatus, sceneSummaryStatus } = await import("@/features/studio/sceneStatus");
+    const finished = scene("job-d", "SUCCEEDED");
+    expect(sceneSummaryStatus({ ...finished, geometry_review: "waiting" })).toMatchObject({ label: "Chờ duyệt vật", group: "action", active: false });
+    expect(sceneSummaryStatus({ ...finished, geometry_review: "running" })).toMatchObject({ label: "Đang tạo mesh", group: "running", active: true });
+    expect(sceneSummaryStatus({ ...finished, geometry_review: "failed" })).toMatchObject({ label: "Tạo mesh lỗi", tone: "rust", group: "action" });
+    // Ready hoặc API cũ không gửi trường này: giữ nhãn cũ.
+    expect(sceneSummaryStatus({ ...finished, geometry_review: null })).toMatchObject({ label: "Đã dựng scene", group: "done" });
+    expect(sceneSummaryStatus(finished)).toMatchObject({ label: "Đã dựng scene", group: "done" });
+    expect(sceneStatus(scene("job-r", "RUNNING").latest_job, false, false, false, "waiting").group).toBe("running");
+  });
+
+  it("Tổng quan đưa scene Draft vào 'Cần bạn xử lý'", async () => {
+    const draft = { ...scene("job-d", "SUCCEEDED"), geometry_review: "waiting" as const };
+    vi.mocked(listScenes).mockResolvedValue({ ok: true, data: { scenes: [draft] } });
+    render(<OverviewPage />);
+    expect(await screen.findByRole("link", { name: /Kho job-d/ })).toHaveTextContent("Chờ duyệt vật");
+    expect(within(screen.getByText("Cần bạn xử lý", { selector: "dt" }).parentElement!).getByText("1")).toBeInTheDocument();
+  });
+});
+
+describe("trạng thái scene chờ xem bản đã che", () => {
+  it("được tính là cần xử lý, không active, và ưu tiên hơn trạng thái worker", async () => {
+    const { sceneStatus } = await import("@/features/studio/sceneStatus");
+    const job = scene("job-r", "RUNNING").latest_job!;
+    expect(sceneStatus(job, false, true)).toMatchObject({ label: "Cần xem bản đã che", group: "action", active: false });
+    expect(sceneStatus(job, false, false)).toMatchObject({ group: "running", active: true });
+  });
+
+  it("nút tạo scene không nháy ra lúc chưa biết người dùng là ai", () => {
+    auth.me = null;
+    render(<OverviewPage />);
+    expect(screen.queryByRole("link", { name: /Thử với mẫu/ })).toBeNull();
+    expect(screen.queryByRole("link", { name: /Tạo scene mới/ })).toBeNull();
   });
 });

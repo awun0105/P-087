@@ -46,7 +46,7 @@ from src.services.reconstruction.rgb.preflight.publication import ArtifactWriter
 MAP_FRAME = "lidar_map"
 SENSOR_FRAME = "lidar_sensor"
 CAMERA_FRAME = "camera"
-TrajectoryOrigin = Literal["estimated", "ground_truth"]
+TrajectoryOrigin = Literal["estimated", "ground_truth", "supplied"]
 
 _FLOOR_RADIUS_M = 3.0
 _FLOOR_BIN_M = 0.02
@@ -73,12 +73,14 @@ class CameraCalibration(ContractModel):
     cx: FiniteFloat
     cy: FiniteFloat
     distortion: tuple[FiniteFloat, FiniteFloat, FiniteFloat, FiniteFloat] = (0.0, 0.0, 0.0, 0.0)
+    #: Provenance only: old package records did not retain whether zero distortion was declared or defaulted.
+    distortion_status: Literal["declared", "partial", "missing", "legacy_unknown"] = "legacy_unknown"
 
 
 class LidarPackageRecord(ContractModel):
     """Bản ghi của gói LiDAR sau khi nhận: mọi thứ bước dựng pose camera và căn chỉnh cần, theo checksum."""
 
-    schema_version: Literal["1.0"] = "1.0"
+    schema_version: Literal["1.0", "1.1"] = "1.1"
     artifact_type: Literal["LidarPackageRecord"] = "LidarPackageRecord"
     job_id: str
     kind: Literal["registered_lidar", "lidar_scan_sequence"]
@@ -86,6 +88,8 @@ class LidarPackageRecord(ContractModel):
     pose_count: int = Field(gt=1)
     trajectory_ref: ProductArtifactRef
     frame_times_ref: ProductArtifactRef
+    #: Exact calibration bytes extracted from the uploaded package; absent on legacy records.
+    calibration_ref: ProductArtifactRef | None = None
     #: `lidar_sensor_from_camera`: vị trí và hướng camera trong hệ cảm biến LiDAR.
     sensor_from_camera: Transform
     #: Nội tham số camera nếu calibration có; None thì bước dựng pose để COLMAP tự ước lượng.
@@ -142,7 +146,11 @@ def parse_camera(text: str, fmt: Literal["torwic_txt", "json"]) -> CameraCalibra
     try:
         if fmt == "json":
             block = json.loads(text).get("camera")
-            return None if block is None else CameraCalibration.model_validate(block)
+            if block is None:
+                return None
+            distortion = block.get("distortion")
+            status = "missing" if distortion is None else "declared" if len(distortion) == 4 else "partial"
+            return CameraCalibration.model_validate({**block, "distortion_status": status})
         values: dict[str, str] = {}
         for line in text.splitlines():
             key, separator, raw = line.split("#", 1)[0].replace("=", ":", 1).partition(":")
@@ -150,7 +158,9 @@ def parse_camera(text: str, fmt: Literal["torwic_txt", "json"]) -> CameraCalibra
                 values[key.strip().removeprefix("Camera1.")] = raw.strip()
         if not {"fx", "fy", "cx", "cy", "width", "height"} <= values.keys():
             return None
-        distortion = [float(item) for item in values.get("D", "[0, 0, 0, 0]").strip("[]").split(",")][:4]
+        distortion_declared = "D" in values
+        distortion = [float(item) for item in values.get("D", "").strip("[]").split(",") if item.strip()][:4]
+        distortion_status = "missing" if not distortion_declared else "declared" if len(distortion) == 4 else "partial"
         return CameraCalibration(
             width=int(float(values["width"])),
             height=int(float(values["height"])),
@@ -159,6 +169,7 @@ def parse_camera(text: str, fmt: Literal["torwic_txt", "json"]) -> CameraCalibra
             cx=float(values["cx"]),
             cy=float(values["cy"]),
             distortion=tuple(distortion + [0.0] * (4 - len(distortion))),  # type: ignore[arg-type]
+            distortion_status=distortion_status,
         )
     except (TypeError, ValueError) as error:
         raise LidarPackageError(f"Nội tham số camera trong calibration không đọc được: {error}") from error
@@ -231,7 +242,11 @@ class LidarPackageIngest:
         floor_z, support = estimate_floor(points, poses)
         cloud_path = workspace / f"registered_lidar.{fmt}"
         cloud_path.write_bytes(payload)
-        origin = DependencyOrigin.GROUND_TRUTH if trajectory_origin == "ground_truth" else DependencyOrigin.ESTIMATED
+        origin = {
+            "ground_truth": DependencyOrigin.GROUND_TRUTH,
+            "estimated": DependencyOrigin.ESTIMATED,
+            "supplied": DependencyOrigin.SENSOR_INPUT,
+        }[trajectory_origin]
         dependencies = [
             PreprocessingDependency(role="pose", origin=origin, source_checksum=_sha256(trajectory_bytes)),
             PreprocessingDependency(
@@ -279,17 +294,26 @@ class LidarPackageIngest:
             )
         )
         base = PurePosixPath(lidar.metadata_ref.artifact_uri.removeprefix("artifact://")).parent
+        trajectory_ref = self._publish(
+            job_id, f"{base}/trajectory.txt", trajectory_bytes, "LidarTrajectory", provenance
+        )
+        frame_times_ref = self._publish(job_id, f"{base}/frame_times.txt", times_bytes, "LidarFrameTimes", provenance)
+        calibration_suffix = PurePosixPath(evidence.calibration_member).suffix.lower() or ".txt"
+        calibration_ref = self._publish(
+            job_id,
+            f"{base}/calibration{calibration_suffix}",
+            calibration_bytes,
+            "LidarCalibrationSource",
+            provenance,
+        )
         record = LidarPackageRecord(
             job_id=job_id,
             kind="lidar_scan_sequence" if fusion is not None else "registered_lidar",
             trajectory_origin=trajectory_origin,
             pose_count=len(poses),
-            trajectory_ref=self._publish(
-                job_id, f"{base}/trajectory.txt", trajectory_bytes, "LidarTrajectory", provenance
-            ),
-            frame_times_ref=self._publish(
-                job_id, f"{base}/frame_times.txt", times_bytes, "LidarFrameTimes", provenance
-            ),
+            trajectory_ref=trajectory_ref,
+            frame_times_ref=frame_times_ref,
+            calibration_ref=calibration_ref,
             sensor_from_camera=sensor_from_camera,
             camera=camera,
             lidar_geometry_ref=lidar.geometry_ref,
@@ -302,7 +326,14 @@ class LidarPackageIngest:
         )
         record = record.model_copy(update={"record_checksum": canonical_content_checksum(record, "record_checksum")})
         body = record.model_dump_json(indent=2).encode("utf-8") + b"\n"
-        reference = self._publish(job_id, f"{base}/lidar_package.json", body, "LidarPackageRecord", provenance)
+        reference = self._publish(
+            job_id,
+            f"{base}/lidar_package.json",
+            body,
+            "LidarPackageRecord",
+            provenance,
+            schema_version=record.schema_version,
+        )
         return LidarPackageResult(record, reference)
 
     def _poses(self, trajectory_bytes: bytes, evidence: LidarEvidence) -> list[ScanPose]:
@@ -353,11 +384,18 @@ class LidarPackageIngest:
                 raise LidarPackageError(f"Scan {PurePosixPath(name).name} không đọc được: {error}") from error
 
     def _publish(
-        self, job_id: str, relative: str, payload: bytes, artifact_type: str, provenance: PreprocessingProvenance
+        self,
+        job_id: str,
+        relative: str,
+        payload: bytes,
+        artifact_type: str,
+        provenance: PreprocessingProvenance,
+        *,
+        schema_version: Literal["1.0", "1.1"] = "1.0",
     ) -> ProductArtifactRef:
         reference = ProductArtifactRef(
             artifact_type=artifact_type,
-            schema_version="1.0",
+            schema_version=schema_version,
             artifact_uri=f"artifact://{relative}",
             artifact_checksum=_sha256(payload),
             data_class=ArtifactDataClass.DERIVED,

@@ -5,7 +5,7 @@ from pathlib import Path
 
 from src.models.contracts.artifacts import ArtifactDataClass, ProductArtifactRef
 from src.models.contracts.manifests import StageId
-from src.services.orchestration.artifacts import sha256_bytes
+from src.services.orchestration.artifacts import ArtifactResolver, sha256_bytes
 from src.services.orchestration.processing.models import (
     JobProcessingConfig,
     MachineCapability,
@@ -47,6 +47,9 @@ def build_job_config(
     presets_checksum: str,
     params: dict[str, ParamValue],
     capability: MachineCapability | None,
+    *,
+    colmap_use_gpu: bool = False,
+    anonymize: bool = False,
 ) -> JobProcessingConfig:
     """Validate thông số người dùng rồi ghép với giá trị cố định thành config của tool.
 
@@ -57,7 +60,14 @@ def build_job_config(
         values = presets.validate_params(params)
     except ValueError as error:
         raise ProcessingConfigError(str(error)) from error
-    grouped: dict[str, dict[str, ParamValue]] = {"sampling": {}, "colmap": {}, "brush": {}}
+    grouped: dict[str, dict[str, ParamValue]] = {
+        "sampling": {},
+        "colmap": {},
+        "brush": {},
+        "geometry": {},
+        "scene": {},
+        "simulation": {},
+    }
     for key, value in values.items():
         group, name = key.split(".", 1)
         grouped[group][name] = value
@@ -67,8 +77,12 @@ def build_job_config(
         presets_checksum=presets_checksum,
         params=values,
         sampling={key: value for key, value in grouped["sampling"].items() if not isinstance(value, str)},
-        colmap={**presets.fixed.colmap, **grouped["colmap"], "num_threads": threads},
+        colmap={**presets.fixed.colmap, **grouped["colmap"], "num_threads": threads, "use_gpu": colmap_use_gpu},
         brush={**presets.fixed.brush, **grouped["brush"]},
+        geometry=grouped["geometry"],
+        scene=grouped["scene"],
+        simulation=grouped["simulation"],
+        anonymize=anonymize,
     )
 
 
@@ -88,3 +102,11 @@ def job_config_reference(job_id: str, checksum: str) -> ProductArtifactRef:
         producer_stage=StageId.INPUT_VALIDATE,
         job_id=job_id,
     )
+
+
+def load_job_config(job_id: str, checksum: str, resolver: ArtifactResolver) -> JobProcessingConfig | None:
+    """Read sealed job settings; legacy jobs have no per-job processing artifact."""
+    reference = job_config_reference(job_id, checksum)
+    if resolver.locate(reference.artifact_uri) is None:
+        return None
+    return JobProcessingConfig.model_validate_json(resolver.require(reference).read_bytes())

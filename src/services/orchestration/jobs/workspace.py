@@ -11,7 +11,10 @@ Quyền xoá attempt của người khác chỉ đến từ bằng chứng nó k
 trong thư mục. Tuổi thư mục hoặc trạng thái job không cấp quyền xoá.
 """
 
-import fcntl
+try:
+    import fcntl
+except ImportError:
+    fcntl = None  # type: ignore[assignment]
 import logging
 import os
 import re
@@ -146,11 +149,13 @@ def attempt_lease(workspace: Path) -> Iterator[None]:
     dọn lease mồ côi. File lease là scratch: cleanup của chính attempt xoá được nó.
     """
     with (workspace / LEASE_NAME).open("a") as handle:
-        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if fcntl is not None:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         try:
             yield
         finally:
-            fcntl.flock(handle, fcntl.LOCK_UN)
+            if fcntl is not None:
+                fcntl.flock(handle, fcntl.LOCK_UN)
 
 
 def attempt_in_use(workspace: Path) -> bool:
@@ -160,10 +165,12 @@ def attempt_in_use(workspace: Path) -> bool:
         try:
             with lease.open("a") as handle:
                 try:
-                    fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    if fcntl is not None:
+                        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 except BlockingIOError:
                     return True
-                fcntl.flock(handle, fcntl.LOCK_UN)
+                if fcntl is not None:
+                    fcntl.flock(handle, fcntl.LOCK_UN)
         except OSError:
             return True
     inside = any_process_inside(workspace)

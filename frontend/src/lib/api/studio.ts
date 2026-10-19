@@ -4,10 +4,26 @@
  */
 
 import { ApiError, apiFetch, apiUrl, fetchApi, type ApiResult } from "@/lib/api/client";
-import { directUpload, xhrPutPart } from "@/lib/api/directUpload";
-import type { SceneEditResponse, SceneResponse } from "@/lib/contracts/api";
+import { demoApiPath } from "@/lib/api/demo-session";
+import { clearDirectUploadResume, directUpload, xhrPutPart } from "@/lib/api/directUpload";
+import { verifyVideoPreparationChecksum } from "@/lib/contracts/videoPreparation";
+import type { VideoPreparedArtifact } from "@/lib/media/video-normalization";
+import type {
+  ColliderEditCommand,
+  ObjectMembershipMergeCommand,
+  ObjectMembershipReassignCommand,
+  ObjectRegionCommand,
+  ProductArtifactRef,
+  SceneEditResponse,
+  SceneResponse,
+  ValidationOperationStatus,
+  ValidationRunStatus,
+  ValidationRunView,
+} from "@/lib/contracts/api";
+import { VALIDATION_OPERATION_STATUSES, VALIDATION_RUN_STATUSES } from "@/lib/contracts/api";
 import {
   parseDemoManifest,
+  parseDemoPublishResult,
   parseDemoState,
   parseDemoSelection,
   parseMetricProposal,
@@ -16,7 +32,9 @@ import {
   parseMetricPreview,
   parseModeComparison,
   parseStageViews,
+  parseSuggestResponse,
   type DemoManifest,
+  type DemoPublishResult,
   type DemoSelection,
   type DemoState,
   type MetricProposal,
@@ -31,6 +49,8 @@ import {
   type ParamValue,
   type ProcessingEvaluation,
   type ProcessingOptions,
+  type ScenarioPreferences,
+  type SuggestResponse,
   type SampleSummary,
   type SceneFromUpload,
   type SceneSummary,
@@ -49,6 +69,23 @@ export async function markDemo(jobId: string): Promise<DemoState> {
   return parseDemoState(await apiFetch<unknown>(`/api/v1/jobs/${encodeURIComponent(jobId)}/demo/baseline`, { method: "POST" }));
 }
 
+/** Reviewer xuất scene vào thư viện mẫu (`/new/try-demo`); `confirm_public` là xác nhận được công khai video. */
+export async function publishDemo(
+  jobId: string,
+  body: { title?: string; description: string; confirm_public: boolean },
+): Promise<DemoPublishResult> {
+  return parseDemoPublishResult(await apiFetch<unknown>(`/api/v1/jobs/${encodeURIComponent(jobId)}/demo/publish`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  }));
+}
+
+/** Reviewer gỡ mẫu khỏi thư viện công khai, giữ nguyên dự án và artifact. */
+export async function removeSample(sampleId: string): Promise<void> {
+  await apiFetch(`/api/v1/samples/${encodeURIComponent(sampleId)}`, { method: "DELETE" });
+}
+
 /** Reviewer bỏ đánh dấu bản demo; nội dung scene giữ nguyên. */
 export async function clearDemo(jobId: string): Promise<DemoState> {
   return parseDemoState(await apiFetch<unknown>(`/api/v1/jobs/${encodeURIComponent(jobId)}/demo/baseline`, { method: "DELETE" }));
@@ -63,6 +100,15 @@ export async function resetDemo(jobId: string, expectedRevision: string): Promis
   }));
 }
 
+/** Đưa scene về bản gốc ban đầu (rev-001) bằng một revision mới; `expectedRevision` là revision đang thấy trên màn hình. */
+export async function restoreRoot(jobId: string, expectedRevision: string): Promise<DemoState> {
+  return parseDemoState(await apiFetch<unknown>(`/api/v1/jobs/${encodeURIComponent(jobId)}/demo/restore-root`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ expected_scene_revision: expectedRevision }),
+  }));
+}
+
 /** Kết quả xem được của từng bước (frame, camera, 3DGS, collision mesh). */
 export async function getStageViews(jobId: string, signal?: AbortSignal): Promise<StageView[]> {
   const data = await apiFetch<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/stage-views`, { signal });
@@ -70,6 +116,10 @@ export async function getStageViews(jobId: string, signal?: AbortSignal): Promis
 }
 
 const API = "/api/v1";
+
+function newRunIdempotencyKey(): string {
+  return globalThis.crypto.randomUUID();
+}
 
 export function listScenes(): Promise<ApiResult<{ scenes: SceneSummary[] }>> {
   return fetchApi<{ scenes: SceneSummary[] }>(`${API}/scenes`);
@@ -88,6 +138,7 @@ export function createSceneFromUpload(
 ): Promise<SceneFromUpload> {
   return apiFetch<SceneFromUpload>(`${API}/scenes/from-upload`, {
     method: "POST",
+    headers: { "Idempotency-Key": newRunIdempotencyKey() },
     body: JSON.stringify({ upload_id: uploadId, name, attestation, processing, lidar }),
   });
 }
@@ -95,6 +146,21 @@ export function createSceneFromUpload(
 /** Thông số chỉnh được, preset và cấu hình máy worker (từ file cấu hình chung). */
 export function getProcessingOptions(): Promise<ApiResult<ProcessingOptions>> {
   return fetchApi<ProcessingOptions>(`${API}/processing/options`);
+}
+
+export async function suggestProcessingPreset(
+  preferences: ScenarioPreferences,
+  signal?: AbortSignal,
+): Promise<ApiResult<SuggestResponse>> {
+  const result = await fetchApi<unknown>(`${API}/processing/suggest`, {
+    method: "POST", body: JSON.stringify(preferences), signal,
+  });
+  if (!result.ok) return result;
+  try {
+    return { ok: true, data: parseSuggestResponse(result.data) };
+  } catch (error) {
+    return { ok: false, error: new ApiError(502, error instanceof Error ? error.message : "Gợi ý cấu hình không hợp lệ") };
+  }
 }
 
 /** Ước lượng tài nguyên của bộ thông số so với máy worker. */
@@ -126,8 +192,21 @@ export function cancelJob(jobId: string): Promise<unknown> {
   });
 }
 
-export function retryJob(jobId: string): Promise<unknown> {
-  return apiFetch(`${API}/jobs/${encodeURIComponent(jobId)}/retry`, { method: "POST" });
+export interface RetryJobReceipt {
+  job_id: string;
+  status: "QUEUED";
+  job_manifest_checksum: string;
+}
+
+export async function retryJob(jobId: string): Promise<RetryJobReceipt> {
+  const result = await apiFetch<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/retry`, {
+    method: "POST",
+    headers: { "Idempotency-Key": newRunIdempotencyKey() },
+  });
+  if (!isRecord(result) || result.job_id !== jobId || result.status !== "QUEUED" || typeof result.job_manifest_checksum !== "string") {
+    throw new ApiError(502, "Backend trả trạng thái chấp nhận retry không hợp lệ");
+  }
+  return result as unknown as RetryJobReceipt;
 }
 
 /** Video mẫu đã xử lý sẵn (thẻ ở bước tải video lên). */
@@ -148,12 +227,19 @@ export async function getSample(sampleId: string): Promise<ApiResult<DemoManifes
 
 /** URL tương đối cùng origin để `<img>`, `<video>` và editor nhúng dùng được. */
 export function sampleFileUrl(sampleId: string, name: string): string {
-  return `${API}/samples/${encodeURIComponent(sampleId)}/files/${encodeURIComponent(name)}`;
+  return demoApiPath(`${API}/samples/${encodeURIComponent(sampleId)}/files/${encodeURIComponent(name)}`);
 }
 
 export interface UploadHandle {
   promise: Promise<UploadRecord>;
   abort: () => void;
+}
+
+export interface UploadVideoOptions {
+  resumeIdentity?: string;
+  keepResumeKey?: boolean;
+  temporary?: boolean;
+  onUploadId?: (uploadId: string) => void;
 }
 
 /**
@@ -165,6 +251,7 @@ export function uploadVideo(
   file: File,
   onProgress: (fraction: number) => void,
   onVerifying?: () => void,
+  options: UploadVideoOptions = {},
 ): UploadHandle {
   const controller = new AbortController();
   let proxy: UploadHandle | null = null;
@@ -174,13 +261,21 @@ export function uploadVideo(
       throw new ApiError(413, `Video vượt giới hạn ${formatLimit(config.max_bytes)}`);
     }
     if (!config.direct) {
-      proxy = proxyUpload(file, onProgress);
+      proxy = proxyUpload(file, onProgress, options.temporary);
       if (controller.signal.aborted) proxy.abort();
       return proxy.promise;
     }
     const state = await directUpload(
       file,
-      { onProgress, onVerifying, signal: controller.signal },
+      {
+        onProgress,
+        onVerifying,
+        signal: controller.signal,
+        resumeIdentity: options.resumeIdentity,
+        keepResumeKey: options.keepResumeKey,
+        temporary: options.temporary,
+        onStarted: options.onUploadId,
+      },
       { api: apiFetch, putPart: xhrPutPart, sleep: (ms) => new Promise((r) => setTimeout(r, ms)), storage: browserStorage() },
     );
     const uploads = await apiFetch<{ uploads: UploadRecord[] }>(`${API}/uploads`);
@@ -197,6 +292,140 @@ export function uploadVideo(
   };
 }
 
+export interface PreparedVideoUploadOptions {
+  accountId: string;
+  onProgress: (fraction: number) => void;
+  onVerifying?: () => void;
+  onUploadedRecord?: (record: UploadRecord) => void;
+  existingRecord?: UploadRecord | null;
+  temporary?: boolean;
+  onUploadId?: (uploadId: string) => void;
+}
+
+interface PreparedVideoUploadDependencies {
+  upload: typeof uploadVideo;
+  api: <T>(path: string, init?: RequestInit) => Promise<T>;
+  storage: () => Pick<Storage, "getItem" | "setItem" | "removeItem"> | null;
+}
+
+const preparedVideoUploadDependencies: PreparedVideoUploadDependencies = {
+  upload: uploadVideo,
+  api: apiFetch,
+  storage: browserStorage,
+};
+
+function readStoredUploadId(storage: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null, key: string): string | null {
+  try {
+    return storage?.getItem(key) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function storeUploadId(
+  storage: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null,
+  key: string,
+  uploadId: string | null,
+): void {
+  try {
+    if (uploadId === null) storage?.removeItem(key);
+    else storage?.setItem(key, uploadId);
+  } catch {
+    // Upload remains usable in this tab; a denied storage only disables reload recovery.
+  }
+}
+
+function belongsToAccount(record: UploadRecord, accountId: string): boolean {
+  return accountId === "local" || accountId === "anonymous"
+    ? record.uploaded_by == null
+    : record.uploaded_by?.user_id === accountId;
+}
+
+function matchesPreparedUpload(record: UploadRecord, accountId: string, prepared: VideoPreparedArtifact): boolean {
+  return belongsToAccount(record, accountId) && record.input_kind === "rgb_video" &&
+    record.media_type === "video/mp4" && record.size_bytes === prepared.file.size &&
+    record.checksum === prepared.manifest.prepared_file.checksum;
+}
+
+async function findPreparedUpload(
+  storage: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null,
+  key: string,
+  accountId: string,
+  prepared: VideoPreparedArtifact,
+  api: PreparedVideoUploadDependencies["api"],
+  signal: AbortSignal,
+): Promise<UploadRecord | null> {
+  const savedId = readStoredUploadId(storage, key);
+  if (!savedId) return null;
+  const uploads = await api<{ uploads: UploadRecord[] }>(`${API}/uploads`, { signal });
+  const record = uploads.uploads.find((item) => item.upload_id === savedId) ?? null;
+  const matches = record !== null && matchesPreparedUpload(record, accountId, prepared);
+  if (!matches) storeUploadId(storage, key, null);
+  return matches ? record : null;
+}
+
+/** Upload finalized bytes, then bind and verify the preparation receipt and source-frame map. */
+export function uploadPreparedVideo(
+  prepared: VideoPreparedArtifact,
+  options: PreparedVideoUploadOptions,
+  dependencies: PreparedVideoUploadDependencies = preparedVideoUploadDependencies,
+): UploadHandle {
+  const controller = new AbortController();
+  let activeUpload: UploadHandle | null = null;
+  const identity = `${options.accountId}:${prepared.manifest.prepared_file.checksum}:${prepared.manifest.preparation_checksum}`;
+  const storageKey = `r2s-prepared-upload:v1:${encodeURIComponent(identity)}`;
+  const directStorage = dependencies.storage();
+  const promise = (async () => {
+    if (prepared.file.size !== prepared.manifest.prepared_file.size_bytes ||
+        prepared.frameMapFile.size !== prepared.manifest.frame_map.size_bytes) {
+      throw new ApiError(422, "Bản video hoặc frame map không khớp kích thước trong manifest.");
+    }
+    await verifyVideoPreparationChecksum(prepared.manifest);
+    let record = options.existingRecord && matchesPreparedUpload(options.existingRecord, options.accountId, prepared)
+      ? options.existingRecord
+      : null;
+    record ??= await findPreparedUpload(
+      directStorage, storageKey, options.accountId, prepared, dependencies.api, controller.signal,
+    );
+    if (!record) {
+      activeUpload = dependencies.upload(
+        prepared.file,
+        options.onProgress,
+        options.onVerifying,
+        { resumeIdentity: identity, keepResumeKey: true, temporary: options.temporary, onUploadId: options.onUploadId },
+      );
+      if (controller.signal.aborted) activeUpload.abort();
+      record = await activeUpload.promise;
+      storeUploadId(directStorage, storageKey, record.upload_id);
+    }
+    options.onUploadedRecord?.(record);
+    if (controller.signal.aborted) throw new ApiError(499, "Đã hủy xác minh video.");
+
+    const uploadId = encodeURIComponent(record.upload_id);
+    await dependencies.api<UploadRecord>(`${API}/uploads/${uploadId}/video-preparation/manifest`, {
+      method: "PUT",
+      body: JSON.stringify(prepared.manifest),
+      signal: controller.signal,
+    });
+    options.onVerifying?.();
+    const verified = await dependencies.api<UploadRecord>(`${API}/uploads/${uploadId}/video-preparation/frame-map`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/x-ndjson" },
+      body: prepared.frameMapFile,
+      signal: controller.signal,
+    });
+    storeUploadId(directStorage, storageKey, null);
+    clearDirectUploadResume(prepared.file, identity, directStorage);
+    return verified;
+  })();
+
+  const abort = () => {
+    controller.abort();
+    activeUpload?.abort();
+  };
+  return { promise, abort };
+}
+
 function browserStorage(): Storage | null {
   try {
     return typeof window === "undefined" ? null : window.localStorage;
@@ -210,10 +439,10 @@ function formatLimit(bytes: number): string {
 }
 
 /** Đường cũ: stream cả file qua API (`/uploads`) khi deployment chưa có kho file. */
-function proxyUpload(file: File, onProgress: (fraction: number) => void): UploadHandle {
+function proxyUpload(file: File, onProgress: (fraction: number) => void, temporary = false): UploadHandle {
   const request = new XMLHttpRequest();
   const promise = new Promise<UploadRecord>((resolve, reject) => {
-    request.open("POST", `${API}/uploads?filename=${encodeURIComponent(file.name)}`);
+    request.open("POST", demoApiPath(`${API}/uploads?filename=${encodeURIComponent(file.name)}${temporary ? "&temporary=true" : ""}`));
     request.setRequestHeader("Content-Type", file.type || "application/octet-stream");
     request.upload.onprogress = (event) => {
       if (event.lengthComputable && event.total > 0) onProgress(event.loaded / event.total);
@@ -294,19 +523,31 @@ export function confirmMetric(jobId: string, input: MetricInput, previewChecksum
   });
 }
 
-/** Demo 3 hướng tỉ lệ trên cùng scene: RGB only (mô phỏng), anchor người dùng, LiDAR. */
+/** Số đo và nguồn tỉ lệ của scene: đề xuất MoGe-2, kết quả đã xác nhận, LiDAR. */
 export async function getModeComparison(jobId: string, signal?: AbortSignal): Promise<ModeComparison> {
   const data = await apiFetch<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/metric/comparison`, { signal });
   return parseModeComparison(data);
 }
 
-/** Tạo scene import từ upload 3DGS; máy chủ nén PLY → SOG trong nền. */
-export function createImport(uploadId: string, name: string): Promise<ImportedScene> {
-  return apiFetch<ImportedScene>(`${API}/imports`, { method: "POST", body: JSON.stringify({ upload_id: uploadId, name }) });
+/** Tạo scene import từ upload PLY/COLMAP hoặc SOG; standalone worker publish bản xem. */
+export function createImport(uploadId: string, name: string, idempotencyKey = newRunIdempotencyKey()): Promise<ImportedScene> {
+  return apiFetch<ImportedScene>(`${API}/imports`, {
+    method: "POST",
+    headers: { "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify({ upload_id: uploadId, name }),
+  });
 }
 
 export function getImport(importId: string, signal?: AbortSignal): Promise<ApiResult<ImportedScene>> {
   return fetchApi<ImportedScene>(`${API}/imports/${encodeURIComponent(importId)}`, { signal });
+}
+
+export function retryImport(importId: string): Promise<ImportedScene> {
+  return apiFetch<ImportedScene>(`${API}/imports/${encodeURIComponent(importId)}/retry`, { method: "POST" });
+}
+
+export function cancelImport(importId: string): Promise<ImportedScene> {
+  return apiFetch<ImportedScene>(`${API}/imports/${encodeURIComponent(importId)}/cancel`, { method: "POST" });
 }
 
 export function listImports(): Promise<ApiResult<{ imports: ImportedScene[] }>> {
@@ -318,11 +559,43 @@ export function importContentUrl(importId: string): string {
   return `${API}/imports/${encodeURIComponent(importId)}/content/scene.sog`;
 }
 
+/** Lưu góc nhìn camera mặc định của scene import (hoặc gỡ nếu null). */
+export function updateImportCamera(
+  importId: string,
+  camera: { position: [number, number, number]; target: [number, number, number]; fov?: number } | null,
+): Promise<ImportedScene> {
+  if (camera === null) {
+    return clearImportCamera(importId);
+  }
+  return apiFetch<ImportedScene>(`${API}/imports/${encodeURIComponent(importId)}/camera`, {
+    method: "PATCH",
+    body: JSON.stringify(camera),
+  });
+}
+
+/** Gỡ bookmark góc nhìn mặc định của scene import, quay lại góc nhìn tự động ban đầu. */
+export function clearImportCamera(importId: string): Promise<ImportedScene> {
+  return apiFetch<ImportedScene>(`${API}/imports/${encodeURIComponent(importId)}/camera`, {
+    method: "DELETE",
+  });
+}
+
 // ── vật thể trong SceneIR (PRODUCT-07/07A, ADR 0006) ─────────────────────────
 
 /** SceneIR hiện tại của job; 404 khi bước tách vật thể chưa publish revision nào. */
 export function getJobScene(jobId: string, signal?: AbortSignal): Promise<ApiResult<SceneResponse>> {
   return fetchApi<SceneResponse>(`${API}/jobs/${encodeURIComponent(jobId)}/scene`, { signal });
+}
+
+/** Choose one allow-listed LiDAR candidate; the server reruns eligibility and owns the revision CAS. */
+export function selectLidarCollisionSource(
+  jobId: string,
+  command: { expected_scene_revision: string; candidate_manifest_ref: ProductArtifactRef },
+): Promise<SceneEditResponse> {
+  return apiFetch<SceneEditResponse>(`${API}/jobs/${encodeURIComponent(jobId)}/scene/collision-source/lidar`, {
+    method: "POST",
+    body: JSON.stringify(command),
+  });
 }
 
 export type ObjectAction = "confirm" | "ignore" | "hide" | "delete" | "rename" | "restore" | "duplicate" | "label";
@@ -339,6 +612,101 @@ export function applyObjectAction(
     `${API}/jobs/${encodeURIComponent(jobId)}/scene/objects/${encodeURIComponent(objectId)}/${action}`,
     { method: "POST", body: JSON.stringify({ expected_scene_revision: expectedRevision, ...extra }) },
   );
+}
+
+/** Merge persisted Gaussian ownership and return the canonical regenerated scene revision. */
+export function mergeObjectCandidates(jobId: string, command: ObjectMembershipMergeCommand): Promise<SceneEditResponse> {
+  return apiFetch<SceneEditResponse>(`${API}/jobs/${encodeURIComponent(jobId)}/scene/corrections/merge`, {
+    method: "POST",
+    body: JSON.stringify(command),
+  });
+}
+
+/** Reassign a bounded source-frame ROI and return the canonical regenerated scene revision. */
+export function reassignObjectMembership(
+  jobId: string,
+  command: ObjectMembershipReassignCommand,
+): Promise<SceneEditResponse> {
+  return apiFetch<SceneEditResponse>(`${API}/jobs/${encodeURIComponent(jobId)}/scene/corrections/reassign`, {
+    method: "POST",
+    body: JSON.stringify(command),
+  });
+}
+
+/** Bộ đếm và mẫu của một lần xem trước vùng. Preview không ghi gì và không đổi revision (architecture.md §7.3). */
+export interface RegionPreview {
+  scene_revision: string;
+  membership_checksum: string;
+  object_id: string;
+  added_count: number;
+  removed_count: number;
+  object_gaussian_count: number;
+  protected_floor_count: number;
+  overlaps: Record<string, number>;
+  claimed: Record<string, number>;
+  /** Object-local, tối đa 20 000 điểm mỗi loại. */
+  added_sample_m: [number, number, number][];
+  removed_sample_m: [number, number, number][];
+  shell_glb_base64: string | null;
+  shell_error: string | null;
+  shell_sample_rows?: number;
+  /** Số Gaussian còn lại của từng vật "Lấy luôn" sau khi áp box (T-024). */
+  donor_remaining?: Record<string, number>;
+  /** Vật "Lấy luôn" sẽ còn dưới tối thiểu nếu áp box này: Apply bị khoá tới khi bỏ tick hoặc thu box. */
+  blockers?: { object_id: string; remaining: number; minimum: number }[];
+}
+
+export function previewObjectRegion(
+  jobId: string,
+  objectId: string,
+  command: ObjectRegionCommand,
+  signal?: AbortSignal,
+): Promise<RegionPreview> {
+  return apiFetch<RegionPreview>(
+    `${API}/jobs/${encodeURIComponent(jobId)}/scene/objects/${encodeURIComponent(objectId)}/region/preview`,
+    { method: "POST", body: JSON.stringify(command), signal },
+  );
+}
+
+/** Box ban đầu của "Chỉnh vùng": bao đúng các Gaussian hiện có của vật, object-local (T-023). Chỉ đọc. */
+export interface RegionFit {
+  scene_revision: string;
+  membership_checksum: string;
+  object_id: string;
+  center_m: [number, number, number];
+  half_extents_m: [number, number, number];
+  yaw_rad: number;
+  rows: number;
+}
+
+export function fetchRegionFit(
+  jobId: string,
+  objectId: string,
+  revision: string,
+  signal?: AbortSignal,
+): Promise<RegionFit> {
+  const query = new URLSearchParams({ expected_scene_revision: revision });
+  return apiFetch<RegionFit>(
+    `${API}/jobs/${encodeURIComponent(jobId)}/scene/objects/${encodeURIComponent(objectId)}/region/fit?${query}`,
+    { signal },
+  );
+}
+
+/** Draft: 201 với revision mới. Ready: 202 với tiến độ dựng lại (T-011). Dùng `isSceneEditResponse` để phân biệt. */
+export function applyObjectRegion(
+  jobId: string,
+  objectId: string,
+  command: ObjectRegionCommand,
+): Promise<SceneEditResponse | ObjectifyState> {
+  return apiFetch<SceneEditResponse | ObjectifyState>(
+    `${API}/jobs/${encodeURIComponent(jobId)}/scene/objects/${encodeURIComponent(objectId)}/region/apply`,
+    { method: "POST", body: JSON.stringify(command) },
+  );
+}
+
+/** Phản hồi apply là revision mới (Draft) hay tiến độ dựng lại (Ready): phân biệt theo dạng JSON, không theo mã HTTP. */
+export function isSceneEditResponse(value: SceneEditResponse | ObjectifyState): value is SceneEditResponse {
+  return "scene" in value && "scene_revision" in value;
 }
 
 /** Thêm vật cản hộp; `center` là tâm hộp theo mét trong khung world (sàn z = 0). */
@@ -376,6 +744,14 @@ export function setObjectTransform(
       expected_scene_revision: expectedRevision,
       edits: [{ object_id: objectId, translation_xyz: translation, rotation_quaternion_xyzw: rotation }],
     }),
+  });
+}
+
+/** Ghi kích thước/local pose của box collider thành revision SceneIR kế tiếp. */
+export function editCollider(jobId: string, command: ColliderEditCommand): Promise<SceneEditResponse> {
+  return apiFetch<SceneEditResponse>(`${API}/jobs/${encodeURIComponent(jobId)}/scene/collider`, {
+    method: "POST",
+    body: JSON.stringify(command),
   });
 }
 
@@ -440,12 +816,29 @@ export function restoreSceneRevision(
 
 // ── dựng lại tập vật: chạy lại tách theo vật / dùng hộp ứng viên ─────────────
 
-export type ObjectifyMode = "objectify" | "boxes";
+export type ObjectifyMode = "objectify" | "boxes" | "membership" | "geometry" | "region";
+
+export type OperationResource = "vram" | "ram" | "disk";
+export type OperationWaitReason = "busy" | "external" | "exceeds_machine" | "unmeasured";
+
+export interface ObjectifyResourceWait {
+  status: "waiting_resources" | "waiting_gpu_affinity" | "worker_busy" | "identity_conflict";
+  required_gb: Record<OperationResource, number | null>;
+  available_gb: Record<OperationResource, number | null>;
+  capacity_gb: Record<OperationResource, number | null>;
+  waiting_on: OperationResource[];
+  reasons: Partial<Record<OperationResource, OperationWaitReason>>;
+  needs_exclusive_gpu: boolean;
+}
 
 /** Trạng thái tách theo vật của scene + yêu cầu dựng lại gần nhất (worker thực hiện). */
 export interface ObjectifyState {
-  status: "idle" | "queued" | "running" | "done" | "failed";
+  operation_id?: string | null;
+  phase?: string | null;
+  status: "idle" | "queued" | "running" | "done" | "failed" | "cancelled";
   mode: ObjectifyMode | null;
+  /** Revision SceneIR hiện tại; API cũ không gửi. */
+  scene_revision?: string | null;
   /** Tách theo vật lỗi hết số lần thử; scene chỉ có môi trường, chờ người dùng chọn. */
   awaiting_choice: boolean;
   object_centric: boolean;
@@ -455,6 +848,16 @@ export interface ObjectifyState {
   base_revision: string | null;
   result_revision: string | null;
   error: string | null;
+  /** False means the same input cannot recover by repeating objectify. Older APIs omit this. */
+  retryable?: boolean | null;
+  floor_fit?: Record<string, unknown> | null;
+  /** Snapshot tài nguyên khiến request vẫn queued; không chứa worker identity/lease token. */
+  resource_wait: ObjectifyResourceWait | null;
+  /** Running operation has received a cancel request and is stopping/reaping its child. */
+  cancellation_requested: boolean;
+  /** Trạng thái hình học theo vật của scene; null = scene cũ không có khoá (luồng cũ, T-021). */
+  object_geometry?: "awaiting_review" | "ready" | null;
+  geometry_note?: string | null;
 }
 
 export function getObjectifyState(jobId: string, signal?: AbortSignal): Promise<ObjectifyState> {
@@ -469,6 +872,21 @@ export function requestObjectify(jobId: string, expectedRevision: string, mode: 
   });
 }
 
+/** Xếp hàng tạo mesh theo vật trên đúng revision Draft đang hiển thị (architecture.md §7.4). */
+export function buildObjectGeometry(jobId: string, expectedRevision: string): Promise<ObjectifyState> {
+  return apiFetch<ObjectifyState>(`${API}/jobs/${encodeURIComponent(jobId)}/scene/geometry/build`, {
+    method: "POST",
+    body: JSON.stringify({ expected_scene_revision: expectedRevision }),
+  });
+}
+
+/** Cancel queued work or request a running objectify worker to stop its child process. */
+export function cancelObjectify(jobId: string, operationId?: string | null): Promise<ObjectifyState> {
+  return apiFetch<ObjectifyState>(`${API}/jobs/${encodeURIComponent(jobId)}/scene/objectify/cancel${operationId ? `?operation_id=${encodeURIComponent(operationId)}` : ""}`, {
+    method: "POST",
+  });
+}
+
 // ── gói mô phỏng Isaac (EX-SIM SIM-02…05) ───────────────────────────────────
 
 export interface PreflightRuleView {
@@ -476,6 +894,34 @@ export interface PreflightRuleView {
   result: "PASS" | "FAIL" | "WARN" | string;
   affected_object_ids: string[];
   remediation: string | null;
+}
+
+export interface ExportCapabilityIssueView {
+  code: string;
+  message: string;
+  affected_object_ids: string[];
+}
+
+export interface ExportCapabilityView {
+  scene_revision: string;
+  scene_ir_checksum: string;
+  status: "supported" | "blocked";
+  requested_mode: "auto";
+  effective_mode: "legacy_box" | "hybrid";
+  builder_version: string;
+  runtime_qualification: "not_required" | "qualified" | "failed";
+  runtime_version: string | null;
+  requirements: {
+    collider_types: string[];
+    static_physics: boolean;
+    dynamic_physics: boolean;
+    local_collider_offsets: boolean;
+    hybrid_visuals: boolean;
+    external_assets: boolean;
+  };
+  blockers: ExportCapabilityIssueView[];
+  /** Lưu ý không chặn xuất (vd. vật danh mục xuất bằng hộp); vắng ở backend cũ nên coi là rỗng. */
+  notices: ExportCapabilityIssueView[];
 }
 
 /** Tập con của `SimulationPackage` backend mà UI hiển thị; các field khác bỏ qua. */
@@ -486,8 +932,57 @@ export interface SimulationPackageView {
   confirmed_objects: number;
   environment_triangles: number;
   carved_triangles: number;
+  /** Tam giác nền được giữ vì hộp nguồn chung với vật không bị khoét; vắng ở backend cũ nên coi là 0. */
+  retained_shared_triangles: number;
+  retained_shared_object_ids: string[];
   preflight: { blocking_result: string; rules: PreflightRuleView[] };
+  export_capability: ExportCapabilityView | null;
   package_ref: { artifact_uri: string; artifact_checksum: string } | null;
+}
+
+function parseExportCapability(value: unknown): ExportCapabilityView | null {
+  if (value === null || value === undefined) return null;
+  if (!isObject(value)) throw new ApiError(502, "Backend trả capability USD sai contract");
+
+  const requirements = value.requirements;
+  const validRequirements =
+    isObject(requirements) &&
+    Array.isArray(requirements.collider_types) &&
+    requirements.collider_types.every((item) => typeof item === "string") &&
+    [
+      "static_physics",
+      "dynamic_physics",
+      "local_collider_offsets",
+      "hybrid_visuals",
+      "external_assets",
+    ].every((key) => typeof requirements[key] === "boolean");
+  const validIssues = (items: unknown) =>
+    Array.isArray(items) &&
+    items.every(
+      (item) =>
+        isObject(item) &&
+        typeof item.code === "string" &&
+        typeof item.message === "string" &&
+        Array.isArray(item.affected_object_ids) &&
+        item.affected_object_ids.every((id) => typeof id === "string"),
+    );
+  const notices = value.notices ?? [];
+  if (
+    typeof value.scene_revision !== "string" ||
+    typeof value.scene_ir_checksum !== "string" ||
+    !["supported", "blocked"].includes(String(value.status)) ||
+    value.requested_mode !== "auto" ||
+    !["legacy_box", "hybrid"].includes(String(value.effective_mode)) ||
+    typeof value.builder_version !== "string" ||
+    !["not_required", "qualified", "failed"].includes(String(value.runtime_qualification)) ||
+    !(value.runtime_version === null || typeof value.runtime_version === "string") ||
+    !validRequirements ||
+    !validIssues(value.blockers) ||
+    !validIssues(notices)
+  ) {
+    throw new ApiError(502, "Backend trả capability USD sai contract");
+  }
+  return { ...value, notices } as unknown as ExportCapabilityView;
 }
 
 function parseSimulationPackage(value: unknown): SimulationPackageView | null {
@@ -501,7 +996,23 @@ function parseSimulationPackage(value: unknown): SimulationPackageView | null {
   ) {
     throw new ApiError(502, "Backend trả gói mô phỏng sai contract");
   }
-  return data as SimulationPackageView;
+  const exportCapability = parseExportCapability(data.export_capability);
+  if (exportCapability?.status === "blocked" && data.package_ref != null) {
+    throw new ApiError(502, "Backend trả candidate dù capability USD đang bị chặn");
+  }
+  const { retained_shared_triangles: retained = 0, retained_shared_object_ids: retainedIds = [] } = data;
+  if (
+    !Number.isSafeInteger(retained) || retained < 0 ||
+    !Array.isArray(retainedIds) || !retainedIds.every((id) => typeof id === "string")
+  ) {
+    throw new ApiError(502, "Backend trả số tam giác dùng chung sai contract");
+  }
+  return {
+    ...data,
+    retained_shared_triangles: retained,
+    retained_shared_object_ids: retainedIds,
+    export_capability: exportCapability,
+  } as SimulationPackageView;
 }
 
 /** Gói của revision scene hiện tại; null khi chưa tạo hoặc scene đã sửa sau lần tạo. */
@@ -541,11 +1052,11 @@ export async function getTrainingRecording(jobId: string, signal?: AbortSignal):
 }
 
 export function trainingRecordingUrl(jobId: string): string {
-  return `${API}/jobs/${encodeURIComponent(jobId)}/training-recording.rrd`;
+  return demoApiPath(`${API}/jobs/${encodeURIComponent(jobId)}/training-recording.rrd`);
 }
 
 export function simulationPackageDownloadUrl(jobId: string): string {
-  return `${API}/jobs/${encodeURIComponent(jobId)}/simulation-package/download`;
+  return demoApiPath(`${API}/jobs/${encodeURIComponent(jobId)}/simulation-package/download`);
 }
 
 // ── duyệt & phát hành (PRODUCT-10/11) ────────────────────────────────────────
@@ -580,6 +1091,16 @@ export interface PathResultView {
   evidence_refs: EvidenceRefView[];
 }
 
+export type CollisionObservationStateView = "observed_static" | "unobserved" | "inferred" | "motion_suspected";
+
+export interface CollisionPathSupportView {
+  pair_id: string;
+  state: CollisionObservationStateView;
+  observation_ids: string[];
+  coverage_fraction: number;
+  diagnostic_ref: EvidenceRefView | null;
+}
+
 export interface ValidationReportView {
   overall_result: string;
   validator_version: string;
@@ -588,6 +1109,8 @@ export interface ValidationReportView {
   environment_versions: Record<string, string>;
   checks: ValidationCheckView[];
   path_results: PathResultView[];
+  collision_quality_ref: EvidenceRefView | null;
+  collision_path_support: CollisionPathSupportView[];
 }
 
 /** Phần `ReviewState` backend mà UI dùng, đã chuẩn hoá ở biên API (thiếu trường phụ thì nhận giá trị rỗng). */
@@ -599,8 +1122,9 @@ export interface ReviewStateView {
     validation_report_checksum: string | null;
   };
   validation: ValidationReportView | null;
-  /** Báo cáo có bằng chứng chạy Isaac Sim thật không; null khi chưa có báo cáo hoặc backend không trả cờ. */
+  /** True chỉ khi backend xác minh selected worker run, candidate/config/report và RuntimeManifest cùng identity. */
   isaac_runtime_proof: boolean | null;
+  /** Warning IDs từ gate; optional path warning dùng `path:<pair_id>`. */
   warning_ids: string[];
   /** Tên hiển thị của người duyệt (backend điền từ tài khoản); null thì UI hiện id. */
   reviewer_name?: string | null;
@@ -621,6 +1145,7 @@ export interface ReviewStateView {
     validation_report_checksum: string | null;
   } | null;
   release_archive: { artifact_uri: string } | null;
+  release_seal_error: string | null;
   blockers: string[];
 }
 
@@ -649,6 +1174,12 @@ function evidenceRefs(value: unknown): EvidenceRefView[] {
 
 function validationReport(value: unknown): ValidationReportView | null {
   if (!isObject(value)) return null;
+  const collisionStates = new Set<CollisionObservationStateView>([
+    "observed_static",
+    "unobserved",
+    "inferred",
+    "motion_suspected",
+  ]);
   const rows = (items: unknown, key: "check_id" | "pair_id") =>
     (Array.isArray(items) ? items : []).flatMap((item) => {
       const id = isObject(item) ? text(item[key]) : null;
@@ -656,6 +1187,30 @@ function validationReport(value: unknown): ValidationReportView | null {
       return [{ id, result: text(item.result) ?? "?", message: text(item.message), evidence_refs: evidenceRefs(item.evidence_refs) }];
     });
   const versions = isObject(value.environment_versions) ? value.environment_versions : {};
+  const collisionSupport = (Array.isArray(value.collision_path_support) ? value.collision_path_support : []).flatMap((item) => {
+    if (!isObject(item)) return [];
+    const pairId = text(item.pair_id);
+    const state = text(item.state);
+    const coverage = item.coverage_fraction;
+    if (
+      !pairId ||
+      !state ||
+      !collisionStates.has(state as CollisionObservationStateView) ||
+      typeof coverage !== "number" ||
+      !Number.isFinite(coverage) ||
+      coverage < 0 ||
+      coverage > 1
+    ) {
+      return [];
+    }
+    return [{
+      pair_id: pairId,
+      state: state as CollisionObservationStateView,
+      observation_ids: strings(item.observation_ids),
+      coverage_fraction: coverage,
+      diagnostic_ref: evidenceRefs([item.diagnostic_ref])[0] ?? null,
+    }];
+  });
   return {
     overall_result: text(value.overall_result) ?? "?",
     validator_version: text(value.validator_version) ?? "?",
@@ -664,7 +1219,112 @@ function validationReport(value: unknown): ValidationReportView | null {
     environment_versions: Object.fromEntries(Object.entries(versions).flatMap(([key, version]) => (typeof version === "string" ? [[key, version]] : []))),
     checks: rows(value.checks, "check_id").map(({ id, ...rest }) => ({ check_id: id, ...rest })),
     path_results: rows(value.path_results, "pair_id").map(({ id, ...rest }) => ({ pair_id: id, ...rest })),
+    collision_quality_ref: evidenceRefs([value.collision_quality_ref])[0] ?? null,
+    collision_path_support: collisionSupport,
   };
+}
+
+function parseValidationRun(value: unknown): ValidationRunView {
+  if (!isObject(value)) throw new ApiError(502, "Backend trả validation run sai contract");
+  const jobId = text(value.job_id);
+  const runId = text(value.run_id);
+  const sceneRevision = text(value.scene_revision);
+  const candidateChecksum = text(value.candidate_checksum);
+  const configChecksum = text(value.validation_config_checksum);
+  const requestedAt = text(value.requested_at);
+  const runStatus = VALIDATION_RUN_STATUSES.find((item) => item === value.run_status);
+  const status = VALIDATION_OPERATION_STATUSES.find((item) => item === value.status);
+  const attempt = value.attempt;
+  if (
+    value.schema_version !== "1.0" ||
+    !jobId ||
+    !runId ||
+    typeof attempt !== "number" ||
+    !Number.isSafeInteger(attempt) ||
+    attempt < 1 ||
+    !sceneRevision ||
+    !candidateChecksum ||
+    !configChecksum ||
+    !runStatus ||
+    !status ||
+    !requestedAt ||
+    (value.started_at !== null && typeof value.started_at !== "string") ||
+    (value.completed_at !== null && typeof value.completed_at !== "string") ||
+    (value.report_checksum !== null && typeof value.report_checksum !== "string") ||
+    typeof value.selected !== "boolean" ||
+    typeof value.retryable !== "boolean" ||
+    (value.error_code !== null && typeof value.error_code !== "string")
+  ) {
+    throw new ApiError(502, "Backend trả validation run sai contract");
+  }
+  return {
+    schema_version: "1.0",
+    job_id: jobId,
+    run_id: runId,
+    attempt,
+    scene_revision: sceneRevision,
+    candidate_checksum: candidateChecksum,
+    validation_config_checksum: configChecksum,
+    run_status: runStatus as ValidationRunStatus,
+    status: status as ValidationOperationStatus,
+    requested_at: requestedAt,
+    started_at: value.started_at as string | null,
+    completed_at: value.completed_at as string | null,
+    report_checksum: value.report_checksum as string | null,
+    selected: value.selected,
+    retryable: value.retryable,
+    error_code: value.error_code as string | null,
+  };
+}
+
+export async function listValidationRuns(jobId: string, signal?: AbortSignal): Promise<ValidationRunView[]> {
+  const value = await apiFetch<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/validation-runs`, { signal });
+  if (!Array.isArray(value)) throw new ApiError(502, "Backend trả validation history sai contract");
+  return value.map(parseValidationRun);
+}
+
+export async function submitValidationRun(jobId: string, candidateChecksum: string): Promise<ValidationRunView> {
+  return parseValidationRun(await apiFetch<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/validation-runs`, {
+    method: "POST",
+    headers: { "Idempotency-Key": newRunIdempotencyKey() },
+    body: JSON.stringify({ candidate_checksum: candidateChecksum }),
+  }));
+}
+
+export async function cancelValidationRun(jobId: string, runId: string): Promise<ValidationRunView> {
+  return parseValidationRun(await apiFetch<unknown>(
+    `${API}/jobs/${encodeURIComponent(jobId)}/validation-runs/${encodeURIComponent(runId)}/cancel`,
+    { method: "POST" },
+  ));
+}
+
+export async function retryValidationRun(jobId: string, runId: string): Promise<ValidationRunView> {
+  return parseValidationRun(await apiFetch<unknown>(
+    `${API}/jobs/${encodeURIComponent(jobId)}/validation-runs/${encodeURIComponent(runId)}/retry`,
+    { method: "POST", headers: { "Idempotency-Key": newRunIdempotencyKey() } },
+  ));
+}
+
+export async function selectValidationRun(
+  jobId: string,
+  runId: string,
+  candidateChecksum: string,
+  expectedSelectedRunId: string | null,
+): Promise<ValidationRunView> {
+  return parseValidationRun(await apiFetch<unknown>(
+    `${API}/jobs/${encodeURIComponent(jobId)}/validation-runs/${encodeURIComponent(runId)}/select`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        candidate_checksum: candidateChecksum,
+        expected_selected_run_id: expectedSelectedRunId,
+      }),
+    },
+  ));
+}
+
+export function validationArtifactUrl(jobId: string, runId: string, artifactName: string): string {
+  return demoApiPath(`${API}/jobs/${encodeURIComponent(jobId)}/validation-runs/${encodeURIComponent(runId)}/artifacts/${encodeURIComponent(artifactName)}`);
 }
 
 function parseReviewState(value: unknown): ReviewStateView {
@@ -705,6 +1365,7 @@ function parseReviewState(value: unknown): ReviewStateView {
       validation_report_checksum: text(release.validation_report_checksum),
     },
     release_archive: archive ? { artifact_uri: archive } : null,
+    release_seal_error: text(value.release_seal_error),
     blockers: strings(value.blockers),
   };
 }
@@ -739,7 +1400,7 @@ export async function retryReleaseSeal(jobId: string): Promise<ReviewStateView> 
 }
 
 export function releaseDownloadUrl(jobId: string): string {
-  return `${API}/jobs/${encodeURIComponent(jobId)}/release-download`;
+  return demoApiPath(`${API}/jobs/${encodeURIComponent(jobId)}/release-download`);
 }
 
 /** Một thứ nằm trong mục thùng rác: scene, scene nhập, hoặc upload chỉ scene đó dùng. */
@@ -760,6 +1421,7 @@ export interface TrashEntry {
   deleted_by: string | null;
   size_bytes: number;
   items: TrashItem[];
+  capabilities?: { can_restore: boolean; can_purge: boolean };
 }
 
 /** Kết quả theo từng mục: mục lỗi không chặn các mục còn lại. */
@@ -789,6 +1451,14 @@ export function parseTrashEntries(data: unknown): TrashEntry[] {
       }
       return { kind, identifier: item.identifier, name: item.name, detail: typeof item.detail === "string" ? item.detail : "" };
     });
+    let capabilities: TrashEntry["capabilities"];
+    if (entry.capabilities !== undefined) {
+      if (
+        !isRecord(entry.capabilities) || typeof entry.capabilities.can_restore !== "boolean" ||
+        typeof entry.capabilities.can_purge !== "boolean"
+      ) throw new ApiError(502, "Quyền thùng rác không hợp lệ");
+      capabilities = { can_restore: entry.capabilities.can_restore, can_purge: entry.capabilities.can_purge };
+    }
     return {
       entry_id: entry.entry_id,
       title: entry.title,
@@ -797,6 +1467,7 @@ export function parseTrashEntries(data: unknown): TrashEntry[] {
       deleted_by: typeof entry.deleted_by === "string" ? entry.deleted_by : null,
       size_bytes: entry.size_bytes,
       items,
+      capabilities,
     };
   });
 }
@@ -838,6 +1509,7 @@ export interface EvaluationMetric {
   meaning: string;
   verdict: "ok" | "warn" | "fail" | null;
   threshold: string | null;
+  reference: string | null;
 }
 
 export interface EvaluationGroup {
@@ -854,6 +1526,7 @@ export interface JobEvaluation {
   job_status: string;
   scene_revision: string | null;
   generated_at: string;
+  summary: string[];
   groups: EvaluationGroup[];
 }
 
@@ -875,6 +1548,7 @@ export function parseJobEvaluation(data: unknown): JobEvaluation {
         unit: typeof metric.unit === "string" ? metric.unit : null,
         verdict: EVALUATION_VERDICT.find((item) => item === metric.verdict) ?? null,
         threshold: typeof metric.threshold === "string" ? metric.threshold : null,
+        reference: typeof metric.reference === "string" ? metric.reference : null,
       };
     });
     return { group_id: group.group_id, title: group.title, status, note: typeof group.note === "string" ? group.note : null, metrics };
@@ -885,6 +1559,7 @@ export function parseJobEvaluation(data: unknown): JobEvaluation {
     job_status: typeof data.job_status === "string" ? data.job_status : "",
     scene_revision: typeof data.scene_revision === "string" ? data.scene_revision : null,
     generated_at: typeof data.generated_at === "string" ? data.generated_at : "",
+    summary: Array.isArray(data.summary) ? data.summary.filter((s): s is string => typeof s === "string") : [],
     groups,
   };
 }
@@ -895,5 +1570,48 @@ export async function getJobEvaluation(jobId: string, signal?: AbortSignal): Pro
 
 /** Link tải báo cáo Markdown của bảng đánh giá (backend đặt tên file). */
 export function evaluationReportUrl(jobId: string): string {
-  return `${API}/jobs/${encodeURIComponent(jobId)}/evaluation/report.md`;
+  return demoApiPath(`${API}/jobs/${encodeURIComponent(jobId)}/evaluation/report.md`);
+}
+
+
+export interface CollisionSurfacePlane {
+  id: string;
+  kind: "floor" | "wall";
+  source_checksum: string;
+  fill_regions?: boolean;
+  points: [[number,number,number],[number,number,number],[number,number,number]];
+}
+export function editCollisionSurface(jobId: string, command: {
+  expected_scene_revision: string; source_checksum: string; action: "mark" | "remove" | "fill";
+  kind?: "floor" | "wall"; points?: CollisionSurfacePlane["points"]; plane_id?: string;
+}): Promise<SceneEditResponse> {
+  return apiFetch<SceneEditResponse>(`${API}/jobs/${encodeURIComponent(jobId)}/scene/collision-surfaces`, {
+    method: "POST", body: JSON.stringify(command),
+  });
+}
+
+export interface MembershipPreview {
+  scene_revision: string;
+  membership_checksum: string;
+  source_visual_checksum: string;
+  source_object_id: string | null;
+  target_object_id: string | null;
+  affected_object_ids: string[];
+  gaussian_count: number;
+  protected_count: number;
+  wrong_owner_count: number;
+  source_gaussian_indices: number[];
+  remaining_gaussians: Record<string, number>;
+}
+
+export function previewMembership(jobId: string, command: ObjectMembershipReassignCommand): Promise<MembershipPreview> {
+  return apiFetch<MembershipPreview>(`${API}/jobs/${encodeURIComponent(jobId)}/scene/membership/preview`, {
+    method: "POST", body: JSON.stringify(command),
+  });
+}
+
+export function regenerateMembership(jobId: string, command: ObjectMembershipReassignCommand): Promise<ObjectifyState> {
+  return apiFetch<ObjectifyState>(`${API}/jobs/${encodeURIComponent(jobId)}/scene/membership/regenerate`, {
+    method: "POST", body: JSON.stringify(command),
+  });
 }

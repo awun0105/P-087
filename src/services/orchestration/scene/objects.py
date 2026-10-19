@@ -21,19 +21,22 @@ from src.services.orchestration.scene.errors import (
     SceneObjectNotFoundError,
     SceneRevisionConflictError,
 )
-from src.services.orchestration.scene.models import SceneEditResult
+from src.services.orchestration.scene.models import ColliderEditCommand, SceneEditResult
+from src.services.orchestration.scene.object_restore import restore_merged_group
 from src.services.scene.editing.commands import (
     PrimitiveObjectCommand,
     add_primitive_object,
     confirm_object,
     delete_object,
     duplicate_object,
+    edit_box_collider,
     ignore_object,
     rename_object,
     restore_object,
     set_object_active,
     set_object_semantics,
 )
+from src.services.scene.geometry_state import require_geometry_ready
 
 ObjectAction = Literal["confirm", "ignore", "hide", "delete", "rename", "restore", "duplicate", "label"]
 OBJECT_ACTIONS: frozenset[str] = frozenset(
@@ -67,8 +70,8 @@ def apply_object_action(
 ) -> SceneEditResult:
     """Một thao tác trên một vật, publish revision kế tiếp.
 
-    confirm/ignore ứng viên; hide (active=False/True); delete (vật thêm tay gỡ hẳn, vật tái dựng đánh
-    dấu DELETED); restore; rename; duplicate; label (nhãn + vật lý: khối lượng người dùng nhập, nếu
+    confirm/ignore ứng viên; hide bật/tắt mô phỏng vật đã xác nhận; delete giữ tombstone
+    DELETED để khôi phục cả vật thêm tay; restore khôi phục vật hoặc nhóm đã gộp; rename; duplicate; label (nhãn + vật lý: khối lượng người dùng nhập, nếu
     không thì mặc định của nhãn hoặc mật độ × thể tích collider).
     """
     scene = _current(editor, job_id, expected_revision)
@@ -80,12 +83,20 @@ def apply_object_action(
         elif action == "ignore":
             updated = ignore_object(scene, object_id)
         elif action == "hide":
-            updated = set_object_active(scene, object_id, bool(active))
+            if not isinstance(active, bool):
+                raise ValueError("simulation activation requires an explicit boolean")
+            updated = set_object_active(scene, object_id, active)
         elif action == "delete":
             updated = delete_object(scene, object_id)
         elif action == "restore":
-            updated = restore_object(scene, object_id)
+            target = next(item for item in scene.objects if item.id == object_id)
+            updated = (
+                restore_merged_group(editor, job_id, scene, object_id)
+                if target.provenance.get("review") == "MERGED"
+                else restore_object(scene, object_id)
+            )
         elif action == "duplicate":
+            require_geometry_ready(scene, "nhân bản vật")
             updated = duplicate_object(scene, object_id, _next_id(scene, "user"), _DUPLICATE_OFFSET_M)
         elif action == "label":
             target = next(item for item in scene.objects if item.id == object_id)
@@ -100,6 +111,32 @@ def apply_object_action(
     except ValueError as error:
         raise SceneEditRejectedError(str(error)) from error
     return editor.publish_next(job_id, expected_revision, updated, action)
+
+
+def edit_collider_scene(scene: SceneIR, command: ColliderEditCommand) -> SceneIR:
+    """Validate a collider command against one scene snapshot and return its pure edit result."""
+    if command.expected_scene_revision != scene.scene_revision:
+        raise SceneRevisionConflictError(
+            f"scene đã đổi: client đang giữ {command.expected_scene_revision}, revision hiện tại là {scene.scene_revision}"
+        )
+    require_geometry_ready(scene, "sửa collider")
+    try:
+        return edit_box_collider(
+            scene,
+            command.object_id,
+            dimensions_xyz_m=command.dimensions_xyz_m,
+            local_translation_xyz_m=command.local_translation_xyz_m,
+            local_rotation_quaternion_xyzw=command.local_rotation_quaternion_xyzw,
+        )
+    except ValueError as error:
+        raise SceneEditRejectedError(str(error)) from error
+
+
+def edit_collider(editor: SceneEditor, job_id: str, command: ColliderEditCommand) -> SceneEditResult:
+    """Publish a validated collider override as the next canonical scene revision."""
+    current = editor.current(job_id).scene
+    updated = edit_collider_scene(current, command)
+    return editor.publish_next(job_id, command.expected_scene_revision, updated, "edit_collider")
 
 
 def _next_id(scene: SceneIR, prefix: str) -> str:
@@ -139,6 +176,7 @@ def add_box_object(
 ) -> SceneEditResult:
     """Thêm vật cản hộp do người dùng đặt (PRODUCT-07A): CONFIRMED, tâm hộp tại `center_xyz` (mét, world)."""
     scene = _current(editor, job_id, expected_revision)
+    require_geometry_ready(scene, "thêm vật")
     if min(dimensions_xyz_m) <= 0:
         raise SceneEditRejectedError("kích thước hộp phải dương")
     taken = {item.id for item in scene.objects}
@@ -193,6 +231,7 @@ def add_catalog_object(
     `position_xyz` là điểm đặt trên sàn (đáy hộp), tâm hộp được nâng nửa chiều cao.
     """
     scene = _current(editor, job_id, expected_revision)
+    require_geometry_ready(scene, "thêm vật từ thư viện")
     entry = load_catalog().family(family)
     if entry is None or not entry.placeable:
         raise SceneEditRejectedError(f"họ asset {family} không có trong danh mục đặt được")

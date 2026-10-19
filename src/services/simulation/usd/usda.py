@@ -4,9 +4,13 @@ Xuất cấu trúc scene phân cấp (/World, /World/Environment, /World/Objects
 với metadata chuẩn hóa: metersPerUnit = 1.0, upAxis = "Z" theo OpenReal2Sim và Re3Sim.
 """
 
+import json
+
 import numpy as np
 
-from src.models.contracts.scene import ColliderSpec, ColliderType, SceneIR, SceneObject
+from src.models.contracts.scene import ColliderSpec, ColliderType, SceneIR, SceneObject, SceneObjectState
+from src.services.simulation.usd.capabilities import catalog_asset_provenance
+from src.services.simulation.usd.physics_config import physics_build_config
 
 
 def _format_prim_name(raw_id: str) -> str:
@@ -30,14 +34,17 @@ def _generate_ground_plane_usda() -> list[str]:
 
 
 def _generate_collider_usda(collider: ColliderSpec) -> list[str]:
-    """Sinh định nghĩa Prim cho ColliderSpec dạng Box."""
-    dims = collider.dimensions_xyz_m or (1.0, 1.0, 1.0)
+    """Sinh định nghĩa Prim cho ColliderSpec dạng hộp; không giả Mesh rỗng."""
+    if collider.collider_type not in (ColliderType.AABB, ColliderType.OBB):
+        raise ValueError(f"legacy USD exporter cannot preserve collider '{collider.collider_type}'")
+    dims = collider.dimensions_xyz_m
+    if dims is None or any(not np.isfinite(value) or value <= 0 for value in dims):
+        raise ValueError("legacy USD box colliders require finite positive dimensions")
     tx, ty, tz = collider.local_transform.translation_xyz
     qx, qy, qz, qw = collider.local_transform.rotation_quaternion_xyzw
 
-    prim_type = "Cube" if collider.collider_type in (ColliderType.AABB, ColliderType.OBB) else "Mesh"
     return [
-        f'            def {prim_type} "collider" (',
+        '            def Cube "collider" (',
         '                apiSchemas = ["PhysicsCollisionAPI"]',
         "            )",
         "            {",
@@ -52,12 +59,35 @@ def _generate_collider_usda(collider: ColliderSpec) -> list[str]:
 
 def _generate_object_usda(obj: SceneObject) -> list[str]:
     """Sinh định nghĩa Prim cho một SceneObject cùng toạ độ và collider."""
+    if obj.physics is not None:
+        raise ValueError(f"legacy USD exporter cannot preserve ObjectPhysics for '{obj.id}'")
+    if obj.asset_ref is not None:
+        raise ValueError(f"legacy USD exporter cannot preserve asset dependencies for '{obj.id}'")
+    if obj.state == SceneObjectState.CONFIRMED and obj.collider is None:
+        raise ValueError(f"legacy USD exporter requires a collider for confirmed object '{obj.id}'")
     prim_name = _format_prim_name(obj.id)
     tx, ty, tz = obj.transform.translation_xyz
     qx, qy, qz, qw = obj.transform.rotation_quaternion_xyzw
 
+    catalog = catalog_asset_provenance(obj)
     lines = [
         f'        def Xform "{prim_name}"',
+        *(
+            [
+                "        (",
+                "            customData = {",
+                "                dictionary real2sim = {",
+                "                    dictionary catalog = {",
+                f"                        string asset_url = {json.dumps(catalog['asset_url'], ensure_ascii=False)}",
+                f"                        string family = {json.dumps(catalog['family'], ensure_ascii=False)}",
+                "                    }",
+                "                }",
+                "            }",
+                "        )",
+            ]
+            if catalog is not None
+            else []
+        ),
         "        {",
         f"            double3 xformOp:translate = ({tx}, {ty}, {tz})",
         f"            quatf xformOp:orient = ({qw}, {qx}, {qy}, {qz})",
@@ -106,12 +136,15 @@ def generate_mesh_layer_usda(vertices: np.ndarray, faces: np.ndarray, prim_name:
     )
 
 
-def generate_scene_usda(scene: SceneIR, environment_layer: str | None = None) -> str:
+def generate_scene_usda(
+    scene: SceneIR, environment_layer: str | None = None, *, build_config: dict[str, object] | None = None
+) -> str:
     """Chuyển đổi SceneIR thành nội dung văn bản OpenUSD ASCII (.usda) hoàn chỉnh.
 
     `environment_layer` là đường dẫn tương đối (cùng gói) tới layer mesh collider môi trường;
     None giữ hành vi cũ (chỉ ground plane).
     """
+    config = physics_build_config(build_config or {})
     lines = [
         "#usda 1.0",
         "(",
@@ -126,12 +159,30 @@ def generate_scene_usda(scene: SceneIR, environment_layer: str | None = None) ->
         ")",
         "",
         'def Xform "World"',
+        *(['(prepend apiSchemas = ["MaterialBindingAPI"])'] if build_config is not None else []),
         "{",
+        *(
+            [
+                '    rel material:binding:physics = </World/PhysicsMaterial> (bindMaterialAs = "weakerThanDescendants")',
+                '    def Material "PhysicsMaterial" (prepend apiSchemas = ["PhysicsMaterialAPI"])',
+                "    {",
+                f"        float physics:staticFriction = {config['static_friction']}",
+                f"        float physics:dynamicFriction = {config['dynamic_friction']}",
+                f"        float physics:restitution = {config['restitution']}",
+                "    }",
+            ]
+            if build_config is not None
+            else []
+        ),
+        '    def PhysicsScene "PhysicsScene"',
+        "    {",
+        "    }",
+        "",
         '    def Xform "Environment"',
         "    {",
     ]
 
-    if scene.environment.collider_ref is not None:
+    if scene.environment.collider_ref is not None and config["ground_plane"]:
         lines.extend(_generate_ground_plane_usda())
     if environment_layer is not None:
         lines.extend(

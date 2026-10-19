@@ -18,7 +18,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { ErrorFeedback, notifySuccess, PageHeader } from "@/components/studio/feedback";
 import { Button, EmptyState, Notice } from "@/components/studio/primitives";
 import { useAuth } from "@/features/studio/AuthProvider";
-import { canEdit, isReviewer } from "@/lib/api/auth";
+import { canEdit, isReviewer, resourceCapabilityAllowed } from "@/lib/api/auth";
 import { listTrash, purgeTrash, restoreTrash, type TrashActionResult, type TrashEntry } from "@/lib/api/studio";
 import { formatBytes } from "@/lib/format";
 import { errorMessage } from "@/lib/ui-error";
@@ -42,7 +42,8 @@ export function remainingLabel(expiresAt: string | null, now: number): string {
 export function TrashPage() {
   const { me } = useAuth();
   const allowed = canEdit(me);
-  const mayPurge = isReviewer(me);
+  const canRestore = useCallback((entry: TrashEntry) => resourceCapabilityAllowed(me, entry.capabilities?.can_restore), [me]);
+  const canPurgeEntry = useCallback((entry: TrashEntry) => entry.capabilities?.can_purge ?? isReviewer(me), [me]);
   const [entries, setEntries] = useState<TrashEntry[] | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
@@ -58,12 +59,15 @@ export function TrashPage() {
       setEntries(next);
       setLoadedAt(Date.now());
       // Mục đã bị xử lý ở tab khác thì không còn được chọn.
-      setSelected((current) => new Set(next.map((entry) => entry.entry_id).filter((id) => current.has(id))));
+      setSelected((current) => new Set(next
+        .filter((entry) => canRestore(entry) || canPurgeEntry(entry))
+        .map((entry) => entry.entry_id)
+        .filter((id) => current.has(id))));
       setError(null);
     } catch (cause) {
       setError(errorMessage(cause));
     }
-  }, []);
+  }, [canPurgeEntry, canRestore]);
 
   useEffect(() => {
     if (!allowed) return;
@@ -95,8 +99,12 @@ export function TrashPage() {
   }
 
   const all = entries?.map((entry) => entry.entry_id) ?? [];
-  const chosen = all.filter((id) => selected.has(id));
-  const everything = all.length > 0 && chosen.length === all.length;
+  const actionable = entries?.filter((entry) => canRestore(entry) || canPurgeEntry(entry)) ?? [];
+  const chosen = actionable.filter((entry) => selected.has(entry.entry_id)).map((entry) => entry.entry_id);
+  const restorable = entries?.filter(canRestore).map((entry) => entry.entry_id) ?? [];
+  const purgeable = entries?.filter(canPurgeEntry).map((entry) => entry.entry_id) ?? [];
+  const mayPurge = purgeable.length > 0;
+  const everything = actionable.length > 0 && chosen.length === actionable.length;
   const toggle = (id: string, on: boolean) => setSelected((current) => {
     const next = new Set(current);
     if (on) next.add(id); else next.delete(id);
@@ -111,12 +119,16 @@ export function TrashPage() {
         description="Scene đã gỡ nằm ở đây tới hạn ở cột “Tự xoá” rồi bị xoá hẳn; trước hạn đó bạn khôi phục hoặc xoá hẳn được. Xoá hẳn sẽ xoá cả file trên kho lưu trữ và không khôi phục được."
         action={all.length > 0 ? (
           <>
-            <Button variant="secondary" disabled={busy} onClick={() => void run("restore", all)}><RotateCcw aria-hidden /> Khôi phục tất cả</Button>
-            <Button variant="danger" disabled={busy || !mayPurge} onClick={() => setConfirming(all)}><Trash2 aria-hidden /> Xoá tất cả</Button>
+            {restorable.length > 0 && <Button variant="secondary" disabled={busy} onClick={() => void run("restore", restorable)}><RotateCcw aria-hidden /> {restorable.length === all.length ? "Khôi phục tất cả" : "Khôi phục mục được phép"}</Button>}
+            <Button variant="danger" disabled={busy || !mayPurge} onClick={() => setConfirming(purgeable)}><Trash2 aria-hidden /> Xoá tất cả</Button>
           </>
         ) : undefined}
       />
-      {!mayPurge && all.length > 0 && <Notice tone="neutral" className="mt-6">Chỉ Reviewer xoá hẳn được. Bạn vẫn khôi phục được các mục trong thùng rác.</Notice>}
+      {!mayPurge && all.length > 0 && (
+        <Notice tone="neutral" className="mt-6">
+          Chỉ Reviewer xoá hẳn được.{me.user?.role === "guest" && " Guest chỉ khôi phục resource do mình sở hữu."}
+        </Notice>
+      )}
       {error && <ErrorFeedback className="mt-6" message={error} retry={() => void load()} />}
       {failures.length > 0 && (
         <Notice tone="rust" className="mt-6">
@@ -146,7 +158,7 @@ export function TrashPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-10">
-                    <Checkbox checked={everything} onCheckedChange={(value) => setSelected(new Set(value === true ? all : []))} aria-label="Chọn tất cả" />
+                    <Checkbox checked={everything} onCheckedChange={(value) => setSelected(new Set(value === true ? actionable.map((entry) => entry.entry_id) : []))} aria-label="Chọn tất cả" />
                   </TableHead>
                   <TableHead>Tên</TableHead>
                   <TableHead className="hidden sm:table-cell">Gỡ lúc</TableHead>
@@ -159,23 +171,29 @@ export function TrashPage() {
                 {entries.map((entry) => (
                   <TableRow key={entry.entry_id} data-state={selected.has(entry.entry_id) ? "selected" : undefined}>
                     <TableCell>
-                      <Checkbox checked={selected.has(entry.entry_id)} onCheckedChange={(value) => toggle(entry.entry_id, value === true)} aria-label={`Chọn ${entry.title}`} />
+                      <Checkbox
+                        checked={selected.has(entry.entry_id)}
+                        disabled={busy || (!canRestore(entry) && !canPurgeEntry(entry))}
+                        onCheckedChange={(value) => toggle(entry.entry_id, value === true)}
+                        aria-label={`Chọn ${entry.title}`}
+                      />
                     </TableCell>
                     <TableCell className="max-w-72">
                       <p className="truncate font-medium text-ink">{entry.title}</p>
                       <p className="truncate text-xs text-ink-subtle">
                         {entry.items.map((item) => `${KIND_LABEL[item.kind]}${item.kind === "upload" ? ` ${item.name}` : ""}`).join(" · ")}
                       </p>
+                      {!canRestore(entry) && !canPurgeEntry(entry) && <p className="text-xs text-ink-subtle">Chỉ người sở hữu resource mới khôi phục được.</p>}
                     </TableCell>
                     <TableCell className="hidden text-xs value-tech text-ink-muted sm:table-cell">{DATE.format(new Date(entry.deleted_at))}</TableCell>
                     <TableCell className="text-xs whitespace-nowrap value-tech text-ink-muted">{remainingLabel(entry.expires_at, loadedAt)}</TableCell>
                     <TableCell className="hidden text-xs value-tech text-ink-muted md:table-cell">{formatBytes(entry.size_bytes)}</TableCell>
                     <TableCell>
                       <div className="flex justify-end gap-2">
-                        <Button size="sm" variant="secondary" disabled={busy} onClick={() => void run("restore", [entry.entry_id])} aria-label={`Khôi phục ${entry.title}`}>
+                        <Button size="sm" variant="secondary" disabled={busy || !canRestore(entry)} onClick={() => void run("restore", [entry.entry_id])} aria-label={`Khôi phục ${entry.title}`}>
                           <RotateCcw aria-hidden /> <span className="hidden lg:inline">Khôi phục</span>
                         </Button>
-                        <Button size="sm" variant="danger" disabled={busy || !mayPurge} onClick={() => setConfirming([entry.entry_id])} aria-label={`Xoá hẳn ${entry.title}`}>
+                        <Button size="sm" variant="danger" disabled={busy || !canPurgeEntry(entry)} onClick={() => setConfirming([entry.entry_id])} aria-label={`Xoá hẳn ${entry.title}`}>
                           <Trash2 aria-hidden /> <span className="hidden lg:inline">Xoá hẳn</span>
                         </Button>
                       </div>

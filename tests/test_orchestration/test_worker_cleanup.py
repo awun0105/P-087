@@ -1,5 +1,6 @@
 """Fixture proof cho cleanup boundary; không thay GPU/browser/runtime acceptance."""
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -184,6 +185,9 @@ def test_preview_cleanup_only_after_verified_commit(
             runner._execute_preview(attempt, reference, profile)
     else:
         assert runner._execute_preview(attempt, reference, profile) == job
+    if failure in {None, "receipt"}:
+        verified_at = fake.record_preview.call_args.kwargs["verified_at"]
+        assert (verified_at is not None) is (failure is None)
     assert (workspace / "rec" / "database.db").exists() == (failure is not None)
     assert registry.runtime_resolver.require(reference).is_file()
 
@@ -215,9 +219,26 @@ def test_finalize_consumes_scene_before_cleanup(tmp_path: Path, monkeypatch: pyt
     monkeypatch.setattr(runner, "get_settings", lambda: settings)
     monkeypatch.setattr(runner, "get_project_registry", lambda: registry)
     monkeypatch.setattr(runner, "_authorized_decision", lambda *args: (confirmation, "sha256:" + "a" * 64))
+    monkeypatch.setattr(
+        runner,
+        "load_job_config",
+        lambda *args: SimpleNamespace(
+            geometry={
+                "resolution_m": 0.1,
+                "collision_mesh": "faces",
+                "floor_fill_size_m": 1.2,
+                "external_fill_size_m": 0,
+            }
+        ),
+    )
 
     def tool(attempt: runner._Attempt, *args: object) -> tuple[int, dict]:
         """Fixture worker writes scratch that scene consumer needs."""
+        request = json.loads((attempt.workspace / "finalize.request.json").read_bytes())
+        assert request["geometry"]["resolution_m"] == 0.1
+        assert request["geometry"]["collision_mesh"] == "faces"
+        assert request["geometry"]["floor_fill_size_m"] == 1.2
+        assert request["geometry"].get("external_fill_size_m") is None
         (attempt.workspace / "model.bin").write_bytes(b"scratch")
         return int(failed), {"result_ref": reference.model_dump(mode="json")}
 
@@ -413,13 +434,13 @@ def test_metric_proposal_step_never_blocks_the_preview(tmp_path: Path, monkeypat
     )
     propose = Mock(return_value=None)
     monkeypatch.setattr(runner, "propose_metric", propose)
-    for name in ("REC06_MOGE_PYTHON", "REC06_MOGE_MODEL"):
+    for name in ("R2S_MOGE_PYTHON", "R2S_MOGE_MODEL"):
         monkeypatch.delenv(name, raising=False)
     runner._propose_metric(attempt, None)  # preview lỗi: không có ref
     runner._propose_metric(attempt, reference)  # runtime MoGe không cấu hình
     propose.assert_not_called()
-    monkeypatch.setenv("REC06_MOGE_PYTHON", "/usr/bin/python3")
-    monkeypatch.setenv("REC06_MOGE_MODEL", str(tmp_path / "model.pt"))
+    monkeypatch.setenv("R2S_MOGE_PYTHON", "/usr/bin/python3")
+    monkeypatch.setenv("R2S_MOGE_MODEL", str(tmp_path / "model.pt"))
     runner._propose_metric(attempt, reference)  # preview.json của fixture không phải ReconstructionPreview: bị bắt
     propose.assert_not_called()
     preview = SimpleNamespace(source_visual_ref=reference)

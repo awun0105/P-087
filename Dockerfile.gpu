@@ -1,90 +1,88 @@
 # Image GPU worker (ADR 0003 khối C) cho máy thuê dạng container: vast.ai, RunPod, hoặc Docker có NVIDIA runtime.
-# Chứa trọn runtime pipeline: COLMAP 4.x (đúng bản đã ghim của máy local), Brush, Node + splat-transform, venv app,
-# runtime tách theo vật (torch + SAM2 + gsplat + CoACD + LaMa). Không chứa frontend và không chứa secret.
+# Chứa trọn runtime pipeline (COLMAP 4.x, Brush, Node + splat-transform, LiDAR odometry, runtime tách theo vật, ObjectGS)
+# và venv app. Không chứa frontend và không chứa secret.
 #
-#   docker build -f Dockerfile.gpu -t <registry>/real2sim-gpu:<tag> .
+# Mọi phiên bản và công thức cài nằm ở configs/runtime/pins.env và scripts/gpu/install.d/; file này không chép số phiên
+# bản. Image dựng bằng install.sh (cùng công thức với laptop), ghi /opt/real2sim/runtime.env, và entrypoint chỉ nạp file đó.
+#
+#   docker build -f Dockerfile.gpu \
+#     --build-arg COLMAP_IMAGE="$(sed -n 's/^COLMAP_IMAGE=//p' configs/runtime/pins.env)" \
+#     -t <registry>/real2sim-gpu:<tag> .
 #   docker run --gpus all -e DATABASE_URL=... -e ARTIFACT_S3_BUCKET=... <image> worker
 #
-# COLMAP: luồng video + gói LiDAR (ADR 0009) cần `pose_prior_mapper` và database 4.x; bản apt của Ubuntu là 3.x nên
-# không dùng được. Binary lấy từ đúng image chính thức mà máy local chạy (cùng digest → cùng hành vi đã đo), đặt
-# trong thư mục riêng cùng thư viện đi kèm, gọi qua wrapper `colmap`. Phần này đã kiểm trên Ubuntu 24.04 trần
-# (03/10/2026: `colmap help` báo 4.3.0.dev0, có `pose_prior_mapper`, không thiếu thư viện).
-# CHƯA build/chạy thật cả image (máy dev không đủ ổ đĩa). Lần build đầu chạy `preflight` trong container.
-ARG COLMAP_IMAGE=colmap/colmap@sha256:b8498ebecab11c3f9b9a25370e3fcfb6de9b6bcd4f3c85d5dc39a40229f40954
-FROM ${COLMAP_IMAGE} AS colmap
-# `cp -L`: chép file thật thay cho symlink để stage sau không phụ thuộc bố cục thư mục CUDA của image nguồn.
-RUN mkdir -p /export/bin /export/lib \
-    && cp /usr/local/bin/colmap /export/bin/colmap \
-    && cp -L /usr/local/lib/libonnxruntime.so.1 /usr/local/lib/libonnxruntime_providers_shared.so /export/lib/ \
-    && cp -L /usr/local/cuda/lib64/libcudart.so.12 /usr/local/cuda/lib64/libOpenCL.so.1 /export/lib/
-
-FROM nvidia/cuda:12.6.3-devel-ubuntu24.04
-
-ARG BRUSH_VERSION=0.3.0
-ARG BRUSH_SHA=4f0f9a8785d1951c62df26aae247c02c5bba32b00f40b06df4e1c9b867399e20
-ARG NODE_VERSION=v22.20.0
-ARG SPLAT_TRANSFORM_VERSION=3.6.6
-# Nhắc lại ARG khai trước FROM để dùng được trong stage này (định danh runtime COLMAP ghi vào artifact).
+# COLMAP: lấy đúng cây nhị phân từ image ghim (cùng digest với máy local), đặt tại /opt/real2sim/colmap và gọi qua
+# colmap-run. Không cần Docker trong container.
+#
+# CHƯA build thật: T-038 chỉ kiểm tĩnh (máy dev thiếu ổ đĩa). Build thật làm ở T-039.
 ARG COLMAP_IMAGE
+FROM ${COLMAP_IMAGE} AS colmap
+# Cây COLMAP đúng layout của gói nhị phân (colmap/bin, colmap/lib). `cp -L`: chép file thật, không chép symlink.
+RUN mkdir -p /export/colmap/bin /export/colmap/lib \
+    && cp /usr/local/bin/colmap /export/colmap/bin/colmap \
+    && cp -L /usr/local/lib/libonnxruntime.so.1 /usr/local/lib/libonnxruntime_providers_shared.so /export/colmap/lib/ \
+    && cp -L /usr/local/cuda/lib64/libcudart.so.12 /usr/local/cuda/lib64/libOpenCL.so.1 /export/colmap/lib/
+
+FROM nvidia/cuda:12.6.3-devel-ubuntu24.04 AS pipeline
 
 # `all` để NVIDIA runtime mount cả thư viện đồ hoạ: Brush và splat-transform cần Vulkan trên GPU.
+# TORCH_CUDA_ARCH_LIST: build không có GPU nên không dò được kiến trúc; runtime cũng nhận đúng giá trị này.
 ENV DEBIAN_FRONTEND=noninteractive \
     NVIDIA_VISIBLE_DEVICES=all \
     NVIDIA_DRIVER_CAPABILITIES=all \
-    R2S_RUNTIME=/opt/real2sim/runtime \
-    R2S_SCENE_RUNTIME=/opt/real2sim/scene_runtime \
+    R2S_ROOT=/opt/real2sim \
     R2S_STATE=/data \
-    R2S_COLMAP_IMAGE=${COLMAP_IMAGE} \
     TORCH_EXTENSIONS_DIR=/opt/real2sim/torch_extensions \
     TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;8.9" \
-    UV_PYTHON_INSTALL_DIR=/opt/real2sim/python \
-    PATH=/opt/real2sim/runtime/node/bin:/usr/local/cuda/bin:$PATH
-
-# Dòng thứ hai trở đi là thư viện COLMAP 4.x liên kết động (lấy từ `ldd` của binary đã ghim).
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-       ffmpeg libvulkan1 vulkan-tools xz-utils curl git ca-certificates libgl1 libgomp1 \
-       libglew2.2 libopengl0 libopenimageio2.4t64 libqt6core6t64 libqt6gui6t64 libqt6opengl6t64 \
-       libqt6openglwidgets6t64 libqt6svg6 libqt6widgets6t64 libceres4t64 libcholmod5 libcurl4t64 \
-       libgoogle-glog0v6t64 libgmp10 libmetis5 libmkl-core libmkl-intel-lp64 libmkl-intel-thread libomp5-18 \
-       libsqlite3-0 libssl3t64 \
-    && rm -rf /var/lib/apt/lists/*
-COPY --from=colmap /export /opt/real2sim/colmap
-# Wrapper chỉ thêm thư viện riêng của COLMAP cho chính tiến trình COLMAP; torch/Brush vẫn dùng CUDA của image.
-RUN printf '#!/bin/sh\nLD_LIBRARY_PATH="/opt/real2sim/colmap/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" exec /opt/real2sim/colmap/bin/colmap "$@"\n' \
-       > /usr/local/bin/colmap \
-    && chmod +x /usr/local/bin/colmap \
-    && colmap help 2>&1 | grep -q "^COLMAP 4\." \
-    && colmap pose_prior_mapper -h 2>&1 | grep -q -- "--prior_position_std_x"
-COPY --from=ghcr.io/astral-sh/uv:0.9.4 /uv /usr/local/bin/uv
-
-# Brush + Node + splat-transform (ghim phiên bản như máy local, xem scripts/gpu/README.md §2).
-RUN mkdir -p "$R2S_RUNTIME/brush" "$R2S_RUNTIME/node" \
-    && curl -L --fail -o /tmp/brush.tar.xz \
-       "https://github.com/ArthurBrussee/brush/releases/download/v${BRUSH_VERSION}/brush-app-x86_64-unknown-linux-gnu.tar.xz" \
-    && echo "${BRUSH_SHA}  /tmp/brush.tar.xz" | sha256sum -c - \
-    && tar -xJf /tmp/brush.tar.xz -C "$R2S_RUNTIME/brush" --strip-components=1 \
-    && curl -L --fail -o /tmp/node.tar.xz "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-linux-x64.tar.xz" \
-    && tar -xJf /tmp/node.tar.xz -C "$R2S_RUNTIME/node" --strip-components=1 \
-    && rm /tmp/brush.tar.xz /tmp/node.tar.xz \
-    && cd "$R2S_RUNTIME" && npm install --silent "@playcanvas/splat-transform@${SPLAT_TRANSFORM_VERSION}"
+    TORCH_HOME=/opt/real2sim/torch_cache \
+    UV_PYTHON_INSTALL_DIR=/opt/real2sim/python
 
 WORKDIR /opt/real2sim/app
 
-# Dependency của app theo lockfile (lớp cache riêng: đổi code không cài lại).
-COPY requirements.lock.txt ./
-RUN uv venv --python 3.12 .venv && uv pip sync --python .venv/bin/python requirements.lock.txt
+# Gói apt của runtime: cùng danh sách với install.sh --check-system.
+COPY configs/runtime/apt-packages.txt configs/runtime/apt-packages.txt
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends $(grep -v '^#' configs/runtime/apt-packages.txt) \
+    && rm -rf /var/lib/apt/lists/*
 
-# Runtime tách theo vật; kernel CUDA của gsplat được biên dịch sẵn (không cần GPU lúc build).
-COPY scripts/gpu/setup_scene_runtime.sh scripts/gpu/setup_scene_runtime.sh
-RUN CPATH="$(.venv/bin/python -c "import sysconfig; print(sysconfig.get_paths()['include'])")" \
-    R2S_SKIP_GPU_CHECK=1 MAX_JOBS=4 bash scripts/gpu/setup_scene_runtime.sh "$R2S_SCENE_RUNTIME" \
+COPY --from=colmap /export/colmap /opt/real2sim/colmap
+COPY --from=ghcr.io/astral-sh/uv:0.9.4 /uv /usr/local/bin/uv
+
+# Runtime GPU: install.sh là nơi duy nhất cài và ghi đường dẫn. Chỉ chép những file nó cần để lớp cache không vỡ
+# khi đổi code app.
+COPY configs/runtime/ configs/runtime/
+COPY requirements-lidar-odometry.lock.txt ./
+COPY src/services/scene/objectgs.py src/services/scene/objectgs.py
+COPY scripts/gpu/install.sh scripts/gpu/doctor.sh scripts/gpu/setup_scene_runtime.sh scripts/gpu/setup_objectgs_runtime.sh scripts/gpu/
+COPY scripts/gpu/install.d/ scripts/gpu/install.d/
+# ObjectGS verification imports preflight, which imports src.runtime_env.
+COPY scripts/kaggle/preflight.py scripts/kaggle/preflight.py
+COPY src/runtime_env.py src/runtime_env.py
+
+# Venv của app theo lockfile (lớp cache riêng: đổi code không cài lại).
+COPY requirements.lock.txt ./
+RUN uv venv --python 3.12.14 .venv \
+    && uv pip sync --python .venv/bin/python --require-hashes requirements.lock.txt \
+    && uv pip check --python .venv/bin/python
+
+# Scene và ObjectGS cần header của đúng Python venv (CPATH). Không có GPU lúc build: kiểm gsplat không đòi GPU.
+RUN CPATH="$(.venv/bin/python -c 'import sysconfig; print(sysconfig.get_paths()["include"])')" \
+    scripts/gpu/install.sh /opt/real2sim --colmap=binary --skip-gpu-check --no-doctor \
     && uv cache clean
 
 COPY . .
-RUN chmod +x scripts/gpu/docker_entrypoint.sh
+RUN chmod +x scripts/gpu/docker_entrypoint.sh scripts/gpu/isaac_python.sh
+ENV R2S_REQUIRE_FULL_RUNTIME=1
 
 VOLUME ["/data"]
 EXPOSE 8000
 ENTRYPOINT ["scripts/gpu/docker_entrypoint.sh"]
 CMD ["worker"]
+
+# Optional full pipeline + Isaac image. Select --target isaac explicitly.
+# The operator must accept the NVIDIA license; the default image needs no Isaac download.
+FROM pipeline AS isaac
+ARG ISAAC_ACCEPT_EULA=NO
+RUN ISAAC_ACCEPT_EULA="$ISAAC_ACCEPT_EULA" bash scripts/gpu/setup_isaac_runtime.sh /opt/real2sim/isaac_runtime
+ENV PRODUCT_ISAAC_VALIDATION_LAUNCHER=/opt/real2sim/app/scripts/gpu/isaac_python.sh
+
+FROM pipeline AS production

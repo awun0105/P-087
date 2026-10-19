@@ -4,7 +4,7 @@ import { errorMessage } from "@/lib/ui-error";
 
 import { ArrowLeft, Box, Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 
 import { Button, Card, EmptyState, Notice } from "@/components/studio/primitives";
 import { describeDetection, isGaussian } from "@/features/studio/inputKinds";
@@ -29,6 +29,7 @@ export function ImportSetupStep({ preselect, onBack }: { preselect: string | nul
   const actor = me?.user?.user_id ?? (me?.auth_required ? "guest" : "local");
   const { value: draft, setValue: setDraft, ready: draftReady, clear } = useSessionDraft("gaussian:v1:" + actor, { ...EMPTY_SETUP, selected: preselect }, parseSetupDraft);
   const { selected, name } = draft;
+  const idempotency = useRef<{ fingerprint: string; key: string } | null>(null);
   const setName = (name: string) => setDraft((current) => ({ ...current, name }));
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -61,9 +62,14 @@ export function ImportSetupStep({ preselect, onBack }: { preselect: string | nul
     setSubmitting(true);
     setError(null);
     try {
-      const created = await createImport(selected, name.trim());
+      const normalizedName = name.trim();
+      const fingerprint = JSON.stringify({ upload_id: selected, name: normalizedName });
+      const key = idempotency.current?.fingerprint === fingerprint ? idempotency.current.key : globalThis.crypto.randomUUID();
+      idempotency.current = { fingerprint, key };
+      const created = await createImport(selected, normalizedName, key);
       clear();
-      notifySuccess("Đã tạo scene import. Máy chủ đang chuẩn bị bản xem.");
+      idempotency.current = null;
+      notifySuccess("Đã xếp scene import vào hàng đợi worker.");
       router.push(`/imports/${encodeURIComponent(created.import_id)}`);
     } catch (cause) {
       setError(errorMessage(cause, "Không mở được scene 3DGS"));
@@ -78,7 +84,7 @@ export function ImportSetupStep({ preselect, onBack }: { preselect: string | nul
     ) : <p role="status" className="text-sm text-ink-muted">Đang tải danh sách file 3DGS…</p>;
   }
   if (uploads.length === 0) {
-    return <EmptyState icon={<Box aria-hidden />} title="Chưa có file 3DGS" action={<Button onClick={onBack}>Tải PLY/ZIP lên</Button>}>
+    return <EmptyState icon={<Box aria-hidden />} title="Chưa có file 3DGS" action={<Button onClick={onBack}>Tải PLY/SOG/ZIP lên</Button>}>
       File đã tải lên được máy chủ nhận diện là 3DGS sẽ xuất hiện ở đây.
     </EmptyState>;
   }

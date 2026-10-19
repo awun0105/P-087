@@ -1,0 +1,12 @@
+{
+  "two_overlapping_tabs_same_actor": {
+    "reported_person_minutes": 1.0,
+    "batch_before_minutes": 0,
+    "batch_after_minutes": 1.0,
+    "wall_minutes": 0.5
+  },
+  "parallel_system_10s_human_7s": {
+    "sum_effort_seconds": 17,
+    "interval_union_wall_seconds": 12.0
+  }
+}

@@ -67,14 +67,32 @@ class ProjectCreateInput(BaseModel):
     attestation: SourceRightsAttestation
 
 
+class LidarPackageMember(BaseModel):
+    """Một file người dùng nộp rời được server đóng vào gói LiDAR chuẩn, kèm checksum nguồn để truy vết."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    member_path: str = Field(min_length=1, max_length=256)
+    #: File trong input assembly mà thành viên này là bản sao nguyên vẹn.
+    file_id: Identifier
+    #: Checksum bytes của file nguồn (checksum thành viên nếu file nằm trong ZIP của người dùng).
+    source_checksum: Checksum
+    role: Literal["lidar_scan", "sensor_trajectory", "camera_lidar_calibration", "rgb_frame_times"]
+    #: True khi byte trong gói KHÁC file nguồn: calibration (ROS YAML, JSON ngược chiều hoặc ma trận) được chuẩn
+    #: hoá về JSON `lidar_from_camera`. `source_checksum` vẫn là checksum của file nguồn.
+    normalized: bool = False
+
+
 class LidarAttachment(BaseModel):
     """Gói LiDAR người dùng gắn vào scene và hai lời khai contract bắt buộc cho đầu vào RGB + LiDAR."""
 
     model_config = ConfigDict(extra="forbid")
 
     upload_id: Identifier
-    #: Quỹ đạo trong gói do SLAM/odometry tự tính, hay là quỹ đạo chuẩn (ground truth) của dataset.
-    trajectory_origin: Literal["estimated", "ground_truth"]
+    #: Có khi gói được server đóng từ các file rời; None nghĩa là người dùng tự nộp một gói ZIP.
+    package_members: list[LidarPackageMember] | None = None
+    #: Nguồn pose có thể là đoán, chuẩn dataset hoặc TUM được người dùng cung cấp.
+    trajectory_origin: Literal["estimated", "ground_truth", "supplied"]
     #: Video và LiDAR cùng một không gian, cùng lượt quay; đơn vị mét, trục Z hướng lên.
     same_scene_confirmed: bool
 
@@ -95,6 +113,8 @@ class UploadProjectInput(BaseModel):
     attestation: SourceRightsAttestation
     #: Thông số xử lý theo file cấu hình chung; None → preset "tối thiểu cho chất lượng tốt".
     processing: dict[str, int | float | str] | None = None
+    #: Tự động che khuôn mặt/biển số trên frame trước khi dựng 3D (AUD-18); chỉ nhận khi deployment có anonymizer.
+    anonymize: bool = False
     #: Gói LiDAR đi kèm video (ADR 0009); None = job chỉ có video.
     lidar: "LidarAttachment | None" = None
 
@@ -119,7 +139,7 @@ class InputVideoSummary(BaseModel):
 
 
 class DemoBaseline(BaseModel):
-    """Mốc "bản demo gốc" của một scene: revision SceneIR mà nút Khôi phục bản demo đưa scene trở về.
+    """Mốc gốc của một scene: revision SceneIR mà nút "Khôi phục về mốc gốc" đưa scene trở về (khác việc xuất vào thư viện mẫu).
 
     Scene demo vẫn chỉnh sửa và tương tác được như scene thường; khôi phục chỉ tạo revision mới mang nội dung của mốc
     này (lịch sử revision chỉ tiến, không xoá), không chạy lại bước xử lý nào.
@@ -144,14 +164,37 @@ class ProjectRecord(BaseModel):
     input_manifest_checksum: Checksum
     source_rights_attestation: JsonObject
     privacy_report: PrivacyValidationReport
-    #: `self_attested` chỉ gán cho project tạo từ upload khi deployment bật chế độ
-    #: MVP (Settings.product_privacy_mode); project cũ/fixture giữ cổng QA.
+    #: `self_attested` dành cho upload hoặc dataset batch có lời khai nguồn; project mặc định/fixture giữ cổng QA.
     privacy_mode: Literal["qa_verified", "self_attested"] = "qa_verified"
     #: InputManifest đã publish (bytes checksum) để worker chuẩn bị input video.
     input_manifest_ref: ProductArtifactRef | None = None
+    #: Video ghép chỉ để phát lại; worker không đọc ref này.
+    display_video_ref: ProductArtifactRef | None = Field(default=None, exclude_if=lambda value: value is None)
+    #: New grouped-input evidence is omitted for legacy projects to preserve old JSON/CAS bytes.
+    input_assembly_ref: ProductArtifactRef | None = Field(default=None, exclude_if=lambda value: value is None)
+    input_resolution_ref: ProductArtifactRef | None = Field(default=None, exclude_if=lambda value: value is None)
+    input_recipe_ref: ProductArtifactRef | None = Field(default=None, exclude_if=lambda value: value is None)
+    input_runtime_registry_ref: ProductArtifactRef | None = Field(default=None, exclude_if=lambda value: value is None)
     input_video: InputVideoSummary | None = None
     created_at: datetime | None = None
     #: Người tạo scene; None với project cũ, fixture hoặc khi không bật đăng nhập.
     created_by: Actor | None = None
     #: Scene được đánh dấu là bản demo; không ghi vào JSON khi None để bản ghi cũ giữ nguyên bytes (CAS so bytes).
     demo_baseline: DemoBaseline | None = Field(default=None, exclude_if=lambda value: value is None)
+
+    @model_validator(mode="after")
+    def _bind_input_assembly_evidence(self) -> "ProjectRecord":
+        references = (
+            self.input_assembly_ref,
+            self.input_resolution_ref,
+            self.input_recipe_ref,
+            self.input_runtime_registry_ref,
+        )
+        if any(reference is not None for reference in references) and any(
+            reference is None for reference in references
+        ):
+            raise ValueError("grouped input evidence refs must be present as one complete set")
+        for reference in references:
+            if reference is not None and reference.job_id != self.project_id:
+                raise ValueError("grouped input evidence must belong to the project namespace")
+        return self

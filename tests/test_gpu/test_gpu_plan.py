@@ -47,7 +47,7 @@ def test_two_gpus_share_workers_evenly_and_pin_both_runtimes() -> None:
     assert [gpu for gpu, _ in slots] == [0, 1, 0, 1]
     gpu, environment = slots[1]
     assert environment["CUDA_VISIBLE_DEVICES"] == "1"
-    brush = json.loads(environment["REC04_BRUSH_ENVIRONMENT"])
+    brush = json.loads(environment["R2S_BRUSH_ENVIRONMENT"])
     assert brush == {"RUST_LOG": "info", "CUBECL_WGPU_DEFAULT_DEVICE": "DiscreteGpu(0)"}
 
 

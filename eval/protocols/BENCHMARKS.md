@@ -17,6 +17,7 @@ không điền ước đoán như kết quả.
 | `pipeline_runtime` | Thời gian, chi phí xử lý một job | giây từng stage, tổng giây, kích thước input/SOG, GPU, $ ước tính | Product runtime (journal job) | `src/services/orchestration/benchmark.py` | **Có** — worker tự ghi |
 | `recon_visual_quality` | Chất lượng ảnh render 3DGS | PSNR, SSIM, LPIPS-VGG trên mỗi ảnh thứ 8 của chính video (7k…30k bước) | Ảnh của job (video chỉ train split) | `eval/visual/brush_quality.py` | **Có** — chạy tay |
 | `recon_pose` | Độ chính xác quỹ đạo camera | ATE/RPE so với `traj_gt` | Evaluation-only GT | `eval/pose/trajectory_error.py` | **Có** — chạy tay, ghi theo job |
+| `lidar_odometry` | Sai số quỹ đạo LiDAR odometry | ATE rigid-aligned và RPE translation/rotation, coverage | Reference evaluation-only; không dùng trong product solver | `eval/pose/lidar_odometry_error.py` | **Có** — chạy tay; chưa có real-sensor acceptance |
 | `recon_geometry` | Độ chính xác hình học | Chamfer, F-score so với GT `.ply` | Evaluation-only GT | `eval/geometry/surface_error.py` | **Có** — chạy tay, ghi theo job |
 | `metric_scale` | Sai số tỉ lệ mét | sai số scale %, sai số khoảng cách A/B (m) | So với LiDAR/GT (ADR 0001) | `eval/pose/trajectory_error.py` | **Có** — sai số tỉ lệ của scene và của đề xuất tự động (`eval/pose/scale_proposal_error.py`) |
 | `browser_render` | Trình duyệt có mượt không | thời gian tải scene, FPS theo LOD/thiết bị | Client gửi lên | `eval/visual/` | Chưa (cần LOD) |

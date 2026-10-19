@@ -10,6 +10,7 @@ from src.services.orchestration.artifacts import sha256_file
 from src.services.orchestration.samples.models import DemoFile, DemoManifest, DemoSource
 
 logger = logging.getLogger(__name__)
+UNPUBLISHED_MARKER = ".unpublished"
 
 
 class DemoUnavailableError(LookupError):
@@ -24,6 +25,8 @@ class DemoBundle:
 
     def manifest(self) -> DemoManifest:
         """Đọc và validate manifest; thiếu/hỏng → DemoUnavailableError."""
+        if (self.root / UNPUBLISHED_MARKER).exists():
+            raise DemoUnavailableError("Mẫu đã được bỏ khỏi thư viện demo")
         path = self.root / "manifest.json"
         if not path.is_file():
             raise DemoUnavailableError("Chưa có demo bundle trên deployment này")
@@ -89,7 +92,10 @@ class DemoLibrary:
         return {
             child.name: DemoBundle(child)
             for child in sorted(self.root.iterdir())
-            if child.is_dir() and _SAMPLE_ID.fullmatch(child.name) and (child / "manifest.json").is_file()
+            if child.is_dir()
+            and _SAMPLE_ID.fullmatch(child.name)
+            and (child / "manifest.json").is_file()
+            and not (child / UNPUBLISHED_MARKER).exists()
         }
 
     def bundle(self, sample_id: str) -> DemoBundle:
@@ -98,6 +104,14 @@ class DemoLibrary:
         if found is None:
             raise DemoUnavailableError("Không có video mẫu này")
         return found
+
+    def unpublish(self, sample_id: str) -> None:
+        """Gỡ mẫu khỏi thư viện công khai; giữ manifest và mọi artifact trên đĩa."""
+        bundle = self.bundle(sample_id)
+        if not bundle.root.is_relative_to(self.root):
+            raise DemoUnavailableError("Mẫu không thuộc thư viện demo")
+        bundle.manifest()
+        (bundle.root / UNPUBLISHED_MARKER).touch()
 
     def summaries(self) -> list[SampleSummary]:
         """Thẻ của mọi mẫu hợp lệ; bundle hỏng bị bỏ qua (có log) thay vì làm hỏng cả danh sách."""

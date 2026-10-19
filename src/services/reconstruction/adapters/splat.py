@@ -3,14 +3,15 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import SettingsConfigDict
 
+from src.runtime_env import RuntimeSettings
 from src.services.reconstruction.adapters.brush_runtime import Invocation, VisualProcess
 from src.services.reconstruction.rgb.frames.frame_set import _sha256
 from src.services.reconstruction.rgb.splat.visual import SplatInspection
 
 
-class SplatRuntimeSettings(BaseSettings):
+class SplatRuntimeSettings(RuntimeSettings):
     """Path module deployment-supplied; npm dependency ở runtime riêng."""
 
     module_path: Path
@@ -18,7 +19,7 @@ class SplatRuntimeSettings(BaseSettings):
     #: Nén SOG bằng WebGPU (Dawn) nhanh hơn CPU 5–10× theo README upstream; không tạo
     #: được GPU device thì bridge tự lùi về CPU và ghi lại thiết bị thực tế.
     device: Literal["gpu", "cpu"] = "gpu"
-    model_config = SettingsConfigDict(env_prefix="REC04_SPLAT_", extra="forbid")
+    model_config = SettingsConfigDict(env_prefix="R2S_SPLAT_", extra="forbid")
 
 
 class SplatArtifactProcessor:

@@ -34,7 +34,7 @@ cập nhật file này trong cùng commit (ADR 0008).
 - License: MIT cho mã và cho trọng số (theo `LICENSE` của repository và model card, kiểm 02/10/2026);
   phần DINOv2 trong repository theo Apache License 2.0.
 - Phụ thuộc đi kèm: `utils3d` (https://github.com/EasternJournalist/utils3d @`3fab839`, MIT).
-- Dùng như thư viện (REUSE, không sửa) trong runtime `REC06_MOGE_PYTHON`; code app chỉ gọi
+- Dùng như thư viện (REUSE, không sửa) trong runtime `R2S_MOGE_PYTHON`; code app chỉ gọi
   `moge.model.v2.MoGeModel` từ `src/services/reconstruction/adapters/moge_runner.py`. Không vendor source vào
   repository. Cài `--no-deps` để không đổi phiên bản thư viện của SAM 2 và gsplat trong cùng runtime.
 - Ý tưởng ghép độ sâu thưa COLMAP với độ sâu mét (DN-Splatter) và giải tỉ lệ scale-only (MonoSplat) được viết

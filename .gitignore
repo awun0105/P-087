@@ -22,6 +22,8 @@ r2s-studio-data*.zip
 r2s-studio-data*.zip.sha256
 real2sim-studio-source*.zip
 real2sim-studio-source*.zip.sha256
+r2s-*.zip
+*.zip
 r2s-studio-data*.tar.gz
 *.partial
 
@@ -83,3 +85,6 @@ scripts/gpu/studio.env
 # Agent and CodeGraph tools
 .codegraph/
 .ua/
+.wrangler/
+graphify-out/
+.mcp.json

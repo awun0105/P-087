@@ -4,32 +4,50 @@
  */
 import type { InputKind, UploadRecord } from "@/lib/contracts/studio";
 
-export const UPLOAD_ACCEPT = ".mp4,.mov,.ply,.zip,video/mp4,video/quicktime,application/zip";
-export const VIDEO_ACCEPT = ".mp4,.mov,video/mp4,video/quicktime";
-export const GAUSSIAN_ACCEPT = ".ply,.zip,application/zip";
-/** Gói LiDAR luôn là một file ZIP (ADR 0009). */
-export const LIDAR_ACCEPT = ".zip,application/zip";
+export const GAUSSIAN_ACCEPT = ".ply,.sog,.zip,application/zip,application/x-sog";
 
-const ACCEPTED_NAME = /\.(mp4|mov|ply|zip)$/i;
+/**
+ * Đuôi file mà pipeline có chỗ dùng thật, mirror `ASSEMBLY_UPLOAD_EXTENSIONS` ở backend:
+ * video MP4/MOV, point cloud PLY/PCD, Gaussian PLY/SOG, ZIP, và metadata dạng văn bản
+ * (calibration JSON/text, quỹ đạo TUM, timestamp). Đuôi chỉ lọc sớm để khỏi tải lên thứ
+ * không ai đọc; vai trò thật do probe nội dung của máy chủ quyết định.
+ */
+const ASSEMBLY_EXTENSIONS = ["mp4", "mov", "ply", "pcd", "sog", "zip", "json", "txt", "tum", "csv", "yaml", "yml"] as const;
+export const ASSEMBLY_ACCEPT = [
+  ...ASSEMBLY_EXTENSIONS.map((item) => `.${item}`),
+  "video/mp4",
+  "video/quicktime",
+  "application/zip",
+  "application/x-sog",
+  "application/json",
+  "text/plain",
+  "text/csv",
+  "application/yaml",
+  "text/yaml",
+].join(",");
+const ASSEMBLY_NAME = new RegExp(`\\.(${ASSEMBLY_EXTENSIONS.join("|")})$`, "i");
 
-export const INPUT_KIND_LABELS: Record<InputKind, string> = {
+/** Lọc sớm ở khung tải input chung; null khi đuôi file có consumer trong pipeline. */
+export function rejectAssemblyFileName(name: string): string | null {
+  return ASSEMBLY_NAME.test(name)
+    ? null
+    : "Pipeline không đọc được loại file này. Nhận video .mp4/.mov, point cloud .ply/.pcd, scene 3DGS .ply/.sog, .zip, và metadata .json/.yaml/.yml/.txt/.tum/.csv.";
+}
+
+const INPUT_KIND_LABELS: Record<InputKind, string> = {
   rgb_video: "Video",
   gaussian_ply: "Scene 3DGS (.ply)",
   gaussian_ply_colmap: "3DGS + COLMAP (.zip)",
+  gaussian_sog: "Scene 3DGS (.sog)",
   registered_lidar: "Gói LiDAR: đám mây đã đăng ký (.zip)",
   lidar_scan_sequence: "Gói LiDAR: scan thô + quỹ đạo (.zip)",
 };
 
-/** Lọc sớm theo đuôi; null khi hợp lệ, ngược lại là lời nhắc cho người dùng. */
-export function rejectFileName(name: string): string | null {
-  return ACCEPTED_NAME.test(name) ? null : "Chỉ nhận video .mp4/.mov, scene 3DGS .ply hoặc .zip (PLY 3DGS + model COLMAP).";
-}
-
-/** Lọc sớm theo nhánh UX; kết quả nhận diện của máy chủ vẫn là authority cuối cùng. */
-export function rejectFileNameFor(name: string, kind: "video" | "gaussian" | "lidar"): string | null {
-  if (kind === "lidar") return /\.zip$/i.test(name) ? null : "Gói LiDAR là một file .zip gồm đám mây hoặc scan, quỹ đạo, calibration và thời điểm frame.";
-  if (kind === "video") return /\.(mp4|mov)$/i.test(name) ? null : "Dựng từ video chỉ nhận .mp4/.mov. Chọn Mở 3DGS để tải .ply/.zip.";
-  return /\.(ply|zip)$/i.test(name) ? null : "Mở 3DGS chỉ nhận .ply hoặc .zip có PLY. Chọn Dựng từ video cho .mp4/.mov.";
+/** Lọc sớm cho nhánh "Mở 3DGS"; kết quả nhận diện của máy chủ vẫn là authority cuối cùng. */
+export function rejectGaussianFileName(name: string): string | null {
+  return /\.(ply|sog|zip)$/i.test(name)
+    ? null
+    : "Mở 3DGS chỉ nhận .ply, .sog hoặc .zip có PLY. Dùng trang Tạo scene cho video và metadata.";
 }
 
 /** Record cũ (trước ADR 0004) không có `input_kind` là video. */
@@ -46,12 +64,12 @@ export function isLidar(record: UploadRecord): boolean {
 /** File mở được ở nhánh "Mở 3DGS". */
 export function isGaussian(record: UploadRecord): boolean {
   const kind = inputKind(record);
-  return kind === "gaussian_ply" || kind === "gaussian_ply_colmap";
+  return kind === "gaussian_ply" || kind === "gaussian_ply_colmap" || kind === "gaussian_sog";
 }
 
-/** Hiện chỉ video có luồng dựng scene; import 3DGS là gói 5 của plan tổng thể. */
+/** Chỉ video RGB được dựng scene; chờ server xác minh receipt nếu upload đã chuẩn hóa. */
 export function canCreateScene(record: UploadRecord): boolean {
-  return inputKind(record) === "rgb_video";
+  return inputKind(record) === "rgb_video" && record.video_preparation_status !== "pending";
 }
 
 /** Tóm tắt bằng chứng nhận diện để người dùng thấy máy chủ đã hiểu file thế nào. */
@@ -64,7 +82,7 @@ export function describeDetection(record: UploadRecord): string {
   if (kind === "lidar_scan_sequence" && lidar?.scan_count) {
     return `${INPUT_KIND_LABELS[kind]} · ${lidar.scan_count.toLocaleString("vi-VN")} scan · ${lidar.pose_count.toLocaleString("vi-VN")} pose`;
   }
-  const gaussian = record.detection?.gaussian;
+  const gaussian = record.detection?.gaussian ?? record.detection?.sog;
   if (kind === "rgb_video" || !gaussian) return INPUT_KIND_LABELS[kind];
   const count = gaussian.gaussian_count.toLocaleString("vi-VN");
   return `${INPUT_KIND_LABELS[kind]} · ${count} Gaussian · SH bậc ${gaussian.sh_degree}`;

@@ -1,0 +1,116 @@
+{
+  "schema_version": "1.0",
+  "package_ref": {
+    "artifact_type": "LidarPackageRecord",
+    "schema_version": "1.0",
+    "artifact_uri": "artifact://jobs/job-lidar-qa/qa/package.json",
+    "artifact_checksum": "sha256:8888888888888888888888888888888888888888888888888888888888888888",
+    "data_class": "derived",
+    "producer_stage": "ST-LIDAR-INGEST",
+    "job_id": "job-lidar-qa",
+    "source_provenance": null
+  },
+  "calibration_ref": {
+    "artifact_type": "LidarCalibrationSource",
+    "schema_version": "1.0",
+    "artifact_uri": "artifact://jobs/job-lidar-qa/qa/calibration.txt",
+    "artifact_checksum": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "data_class": "derived",
+    "producer_stage": "ST-LIDAR-INGEST",
+    "job_id": "job-lidar-qa",
+    "source_provenance": null
+  },
+  "trajectory_ref": {
+    "artifact_type": "LidarTrajectory",
+    "schema_version": "1.0",
+    "artifact_uri": "artifact://jobs/job-lidar-qa/qa/trajectory.txt",
+    "artifact_checksum": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "data_class": "derived",
+    "producer_stage": "ST-LIDAR-INGEST",
+    "job_id": "job-lidar-qa",
+    "source_provenance": null
+  },
+  "timing_ref": {
+    "artifact_type": "LidarFrameTimes",
+    "schema_version": "1.0",
+    "artifact_uri": "artifact://jobs/job-lidar-qa/qa/frame_times.txt",
+    "artifact_checksum": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "data_class": "derived",
+    "producer_stage": "ST-LIDAR-INGEST",
+    "job_id": "job-lidar-qa",
+    "source_provenance": null
+  },
+  "intrinsics_ref": {
+    "artifact_type": "CameraIntrinsics",
+    "schema_version": "1.0",
+    "artifact_uri": "artifact://jobs/job-lidar-qa/qa/intrinsics.json",
+    "artifact_checksum": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+    "data_class": "derived",
+    "producer_stage": "ST-LIDAR-INGEST",
+    "job_id": "job-lidar-qa",
+    "source_provenance": null
+  },
+  "rgb_frame_set_ref": {
+    "artifact_type": "NormalizedRGBFrameSet",
+    "schema_version": "1.0",
+    "artifact_uri": "artifact://jobs/job-lidar-qa/qa/rgb-frame-set.json",
+    "artifact_checksum": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+    "data_class": "derived",
+    "producer_stage": "ST-LIDAR-INGEST",
+    "job_id": "job-lidar-qa",
+    "source_provenance": null
+  },
+  "profile": {
+    "schema_version": "1.0",
+    "profile_id": "synthetic-s1-profile",
+    "minimum_sampled_frames": 3,
+    "minimum_matched_frames": 3,
+    "minimum_overlapping_frames": 3,
+    "minimum_projected_points_per_frame": 20,
+    "minimum_overlap_fraction": 0.25,
+    "maximum_timestamp_residual_sec": 0.01,
+    "config_checksum": "sha256:25ea6ce71ffa768835b57090aaf98c4a32296739f6cc585f51eb0da0c0518c35"
+  },
+  "input_checksum": "sha256:8888888888888888888888888888888888888888888888888888888888888888",
+  "calibration_checksum": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "timing_checksum": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "intrinsics_checksum": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+  "config_checksum": "sha256:25ea6ce71ffa768835b57090aaf98c4a32296739f6cc585f51eb0da0c0518c35",
+  "coordinate_unit": "m",
+  "timestamp_unit": "seconds",
+  "clock_relation": "same_clock",
+  "clock_offset_seconds": 0.0,
+  "sampled_rgb_frame_ids": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "matched_lidar_pose_ids": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "sampled_frame_count": 4,
+  "matched_frame_count": 4,
+  "trajectory_pose_count": 6,
+  "observable_frame_count": 4,
+  "projected_point_count": 160,
+  "overlap_point_count": 80,
+  "overlap_fraction": 0.5,
+  "maximum_timestamp_residual_sec": 0.0,
+  "observability": "READY_FOR_SCORING",
+  "result": "INCONCLUSIVE",
+  "findings": [
+    {
+      "code": "PROJECTION_SCORING_PENDING",
+      "severity": "inconclusive",
+      "detail": "Structural checks and availability checks do not measure image-to-cloud calibration consistency.",
+      "remediation": "Run AUD-13.S2 projection scoring before treating this package as sensor-QA qualified."
+    }
+  ],
+  "overlay_refs": [],
+  "projection_evidence_ref": null,
+  "report_checksum": "sha256:8af159123a5b8a272d959d844186cd7a98db015b77de952558468bd2925b183d"
+}

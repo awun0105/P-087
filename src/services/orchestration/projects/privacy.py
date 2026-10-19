@@ -49,12 +49,20 @@ SELF_ATTESTATION_FLAGS = ("rights_to_use_confirmed", "anonymization_confirmed")
 def project_block_reason(project: "ProjectRecord") -> str | None:
     """Lý do chặn dispatch của một project, hoặc None khi được chạy.
 
-    `self_attested` (MVP, owner chốt 2026-09-29): người upload đã tự xác nhận video
-    không chứa khuôn mặt/biển số. Chỉ chấp nhận khi report còn ở mức sàng lọc sơ
-    bộ, không có finding; `QUARANTINED` luôn chặn. Không nâng report thành VERIFIED.
+    `self_attested` (MVP, owner chốt 2026-09-29): input có lời khai quyền dùng và ẩn danh của người tạo;
+    batch dataset cũng dùng mode này theo yêu cầu T-045. Chỉ chấp nhận khi report còn ở mức sàng lọc sơ bộ,
+    không có finding; `QUARANTINED` luôn chặn. Không nâng report thành VERIFIED.
+
+    `qa_verified` (owner chốt 2026-10-09): video upload qua Studio vào pipeline với cùng điều kiện, vì worker bắt
+    buộc che khuôn mặt/biển số cho video của project này và dừng job cho tới khi người upload chấp nhận bản đã
+    che (AUD-18, `jobs/anonymization_review.py`). Project không phải video upload không có bước che đó nên vẫn
+    cần `VERIFIED_ANONYMIZED`.
     """
     report = project.privacy_report
-    if project.privacy_mode == "self_attested" and report.result == PrivacyResult.PRELIMINARY_SCREENED:
+    masked_upload = project.privacy_mode == "qa_verified" and project.input_video is not None
+    if report.result == PrivacyResult.PRELIMINARY_SCREENED and (
+        project.privacy_mode == "self_attested" or masked_upload
+    ):
         attestation = project.source_rights_attestation
         if report.unresolved_findings:
             return "input có finding privacy chưa xử lý"

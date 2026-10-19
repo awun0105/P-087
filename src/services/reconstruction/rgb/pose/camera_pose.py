@@ -2,12 +2,14 @@
 
 import hashlib
 import math
+from pathlib import Path
 from typing import Annotated, Literal
 
 from pydantic import Field, model_validator
 
 from src.models.contracts.artifacts import Checksum, ContractModel, ProductArtifactRef
 from src.models.contracts.identity import canonical_content_checksum, canonical_json_bytes
+from src.services.reconstruction.rgb.frames.frame_set import frame_image_name
 
 Finite = Annotated[float, Field(allow_inf_nan=False)]
 Vector3 = tuple[Finite, Finite, Finite]
@@ -38,6 +40,13 @@ class ColmapConfig(ContractModel):
     min_registered_frames: int = Field(ge=2)
     min_registered_ratio: float = Field(gt=0, le=1, allow_inf_nan=False)
     vocab_tree: ProductArtifactRef | None = None
+    # Omit unchanged defaults to keep existing schema-1.0 artifacts/checksums readable.
+    matching_mode: Literal["sequential", "sequential_vocab_tree", "exhaustive"] = Field(
+        default="sequential", exclude_if=lambda value: value == "sequential"
+    )
+    loop_detection_period: int = Field(default=10, ge=1, exclude_if=lambda value: value == 10)
+    loop_detection_num_images: int = Field(default=50, ge=1, exclude_if=lambda value: value == 50)
+    loop_detection_min_index_distance: int = Field(default=50, ge=0, exclude_if=lambda value: value == 50)
 
     def checksum(self) -> str:
         """Hash đầy đủ config, không thêm self-checksum field vào schema."""
@@ -77,7 +86,7 @@ class CameraPose(ContractModel):
     def _valid_rotation(self) -> "CameraPose":
         if not math.isclose(sum(x * x for x in self.rotation_xyzw), 1.0, abs_tol=1e-6):
             raise ValueError("camera quaternion must have unit norm")
-        if self.image_name != f"{self.frame_id:06d}.png":
+        if self.image_name != frame_image_name(self.frame_id, Path(self.image_name)):
             raise ValueError("camera image name differs from normalized frame identity")
         return self
 

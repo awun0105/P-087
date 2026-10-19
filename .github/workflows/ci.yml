@@ -71,4 +71,4 @@ jobs:
         run: npm test
 
       - name: Build
-        run: npm run build
+        run: npm run build:editor && npm run build

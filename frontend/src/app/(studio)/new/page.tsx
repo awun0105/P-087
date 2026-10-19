@@ -1,12 +1,12 @@
 import { Suspense } from "react";
 
-import { NewSceneFlow } from "@/features/studio/NewSceneFlow";
+import { UnifiedInputFlow } from "@/features/studio/UnifiedInputFlow";
 
 export default function NewScenePage() {
-  // Trang chọn cách bắt đầu; link cũ `/new?source=…` / `?sample=…` được chuyển sang trang con ở client.
+  // `/new` là khung upload chung; link mẫu và import cũ được chuyển ở client.
   return (
     <Suspense>
-      <NewSceneFlow />
+      <UnifiedInputFlow />
     </Suspense>
   );
 }

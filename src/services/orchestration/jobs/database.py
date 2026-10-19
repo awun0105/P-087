@@ -4,12 +4,14 @@ SQL chỉ chứa hằng số nội bộ; mọi giá trị đi qua bind parameter
 chia sẻ giữa các thread của FastAPI. Không mở database khi import module.
 """
 
+import re
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from threading import Lock
 from typing import Protocol, cast
+from urllib.parse import urlsplit, urlunsplit
 
 
 class RuntimeStateConflictError(RuntimeError):
@@ -135,8 +137,348 @@ MIGRATIONS: tuple[tuple[int, tuple[str, ...]], ...] = (
             "CREATE INDEX r2s_resource_usage_job ON r2s_resource_usage(job_id)",
         ),
     ),
+    (
+        # Lịch sử validation bất biến theo attempt; selection CAS trỏ tới một run cụ thể.
+        9,
+        (
+            """CREATE TABLE r2s_validation_runs (
+                run_id TEXT PRIMARY KEY,
+                job_id TEXT NOT NULL,
+                candidate_checksum TEXT NOT NULL,
+                config_checksum TEXT NOT NULL,
+                attempt INTEGER NOT NULL CHECK(attempt > 0),
+                status TEXT NOT NULL,
+                run_checksum TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                UNIQUE(job_id, candidate_checksum, config_checksum, attempt),
+                UNIQUE(run_id, job_id, candidate_checksum, config_checksum))""",
+            "CREATE INDEX r2s_validation_runs_identity ON r2s_validation_runs(job_id, candidate_checksum, config_checksum, attempt)",
+            """CREATE TABLE r2s_validation_selections (
+                job_id TEXT NOT NULL,
+                candidate_checksum TEXT NOT NULL,
+                config_checksum TEXT NOT NULL,
+                run_id TEXT NOT NULL,
+                report_checksum TEXT NOT NULL,
+                generation INTEGER NOT NULL CHECK(generation > 0),
+                selection_checksum TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                PRIMARY KEY(job_id, candidate_checksum, config_checksum),
+                FOREIGN KEY(run_id, job_id, candidate_checksum, config_checksum)
+                    REFERENCES r2s_validation_runs(run_id, job_id, candidate_checksum, config_checksum))""",
+        ),
+    ),
+    (
+        # Frozen approval-bound release identity makes archive/manifest retry deterministic.
+        10,
+        (
+            """CREATE TABLE r2s_release_seals (
+                job_id TEXT NOT NULL,
+                candidate_checksum TEXT NOT NULL,
+                validation_report_checksum TEXT NOT NULL,
+                approval_record_checksum TEXT NOT NULL,
+                generation INTEGER NOT NULL CHECK(generation > 0),
+                intent_checksum TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                PRIMARY KEY(job_id, candidate_checksum, validation_report_checksum, approval_record_checksum))""",
+        ),
+    ),
+    (
+        # Keep a safe, durable diagnostic when immutable release publication needs reviewer retry.
+        11,
+        (
+            """CREATE TABLE r2s_release_seal_failures (
+                job_id TEXT NOT NULL,
+                candidate_checksum TEXT NOT NULL,
+                validation_report_checksum TEXT NOT NULL,
+                approval_record_checksum TEXT NOT NULL,
+                failure_code TEXT NOT NULL,
+                attempts INTEGER NOT NULL CHECK(attempts > 0),
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(job_id, candidate_checksum, validation_report_checksum, approval_record_checksum))""",
+        ),
+    ),
+    (
+        # Durable scene head, resumable legacy backfill, and the pending writer slot used by AUD-10.
+        12,
+        (
+            """CREATE TABLE r2s_scene_heads (
+                job_id TEXT PRIMARY KEY,
+                generation INTEGER NOT NULL CHECK(generation > 0),
+                allocation_sequence INTEGER NOT NULL CHECK(allocation_sequence > 0),
+                head_checksum TEXT NOT NULL,
+                payload TEXT NOT NULL)""",
+            """CREATE TABLE r2s_scene_head_repairs (
+                job_id TEXT PRIMARY KEY,
+                status TEXT NOT NULL,
+                generation INTEGER NOT NULL CHECK(generation > 0),
+                repair_checksum TEXT NOT NULL,
+                payload TEXT NOT NULL)""",
+            """CREATE TABLE r2s_scene_head_backfill_items (
+                job_id TEXT NOT NULL,
+                scene_revision TEXT NOT NULL,
+                item_checksum TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                PRIMARY KEY(job_id, scene_revision))""",
+            """CREATE TABLE r2s_scene_publications (
+                job_id TEXT PRIMARY KEY,
+                expected_generation INTEGER NOT NULL CHECK(expected_generation > 0),
+                target_revision TEXT NOT NULL,
+                lease_expires_at TEXT NOT NULL,
+                payload TEXT NOT NULL)""",
+        ),
+    ),
+    (
+        # Immutable creator for each job; legacy jobs remain NULL until a real saved creator exists.
+        13,
+        ("ALTER TABLE r2s_jobs ADD COLUMN owner_user_id TEXT",),
+    ),
+    (
+        14,
+        (
+            """CREATE TABLE r2s_guest_quota_windows (
+                actor_user_id TEXT NOT NULL REFERENCES r2s_users(user_id),
+                policy_id TEXT NOT NULL,
+                window_start_utc TEXT NOT NULL,
+                resets_at_utc TEXT NOT NULL,
+                policy_limit INTEGER NOT NULL CHECK(policy_limit > 0),
+                used_count INTEGER NOT NULL CHECK(used_count >= 0 AND used_count <= policy_limit),
+                PRIMARY KEY(actor_user_id, policy_id, window_start_utc))""",
+            """CREATE TABLE r2s_quota_intents (
+                actor_user_id TEXT NOT NULL REFERENCES r2s_users(user_id),
+                operation_kind TEXT NOT NULL CHECK(operation_kind IN ('job.create', 'scene.create', 'job.retry')),
+                idempotency_key TEXT NOT NULL,
+                policy_id TEXT NOT NULL,
+                window_start_utc TEXT NOT NULL,
+                request_fingerprint TEXT NOT NULL,
+                accepted_at_utc TEXT NOT NULL,
+                result_kind TEXT NOT NULL CHECK(result_kind = 'job'),
+                result_id TEXT NOT NULL,
+                result_reference TEXT NOT NULL,
+                PRIMARY KEY(actor_user_id, operation_kind, idempotency_key),
+                FOREIGN KEY(actor_user_id, policy_id, window_start_utc)
+                    REFERENCES r2s_guest_quota_windows(actor_user_id, policy_id, window_start_utc))""",
+            "CREATE INDEX r2s_quota_intents_by_result ON r2s_quota_intents(result_kind, result_id)",
+        ),
+    ),
+    (
+        # Import view packaging is a durable product operation, independent of reconstruction jobs.
+        15,
+        (
+            """CREATE TABLE r2s_import_operations (
+                operation_id TEXT PRIMARY KEY,
+                import_id TEXT NOT NULL UNIQUE REFERENCES r2s_imports(import_id) ON DELETE CASCADE,
+                status TEXT NOT NULL CHECK(status IN ('QUEUED','WAITING','RUNNING','SUCCEEDED','FAILED','CANCELLED')),
+                attempt INTEGER NOT NULL CHECK(attempt >= 0),
+                requester_id TEXT NOT NULL,
+                idempotency_key TEXT,
+                request_fingerprint TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                owner_id TEXT,
+                fencing_token INTEGER NOT NULL CHECK(fencing_token >= 0),
+                lease_expires_at TEXT,
+                heartbeat_at TEXT,
+                payload TEXT NOT NULL)""",
+            "CREATE INDEX r2s_import_operations_by_status ON r2s_import_operations(status, created_at)",
+            "CREATE UNIQUE INDEX r2s_import_operations_idempotency ON r2s_import_operations(requester_id, idempotency_key) WHERE idempotency_key IS NOT NULL",
+        ),
+    ),
+    (
+        # Durable Isaac validation request, idempotency, claim lease and retry state.
+        16,
+        (
+            """CREATE TABLE r2s_validation_operations (
+                run_id TEXT PRIMARY KEY REFERENCES r2s_validation_runs(run_id),
+                job_id TEXT NOT NULL,
+                requester_id TEXT NOT NULL,
+                idempotency_key TEXT NOT NULL,
+                request_fingerprint TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(status IN (
+                    'QUEUED','WAITING_RESOURCES','CLAIMED','RUNNING','CANCEL_REQUESTED',
+                    'COMPLETED','FAILED','CANCELLED')),
+                worker_id TEXT,
+                lease_id TEXT,
+                fencing_token INTEGER NOT NULL CHECK(fencing_token >= 0),
+                lease_expires_at TEXT,
+                heartbeat_at TEXT,
+                cancel_requested_at TEXT,
+                retryable INTEGER NOT NULL CHECK(retryable IN (0,1)),
+                error_code TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                operation_checksum TEXT NOT NULL,
+                payload TEXT NOT NULL)""",
+            "CREATE UNIQUE INDEX r2s_validation_operations_idempotency ON r2s_validation_operations(requester_id, idempotency_key)",
+            "CREATE INDEX r2s_validation_operations_by_status ON r2s_validation_operations(status, created_at)",
+        ),
+    ),
+    (
+        # Durable grouped uploads, immutable assembly revisions, resolver evidence and accepted runs.
+        17,
+        (
+            "CREATE TABLE r2s_input_uploads (upload_id TEXT PRIMARY KEY, payload TEXT NOT NULL)",
+            """CREATE TABLE r2s_input_assemblies (
+                assembly_id TEXT NOT NULL,
+                revision INTEGER NOT NULL CHECK(revision > 0),
+                owner_id TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                PRIMARY KEY(assembly_id, revision))""",
+            """CREATE TABLE r2s_input_assembly_heads (
+                assembly_id TEXT PRIMARY KEY,
+                owner_id TEXT NOT NULL,
+                revision INTEGER NOT NULL CHECK(revision > 0),
+                FOREIGN KEY(assembly_id, revision)
+                    REFERENCES r2s_input_assemblies(assembly_id, revision))""",
+            "CREATE INDEX r2s_input_assemblies_by_owner ON r2s_input_assemblies(owner_id, assembly_id, revision)",
+            """CREATE TABLE r2s_input_resolutions (
+                report_checksum TEXT PRIMARY KEY,
+                assembly_id TEXT NOT NULL,
+                revision INTEGER NOT NULL,
+                owner_id TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                FOREIGN KEY(assembly_id, revision)
+                    REFERENCES r2s_input_assemblies(assembly_id, revision))""",
+            "CREATE INDEX r2s_input_resolutions_by_assembly ON r2s_input_resolutions(assembly_id, revision)",
+            """CREATE TABLE r2s_input_runs (
+                requester_id TEXT NOT NULL,
+                idempotency_key TEXT NOT NULL,
+                request_fingerprint TEXT NOT NULL,
+                job_id TEXT NOT NULL UNIQUE REFERENCES r2s_jobs(job_id),
+                project_id TEXT NOT NULL REFERENCES r2s_projects(project_id),
+                assembly_id TEXT NOT NULL,
+                revision INTEGER NOT NULL,
+                report_checksum TEXT NOT NULL REFERENCES r2s_input_resolutions(report_checksum),
+                recipe_checksum TEXT NOT NULL,
+                recipe_ref TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                PRIMARY KEY(requester_id, idempotency_key),
+                FOREIGN KEY(assembly_id, revision)
+                    REFERENCES r2s_input_assemblies(assembly_id, revision))""",
+            "CREATE INDEX r2s_input_runs_by_assembly ON r2s_input_runs(assembly_id, revision)",
+        ),
+    ),
+    (
+        18,
+        (
+            """CREATE TABLE r2s_registration_operations (
+                operation_id TEXT PRIMARY KEY,
+                requester_id TEXT NOT NULL REFERENCES r2s_users(user_id),
+                idempotency_key TEXT NOT NULL,
+                target_job_id TEXT NOT NULL REFERENCES r2s_jobs(job_id),
+                request_checksum TEXT NOT NULL,
+                state TEXT NOT NULL,
+                worker_id TEXT,
+                lease_token TEXT,
+                fencing_token INTEGER NOT NULL,
+                lease_expires_at TEXT,
+                heartbeat_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                operation_checksum TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                UNIQUE(requester_id, idempotency_key))""",
+            "CREATE INDEX r2s_registration_operations_by_queue ON r2s_registration_operations(state, created_at, operation_id)",
+            "CREATE INDEX r2s_registration_operations_by_job ON r2s_registration_operations(target_job_id, created_at)",
+        ),
+    ),
+)
+MIGRATIONS += (
+    (
+        19,
+        (
+            "CREATE TABLE r2s_temporary_uploads (upload_id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, "
+            "expires_at TEXT NOT NULL, protected_until TEXT, deleting INTEGER NOT NULL DEFAULT 0)",
+            "CREATE INDEX r2s_temporary_uploads_by_expiry ON r2s_temporary_uploads(expires_at)",
+        ),
+    ),
+)
+MIGRATIONS += (
+    (
+        20,
+        (
+            "CREATE TABLE r2s_value_events (event_id TEXT PRIMARY KEY, job_id TEXT NOT NULL, at TEXT NOT NULL, "
+            "kind TEXT NOT NULL, actor_id TEXT, payload TEXT NOT NULL)",
+            "CREATE INDEX r2s_value_events_by_job ON r2s_value_events(job_id, at)",
+        ),
+    ),
+)
+MIGRATIONS += (
+    (
+        21,
+        (
+            "CREATE TABLE r2s_benchmark_truth (job_id TEXT PRIMARY KEY, version INTEGER NOT NULL, payload TEXT NOT NULL)",
+        ),
+    ),
+)
+MIGRATIONS += (
+    (
+        22,
+        (
+            """CREATE TABLE r2s_worker_runtimes (
+                software_runtime_checksum TEXT NOT NULL,
+                config_checksum TEXT NOT NULL,
+                seed INTEGER,
+                seed_key INTEGER NOT NULL,
+                runtime_manifest_checksum TEXT NOT NULL,
+                gpu_name TEXT,
+                hardware TEXT NOT NULL,
+                manifest TEXT NOT NULL,
+                first_seen_at TEXT NOT NULL,
+                last_seen_at TEXT NOT NULL,
+                PRIMARY KEY (software_runtime_checksum, config_checksum, seed_key)
+            )""",
+            "CREATE INDEX r2s_worker_runtimes_by_config ON r2s_worker_runtimes(config_checksum, last_seen_at)",
+        ),
+    ),
+)
+MIGRATIONS += (
+    (
+        23,
+        (
+            """CREATE TABLE r2s_job_leases (
+                job_id TEXT PRIMARY KEY,
+                lease_token TEXT NOT NULL,
+                worker_id TEXT NOT NULL,
+                lease_expires_at TEXT NOT NULL
+            )""",
+            "CREATE INDEX r2s_job_leases_by_expiry ON r2s_job_leases(lease_expires_at)",
+        ),
+    ),
+)
+MIGRATIONS += (
+    (
+        24,
+        (
+            "CREATE TABLE r2s_demo_sessions (session_id TEXT PRIMARY KEY, state TEXT NOT NULL, "
+            "created_at TEXT NOT NULL, last_seen_at TEXT NOT NULL, expires_at TEXT NOT NULL, payload TEXT NOT NULL)",
+            "CREATE INDEX r2s_demo_sessions_by_state ON r2s_demo_sessions(state, expires_at)",
+            "CREATE TABLE r2s_demo_summaries (session_id TEXT PRIMARY KEY, completed_at TEXT NOT NULL, payload TEXT NOT NULL)",
+            "CREATE TABLE r2s_demo_unpublished (sample_id TEXT PRIMARY KEY, at TEXT NOT NULL)",
+        ),
+    ),
+)
+MIGRATIONS += (
+    (
+        25,
+        (
+            "CREATE TABLE r2s_gpu_control (deployment_id TEXT PRIMARY KEY, payload TEXT NOT NULL)",
+            "CREATE TABLE r2s_gpu_history (intent_id TEXT PRIMARY KEY, deployment_id TEXT NOT NULL, payload TEXT NOT NULL)",
+            "CREATE INDEX r2s_gpu_history_by_deployment ON r2s_gpu_history(deployment_id)",
+        ),
+    ),
 )
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
+
+
+def demo_database_url(url: str, session_id: str) -> str:
+    """Carry an internal schema scope through existing database factories."""
+    if re.fullmatch(r"[a-f0-9]{32}", session_id) is None:
+        raise ValueError("Invalid demo session namespace")
+    parsed = urlsplit(url)
+    if parsed.scheme not in {"postgres", "postgresql"} or parsed.fragment:
+        raise ValueError("Distributed demos require an unscoped PostgreSQL database")
+    return urlunsplit(parsed._replace(fragment=f"r2s_demo_{session_id}"))
+
 
 #: DB đã kiểm/chạy migration trong tiến trình này. API tạo RuntimeDatabase mỗi request;
 #: chỉ lần đầu mới cần transaction bootstrap (tránh khóa ghi + vòng mạng mỗi request).
@@ -150,6 +492,15 @@ class RuntimeDatabase:
     def __init__(self, url: str) -> None:
         self._url = url
         self.postgres = url.startswith(("postgresql://", "postgres://"))
+        self.scope: str | None = None
+        self._connection_url = url
+        if self.postgres:
+            parsed = urlsplit(url)
+            if parsed.fragment:
+                if re.fullmatch(r"r2s_demo_[a-f0-9]{32}", parsed.fragment) is None:
+                    raise ValueError("Invalid runtime database scope")
+                self.scope = parsed.fragment
+                self._connection_url = urlunsplit(parsed._replace(fragment=""))
         self._sqlite_path: Path | None = None
         if not self.postgres:
             if not url.startswith("sqlite:///"):
@@ -170,7 +521,7 @@ class RuntimeDatabase:
                 import psycopg
             except ImportError as error:
                 raise RuntimeError("PostgreSQL cần psycopg 3; cài dependency runtime trước khi khởi động") from error
-            return cast(SqlConnection, psycopg.connect(self._url, autocommit=True, connect_timeout=10))
+            return cast(SqlConnection, psycopg.connect(self._connection_url, autocommit=True, connect_timeout=10))
         connection = sqlite3.connect(str(self._sqlite_path), timeout=30, isolation_level=None)
         connection.execute("PRAGMA foreign_keys=ON")
         return cast(SqlConnection, connection)
@@ -182,6 +533,12 @@ class RuntimeDatabase:
         try:
             connection.execute("BEGIN IMMEDIATE" if write and not self.postgres else "BEGIN")
             try:
+                if self.scope is not None:
+                    # Scope is server-generated and regex-validated. Never fall back to public.
+                    connection.execute(f'SET LOCAL search_path TO "{self.scope}"')
+                    found = connection.execute("SELECT 1 FROM pg_namespace WHERE nspname=%s", (self.scope,)).fetchone()
+                    if found is None:
+                        raise RuntimeStateConflictError("Demo database namespace has been removed")
                 yield RuntimeTransaction(connection, self.postgres)
             except BaseException:
                 # Kể cả KeyboardInterrupt phải nhả transaction; không swallow lỗi.
@@ -196,7 +553,10 @@ class RuntimeDatabase:
         """Tạo bảng version rồi chạy các migration còn thiếu trong một transaction có khóa."""
         with self.transaction(write=True) as tx:
             if self.postgres:
-                tx.execute("SELECT pg_advisory_xact_lock(hashtext('real2sim.runtime.schema'))")
+                tx.execute(
+                    "SELECT pg_advisory_xact_lock(hashtext(?))",
+                    (f"real2sim.runtime.schema:{self.scope}" if self.scope else "real2sim.runtime.schema",),
+                )
             tx.execute(
                 "CREATE TABLE IF NOT EXISTS r2s_schema (id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL)"
             )

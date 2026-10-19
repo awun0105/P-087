@@ -1,0 +1,70 @@
+{
+  "scope": "synthetic local filesystem; excludes DB, HTTP, remote storage and GPU/browser rendering",
+  "source_mib": 128,
+  "delivery_mib": 16,
+  "repeats": 5,
+  "strict_consumer": {
+    "samples": [
+      {
+        "elapsed_ms": 472.197,
+        "bytes_hashed": 150996408
+      },
+      {
+        "elapsed_ms": 483.785,
+        "bytes_hashed": 150996408
+      },
+      {
+        "elapsed_ms": 434.051,
+        "bytes_hashed": 150996408
+      },
+      {
+        "elapsed_ms": 419.532,
+        "bytes_hashed": 150996408
+      },
+      {
+        "elapsed_ms": 563.785,
+        "bytes_hashed": 150996408
+      }
+    ],
+    "first_ms": 472.197,
+    "repeated_median_ms": 458.918,
+    "repeated_bytes_hashed": [
+      150996408,
+      150996408,
+      150996408,
+      150996408
+    ]
+  },
+  "registry_reads": {
+    "samples": [
+      {
+        "elapsed_ms": 434.265,
+        "bytes_hashed": 150996408
+      },
+      {
+        "elapsed_ms": 1.502,
+        "bytes_hashed": 1462
+      },
+      {
+        "elapsed_ms": 1.21,
+        "bytes_hashed": 1462
+      },
+      {
+        "elapsed_ms": 1.142,
+        "bytes_hashed": 1462
+      },
+      {
+        "elapsed_ms": 0.714,
+        "bytes_hashed": 1462
+      }
+    ],
+    "first_ms": 434.265,
+    "repeated_median_ms": 1.176,
+    "repeated_bytes_hashed": [
+      1462,
+      1462,
+      1462,
+      1462
+    ]
+  }
+}

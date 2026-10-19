@@ -1,11 +1,23 @@
 # Real2Sim Studio deployment handoff
 
+For interactive disposable demos across separate API/GPU hosts, use
+[DEMO_RUNBOOK.md](DEMO_RUNBOOK.md). It covers the versioned demo-library bundle,
+PostgreSQL session schemas, R2 isolation, startup provisioning and cleanup.
+The main data-package import below is optional for migrating existing real jobs;
+it is not needed to bootstrap a demo-only deployment from frozen workspaces.
+
 This directory contains reviewable production configuration templates.  It
 does not contain credentials and it does not deploy an account or mutate
 Railway, Supabase, Cloudflare, Vast.ai, RunPod, or Vercel.  The accepted
 topology is Vercel for the Next.js UI, Railway for the FastAPI control server,
 Supabase PostgreSQL for RuntimeDatabase, Cloudflare R2 for immutable artifact
 objects, and an ephemeral GPU worker on Vast.ai with RunPod as fallback.
+
+Start with [OVERVIEW.md](OVERVIEW.md) for the component map, the deploy order
+and the known pitfalls.  All three service templates are generated from one
+source, [`production.env.example`](production.env.example), by
+`python -m scripts.studio.deploy_env`; edit the source and regenerate rather
+than editing a template.
 
 ## Service split
 
@@ -264,8 +276,9 @@ on the volume. The temporary extraction is removed when the command exits.
 tools; it does not require nested Docker.  The worker host still needs a real
 NVIDIA runtime and Vulkan ICD.  Before accepting a worker, run its image
 preflight and record the actual COLMAP/Brush/scene-runtime identity.  The API's
-`PRODUCT_PROCESSING_CONFIG` and `PRODUCT_RUNTIME_MANIFEST` must be supplied as
-a matched pair from an accepted worker baseline.  A manifest copied from the
+`PRODUCT_PROCESSING_CONFIG` must match the accepted worker baseline. The API
+does not receive the worker manifest: with `PRODUCT_RUNTIME_FROM_WORKERS=true`
+it takes each new job's runtime from the workers that publish it.  A manifest copied from the
 laptop or fabricated from defaults does not prove that the rented worker can
 execute the pipeline.
 
@@ -284,13 +297,23 @@ The image entrypoint calls `scripts.gpu.make_runtime_manifest` from actual
 worker probes before preflight. The source state directory must already exist
 and contain no previous manifest. Keep the preflight output and use the
 repository-owned `ExecutionProfile.load` to verify the matched preset and
-canonical manifest checksum. Upload only the accepted worker manifest into the
-Railway volume at `/studio_local/runtime_manifest.json` using
-`railway volume files upload`; the API then sees
-`/app/data/studio_local/runtime_manifest.json`. Set both commented profile paths
-in `api.env.example` and redeploy the API. The API and worker must use the same
-preset contents and manifest checksum; this transfer publishes the worker's
-identity to its control API, rather than reusing a laptop manifest on a worker.
+canonical manifest checksum. Each worker publishes its software runtime
+(image and tool versions, without GPU or driver) into the shared database on
+every heartbeat, so the API needs no manifest upload and no restart when a pod
+is replaced. A manifest pinned by hand for a developer machine is set as
+`PRODUCT_RUNTIME_MANIFEST` instead of the worker mode. The API and worker must
+still use the same preset contents.
+
+Isaac candidate validation is a separate worker capability. Set
+`PRODUCT_ISAAC_VALIDATION_LAUNCHER` to the qualified Isaac Sim Python launcher
+(for example, that install's `python.sh`) and
+`PRODUCT_ISAAC_VALIDATION_RESOURCES` to a measured `OperationResourceProfile`
+JSON file only after that runtime has been qualified on the worker host. Both
+variables are optional and omitted from the generated environment by default.
+Without a launcher, queued validation attempts fail visibly as
+`ISAAC_RUNTIME_NOT_CONFIGURED`. Without a resource profile, admission waits
+instead of guessing capacity. A host launcher setting or protocol-test fake is
+not Isaac runtime qualification evidence.
 
 Operational acceptance from ADR 0003 also requires configured Sentry coverage,
 an external `/health` monitor, the agreed database keep-alive schedule, and a
@@ -306,12 +329,12 @@ autoscaling with live credentials until that boundary is reviewed.  A provider
 deployment and a browser/GPU end-to-end run remain external proof requirements;
 these templates do not claim them.
 
-The production templates retain `PRODUCT_PRIVACY_MODE=qa_verified`. The current
-new-video route in `src/api/studio/scenes.py` accepts only `self_attested`, so
-that route remains closed under this production policy. Imported, previously
-published data can still be restored; enabling new production video processing
-needs an approved QA upload flow or an explicit owner policy decision. The
-packaging tool does not weaken the production gate to match the local MVP.
+The production source sets `PRODUCT_PRIVACY_MODE=self_attested` (owner decision
+2026-10-09): uploaders attest their video has no faces or plates and may opt in
+to automatic masking per job. `qa_verified` masks every Studio video upload and,
+when any frame was redacted, pauses the job until the uploader accepts the
+redacted frames (AUD-18, ADR 0019). It needs the EgoBlur weights on the worker;
+`scripts.studio.deploy_env check` reports an error when they are not declared.
 
 The current GPU entrypoint also has a non-secret local fallback for the selected
 LLM key when the environment value is empty.  The template intentionally leaves

@@ -4,9 +4,10 @@ import hashlib
 import json
 import subprocess
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import Literal
 
@@ -15,7 +16,19 @@ from pydantic import Field, model_validator
 from src.models.contracts.artifacts import ArtifactDataClass, Checksum, ContractModel, ProductArtifactRef
 from src.models.contracts.identity import canonical_content_checksum, verify_content_checksum
 from src.models.contracts.manifests import ExecutionError, InputFile, InputManifest, StageArtifact, StageId, StageStatus
-from src.services.reconstruction.rgb.frames.frame_set import NormalizedRGBFrame, NormalizedRGBFrameSet, _sha256
+from src.models.contracts.retryability import classify_retryability
+from src.models.contracts.video_preparation import (
+    ServerVideoPreparationVerification,
+    VideoFrameBinding,
+    default_video_normalization_profile,
+    validate_video_frame_map_rows,
+)
+from src.services.reconstruction.rgb.frames.frame_set import (
+    NormalizedRGBFrame,
+    NormalizedRGBFrameSet,
+    _sha256,
+    frame_image_name,
+)
 from src.services.reconstruction.rgb.preflight.privacy import PrivacyDispatchProof, RGBPrivacyGate
 from src.services.reconstruction.rgb.preflight.publication import ArtifactWriter
 from src.services.reconstruction.rgb.preflight.quality_models import RGBFrameQuality, RGBQualityReport
@@ -70,6 +83,7 @@ class FrameExtractionRequest:
     config: ExtractionConfig
     job_id: str
     timestamps: dict[int, str] | None = None
+    video_preparation: ServerVideoPreparationVerification | None = None
 
 
 @dataclass(frozen=True)
@@ -89,6 +103,7 @@ class FrameExtractionDependencies:
     resolve_input: Callable[[str], Path]
     gate: RGBPrivacyGate
     decoder: "FFmpegFrameDecoder"
+    resolve_product: Callable[[ProductArtifactRef], Path] | None = None
 
 
 @dataclass(frozen=True)
@@ -127,12 +142,15 @@ class FrameExtractionError(ValueError):
 
     def to_execution_error(self) -> ExecutionError:
         """Translate to shared stage failure contract."""
+        details: dict[str, str] = {"action": self.action}
+        if self.__cause__ is not None:
+            details["exception_type"] = type(self.__cause__).__name__
         return ExecutionError(
             error_code=self.code,
             stage_id=StageId.FRAME_EXTRACT,
             human_message=self.message,
-            retryable=False,
-            details={"action": self.action},
+            retryable=classify_retryability(self.code, details),
+            details=details,
         )
 
     def to_failed_stage(self) -> StageArtifact:
@@ -299,6 +317,18 @@ class RGBFrameExtractor:
             raise FrameExtractionError(
                 "FRAME_QUALITY_MISMATCH", "Quality mask belongs to another input", "Use the matching REC-02 report"
             )
+        if request.video_preparation != request.manifest.video_preparation:
+            raise FrameExtractionError(
+                "FRAME_PREPARATION_MISMATCH",
+                "Video preparation verification differs from the InputManifest",
+                "Create the scene again from the verified prepared-video upload",
+            )
+        if request.video_preparation is not None and request.config.mode != "video_decode":
+            raise FrameExtractionError(
+                "FRAME_PREPARATION_MISMATCH",
+                "Video preparation provenance cannot be applied to image references",
+                "Use the prepared video source for this scene",
+            )
         if len(request.quality.effective_reconstruction_frame_ids) < 2:
             raise FrameExtractionError(
                 "FRAME_COUNT_INVALID", "Too few accepted RGB frames", "Provide more usable RGB input"
@@ -320,7 +350,7 @@ class RGBFrameExtractor:
         )
 
     def _image_frames(self, request: FrameExtractionRequest) -> list[NormalizedRGBFrame]:
-        files = [file for file in request.manifest.files if file.media_type == "image/png"]
+        files = [file for file in request.manifest.files if file.media_type in {"image/png", "image/jpeg"}]
         if len(files) != len(request.quality.frames) or request.timestamps is None:
             raise FrameExtractionError(
                 "FRAME_INPUT_MISMATCH", "Image inventory/timestamps are incomplete", "Supply ordered source timestamps"
@@ -359,21 +389,13 @@ class RGBFrameExtractor:
             )
         if quality.quality != "accepted":
             return None
-        ref = self._source_ref(job_id, file)
+        # Bundle gates require every frame under this job, like decoded video frames; bytes and format are kept.
+        payload = path.read_bytes()
+        name = frame_image_name(quality.frame_id, Path(file.artifact_uri))
+        ref = self._reference(_ArtifactSpec(job_id, f"rec02a/frames/{name}", "RGBFrame"), payload)
+        published = ProductArtifactRef.model_validate(self.deps.writer.publish(ref, payload).model_dump())
         return NormalizedRGBFrame(
-            frame_id=quality.frame_id, timestamp_sec=candidate.timestamp, image=ref, source_checksum=file.checksum
-        )
-
-    @staticmethod
-    def _source_ref(job_id: str, file: InputFile) -> ProductArtifactRef:
-        return ProductArtifactRef(
-            artifact_type="RGBFrame",
-            schema_version="1.0",
-            artifact_uri=file.artifact_uri,
-            artifact_checksum=file.checksum,
-            data_class=file.data_class,
-            producer_stage=StageId.INPUT_VALIDATE,
-            job_id=job_id,
+            frame_id=quality.frame_id, timestamp_sec=candidate.timestamp, image=published, source_checksum=file.checksum
         )
 
     def _video_frames(self, request: FrameExtractionRequest) -> list[NormalizedRGBFrame]:
@@ -406,7 +428,9 @@ class RGBFrameExtractor:
                 raise FrameExtractionError(
                     "FRAME_DECODE_MISMATCH", "Decoded frames differ from REC-02", "Rerun validation on this video"
                 )
-            return self._publish_video_frames(request, chosen, VideoDecodeResult(images, timestamps, file.checksum))
+            decoded = VideoDecodeResult(images, timestamps, file.checksum)
+            source_frame_ids = self._source_frame_ids(request, chosen, decoded)
+            return self._publish_video_frames(request, chosen, decoded, source_frame_ids)
 
     @staticmethod
     def _chosen_frames(request: FrameExtractionRequest) -> list[RGBFrameQuality]:
@@ -419,7 +443,11 @@ class RGBFrameExtractor:
         return accepted[::stride]
 
     def _publish_video_frames(
-        self, request: FrameExtractionRequest, chosen: list[RGBFrameQuality], decoded: VideoDecodeResult
+        self,
+        request: FrameExtractionRequest,
+        chosen: list[RGBFrameQuality],
+        decoded: VideoDecodeResult,
+        source_frame_ids: dict[int, int],
     ) -> list[NormalizedRGBFrame]:
         rows = []
         for quality, image in zip(chosen, decoded.images, strict=True):
@@ -435,9 +463,78 @@ class RGBFrameExtractor:
                     timestamp_sec=decoded.timestamps[frame_id],
                     image=published,
                     source_checksum=decoded.source_checksum,
+                    source_frame_id=source_frame_ids.get(frame_id),
                 )
             )
         return rows
+
+    def _source_frame_ids(
+        self,
+        request: FrameExtractionRequest,
+        chosen: list[RGBFrameQuality],
+        decoded: VideoDecodeResult,
+    ) -> dict[int, int]:
+        verification = request.video_preparation
+        if verification is None:
+            return {}
+        if self.deps.resolve_product is None:
+            raise FrameExtractionError(
+                "FRAME_MAP_UNAVAILABLE",
+                "Verified video frame map cannot be resolved",
+                "Retry after artifact storage recovers",
+            )
+        reference = verification.frame_map_ref
+        path = self.deps.resolve_product(reference)
+        if (
+            not path.is_file()
+            or path.stat().st_size != verification.client_manifest.frame_map.size_bytes
+            or _sha256(path) != reference.artifact_checksum
+        ):
+            raise FrameExtractionError(
+                "FRAME_MAP_CHANGED", "Verified video frame-map bytes changed", "Restore the immutable upload frame map"
+            )
+        wanted = {row.frame_id for row in chosen}
+        source_by_output: dict[int, int] = {}
+        time_base = verification.client_manifest.prepared_video.time_base
+
+        def rows() -> Iterator[VideoFrameBinding]:
+            with path.open("rb") as stream:
+                for line in stream:
+                    if len(line) > 2048 or not line.endswith(b"\n"):
+                        raise ValueError("frame-map row is oversized or truncated")
+                    row = VideoFrameBinding.model_validate_json(line)
+                    if row.output_frame_index >= len(decoded.timestamps):
+                        raise ValueError("frame-map output frame exceeds the decoded video")
+                    actual_time = Decimal(decoded.timestamps[row.output_frame_index])
+                    declared_time = Decimal(row.output_pts * time_base.numerator) / time_base.denominator
+                    tick_tolerance = Decimal(time_base.numerator) / time_base.denominator
+                    if abs(actual_time - declared_time) > tick_tolerance:
+                        raise ValueError("frame-map PTS differs from REC decoder timestamps")
+                    if row.output_frame_index in wanted:
+                        source_by_output[row.output_frame_index] = row.source_frame_index
+                    yield row
+
+        try:
+            validate_video_frame_map_rows(
+                rows(),
+                descriptor=verification.client_manifest.frame_map,
+                source_frame_count=verification.client_manifest.source_video.frame_count,
+                output_frame_count=len(decoded.timestamps),
+                max_sidecar_bytes=default_video_normalization_profile().max_frame_map_bytes,
+            )
+        except (ValueError, OSError) as error:
+            raise FrameExtractionError(
+                "FRAME_MAP_INVALID",
+                "Verified video frame-map no longer matches the prepared video",
+                "Re-upload the prepared video",
+            ) from error
+        if set(source_by_output) != wanted:
+            raise FrameExtractionError(
+                "FRAME_MAP_INCOMPLETE",
+                "Selected RGB frames have no source-frame mapping",
+                "Re-upload the prepared video",
+            )
+        return source_by_output
 
     @staticmethod
     def _frame_set(
@@ -455,6 +552,11 @@ class RGBFrameExtractor:
             extraction_config_checksum=request.config.config_checksum,
             ffmpeg_version=version,
             frames=[frame.model_dump(mode="json") for frame in frames],
+            **(
+                {"video_preparation": request.video_preparation.model_dump(mode="json")}
+                if request.video_preparation
+                else {}
+            ),
             frame_set_checksum="sha256:" + "0" * 64,
         )
         payload["frame_set_checksum"] = canonical_content_checksum(payload, "frame_set_checksum")

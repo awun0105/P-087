@@ -9,15 +9,19 @@ import os
 import re
 import tempfile
 import time
+from collections import OrderedDict
 from pathlib import Path, PurePosixPath
+from threading import Lock
 from typing import TypeVar
 
 from pydantic import BaseModel, ValidationError
 
 from src.models.contracts.artifacts import ArtifactRef
+from src.models.contracts.identity import artifact_model_payload
 from src.services.orchestration.artifacts.checksum import sha256_bytes, verify_file_checksum
 from src.services.orchestration.artifacts.errors import (
     ArtifactAlreadyExistsError,
+    ArtifactChecksumError,
     ArtifactNotFoundError,
     ArtifactSchemaError,
     ArtifactTooLargeError,
@@ -29,6 +33,14 @@ ContractT = TypeVar("ContractT", bound=BaseModel)
 _URI_PREFIX = "artifact://jobs/"
 #: Thời gian nhớ kết quả "kho file chưa có artifact này" (giây).
 _MISSING_TTL_SECONDS = 3.0
+# ponytail: retain at most 512 verified dependency versions per resolver; evicted files are rehashed.
+_VERIFIED_CACHE_MAX = 512
+
+
+def _file_version(path: Path) -> tuple[int, int, int, int, int]:
+    """Local file identity; ctime also invalidates writes that restore size/mtime."""
+    info = path.stat()
+    return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns
 
 
 class ArtifactResolver:
@@ -38,6 +50,8 @@ class ArtifactResolver:
         self.artifact_root = artifact_root.expanduser().resolve()
         self.remote = remote
         self._missing: dict[str, float] = {}
+        self._verified: OrderedDict[tuple[str, str], tuple[int, int, int, int, int]] = OrderedDict()
+        self._verification_lock = Lock()
 
     def resolve(self, artifact_uri: str) -> Path:
         """Resolve one safe logical URI without allowing path traversal."""
@@ -53,12 +67,41 @@ class ArtifactResolver:
 
     def require_uri(self, artifact_uri: str, checksum: str) -> Path:
         """Như `require` nhưng nhận URI + checksum (vd `InputFile` của InputManifest)."""
+        path = self._require_local(artifact_uri, checksum)
+        verify_file_checksum(path, checksum)
+        return path
+
+    def require_unchanged(self, reference: ArtifactRef) -> Path:
+        """Reuse a successful SHA-256 check while the local filesystem version matches.
+
+        Only preview read paths opt in. Strict consumers still use `require`.
+        Cache entries are process-local and never substitute for artifact identity.
+        """
+        path = self._require_local(reference.artifact_uri, reference.artifact_checksum)
+        version = _file_version(path)
+        key = (reference.artifact_uri, reference.artifact_checksum)
+        with self._verification_lock:
+            if self._verified.get(key) == version:
+                self._verified.move_to_end(key)
+                return path
+            self._verified.pop(key, None)
+        verify_file_checksum(path, reference.artifact_checksum)
+        if _file_version(path) != version:
+            raise ArtifactChecksumError("artifact changed during checksum verification")
+        with self._verification_lock:
+            self._verified[key] = version
+            self._verified.move_to_end(key)
+            while len(self._verified) > _VERIFIED_CACHE_MAX:
+                self._verified.popitem(last=False)
+        return path
+
+    def _require_local(self, artifact_uri: str, checksum: str) -> Path:
+        """Resolve safely and fetch missing bytes before either verification path."""
         path = self.resolve(artifact_uri)
         if not path.is_file() and self.remote is not None:
             self.remote.fetch(self.relative_key(artifact_uri), path, checksum)
         if not path.is_file():
             raise ArtifactNotFoundError(f"artifact does not exist: {artifact_uri}")
-        verify_file_checksum(path, checksum)
         return path
 
     def locate(self, artifact_uri: str, *, fresh: bool = False) -> Path | None:
@@ -88,6 +131,49 @@ class ArtifactResolver:
     def relative_key(self, artifact_uri: str) -> str:
         """Key logical `jobs/<namespace>/<path>` dùng chung giữa filesystem và kho file."""
         return self._parse_relative_path(artifact_uri).as_posix()
+
+    def list_uris(self, artifact_uri_prefix: str) -> list[str]:
+        """Liệt kê URI dưới prefix cho công cụ repair tường minh, không dùng trong request lookup thông thường."""
+        if not artifact_uri_prefix.startswith(_URI_PREFIX) or not artifact_uri_prefix.endswith("/"):
+            raise InvalidArtifactUriError("artifact listing requires a directory URI prefix")
+        raw = artifact_uri_prefix.removeprefix(_URI_PREFIX).removesuffix("/")
+        parts = raw.split("/")
+        if not raw or any(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", part) is None for part in parts):
+            raise InvalidArtifactUriError("artifact listing prefix contains an unsafe path")
+        relative_prefix = (PurePosixPath("jobs") / PurePosixPath(*parts)).as_posix()
+        local_root = self.artifact_root
+        for part in PurePosixPath(relative_prefix).parts:
+            local_root /= part
+            if local_root.is_symlink():
+                raise InvalidArtifactUriError("artifact listing prefix traverses a symlink")
+        local_root = local_root.resolve()
+        if not local_root.is_relative_to(self.artifact_root):
+            raise InvalidArtifactUriError("artifact listing prefix escapes ARTIFACT_ROOT")
+
+        uris: set[str] = set()
+        if local_root.is_dir() and not local_root.is_symlink():
+            for path in local_root.rglob("*"):
+                if path.is_symlink():
+                    raise InvalidArtifactUriError("artifact listing contains a symlink")
+                if path.is_file():
+                    resolved = path.resolve()
+                    if not resolved.is_relative_to(self.artifact_root):
+                        raise InvalidArtifactUriError("artifact listing contains a path outside ARTIFACT_ROOT")
+                    relative = path.relative_to(self.artifact_root).as_posix()
+                    uris.add(f"artifact://{relative}")
+
+        if self.remote is not None:
+            key_prefix = f"{relative_prefix}/"
+            for item in self.remote.store.list_objects(self.remote.key(key_prefix)):
+                if not item.key.startswith(self.remote.prefix):
+                    continue
+                relative = item.key.removeprefix(self.remote.prefix)
+                if not relative.startswith(key_prefix):
+                    continue
+                uri = f"artifact://{relative}"
+                self._parse_relative_path(uri)
+                uris.add(uri)
+        return sorted(uris)
 
     def published(self, artifact_uri: str) -> None:
         """Hook sau khi publish cục bộ: đẩy artifact lên kho file nếu có."""
@@ -156,8 +242,7 @@ class FilesystemArtifactStore:
 
     def publish_model(self, reference: ArtifactRef, model: BaseModel) -> ArtifactRef:
         """Publish deterministic UTF-8 JSON produced from a validated model."""
-        payload = model.model_dump_json(indent=2).encode("utf-8") + b"\n"
-        return self.publish(reference, payload)
+        return self.publish(reference, artifact_model_payload(model))
 
     @staticmethod
     def _atomic_create(destination: Path, payload: bytes) -> None:

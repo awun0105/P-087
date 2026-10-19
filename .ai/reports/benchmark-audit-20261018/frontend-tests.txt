@@ -1,0 +1,16 @@
+
+ RUN  v3.2.7 /home/lqaq/PROJECT/AI20K/P-087/frontend
+
+ ✓ tests/operator-time-scene.test.tsx (3 tests) 2872ms
+   ✓ operator time on the scene page > sends the old tab's batch when the user switches to Studio  1612ms
+   ✓ operator time on the scene page > sends nothing for a viewer who cannot mutate the job  1258ms
+ ✓ tests/evaluation-card.test.tsx (8 tests) 230ms
+ ✓ tests/benchmark-page.test.tsx (6 tests) 503ms
+ ✓ tests/value-card.test.tsx (8 tests) 375ms
+ ✓ tests/operator-time.test.ts (10 tests) 37ms
+
+ Test Files  5 passed (5)
+      Tests  35 passed (35)
+   Start at  15:08:47
+   Duration  11.09s (transform 484ms, setup 884ms, collect 1.48s, tests 4.02s, environment 3.62s, prepare 341ms)
+

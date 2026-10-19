@@ -285,6 +285,10 @@ def _serve(root: Path, command: Sequence[str]) -> int:
         ("sqlite:///", "postgresql://", "postgres://")
     ):
         _bootstrap_reviewer(database_url)
+    if _truthy(os.environ.get("GPU_CONTROLLER_RUN")) or _truthy(os.environ.get("GPU_CPU_LANE_ENABLED")):
+        from src.services.orchestration.gpu.supervisor import supervise
+
+        return supervise(command)
     os.execvp(command[0], list(command))
     return 0
 
@@ -326,7 +330,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             command.pop(0)
         if not command:
             port = os.environ.get("PORT", os.environ.get("APP_PORT", "8000"))
-            command = ["uvicorn", "src.main:app", "--host", os.environ.get("APP_HOST", "0.0.0.0"), "--port", port]
+            command = [
+                "uvicorn",
+                "src.main:app",
+                "--host",
+                os.environ.get("APP_HOST", "0.0.0.0"),
+                "--port",
+                port,
+                "--no-access-log",
+            ]
         return _serve(root, command)
     except StartupError as error:
         print(f"Studio startup blocked: {error}", file=sys.stderr)

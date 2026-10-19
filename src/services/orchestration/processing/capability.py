@@ -15,6 +15,12 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from src.services.orchestration.jobs.database import RuntimeDatabase
+from src.services.orchestration.processing.container_limits import (
+    effective_cpu_count,
+    memory_limit_gb,
+    memory_reclaimable_gb,
+    memory_usage_gb,
+)
 from src.services.orchestration.processing.models import MachineCapability
 
 #: Số đo cũ hơn mức này coi như worker không còn chạy.
@@ -99,18 +105,30 @@ def _live_vram_gb() -> float | None:
     return gpu.free_gb if gpu is not None else None
 
 
-def _live_ram_gb() -> float | None:
-    """MemAvailable tính cả cache có thể thu hồi, không dùng MemFree/MemTotal."""
+def _live_ram_gb(cgroup_root: Path | None = None) -> float | None:
+    """MemAvailable tính cả cache có thể thu hồi, giới hạn bởi cgroup nếu có."""
+    host_available: float | None = None
     try:
         for line in Path("/proc/meminfo").read_text().splitlines():
             if line.startswith("MemAvailable:"):
                 value = int(line.split()[1]) / 1024**2
                 if value < 0:
                     raise ValueError("Invalid RAM measurement")
-                return value
+                host_available = value
+                break
     except (OSError, ValueError, IndexError) as error:
         logger.warning("Không đo được live RAM cause=%s", type(error).__name__)
-    return None
+
+    limit = memory_limit_gb(cgroup_root)
+    usage = memory_usage_gb(cgroup_root)
+    if limit is not None and usage is not None:
+        # Page cache thu hồi được không phải bộ nhớ đang bị giữ (xem `memory_reclaimable_gb`).
+        working_set = max(0.0, usage - memory_reclaimable_gb(cgroup_root))
+        cgroup_free = max(0.0, limit - working_set)
+        if host_available is not None:
+            return round(min(host_available, cgroup_free), 2)
+        return round(cgroup_free, 2)
+    return round(host_available, 2) if host_available is not None else None
 
 
 def ram_available_gb() -> float | None:
@@ -154,15 +172,23 @@ def measure_capacity(worker_root: Path) -> dict[str, float | None]:
     return {"vram": gpu.total_gb if gpu is not None else None, "ram": ram, "disk": disk}
 
 
-def _ram_gb() -> float:
+def _ram_gb(cgroup_root: Path | None = None) -> float:
+    host_ram: float | None = None
     try:
         for line in Path("/proc/meminfo").read_text().splitlines():
             if line.startswith("MemTotal:"):
-                return round(int(line.split()[1]) / 1024**2, 2)
+                host_ram = round(int(line.split()[1]) / 1024**2, 2)
+                break
     except OSError:
         pass
-    pages, size = os.sysconf("SC_PHYS_PAGES"), os.sysconf("SC_PAGE_SIZE")
-    return round(pages * size / 1024**3, 2)
+    if host_ram is None:
+        pages, size = os.sysconf("SC_PHYS_PAGES"), os.sysconf("SC_PAGE_SIZE")
+        host_ram = round(pages * size / 1024**3, 2)
+
+    limit = memory_limit_gb(cgroup_root)
+    if limit is not None:
+        return round(min(host_ram, limit), 2)
+    return host_ram
 
 
 def worker_identity() -> tuple[str, str, int]:
@@ -205,7 +231,7 @@ def probe(worker_root: Path, *, idle: bool = False, previous: MachineCapability 
         gpu_name=gpu.name if gpu is not None else None,
         gpu_uuid=selected.uuid if selected is not None else None,
         vram_total_gb=round(gpu.total_gb, 2) if gpu is not None else None,
-        cpu_count=os.cpu_count() or 1,
+        cpu_count=effective_cpu_count(),
         ram_total_gb=_ram_gb(),
         disk_free_gb=round(usage.free / 1024**3, 2),
         disk_total_gb=round(usage.total / 1024**3, 2),

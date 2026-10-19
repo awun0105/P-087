@@ -1,10 +1,17 @@
 .git
+dist/
+.ai/
+.codegraph/
+graphify-out/
+*.zip
 .gitignore
 .env
 .env.*
 **/*.env
 **/*.env.*
 !**/*.env.example
+# Public runtime version/checksum pins are a build input, not credentials.
+!configs/runtime/pins.env
 .agents
 .codex
 .ai-log

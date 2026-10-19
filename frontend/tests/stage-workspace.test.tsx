@@ -2,6 +2,8 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import Link from "next/link";
+
 import { StageSceneWorkspace } from "@/features/studio/inspection/StageSceneWorkspace";
 import { ApiError } from "@/lib/api/client";
 import { getPreview } from "@/lib/api/endpoints";
@@ -9,7 +11,7 @@ import type { ProductArtifactRef } from "@/lib/contracts/api";
 import type { ReconstructionPreview } from "@/lib/contracts/preview";
 
 vi.mock("@/lib/api/endpoints", async (original) => ({ ...(await original<typeof import("@/lib/api/endpoints")>()), getPreview: vi.fn() }));
-vi.mock("@/features/studio/EditorFrame", () => ({ EditorFrame: ({ contentUrl, homeHref, title }: { contentUrl: string; homeHref: string; title: string }) => <div aria-label={title}><a href={homeHref}>Về tiến trình editor</a><output>{contentUrl}</output></div> }));
+vi.mock("@/features/studio/scene/PreviewScene", () => ({ PreviewScene: ({ contentUrl, title, jobId }: { contentUrl: string; title: string; jobId?: string }) => <div aria-label={title} data-job={jobId}><Link href="/scenes/job-a?tab=progress">Về tiến trình editor</Link><output>{contentUrl}</output></div> }));
 vi.mock("@/features/studio/StageViewer", () => ({ StageViewer: ({ stageId, fallbackStageId }: { stageId: string; fallbackStageId?: string }) => <div>Viewer: {stageId}<span>Fallback: {fallbackStageId ?? "none"}</span></div> }));
 vi.mock("@/features/studio/ObjectReviewView", () => ({ ObjectReviewView: ({ jobId }: { jobId: string }) => <div>Objects: {jobId}</div> }));
 vi.mock("@/features/studio/ModeComparisonView", () => ({ ModeComparisonView: ({ jobId }: { jobId: string }) => <div>Comparison: {jobId}</div> }));
@@ -31,8 +33,10 @@ describe("workspace scene 5–8", () => {
     const editor = await screen.findByLabelText("5. 3DGS: Kho A");
     expect(editor).toHaveTextContent("/api/v1/jobs/job-a/artifacts/content/scene.sog");
     expect(editor).toHaveTextContent("artifact_checksum=sha256%3A");
+    // Có jobId thì viewer mới lấy được quỹ đạo camera: mở đầu trong scene và có replay.
+    expect(editor).toHaveAttribute("data-job", "job-a");
     expect(screen.getByRole("link", { name: "Về tiến trình editor" })).toHaveAttribute("href", "/scenes/job-a?tab=progress");
-    expect(screen.getByText(/chưa quy đổi mét/)).toBeInTheDocument();
+    expect(screen.queryByText(/chưa quy đổi mét/)).toBeNull();
   });
 
   it("5 lỗi preview không mount editor, có thể thử lại", async () => {
@@ -60,13 +64,14 @@ describe("workspace scene 5–8", () => {
     render(<StageSceneWorkspace jobId="job-a" stageId="ST-RGB-GEOMETRY" title="Kho A" />);
     expect(await screen.findByText("Viewer: ST-RGB-GEOMETRY")).toBeInTheDocument();
     expect(screen.getByText("Fallback: none")).toBeInTheDocument();
+    expect(screen.queryByText(/Scene hệ mét \+ collision/)).toBeNull();
     expect(screen.queryByRole("group", { name: "Công cụ hệ mét" })).toBeNull();
   });
 
-  it("8 tái sử dụng công cụ SceneObject hiện tại và nói rõ tạo revision mới", async () => {
+  it("8 tái sử dụng công cụ SceneObject, bỏ dòng hướng dẫn dư thừa", async () => {
     render(<StageSceneWorkspace jobId="job-a" stageId="ST-OBJECT-EXTRACT" title="Kho A" />);
     expect(await screen.findByText("Objects: job-a")).toBeInTheDocument();
-    expect(screen.getByText(/SceneObject hiện tại.*revision mới/)).toBeInTheDocument();
+    expect(screen.queryByText(/SceneObject hiện tại.*revision mới/)).toBeNull();
     expect(getPreview).not.toHaveBeenCalled();
   });
 });

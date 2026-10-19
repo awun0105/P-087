@@ -23,6 +23,7 @@ from src.models.contracts.manifests import (
     StageId,
     StageStatus,
 )
+from src.models.contracts.retryability import is_execution_error_retryable
 from src.services.orchestration.jobs.admission import ResourceWait
 from src.services.orchestration.jobs.models import JobAttemptRecord
 from src.services.orchestration.jobs.queue import QueuePosition
@@ -47,22 +48,26 @@ STUDIO_PIPELINE: tuple[StageId, ...] = (
 
 
 def studio_pipeline(job: JobManifest) -> tuple[StageId, ...]:
-    """Các stage của một job Studio. Job có gói LiDAR (ADR 0009) có thêm `ST-LIDAR-INGEST` sau bước tách frame.
+    """Job LiDAR thêm ingest và, với job mới, QA calibration sau bước tách frame.
 
-    Chỉ JobManifest biết job có LiDAR hay không, và chỉ sau khi bước nhận LiDAR đã ghi kết quả (đạt hoặc lỗi); trước
-    đó timeline giống job chỉ có video.
+    Job cũ có artifact ingest nhưng chưa có report QA vẫn giữ nguyên timeline; job đang hoặc đã chạy QA hiển thị cả hai.
     """
-    if job.current_stage != StageId.LIDAR_INGEST and not any(
-        stage.stage_id == StageId.LIDAR_INGEST for stage in job.stage_artifacts
-    ):
+    has_ingest = any(stage.stage_id == StageId.LIDAR_INGEST for stage in job.stage_artifacts)
+    has_qa = job.current_stage == StageId.LIDAR_CALIBRATION_QA or any(
+        stage.stage_id == StageId.LIDAR_CALIBRATION_QA for stage in job.stage_artifacts
+    )
+    if job.current_stage == StageId.LIDAR_INGEST:
+        has_ingest = True
+    if not has_ingest and not has_qa:
         return STUDIO_PIPELINE
     index = STUDIO_PIPELINE.index(StageId.FRAME_EXTRACT) + 1
-    return (*STUDIO_PIPELINE[:index], StageId.LIDAR_INGEST, *STUDIO_PIPELINE[index:])
+    lidar_stages = (StageId.LIDAR_INGEST, StageId.LIDAR_CALIBRATION_QA) if has_qa else (StageId.LIDAR_INGEST,)
+    return (*STUDIO_PIPELINE[:index], *lidar_stages, *STUDIO_PIPELINE[index:])
 
 
 StageState = Literal["pending", "running", "waiting", "succeeded", "failed", "cancelled"]
-#: Lý do pipeline chờ: người xác nhận hoặc worker chưa đủ tài nguyên.
-WaitingFor = Literal["metric_confirmation", "resources"]
+#: Lý do pipeline chờ: người xác nhận, worker chưa đủ tài nguyên, hoặc chưa có GPU đúng runtime của job (T-040).
+WaitingFor = Literal["metric_confirmation", "anonymization_review", "runtime", "resources"]
 
 
 class StageProgress(BaseModel):
@@ -75,6 +80,7 @@ class StageProgress(BaseModel):
     started_at: datetime | None = None
     completed_at: datetime | None = None
     error: ExecutionError | None = None
+    note: str | None = None
 
 
 class JobProgress(BaseModel):
@@ -96,6 +102,62 @@ class JobProgress(BaseModel):
     #: Vị trí trong hàng đợi khi job đang chờ worker; None khi job đang chạy, đã xong hoặc chờ người dùng.
     queue: QueuePosition | None = None
     error: ExecutionError | None = None
+
+
+#: Loại artifact ghi nhận người dùng đã xem và chấp nhận bản frame đã che (AUD-18).
+ANONYMIZATION_ACCEPTANCE_TYPE = "SanitizationAcceptance"
+_SANITIZED_FRAME_SET_SUFFIX = "/rec02a/sanitized/frame_set.json"
+
+
+def sanitized_frame_stage(job: JobManifest) -> StageArtifact | None:
+    """Stage tách frame của job khi frame set là bản đã che khuôn mặt/biển số; None nếu job không chọn che."""
+    return next(
+        (
+            stage
+            for stage in reversed(job.stage_artifacts)
+            if stage.stage_id == StageId.FRAME_EXTRACT
+            and stage.status == StageStatus.SUCCEEDED
+            and stage.artifact_type == "NormalizedRGBFrameSet"
+            and (stage.artifact_uri or "").endswith(_SANITIZED_FRAME_SET_SUFFIX)
+        ),
+        None,
+    )
+
+
+def anonymization_acceptance_stage(job: JobManifest) -> StageArtifact | None:
+    """Bản ghi người dùng đã chấp nhận bản đã che, nếu có."""
+    return next(
+        (
+            stage
+            for stage in job.stage_artifacts
+            if stage.stage_id == StageId.PRIVACY_GATE
+            and stage.status == StageStatus.SUCCEEDED
+            and stage.artifact_type == ANONYMIZATION_ACCEPTANCE_TYPE
+        ),
+        None,
+    )
+
+
+def awaiting_anonymization_review(job: JobManifest) -> bool:
+    """Frame đã che xong, job dừng trước COLMAP chờ người dùng xem và chấp nhận bản đã che.
+
+    QUEUED cũng tính (job được retry trước khi có chấp nhận): worker không được dựng 3D từ bản chưa ai xem.
+    """
+    if sanitized_frame_stage(job) is None or anonymization_acceptance_stage(job) is not None:
+        return False
+    return job.status == JobStatus.QUEUED or (
+        job.status == JobStatus.RUNNING and job.current_stage == StageId.FRAME_EXTRACT
+    )
+
+
+def awaiting_reviewed_preview(job: JobManifest) -> bool:
+    """Người dùng đã chấp nhận bản đã che; job RUNNING đang chờ worker nhận để dựng preview."""
+    return (
+        job.status == JobStatus.RUNNING
+        and job.current_stage == StageId.FRAME_EXTRACT
+        and sanitized_frame_stage(job) is not None
+        and anonymization_acceptance_stage(job) is not None
+    )
 
 
 def awaiting_metric_confirmation(job: JobManifest, preview_ready: bool) -> bool:
@@ -124,8 +186,13 @@ def job_progress(
     resource_wait: ResourceWait | None = None,
     queue: QueuePosition | None = None,
     heartbeat_at: datetime | None = None,
+    runtime_wait: bool = False,
+    notes: dict[StageId, str] | None = None,
 ) -> JobProgress:
-    """Chiếu JobManifest + journal thành tiến trình từng stage của attempt hiện tại."""
+    """Chiếu JobManifest + journal thành tiến trình từng stage của attempt hiện tại.
+
+    `runtime_wait`: không worker nào đang sống chạy được runtime của job (người gọi tính từ `r2s_worker_runtimes`).
+    """
     events = _current_attempt(attempts)
     pipeline = studio_pipeline(job)
     attempt_start = next((event.recorded_at for event in events if event.status == JobStatus.QUEUED), None)
@@ -145,8 +212,22 @@ def job_progress(
     stage_starts: dict[StageId, datetime] = {}
     for event in events:
         if event.status == JobStatus.RUNNING:
-            stage_starts.setdefault(event.current_stage, event.recorded_at)
+            if event.stage_started_at is not None:
+                stage_starts[event.current_stage] = event.stage_started_at
+            else:
+                stage_starts.setdefault(event.current_stage, event.recorded_at)
     failure = next((event.error for event in reversed(events) if event.error is not None), None)
+    terminal_at = next(
+        (
+            event.recorded_at
+            for event in reversed(events)
+            if event.status in {JobStatus.SUCCEEDED, JobStatus.FAILED, JobStatus.CANCELLED}
+        ),
+        job.completed_at,
+    )
+    if failure is not None and failure.retryable and not is_execution_error_retryable(failure):
+        # Project old broad retry flags through today's policy so the UI agrees with POST /retry.
+        failure = failure.model_copy(update={"retryable": False})
     # Pipeline chạy tuần tự: journal cho thấy đã sang stage sau → stage trước đã xong,
     # dù StageArtifact của nó chỉ được commit cùng receipt ở cuối attempt.
     advanced = {
@@ -157,12 +238,22 @@ def job_progress(
         if later in stage_starts
     }
     waiting = awaiting_metric_confirmation(job, preview_ready)
+    reviewing = awaiting_anonymization_review(job)
     resources = (
         resource_wait
         if resource_wait is not None
         and resource_wait.job_manifest_checksum == job.job_manifest_checksum
-        and (job.status == JobStatus.QUEUED or awaiting_finalize(job))
+        and not reviewing
+        and (job.status == JobStatus.QUEUED or awaiting_finalize(job) or awaiting_reviewed_preview(job))
         else None
+    )
+    # Snapshot chờ tài nguyên chỉ do worker đang sống ghi, nên job đó đã có máy xét và không thiếu runtime.
+    runtime_pending = (
+        runtime_wait
+        and resources is None
+        and not waiting
+        and not reviewing
+        and (job.status == JobStatus.QUEUED or awaiting_finalize(job) or awaiting_reviewed_preview(job))
     )
     stages: list[StageProgress] = []
     for stage_id in pipeline:
@@ -188,13 +279,19 @@ def job_progress(
                 state = "waiting"
             elif resources is not None and state == "running":
                 state = "pending"
+        if reviewing and stage_id == StageId.FRAME_EXTRACT:
+            # Frame đã tách và che xong nhưng bước này chưa khép lại: đang chờ người dùng xem bản đã che.
+            state = "waiting"
+        if stage_id == job.current_stage and state in {"failed", "cancelled"} and completed_at is None:
+            completed_at = terminal_at
         stages.append(
             StageProgress(
                 stage_id=stage_id,
                 state=state,
-                started_at=stage_starts.get(stage_id),
+                started_at=(record.started_at if record is not None else None) or stage_starts.get(stage_id),
                 completed_at=completed_at,
                 error=error,
+                note=(notes or {}).get(stage_id),
             )
         )
     base_updated = resources.checked_at if resources else (events[-1].recorded_at if events else job.started_at)
@@ -213,9 +310,22 @@ def job_progress(
         completed_at=job.completed_at,
         stages=stages,
         preview_ready=preview_ready,
-        waiting_for="metric_confirmation" if waiting else ("resources" if resources else None),
+        waiting_for=(
+            "metric_confirmation"
+            if waiting
+            else (
+                "anonymization_review"
+                if reviewing
+                else ("runtime" if runtime_pending else ("resources" if resources else None))
+            )
+        ),
         resource_wait=resources,
-        queue=queue if job.status == JobStatus.QUEUED or awaiting_finalize(job) else None,
+        queue=(
+            queue
+            if not reviewing
+            and (job.status == JobStatus.QUEUED or awaiting_finalize(job) or awaiting_reviewed_preview(job))
+            else None
+        ),
         error=failure if job.status == JobStatus.FAILED else None,
     )
 

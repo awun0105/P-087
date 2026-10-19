@@ -1,11 +1,11 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { restoreProcessing, useProcessingForm } from "@/features/studio/useProcessingForm";
-import { evaluateProcessing, getProcessingOptions } from "@/lib/api/studio";
+import { evaluateProcessing, getProcessingOptions, suggestProcessingPreset } from "@/lib/api/studio";
 import { ApiError } from "@/lib/api/client";
 import type { ProcessingOptions } from "@/lib/contracts/studio";
 
-vi.mock("@/lib/api/studio", () => ({ getProcessingOptions: vi.fn(), evaluateProcessing: vi.fn() }));
+vi.mock("@/lib/api/studio", () => ({ getProcessingOptions: vi.fn(), evaluateProcessing: vi.fn(), suggestProcessingPreset: vi.fn() }));
 const evaluation: ProcessingOptions["default_evaluation"] = { blocking: false, resources: [], parameters: [], note: "fixture" };
 const options: ProcessingOptions = {
   profile_id: "fixture",
@@ -16,6 +16,57 @@ const options: ProcessingOptions = {
 };
 beforeEach(() => { vi.resetAllMocks(); vi.mocked(getProcessingOptions).mockResolvedValue({ ok: true, data: options }); vi.mocked(evaluateProcessing).mockResolvedValue({ ok: true, data: evaluation }); });
 describe("thông số nháp và evaluation hiện hành", () => {
+  it("debounces edits for 300 ms after the last change and aborts an older evaluation", async () => {
+    vi.useFakeTimers();
+    const hook = renderHook(() => useProcessingForm(true));
+    try {
+      await act(async () => { await Promise.resolve(); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      expect(hook.result.current.values).toEqual({ frames: 10 });
+      vi.mocked(evaluateProcessing).mockClear();
+      act(() => hook.result.current.setValue("frames", 20));
+      await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+      expect(evaluateProcessing).not.toHaveBeenCalled();
+      act(() => hook.result.current.setValue("frames", 30));
+      await act(async () => { await vi.advanceTimersByTimeAsync(299); });
+      expect(evaluateProcessing).not.toHaveBeenCalled();
+      await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+      expect(evaluateProcessing).toHaveBeenCalledTimes(1);
+      expect(evaluateProcessing).toHaveBeenLastCalledWith({ frames: 30 }, expect.any(AbortSignal));
+      const signal = vi.mocked(evaluateProcessing).mock.calls[0][1]!;
+      act(() => hook.result.current.setValue("frames", 40));
+      expect(signal.aborted).toBe(true);
+      await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+      expect(evaluateProcessing).toHaveBeenCalledTimes(2);
+      expect(evaluateProcessing).toHaveBeenLastCalledWith({ frames: 40 }, expect.any(AbortSignal));
+    } finally {
+      hook.unmount();
+      vi.useRealTimers();
+    }
+  });
+  it("manual edits cancel a pending suggestion so a late response cannot overwrite them", async () => {
+    let resolve!: (value: Awaited<ReturnType<typeof suggestProcessingPreset>>) => void;
+    vi.mocked(suggestProcessingPreset).mockImplementation(() => new Promise((done) => { resolve = done; }));
+    const hook = renderHook(() => useProcessingForm(true));
+    await waitFor(() => expect(hook.result.current.values).toEqual({ frames: 10 }));
+    const preferences = { input_type: "video_continuous", environment: "indoor", subject_scope: "full_room", target_capacity: "balanced" } as const;
+    let request!: Promise<void>;
+    act(() => { request = hook.result.current.applyScenario(preferences); });
+    expect(hook.result.current.suggesting).toBe(true);
+    act(() => hook.result.current.setValue("frames", 27));
+    await act(async () => { resolve({ ok: true, data: { preset_name: "video_indoor_walkthrough", params: { frames: 40 }, evaluation } }); await request; });
+    expect(hook.result.current.values).toEqual({ frames: 27 });
+    expect(hook.result.current.scenarioPreset).toBeNull();
+  });
+  it("applies a validated scenario and its evaluation together", async () => {
+    vi.mocked(suggestProcessingPreset).mockResolvedValue({ ok: true, data: { preset_name: "video_single_object", params: { frames: 40 }, evaluation } });
+    const hook = renderHook(() => useProcessingForm(true));
+    await waitFor(() => expect(hook.result.current.values).toEqual({ frames: 10 }));
+    await act(async () => { await hook.result.current.applyScenario({ input_type: "video_loop_360", environment: "outdoor", subject_scope: "single_object", target_capacity: "balanced" }); });
+    expect(hook.result.current.values).toEqual({ frames: 40 });
+    expect(hook.result.current.scenarioPreset).toBe("video_single_object");
+    expect(hook.result.current.evaluation).toEqual(evaluation);
+  });
   it("chỉ phục hồi tham số còn trong schema và đúng range/type", () => {
     expect(restoreProcessing(options, { frames: 25, retired: 10 })).toEqual({ frames: 25 });
     for (const frames of [101, 1.5, "50"]) expect(restoreProcessing(options, { frames })).toEqual({ frames: 10 });
@@ -41,5 +92,46 @@ describe("thông số nháp và evaluation hiện hành", () => {
     act(() => hook.result.current.retry());
     await waitFor(() => expect(hook.result.current.evaluation).toEqual(evaluation));
     expect(hook.result.current.values).toEqual({ frames: 30 });
+  });
+});
+
+const reviewOptions: ProcessingOptions = {
+  ...options,
+  parameters: [
+    ...options.parameters,
+    { key: "scene.geometry_review", group: "scene", label: "Duyệt tách vật", description: "", kind: "choice", min: null, max: null, step: null, unit: null, choices: [{ value: "required", label: "Dừng" }, { value: "auto", label: "Tạo mesh ngay" }] },
+  ],
+  presets: {
+    minimum_quality: { frames: 10, "scene.geometry_review": "required" },
+    maximum: { frames: 100, "scene.geometry_review": "required" },
+    machine_maximum: { frames: 100, "scene.geometry_review": "required" },
+  },
+};
+
+describe("lựa chọn duyệt tách vật trong hook", () => {
+  it("giữ đánh dấu preset khi đổi lựa chọn duyệt, và giữ lựa chọn đó khi đổi preset", async () => {
+    vi.mocked(getProcessingOptions).mockResolvedValue({ ok: true, data: reviewOptions });
+    const hook = renderHook(() => useProcessingForm(true));
+    await waitFor(() => expect(hook.result.current.values).toEqual({ frames: 10, "scene.geometry_review": "required" }));
+    expect(hook.result.current.activePreset).toBe("minimum_quality");
+    act(() => hook.result.current.setValue("scene.geometry_review", "auto"));
+    expect(hook.result.current.activePreset).toBe("minimum_quality");
+    act(() => hook.result.current.applyPreset("machine_maximum"));
+    expect(hook.result.current.values).toEqual({ frames: 100, "scene.geometry_review": "auto" });
+    expect(hook.result.current.activePreset).toBe("machine_maximum");
+    act(() => hook.result.current.setValue("frames", 50));
+    expect(hook.result.current.activePreset).toBeNull();
+  });
+
+  it("kịch bản không ghi đè lựa chọn duyệt tách vật người dùng đã chọn", async () => {
+    vi.mocked(getProcessingOptions).mockResolvedValue({ ok: true, data: reviewOptions });
+    vi.mocked(suggestProcessingPreset).mockResolvedValue({ ok: true, data: { preset_name: "video_single_object", params: { frames: 40, "scene.geometry_review": "required" }, evaluation } });
+    const hook = renderHook(() => useProcessingForm(true));
+    await waitFor(() => expect(hook.result.current.values).toEqual({ frames: 10, "scene.geometry_review": "required" }));
+    act(() => hook.result.current.setValue("scene.geometry_review", "auto"));
+    await act(async () => { await hook.result.current.applyScenario({ input_type: "video_loop_360", environment: "outdoor", subject_scope: "single_object", target_capacity: "balanced" }); });
+    expect(hook.result.current.values).toEqual({ frames: 40, "scene.geometry_review": "auto" });
+    expect(hook.result.current.scenarioPreset).toBe("video_single_object");
+    expect(hook.result.current.evaluation).toEqual(evaluation);
   });
 });

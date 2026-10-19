@@ -295,6 +295,21 @@ const initFileHandler = (scene: Scene, events: Events, dropTarget: HTMLElement) 
             const filenames = files.map(f => f.filename.toLowerCase());
 
             const mainFile = files[findMainIndex(filenames)];
+            const membershipChecksum = new URL(window.location.href).searchParams.get('membershipSource');
+            if (membershipChecksum) {
+                const expectedUrl = new URL(window.location.href).searchParams.get('load');
+                if (files.length !== 1 || mainFile.url !== expectedUrl || !mainFile.filename.endsWith('.ply')) {
+                    throw new Error('Membership selection accepts only its immutable source PLY');
+                }
+                const response = await fetch(mainFile.url);
+                if (!response.ok) throw new Error(`Source PLY HTTP ${response.status}`);
+                const payload = await response.arrayBuffer();
+                const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', payload));
+                const checksum = `sha256:${[...digest].map(v => v.toString(16).padStart(2, '0')).join('')}`;
+                if (checksum !== membershipChecksum) throw new Error('Membership source PLY checksum mismatch');
+                mainFile.contents = new File([payload], mainFile.filename);
+            }
+
             const baseUrl = mainFile.url ? new URL('.', new URL(mainFile.url, window.location.href)).href : undefined;
 
             // Create file system with all local files, falling back to URL loading
@@ -319,6 +334,7 @@ const initFileHandler = (scene: Scene, events: Events, dropTarget: HTMLElement) 
                 // user cancelled the load
                 return null;
             }
+            model.resource.membershipSourceChecksum = membershipChecksum;
             model.resource.fileSources = fileSystem.sources;
             await scene.add(model);
             return model;

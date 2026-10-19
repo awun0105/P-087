@@ -1,4 +1,7 @@
+import { SelectOp } from './edit-ops';
 import { Events } from './events';
+import { selectedSourceRows } from './source-selection';
+import type { Splat } from './splat';
 
 const IS_SCENE_DIRTY = 'supersplat:is-scene-dirty';
 const NAVIGATE_HOME = 'supersplat:navigate-home';
@@ -27,6 +30,34 @@ const registerIframeApi = (events: Events) => {
             return;
         }
 
+        if (event.origin === window.location.origin && event.source === window.parent && event.data?.type === 'supersplat:source-selection') {
+            const { requestId, checksum, rowCount } = event.data;
+            try {
+                const rows = selectedSourceRows(events.invoke('scene.allSplats') as Splat[], checksum, rowCount);
+                source.postMessage({ type: 'supersplat:source-selection', requestId, checksum, rows }, event.origin);
+            } catch (cause) {
+                source.postMessage({ type: 'supersplat:source-selection', requestId, error: String(cause) }, event.origin);
+            }
+        }
+        if (event.origin === window.location.origin && event.source === window.parent && event.data?.type === 'supersplat:source-highlight') {
+            const layers = events.invoke('scene.allSplats') as Splat[];
+            const { checksum, rowCount, rows } = event.data;
+            try {
+                selectedSourceRows(layers, checksum, rowCount);
+                if (!Array.isArray(rows) || rows.length > 250000 || rows.some(row => !Number.isInteger(row) || row < 0 || row >= rowCount)) return;
+                const wanted = new Set<number>(rows);
+                const splat = layers[0];
+                const { resource, instances } = splat;
+                const mask = new Uint8Array(instances.count);
+                for (let i = 0; i < instances.count; i++) {
+                    const row = instances.sourceRow[i];
+                    if (wanted.has(resource.sourceFileRows ? resource.sourceFileRows[row] : row)) mask[i] = 255;
+                }
+                events.fire('edit.add', new SelectOp(splat, 'set', mask));
+            } catch (cause) {
+                source.postMessage({ type: 'supersplat:source-selection', error: String(cause) }, event.origin);
+            }
+        }
         if (isSceneDirtyQuery(event.data)) {
             const response: IsSceneDirtyResponse = {
                 type: IS_SCENE_DIRTY,

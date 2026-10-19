@@ -1,11 +1,6 @@
-"""So sánh ba hướng khôi phục tỉ lệ trên cùng một video (ADR 0004 §5, demo Aisle_CW).
+"""Số liệu hiển thị của đề xuất tự động, bản xác nhận REC-06 và LiDAR.
 
-- RGB only (MoGe-2 → ColmapSparseDepthProjector → RobustScaleAligner, ADR 0001 §2 P1): chưa
-  triển khai — chỉ mô tả luồng, **không có số** (không điền số giả).
-- Anchor người dùng: transform của bản xác nhận REC-06 (A/B + 3 điểm sàn).
-- LiDAR: phép đồng dạng SfM → world từ căn chỉnh quỹ đạo (REC-09, GT-assisted).
-
-Chỉ đọc artifact đã có và tính số liệu hiển thị; không xác nhận hay publish gì.
+Port bổ sung đề xuất và nguồn số đo từ artifact; hàm này chỉ tính transform/camera, không publish.
 """
 
 import math
@@ -22,21 +17,23 @@ from src.services.reconstruction.rgb.canonical.metric_math import SimilarityTran
 Vector3 = tuple[FiniteFloat, FiniteFloat, FiniteFloat]
 
 RGB_ONLY_STEPS = (
-    "MoGe-2 dự đoán bản đồ độ sâu theo mét cho từng ảnh",
-    "Chiếu điểm COLMAP lên ảnh để ghép cặp độ sâu SfM ↔ độ sâu MoGe",
-    "Giải tỉ lệ thuần (không dịch) bằng median/least-squares, gắn nhãn ESTIMATED",
+    "Ước lượng độ sâu từ các ảnh của video",
+    "Đối chiếu với mô hình 3D để tìm tỉ lệ mét",
+    "Tạo đề xuất tỉ lệ để kiểm tra trước khi xác nhận",
 )
 
 
 class ModeResult(ContractModel):
-    """Kết quả một hướng; `available=False` khi hướng đó chưa chạy cho scene này."""
+    """Số liệu và trạng thái của một nguồn tỉ lệ, đọc từ artifact của job."""
 
     mode: Literal["rgb_only", "user_anchor", "lidar"]
     title: str
-    status: Literal["mock", "measured", "missing"]
+    status: Literal["estimated", "confirmed", "measured", "missing"]
     note: str
     steps: list[str] = []
     scale_m_per_sfm_unit: FiniteFloat | None = None
+    relative_uncertainty: FiniteFloat | None = None
+    frames_used: int | None = None
     camera_height_mean_m: FiniteFloat | None = None
     camera_height_range_m: tuple[FiniteFloat, FiniteFloat] | None = None
 
@@ -82,9 +79,9 @@ def compare_modes(
     modes = [
         ModeResult(
             mode="rgb_only",
-            title="RGB only (tự ước lượng)",
-            status="mock",
-            note="Mô phỏng · P1 chưa triển khai: cần MoGe-2 trên GPU; scene giữ đơn vị tùy ý.",
+            title="MoGe-2 · Ước lượng tự động",
+            status="missing",
+            note="Job này chưa có đề xuất MoGe-2. Có thể dùng khoảng cách đo ngoài đời để xác nhận tỉ lệ.",
             steps=list(RGB_ONLY_STEPS),
         )
     ]
@@ -95,9 +92,9 @@ def compare_modes(
         modes.append(
             ModeResult(
                 mode="user_anchor",
-                title="Anchor người dùng",
-                status="measured",
-                note="Tỉ lệ từ đoạn A–B, sàn từ 3 điểm người dùng chọn trên 3DGS.",
+                title="Kết quả đã xác nhận",
+                status="confirmed",
+                note="Khoảng cách do người dùng đo ngoài đời; mặt sàn từ các điểm đã chọn trên scene.",
                 scale_m_per_sfm_unit=user.scale_m_per_sfm_unit,
                 camera_height_mean_m=mean,
                 camera_height_range_m=span,
@@ -107,7 +104,7 @@ def compare_modes(
         modes.append(
             ModeResult(
                 mode="user_anchor",
-                title="Anchor người dùng",
+                title="Kết quả đã xác nhận",
                 status="missing",
                 note="Chưa xác nhận tỉ lệ mét cho scene này.",
             )

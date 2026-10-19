@@ -196,5 +196,5 @@ def test_geometry_quality_flags_only_camera_positions_the_mesh_occupies(store: _
 def test_geometry_quality_refuses_a_profile_that_differs_from_the_job(store: _Store) -> None:
     poses = store.put("metric_poses.json", {"poses": [{"translation": [0.0, 0.0, 1.0]}]})
     other = _profile_checksum(0, capsule_radius_m=9.0)
-    with pytest.raises(ValueError, match="khác bản đã dùng"):
+    with pytest.raises(quality.GeometryProfileMismatchError, match="khác bản đã dùng"):
         quality.geometry_quality(_collision(store), poses, (_PROFILE, other), store.resolve)

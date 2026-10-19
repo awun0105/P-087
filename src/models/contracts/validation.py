@@ -1,8 +1,9 @@
 """Preflight, candidate, validation and evaluation contracts."""
 
 from enum import StrEnum
+from typing import Literal, Self
 
-from pydantic import Field, JsonValue
+from pydantic import Field, FiniteFloat, JsonValue, model_validator
 
 from src.models.contracts.artifacts import (
     ArtifactRef,
@@ -15,12 +16,29 @@ from src.models.contracts.artifacts import (
 from src.models.contracts.coordinates import CoordinateSystem, Transform
 
 
+def _artifact_job_id(reference: ProductArtifactRef) -> str:
+    """Read the job identity from a validated logical artifact URI and check optional metadata."""
+    job_id = reference.artifact_uri.removeprefix("artifact://jobs/").partition("/")[0]
+    if reference.job_id is not None and reference.job_id != job_id:
+        raise ValueError("candidate artifact job_id must match its logical URI")
+    return job_id
+
+
 class RuleResult(StrEnum):
     """Result of a preflight or simulator validation rule."""
 
     PASS = "PASS"
     FAIL = "FAIL"
     ERROR = "ERROR"
+
+
+class CollisionObservationState(StrEnum):
+    """Evidence state for the space traversed by one configured validation pair."""
+
+    OBSERVED_STATIC = "observed_static"
+    UNOBSERVED = "unobserved"
+    INFERRED = "inferred"
+    MOTION_SUSPECTED = "motion_suspected"
 
 
 class PreflightRuleId(StrEnum):
@@ -32,6 +50,8 @@ class PreflightRuleId(StrEnum):
     OBJECT_OUT_OF_BOUNDS = "OBJECT_OUT_OF_BOUNDS"
     REQUIRED_ARTIFACT_MISSING = "REQUIRED_ARTIFACT_MISSING"
     OBJECT_CONFIRMATION_INCOMPLETE = "OBJECT_CONFIRMATION_INCOMPLETE"
+    REPRESENTATION_INCOMPLETE = "REPRESENTATION_INCOMPLETE"
+    COLLISION_SOURCE_COVERAGE = "COLLISION_SOURCE_COVERAGE"
 
 
 class PreflightRule(ContractModel):
@@ -78,6 +98,28 @@ class CandidateManifest(ContractModel):
     collider_refs: list[ProductArtifactRef]
     artifact_checksums: list[Checksum]
     build_config_checksum: Checksum
+    collision_source_ref: ProductArtifactRef | None = Field(default=None, exclude_if=lambda value: value is None)
+    collision_selection_ref: ProductArtifactRef | None = Field(default=None, exclude_if=lambda value: value is None)
+    object_aware_collision_ref: ProductArtifactRef | None = Field(default=None, exclude_if=lambda value: value is None)
+
+    @model_validator(mode="after")
+    def _validate_collision_source_pair(self) -> Self:
+        source_ref = self.collision_source_ref
+        selection_ref = self.collision_selection_ref
+        if self.object_aware_collision_ref is not None:
+            if self.object_aware_collision_ref.artifact_type != "ObjectAwareEnvironmentManifest":
+                raise ValueError("candidate object_aware_collision_ref must reference ObjectAwareEnvironmentManifest")
+            if source_ref is not None or selection_ref is not None:
+                raise ValueError("candidate object-aware and legacy collision selection are mutually exclusive")
+        if source_ref is None and selection_ref is None:
+            return self
+        if source_ref is None or selection_ref is None:
+            raise ValueError("candidate collision source and selection refs must be set together")
+        if selection_ref.artifact_type != "CollisionSourceSelection":
+            raise ValueError("candidate collision_selection_ref must reference CollisionSourceSelection")
+        if _artifact_job_id(source_ref) != _artifact_job_id(selection_ref):
+            raise ValueError("candidate collision source and selection must belong to the same job")
+        return self
 
 
 class CandidatePackage(ContractModel):
@@ -108,6 +150,54 @@ class ObservedPathResult(StrEnum):
     ERROR = "ERROR"
 
 
+class CollisionPathSupportEvidence(ContractModel):
+    """Coverage for one path, bound by the enclosing ValidationReport candidate checksum."""
+
+    pair_id: Identifier
+    state: CollisionObservationState
+    observation_ids: list[Identifier] = Field(default_factory=list)
+    coverage_fraction: FiniteFloat = Field(ge=0, le=1)
+    diagnostic_ref: ProductArtifactRef | None = None
+
+    @model_validator(mode="after")
+    def _observed_pair_has_evidence(self) -> Self:
+        if self.state == CollisionObservationState.OBSERVED_STATIC and (
+            not self.observation_ids or self.coverage_fraction <= 0 or self.diagnostic_ref is None
+        ):
+            raise ValueError("observed static path pair requires observations, measured coverage and a diagnostic ref")
+        if self.diagnostic_ref is not None and self.diagnostic_ref.artifact_type != "CollisionPathCoverageDiagnostic":
+            raise ValueError("diagnostic_ref must reference a CollisionPathCoverageDiagnostic artifact")
+        return self
+
+
+class CollisionPathCoverageDiagnostic(ContractModel):
+    """Persisted pair-level support evidence bound to a candidate and its collision QA report."""
+
+    artifact_type: Literal["CollisionPathCoverageDiagnostic"] = "CollisionPathCoverageDiagnostic"
+    schema_version: Literal["1.0"] = "1.0"
+    job_id: Identifier
+    candidate_checksum: Checksum
+    effective_collision_ref: ProductArtifactRef
+    collision_quality_ref: ProductArtifactRef
+    pair_id: Identifier
+    state: CollisionObservationState
+    observation_ids: list[Identifier] = Field(default_factory=list)
+    coverage_fraction: FiniteFloat = Field(ge=0, le=1)
+
+    @model_validator(mode="after")
+    def _validate_candidate_and_report_binding(self) -> Self:
+        if self.collision_quality_ref.artifact_type != "CollisionQualityReport":
+            raise ValueError("collision_quality_ref must reference a CollisionQualityReport artifact")
+        for reference in (self.effective_collision_ref, self.collision_quality_ref):
+            if _artifact_job_id(reference) != self.job_id:
+                raise ValueError("collision path coverage refs must belong to the diagnostic job")
+        if self.state == CollisionObservationState.OBSERVED_STATIC and (
+            not self.observation_ids or self.coverage_fraction <= 0
+        ):
+            raise ValueError("observed static path coverage requires observations and measured coverage")
+        return self
+
+
 class PathResult(ContractModel):
     """Observed result for one configured Start-Goal pair."""
 
@@ -126,8 +216,32 @@ class ValidationReport(ContractModel):
     environment_versions: dict[Identifier, str]
     checks: list[ValidationCheck] = Field(min_length=1)
     path_results: list[PathResult]
+    collision_quality_ref: ProductArtifactRef | None = Field(default=None, exclude_if=lambda value: value is None)
+    collision_path_support: list[CollisionPathSupportEvidence] = Field(
+        default_factory=list,
+        exclude_if=lambda value: not value,
+    )
     overall_result: RuleResult
     report_checksum: Checksum
+
+    @model_validator(mode="after")
+    def _unique_collision_path_support(self) -> Self:
+        if (
+            self.collision_quality_ref is not None
+            and self.collision_quality_ref.artifact_type != "CollisionQualityReport"
+        ):
+            raise ValueError("collision_quality_ref must reference a CollisionQualityReport artifact")
+        if self.collision_path_support and self.collision_quality_ref is None:
+            raise ValueError("collision path support requires its CollisionQualityReport ref")
+        if self.collision_quality_ref is not None:
+            quality_job_id = _artifact_job_id(self.collision_quality_ref)
+            for item in self.collision_path_support:
+                if item.diagnostic_ref is not None and _artifact_job_id(item.diagnostic_ref) != quality_job_id:
+                    raise ValueError("collision path diagnostic and quality report must belong to the same job")
+        pair_ids = [item.pair_id for item in self.collision_path_support]
+        if len(pair_ids) != len(set(pair_ids)):
+            raise ValueError("collision path support pair IDs must be unique")
+        return self
 
 
 class EvaluationSubjectType(StrEnum):

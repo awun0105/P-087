@@ -1,14 +1,30 @@
 """Unit tests cho SIM-04 Deterministic Preflight rules và engine."""
 
+import hashlib
 import json
+import math
 from pathlib import Path
 
 import pytest
+import trimesh
 
+from src.models.contracts.artifacts import ProductArtifactRef
+from src.models.contracts.collision_quality import seal_collision_source_selection
 from src.models.contracts.identity import verify_content_checksum
-from src.models.contracts.scene import SceneIR, SceneObjectState
+from src.models.contracts.scene import (
+    SceneIR,
+    SceneObjectOrigin,
+    SceneObjectState,
+    SourceCollisionMembership,
+    SourceCollisionRegion,
+)
 from src.models.contracts.validation import PreflightRuleId, RuleResult
 from src.services.simulation.preflight import run_preflight
+from src.services.simulation.preflight.rules import (
+    check_collision_source_coverage,
+    check_object_bounds,
+    check_transforms,
+)
 
 FIXTURES = Path(__file__).parents[2] / "fixtures"
 
@@ -18,6 +34,135 @@ def valid_scene() -> SceneIR:
     """Fixture SceneIR hợp lệ chuẩn."""
     payload = json.loads((FIXTURES / "scene_ir/scene.json").read_text(encoding="utf-8"))
     return SceneIR.model_validate(payload)
+
+
+def _artifact_ref(job_id: str, name: str, artifact_type: str, payload: bytes) -> ProductArtifactRef:
+    return ProductArtifactRef(
+        artifact_type=artifact_type,
+        schema_version="1.0",
+        artifact_uri=f"artifact://jobs/{job_id}/{name}",
+        artifact_checksum=f"sha256:{hashlib.sha256(payload).hexdigest()}",
+        data_class="derived",
+        producer_stage="ST-COLLIDER",
+        job_id=job_id,
+    )
+
+
+def _selected_collision_scene(
+    valid_scene: SceneIR,
+    artifact_root: Path,
+    *,
+    triangle_indices: list[int],
+) -> SceneIR:
+    job_id = valid_scene.environment.geometry_ref.job_id
+    assert job_id is not None
+    mesh = trimesh.Trimesh(
+        vertices=[(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)],
+        faces=[(0, 1, 2)],
+        process=False,
+    )
+    source_bytes = mesh.export(file_type="glb")
+    source_ref = _artifact_ref(job_id, "collision/selected.glb", "CollisionGeometry", source_bytes)
+
+    source_geometry_ref = ProductArtifactRef(
+        artifact_type="GeometryArtifact",
+        schema_version="1.0",
+        artifact_uri=f"artifact://jobs/{job_id}/geometry/source.ply",
+        artifact_checksum="sha256:" + "1" * 64,
+        data_class="derived",
+        producer_stage="ST-RGB-GEOMETRY",
+        job_id=job_id,
+    )
+    source_qa_ref = ProductArtifactRef(
+        artifact_type="CollisionSourceQA",
+        schema_version="1.0",
+        artifact_uri=f"artifact://jobs/{job_id}/collision/source-qa.json",
+        artifact_checksum="sha256:" + "2" * 64,
+        data_class="derived",
+        producer_stage="ST-COLLIDER",
+        job_id=job_id,
+    )
+    selection = seal_collision_source_selection(
+        schema_version="1.0",
+        mode="rgb_cleaned",
+        input_mode="rgb_metric_geometry",
+        source_geometry_ref=source_geometry_ref,
+        source_qa_ref=source_qa_ref,
+        profile_checksum="sha256:" + "3" * 64,
+        config_checksum="sha256:" + "4" * 64,
+        effective_resolution_m=0.05,
+        output_collision_ref=source_ref,
+    )
+    selection_bytes = selection.model_dump_json(indent=2).encode()
+    selection_ref = _artifact_ref(
+        job_id,
+        "collision/selection.json",
+        "CollisionSourceSelection",
+        selection_bytes,
+    )
+
+    original = valid_scene.objects[0]
+    membership = SourceCollisionMembership(
+        object_id=original.id,
+        source_geometry_ref=source_ref,
+        extraction_revision=valid_scene.scene_revision,
+        triangle_indices=triangle_indices,
+    )
+    membership_bytes = membership.model_dump_json(indent=2).encode()
+    membership_ref = _artifact_ref(
+        job_id,
+        f"collision/membership/{original.id}.json",
+        "SourceCollisionMembership",
+        membership_bytes,
+    )
+    source_transform = original.transform.model_copy(update={"parent_frame": "world", "local_frame": original.id})
+    region = SourceCollisionRegion(
+        object_id=original.id,
+        source_geometry_ref=source_ref,
+        extraction_revision=valid_scene.scene_revision,
+        source_transform=source_transform,
+        region_kind="triangle_indices",
+        region_ref=membership_ref,
+    )
+    owned_object = original.model_copy(update={"origin": SceneObjectOrigin.RECONSTRUCTED, "source_collision": region})
+    environment = valid_scene.environment.model_copy(
+        update={
+            "collider_ref": source_ref,
+            "collision_source_ref": source_ref,
+            "collision_selection_ref": selection_ref,
+        }
+    )
+    for reference, payload in (
+        (source_ref, source_bytes),
+        (selection_ref, selection_bytes),
+        (membership_ref, membership_bytes),
+    ):
+        path = artifact_root / reference.artifact_uri.removeprefix("artifact://")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(payload)
+    return valid_scene.model_copy(update={"environment": environment, "objects": [owned_object]})
+
+
+def test_collision_source_coverage_verifies_selected_mesh_membership(valid_scene: SceneIR, tmp_path: Path) -> None:
+    scene = _selected_collision_scene(valid_scene, tmp_path, triangle_indices=[0])
+
+    rule = check_collision_source_coverage(
+        scene,
+        artifact_resolver=lambda reference: tmp_path / reference.artifact_uri.removeprefix("artifact://"),
+    )
+
+    assert rule.result == RuleResult.PASS
+    assert rule.affected_object_ids == [scene.objects[0].id]
+    assert "không chứng minh" in (rule.remediation or "")
+
+
+def test_collision_source_coverage_rejects_triangle_outside_selected_mesh(valid_scene: SceneIR, tmp_path: Path) -> None:
+    scene = _selected_collision_scene(valid_scene, tmp_path, triangle_indices=[1])
+
+    rule = check_collision_source_coverage(scene, artifact_store_root=tmp_path)
+
+    assert rule.result == RuleResult.ERROR
+    assert "outside selected collision mesh" in (rule.remediation or "")
 
 
 def test_preflight_on_valid_scene_fixture_passes(valid_scene: SceneIR) -> None:
@@ -96,6 +241,74 @@ def test_preflight_fails_when_object_out_of_bounds(valid_scene: SceneIR) -> None
     rule = next(r for r in report.rules if r.rule_id == PreflightRuleId.OBJECT_OUT_OF_BOUNDS)
     assert rule.result == RuleResult.FAIL
     assert corrupt.objects[0].id in rule.affected_object_ids
+
+
+@pytest.mark.parametrize(
+    ("dimensions", "expected"),
+    [
+        ((2.0, 0.2, 0.4), RuleResult.FAIL),
+        ((0.2, 0.2, 0.4), RuleResult.PASS),
+    ],
+)
+def test_preflight_bounds_use_composed_rotated_box_collider(
+    valid_scene: SceneIR, dimensions: tuple[float, float, float], expected: RuleResult
+) -> None:
+    scene = valid_scene.model_copy(deep=True)
+    obj = scene.objects[0]
+    quarter_turn = (0.0, 0.0, math.sqrt(0.5), math.sqrt(0.5))
+    obj.transform = obj.transform.model_copy(
+        update={
+            "translation_xyz": (49.2, 0.0, 0.5),
+            "rotation_quaternion_xyzw": quarter_turn,
+        }
+    )
+    assert obj.collider is not None
+    local_transform = obj.collider.local_transform.model_copy(
+        update={
+            "translation_xyz": (0.5, 0.0, 0.0),
+            "rotation_quaternion_xyzw": quarter_turn,
+        }
+    )
+    obj.collider = obj.collider.model_copy(update={"dimensions_xyz_m": dimensions, "local_transform": local_transform})
+
+    rule = check_object_bounds(scene)
+
+    assert rule.result == expected
+    assert (obj.id in rule.affected_object_ids) is (expected == RuleResult.FAIL)
+
+
+def test_preflight_transform_rule_checks_local_collider_pose(valid_scene: SceneIR) -> None:
+    scene = valid_scene.model_copy(deep=True)
+    obj = scene.objects[0]
+    assert obj.collider is not None
+    local_transform = obj.collider.local_transform.model_copy(update={"rotation_quaternion_xyzw": (0.0, 0.0, 0.0, 0.5)})
+    obj.collider = obj.collider.model_copy(update={"local_transform": local_transform})
+
+    rule = check_transforms(scene)
+
+    assert rule.result == RuleResult.FAIL
+    assert obj.id in rule.affected_object_ids
+
+
+def test_preflight_manual_collider_override_checks_vertical_extent(valid_scene: SceneIR) -> None:
+    scene = valid_scene.model_copy(deep=True)
+    obj = scene.objects[0]
+    obj.transform = obj.transform.model_copy(update={"translation_xyz": (1.0, 2.0, 0.2)})
+    assert obj.collider is not None
+    local_transform = obj.collider.local_transform.model_copy(update={"translation_xyz": (0.0, 0.0, -0.11)})
+    collider = obj.collider.model_copy(
+        update={
+            "dimensions_xyz_m": (0.2, 0.2, 0.4),
+            "local_transform": local_transform,
+            "provenance": {**obj.collider.provenance, "manual_override": {"operation": "collider_edit"}},
+        }
+    )
+    obj.collider = collider
+
+    rule = check_object_bounds(scene)
+
+    assert rule.result == RuleResult.FAIL
+    assert obj.id in rule.affected_object_ids
 
 
 def test_preflight_fails_when_object_confirmation_incomplete(valid_scene: SceneIR) -> None:

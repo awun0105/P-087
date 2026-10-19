@@ -4,7 +4,7 @@ import { errorMessage } from "@/lib/ui-error";
 
 import { Canvas } from "@react-three/fiber";
 import { Grid, OrbitControls } from "@react-three/drei";
-import { Loader2 } from "lucide-react";
+import { Loader2, Maximize, RotateCcw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
@@ -12,8 +12,14 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { Notice } from "@/components/studio/primitives";
 import { requireEmbeddedGlb } from "@/features/viewer/GlbArtifact";
 import { MetricSceneView } from "@/features/studio/MetricSceneView";
-import { PlayCanvasScene, usePlayCanvasCapability } from "@/features/viewer/PlayCanvasScene";
-import { recordingCameraPose } from "@/features/viewer/source-frame";
+import {
+  INITIAL_RUNTIME,
+  PlayCanvasScene,
+  playCanvasErrorMessage,
+  usePlayCanvasCapability,
+  type ViewerControls,
+} from "@/features/viewer/PlayCanvasScene";
+import { recordingCameraPose, type SourceFrame } from "@/features/viewer/source-frame";
 import { themeColor } from "@/lib/theme";
 import { jobArtifactContentUrl } from "@/lib/api/endpoints";
 import { getStageViews } from "@/lib/api/studio";
@@ -61,7 +67,7 @@ export function StageViewer({ jobId, stageId, fallbackStageId }: { jobId: string
   return (
     <div className="flex size-full flex-col">
       {fallback.length > 0 && <Notice tone="ochre" className="shrink-0 rounded-none">Bản xác nhận tỉ lệ đã có, nhưng API chưa cung cấp 3DGS hệ mét (bản dẫn xuất xuất hiện khi worker hoàn tất hình học). Đang xem lại Gaussian gốc, đơn vị SfM; số đo đã xác nhận xem trong “Xem số đo & so sánh”.</Notice>}
-      <div className="flex flex-wrap gap-1 border-b border-line bg-paper-raised px-3 py-2" role="tablist" aria-label="Kết quả từng bước">
+      {available.length > 1 && <div className="flex flex-wrap gap-1 border-b border-line bg-paper-raised px-3 py-2" role="tablist" aria-label="Kết quả từng bước">
         {available.map((item, index) => (
           <button
             key={`${item.stage_id}-${item.kind}`}
@@ -77,10 +83,7 @@ export function StageViewer({ jobId, stageId, fallbackStageId }: { jobId: string
             {item.title}
           </button>
         ))}
-      </div>
-      <p className="border-b border-line bg-paper px-4 py-2 text-xs text-ink-muted">
-        {view.note} {view.unit === "meter" ? "Đơn vị: mét." : "Đơn vị: tùy ý (SfM)."}
-      </p>
+      </div>}
       <div className="relative min-h-0 flex-1 bg-viewport" role="tabpanel">
         {/* `key` buộc unmount lớp cũ để giải phóng GPU/listener trước khi nạp lớp mới. */}
         <StageLayer key={`${view.stage_id}-${view.kind}`} jobId={jobId} view={view} views={views} />
@@ -97,14 +100,17 @@ function StageLayer({ jobId, view, views }: { jobId: string; view: StageView; vi
   const mesh = views.find((item) => item.kind === "mesh");
   if (metric?.refs[0] && (view === metric || view === mesh)) {
     return (
-      <MetricSceneView
+      <><p className="absolute bottom-3 left-3 z-20 rounded-md bg-viewport-deep/90 px-3 py-1 text-xs text-on-dark">
+        Kết quả tái dựng trước khi chỉnh sửa vật thể
+      </p><MetricSceneView
         jobId={jobId}
         visual={metric.refs[0]}
         collision={mesh?.refs[0]}
+        reconstruction
         cameras={metric.cameras}
         defaultLayers={{ splat: true, collision: view === mesh, boxes: false }}
         lidarOverlay={metric.lidar_overlay ?? null}
-      />
+      /></>
     );
   }
   if (view.kind === "gaussian") {
@@ -170,13 +176,20 @@ function CamerasLayer({ view }: { view: StageView }) {
 
 function GaussianLayer({ jobId, view, cameras }: { jobId: string; view: StageView; cameras: StageView["cameras"] }) {
   const [capability, setCapability] = usePlayCanvasCapability();
+  const [runtime, setRuntime] = useState(INITIAL_RUNTIME);
+  const [viewerControls, setViewerControls] = useState<ViewerControls | null>(null);
+  const sourceFrame: SourceFrame = view.unit === "meter" ? "z_up" : "colmap";
+  const [wheelFactor, setWheelFactor] = useState(2);
   const fail = useCallback(() => setCapability("failed"), [setCapability]);
-  const frame = view.unit === "meter" ? "z_up" : "colmap";
-  const initialCamera = useMemo(() => recordingCameraPose(frame, cameras), [frame, cameras]);
+  const handleApp = useCallback((_app: unknown, controls?: ViewerControls) => {
+    setViewerControls(controls ?? null);
+  }, []);
+  const displayRotation = view.unit === "arbitrary" ? view.display_rotation_xyzw ?? undefined : undefined;
+  const initialCamera = useMemo(() => recordingCameraPose(sourceFrame, cameras, 60, displayRotation), [sourceFrame, cameras, displayRotation]);
   const ref = view.refs[0];
   if (!ref) return <Notice>Bước này chưa có file 3DGS.</Notice>;
   if (capability === "failed" || capability === "unavailable") {
-    return <p className="grid size-full place-items-center text-sm text-on-dark/80">Trình duyệt không render được 3DGS (cần WebGL2).</p>;
+    return <p className="grid size-full place-items-center text-sm text-on-dark/80">{playCanvasErrorMessage(capability)}</p>;
   }
   return (
     <PlayCanvasScene
@@ -187,8 +200,60 @@ function GaussianLayer({ jobId, view, cameras }: { jobId: string; view: StageVie
       mode="VISUAL"
       capability={capability}
       onFailed={fail}
-      sourceFrame={frame}
+      onRuntime={setRuntime}
+      sourceFrame={sourceFrame}
+      displayRotation={displayRotation}
+      cameras={cameras}
+      wheelFactor={wheelFactor}
       initialCamera={initialCamera}
+      initialCameraMode="fly"
+      onApp={handleApp}
+      extraControls={
+        <div
+          className="sse-buttonGroup flex items-center shrink-0 border border-line-dark"
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          <button
+            type="button"
+            className="sse-controlButton flex items-center justify-center text-on-dark/80 hover:text-on-dark transition-colors disabled:opacity-40"
+            onClick={() => viewerControls?.frameScene()}
+            disabled={!runtime.loaded}
+            title="Toàn cảnh (F)"
+            aria-label="Toàn cảnh"
+          >
+            <Maximize className="size-4" aria-hidden />
+          </button>
+          <button
+            type="button"
+            className="sse-controlButton flex items-center justify-center text-on-dark/80 hover:text-on-dark transition-colors disabled:opacity-40"
+            onClick={() => viewerControls?.resetCamera()}
+            disabled={!runtime.loaded}
+            title="Về vị trí ban đầu (R)"
+            aria-label="Về vị trí ban đầu"
+          >
+            <RotateCcw className="size-4" aria-hidden />
+          </button>
+          <div className="flex items-center gap-0.5 border-l border-line-dark px-1.5 text-xs text-on-dark/80">
+            <span className="text-[11px] text-on-dark/60 select-none mr-0.5">Zoom:</span>
+            {[1, 2, 4].map((factor) => (
+              <button
+                key={factor}
+                type="button"
+                onClick={() => setWheelFactor(factor)}
+                className={cn(
+                  "rounded px-1.5 py-0.5 text-xs transition-colors",
+                  wheelFactor === factor
+                    ? "bg-ember-soft text-ember-strong font-medium"
+                    : "text-on-dark/70 hover:text-on-dark hover:bg-on-dark/10",
+                )}
+                title={`Tốc độ zoom ${factor === 1 ? "chuẩn (×1)" : `nhanh (×${factor})`}`}
+              >
+                {factor}×
+              </button>
+            ))}
+          </div>
+        </div>
+      }
     />
   );
 }

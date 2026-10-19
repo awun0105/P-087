@@ -3,7 +3,6 @@
 import hashlib
 import json
 import math
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -12,6 +11,8 @@ from src.models.contracts.artifacts import ProductArtifactRef
 from src.models.contracts.identity import canonical_content_checksum
 from src.services.orchestration.artifacts.errors import ArtifactChecksumError
 from src.services.orchestration.artifacts.store import ArtifactResolver, FilesystemArtifactStore
+from src.services.process_control import ProcessTimeoutError
+from src.services.reconstruction.adapters import colmap_runtime
 from src.services.reconstruction.adapters.colmap import ColmapAdapter, ColmapDependencies, ColmapRequest
 from src.services.reconstruction.adapters.colmap_model import read_sparse_model, select_sparse_model
 from src.services.reconstruction.adapters.colmap_runtime import (
@@ -20,6 +21,7 @@ from src.services.reconstruction.adapters.colmap_runtime import (
     ColmapRuntimeSettings,
     reconstruction_commands,
 )
+from src.services.reconstruction.resume import ResumeCache
 from src.services.reconstruction.rgb.frames.frame_set import FrameSetResolver
 from src.services.reconstruction.rgb.pose.camera_pose import CameraPoseArtifact, ColmapConfig
 from src.services.reconstruction.rgb.pose.pose_publication import CameraPoseResolver
@@ -127,23 +129,46 @@ class FixtureProcess(ColmapProcess):
             raise ColmapError("COLMAP_PROCESS_FAILED", "fixture process failure")
         if arguments[0] == "mapper" and self.mode != "empty":
             for model in ("0", "2", "10"):
-                (workspace / "sparse" / model).mkdir()
+                directory = workspace / "sparse" / model
+                directory.mkdir()
+                (directory / "points3D.bin").write_bytes(f"fixture sparse model {model}".encode())
         if arguments[0] == "model_converter":
             directory = workspace / arguments[arguments.index("--output_path") + 1]
             sparse(directory, (0, 1) if directory.name == "0" else (0, 1, 2))
         return ""
 
 
-def adapter(root: Path, mode: str = "success") -> tuple[ColmapAdapter, ColmapRequest, CameraPoseResolver]:
+def adapter(
+    root: Path, mode: str = "success", resume: ResumeCache | None = None, attempt_id: str | None = None
+) -> tuple[ColmapAdapter, ColmapRequest, CameraPoseResolver]:
     """Full internal boundary với published fixture input."""
     frames, ref = frame_source(root / "source")
     resolver = ArtifactResolver(root / "store")
-    deps = ColmapDependencies(frames, FixtureProcess(mode), FilesystemArtifactStore(resolver), resolver.require)
+    deps = ColmapDependencies(frames, FixtureProcess(mode), FilesystemArtifactStore(resolver), resolver.require, resume)
     return (
         ColmapAdapter(deps),
-        ColmapRequest(ref, config(), root / "work", "rec03-fixture"),
+        ColmapRequest(ref, config(), root / "work", "rec03-fixture", attempt_id),
         CameraPoseResolver(resolver.require, frames),
     )
+
+
+def test_model_image_format_must_match_staged_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Accepting JPEG must not allow a sparse model to name absent images for PNG inputs."""
+    service, request, _ = adapter(tmp_path)
+    original = service.deps.process.run
+
+    def mismatched_names(arguments: list[str], workspace: Path) -> str:
+        result = original(arguments, workspace)
+        if arguments[0] == "model_converter":
+            path = workspace / arguments[arguments.index("--output_path") + 1] / "images.txt"
+            path.write_text(path.read_text().replace(".png", ".jpg"))
+        return result
+
+    monkeypatch.setattr(service.deps.process, "run", mismatched_names)
+    with pytest.raises(ColmapError) as error:
+        service.execute(request)
+    assert error.value.code == "COLMAP_ARTIFACT_INVALID"
+    assert not list((tmp_path / "store").rglob("camera_poses.json"))
 
 
 def test_largest_model_and_numeric_tie_break(tmp_path: Path) -> None:
@@ -207,9 +232,25 @@ def test_command_flags_and_explicit_config(prefixes: tuple[str, str]) -> None:
     assert f"--{prefixes[1]}.use_gpu" in commands[1]
     assert commands[1][commands[1].index("--SequentialMatching.loop_detection") + 1] == "0"
     assert "--SequentialMatching.vocab_tree_path" not in commands[1]
-    assert "--Mapper.random_seed" in commands[2]
+    assert commands[2][commands[2].index("--Mapper.random_seed") + 1] == str(config().random_seed)
     with pytest.raises(ValueError):
         config(min_registered_ratio=0)
+
+
+def test_colmap_use_gpu_command_flags() -> None:
+    gpu_cfg = config(use_gpu=True)
+    prefixes = ("SiftExtraction", "SiftMatching")
+    commands = reconstruction_commands(gpu_cfg, prefixes)
+    assert [command[0] for command in commands] == ["feature_extractor", "sequential_matcher", "mapper"]
+    # feature_extractor có "1" ngay sau --SiftExtraction.use_gpu
+    fe_cmd = commands[0]
+    assert fe_cmd[fe_cmd.index(f"--{prefixes[0]}.use_gpu") + 1] == "1"
+    # sequential_matcher có "1" ngay sau --SiftMatching.use_gpu
+    sm_cmd = commands[1]
+    assert sm_cmd[sm_cmd.index(f"--{prefixes[1]}.use_gpu") + 1] == "1"
+    # mapper không chứa cờ use_gpu
+    mapper_cmd = commands[2]
+    assert not any("use_gpu" in arg for arg in mapper_cmd)
 
 
 def test_published_handoff_and_immutable_sources(tmp_path: Path) -> None:
@@ -234,6 +275,72 @@ def test_published_handoff_and_immutable_sources(tmp_path: Path) -> None:
         resolver.load(result.reference)
 
 
+def test_resume_cache_reuses_verified_colmap_and_recovers_from_corruption(tmp_path: Path) -> None:
+    resume = ResumeCache(tmp_path / "resume")
+    cold, cold_request, _ = adapter(tmp_path / "cold", resume=resume, attempt_id="cold")
+    cold_result = cold.execute(cold_request)
+    cold_checksums = {name: ref.artifact_checksum for name, ref in cold_result.artifact.sparse_files.items()}
+    assert any(command[0] == "mapper" for command in cold.deps.process.commands)
+
+    warm, warm_request, _ = adapter(tmp_path / "warm", resume=ResumeCache(tmp_path / "resume"), attempt_id="warm")
+    warm_result = warm.execute(warm_request)
+    assert not any(
+        command[0] in {"feature_extractor", "sequential_matcher", "mapper"} for command in warm.deps.process.commands
+    )
+    assert warm_result.artifact.poses == cold_result.artifact.poses
+    assert {name: ref.artifact_checksum for name, ref in warm_result.artifact.sparse_files.items()} == cold_checksums
+
+    assert cold_result.resume_key is not None
+    cached_points = resume._colmap(cold_result.resume_key) / "sparse/2/points3D.bin"
+    original = cached_points.read_bytes()
+    cached_points.write_bytes(bytes([original[0] ^ 1]) + original[1:])
+
+    recovered, recovered_request, _ = adapter(tmp_path / "recovered", resume=resume, attempt_id="recovered")
+    recovered_result = recovered.execute(recovered_request)
+    assert any(command[0] == "mapper" for command in recovered.deps.process.commands)
+    assert recovered_result.artifact.poses == cold_result.artifact.poses
+    assert {
+        name: ref.artifact_checksum for name, ref in recovered_result.artifact.sparse_files.items()
+    } == cold_checksums
+    assert list((tmp_path / "resume").glob(f".invalid-colmap-{cold_result.resume_key}-*"))
+
+    repaired, repaired_request, _ = adapter(tmp_path / "repaired", resume=resume, attempt_id="repaired")
+    repaired.execute(repaired_request)
+    assert not any(
+        command[0] in {"feature_extractor", "sequential_matcher", "mapper"}
+        for command in repaired.deps.process.commands
+    )
+
+
+def test_resume_store_failure_does_not_discard_verified_pose(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    resume = ResumeCache(tmp_path / "resume")
+
+    def fail_store(key: str, workspace: Path) -> None:
+        raise OSError("cache disk unavailable")
+
+    monkeypatch.setattr(resume, "store_colmap", fail_store)
+    service, request, resolver = adapter(tmp_path, resume=resume)
+    result = service.execute(request)
+
+    assert result.stage.status.value == "SUCCEEDED"
+    assert resolver.load(result.reference) == result.artifact
+
+
+def test_resume_restore_failure_falls_back_to_cold_colmap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    resume = ResumeCache(tmp_path / "resume")
+
+    def fail_restore(_key: str, _workspace: Path) -> bool:
+        raise OSError("cache disk unavailable")
+
+    monkeypatch.setattr(resume, "restore_colmap", fail_restore)
+    service, request, resolver = adapter(tmp_path, resume=resume)
+    result = service.execute(request)
+
+    assert any(command[0] == "mapper" for command in service.deps.process.commands)
+    assert result.stage.status.value == "SUCCEEDED"
+    assert resolver.load(result.reference) == result.artifact
+
+
 @pytest.mark.parametrize("mode", ["failed", "empty", "threshold"])
 def test_failure_does_not_publish_manifest(tmp_path: Path, mode: str) -> None:
     """Lỗi process/no-model/registration trả failed stage, không publish success manifest."""
@@ -250,14 +357,14 @@ def test_failure_does_not_publish_manifest(tmp_path: Path, mode: str) -> None:
 def test_real_process_boundary_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str) -> None:
     """Mock subprocess OS outcomes; prove adapter never swallows failure."""
 
-    def run(*args: object, **kwargs: object) -> subprocess.CompletedProcess:
+    def run(*args: object, **kwargs: object) -> int:
         if failure == "timeout":
-            raise subprocess.TimeoutExpired("colmap", 1)
+            raise ProcessTimeoutError("colmap")
         if failure == "missing":
             raise FileNotFoundError("private runtime path")
-        return subprocess.CompletedProcess(args, 7)
+        return 7
 
-    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(colmap_runtime, "_run_watched", run)
     process = ColmapProcess(ColmapRuntimeSettings(runtime_identity="fixture"))
     with pytest.raises(ColmapError) as error:
         process.run(["mapper"], tmp_path)
@@ -330,3 +437,148 @@ def test_missing_registration_policy_is_rejected() -> None:
     del payload["min_registered_ratio"]
     with pytest.raises(ValueError, match="min_registered_ratio"):
         ColmapConfig.model_validate(payload)
+
+
+def test_redacted_excerpt(tmp_path: Path) -> None:
+    from src.services.reconstruction.adapters.log_excerpt import redacted_excerpt
+
+    ws = tmp_path / "work"
+    ws.mkdir()
+    raw = f"Processing in {ws}/input\nError calling /usr/bin/colmap at /opt/tools/bin\nDone\n"
+    res = redacted_excerpt(raw, ws)
+    assert res == ["Processing in <workspace>/input", "Error calling <path> at <path>", "Done"]
+    assert redacted_excerpt("", ws) == []
+
+    # Test max_lines and max_bytes
+    many_lines = "\n".join(f"line {i}" for i in range(100))
+    res_lines = redacted_excerpt(many_lines, ws, max_lines=5)
+    assert len(res_lines) == 5
+    assert res_lines[-1] == "line 99"
+
+    res_bytes = redacted_excerpt(many_lines, ws, max_lines=5, max_bytes=20)
+    assert sum(len(line.encode("utf-8")) for line in res_bytes) <= 20
+
+
+def test_colmap_process_exit_codes_and_oom(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from src.models.contracts.retryability import classify_retryability
+
+    # 1. Sequential commands: log_excerpt only contains second command log
+    process = ColmapProcess(ColmapRuntimeSettings(runtime_identity="fixture"))
+    log_file = tmp_path / "process.log"
+
+    def run_first(*args: object, **kwargs: object) -> int:
+        with log_file.open("a") as f:
+            f.write("first command output\n")
+        return 0
+
+    monkeypatch.setattr(colmap_runtime, "_run_watched", run_first)
+    process.run(["feature_extractor"], tmp_path)
+
+    def run_second(*args: object, **kwargs: object) -> int:
+        with log_file.open("a") as f:
+            f.write(f"second command failed in {tmp_path}/data\n")
+        return 7
+
+    monkeypatch.setattr(colmap_runtime, "_run_watched", run_second)
+    with pytest.raises(ColmapError) as exc_info:
+        process.run(["exhaustive_matcher"], tmp_path)
+
+    err = exc_info.value
+    assert err.code == "COLMAP_PROCESS_FAILED"
+    stage = err.to_failed_stage()
+    assert stage.error is not None
+    assert "log_excerpt" in stage.error.details
+    excerpt = stage.error.details["log_excerpt"]
+    assert any("second command failed in <workspace>/data" in line for line in excerpt)
+    assert not any("first command output" in line for line in excerpt)
+    assert str(tmp_path) not in str(stage.error.details)
+
+    # 2. Exit -9 and 137 -> COLMAP_OUT_OF_MEMORY
+    for code in (-9, 137):
+        monkeypatch.setattr(colmap_runtime, "_run_watched", lambda *args, **kwargs: code)
+        with pytest.raises(ColmapError) as oom_info:
+            process.run(["mapper"], tmp_path)
+        assert oom_info.value.code == "COLMAP_OUT_OF_MEMORY"
+        failed = oom_info.value.to_failed_stage()
+        assert failed.error is not None
+        assert failed.error.retryable is True
+        assert classify_retryability("COLMAP_OUT_OF_MEMORY") is True
+
+    # 3. std::bad_alloc with exit 1 -> COLMAP_OUT_OF_MEMORY
+    def run_bad_alloc(*args: object, **kwargs: object) -> int:
+        with log_file.open("a") as f:
+            f.write("terminate called after throwing an instance of 'std::bad_alloc'\n")
+        return 1
+
+    monkeypatch.setattr(colmap_runtime, "_run_watched", run_bad_alloc)
+    with pytest.raises(ColmapError) as alloc_info:
+        process.run(["mapper"], tmp_path)
+    assert alloc_info.value.code == "COLMAP_OUT_OF_MEMORY"
+
+
+def test_colmap_no_model_diagnostics(tmp_path: Path) -> None:
+    service, request, _ = adapter(tmp_path)
+    orig_run = service.deps.process.run
+
+    def mock_run(arguments: list[str], workspace: Path) -> str:
+        if arguments[0] == "mapper":
+            with (workspace / "process.log").open("a") as f:
+                f.write(
+                    "Discarding reconstruction due to no initial pair\n"
+                    "Discarding reconstruction due to no initial pair\n"
+                    "Discarding reconstruction due to insufficient size\n"
+                )
+        return orig_run(arguments, workspace)
+
+    service.deps.process.run = mock_run  # type: ignore[method-assign]
+    service._models = lambda ws, ids: []  # type: ignore[assignment]
+
+    with pytest.raises(ColmapError) as no_model_info:
+        service.execute(request)
+
+    err = no_model_info.value
+    assert err.code == "COLMAP_NO_MODEL"
+    stage = err.to_failed_stage()
+    assert stage.error is not None
+    assert stage.error.retryable is False
+    assert stage.error.details["diagnostics"] == {"no_initial_pair": 2, "insufficient_size": 1}
+    assert "log_excerpt" in stage.error.details
+    assert str(tmp_path) not in str(stage.error.details)
+
+
+def test_colmap_registration_low_details(tmp_path: Path) -> None:
+    service, request, _ = adapter(tmp_path)
+    request = ColmapRequest(
+        request.frame_set,
+        config(min_registered_ratio=1.0, min_registered_frames=100),
+        request.workspace,
+        request.job_id,
+    )
+    with pytest.raises(ColmapError) as low_info:
+        service.execute(request)
+
+    assert low_info.value.code == "COLMAP_REGISTRATION_LOW"
+    stage = low_info.value.to_failed_stage()
+    assert stage.error is not None
+    assert "registered_frames" in stage.error.details
+    assert "input_frames" in stage.error.details
+    assert "min_registered_ratio" in stage.error.details
+    assert stage.error.details["registered_frames"] == 3
+    assert stage.error.details["input_frames"] == 4
+    assert stage.error.details["min_registered_ratio"] == 1.0
+
+
+def test_excerpt_keeps_tail_of_a_single_oversized_line_and_slices_log_by_bytes(tmp_path: Path) -> None:
+    from src.services.reconstruction.adapters.colmap_runtime import _log_since
+    from src.services.reconstruction.adapters.log_excerpt import redacted_excerpt
+
+    excerpt = redacted_excerpt("x" * 5000 + "END", tmp_path, max_bytes=100)
+    assert len(excerpt) == 1 and excerpt[0].endswith("END") and len(excerpt[0].encode()) <= 100
+
+    log = tmp_path / "process.log"
+    log.write_text("lệnh trước: đã xong\n", encoding="utf-8")
+    offset = log.stat().st_size
+    with log.open("a", encoding="utf-8") as handle:
+        handle.write("lệnh sau: lỗi\n")
+    assert _log_since(log, offset) == "lệnh sau: lỗi\n"
+    assert _log_since(tmp_path / "missing.log", 0) == ""

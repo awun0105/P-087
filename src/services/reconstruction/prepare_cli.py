@@ -27,6 +27,8 @@ from src.services.reconstruction.rgb.frames.frame_extraction import (
     FrameExtractionRequest,
     RGBFrameExtractor,
 )
+from src.services.reconstruction.rgb.frames.frame_sanitization import FrameSanitizer, subprocess_anonymizer
+from src.services.reconstruction.rgb.frames.manifest_frames import RGBManifestFrameAdapter, RGBManifestFrameSelection
 from src.services.reconstruction.rgb.preflight.ffmpeg_probe import FFmpegRGBProbe
 from src.services.reconstruction.rgb.preflight.privacy import SelfAttestedPrivacyGate
 from src.services.reconstruction.rgb.preflight.publication import ArtifactWriter, RGBPreflightPublisher
@@ -47,6 +49,8 @@ class PrepareDependencies:
     require: Callable[[ProductArtifactRef], Path]
     validator: RGBQualityValidator
     decoder: FFmpegFrameDecoder
+    #: None khi deployment không cấu hình anonymizer; request bật `anonymize` khi đó sẽ lỗi.
+    sanitizer: FrameSanitizer | None = None
 
 
 def frame_stride(accepted_count: int, target: int) -> int:
@@ -74,6 +78,19 @@ def extraction_config(stride: int) -> ExtractionConfig:
     return ExtractionConfig.model_validate(payload)
 
 
+def image_extraction_config() -> ExtractionConfig:
+    """Dataset images are already the extraction result; preserve every referenced source frame."""
+    payload: dict[str, object] = {
+        "schema_version": "1.0",
+        "mode": "image_refs",
+        "sampling_policy": "quality_accepted",
+        "timestamp_policy": "source_timestamp",
+        "config_checksum": "sha256:" + "0" * 64,
+    }
+    payload["config_checksum"] = canonical_content_checksum(payload, "config_checksum")
+    return ExtractionConfig.model_validate(payload)
+
+
 class VideoInputPreparer:
     """Một lần chuẩn bị cho một job; mỗi stage publish xong mới sang stage sau."""
 
@@ -85,24 +102,31 @@ class VideoInputPreparer:
         manifest = self._manifest(request)
         stages: list[StageArtifact] = []
         publisher = RGBPreflightPublisher(self.deps.writer)
+        input_started_at = datetime.now(UTC)
+        if manifest.source_type.value == "dataset":
+            return self._prepare_dataset(request, manifest, stages, publisher, input_started_at)
         try:
             video = self._video(manifest, request.quality_profile)
             quality = self.deps.validator.validate_video(video)
             quality_ref = publisher.publish_quality(quality, request.job_id)
-            stages.append(_succeeded(StageId.INPUT_VALIDATE, quality_ref))
+            stages.append(_succeeded(StageId.INPUT_VALIDATE, quality_ref, input_started_at))
         except RGBValidationError as error:
-            return self._failed(request, manifest, stages, error.to_execution_error())
+            return self._failed(request, manifest, stages, error.to_execution_error(), input_started_at)
         gate = SelfAttestedPrivacyGate()
+        privacy_started_at = datetime.now(UTC)
         try:
             proof = gate.issue(manifest, len(quality.selected_frame_ids))
             privacy_ref = publisher.publish_privacy(proof.report, request.job_id)
-            stages.append(_succeeded(StageId.PRIVACY_GATE, privacy_ref))
+            stages.append(_succeeded(StageId.PRIVACY_GATE, privacy_ref, privacy_started_at))
         except RGBValidationError as error:
             failure = error.to_execution_error().model_copy(update={"stage_id": StageId.PRIVACY_GATE})
-            return self._failed(request, manifest, stages, failure)
+            return self._failed(request, manifest, stages, failure, privacy_started_at)
         extractor = RGBFrameExtractor(
-            FrameExtractionDependencies(self.deps.writer, self.deps.resolve_uri, gate, self.deps.decoder)
+            FrameExtractionDependencies(
+                self.deps.writer, self.deps.resolve_uri, gate, self.deps.decoder, self.deps.require
+            )
         )
+        frame_started_at = datetime.now(UTC)
         try:
             # PTS thật của video → thời lượng; lỗi PTS là lỗi của stage tách frame.
             timestamps = [float(value) for value in self.deps.decoder.timestamps(video.path)]
@@ -110,19 +134,126 @@ class VideoInputPreparer:
             wanted = target_frames(duration, request.sample_fps, request.max_frames)
             stride = frame_stride(len(quality.effective_reconstruction_frame_ids), wanted)
             extracted = extractor.execute(
-                FrameExtractionRequest(manifest, quality, proof, extraction_config(stride), request.job_id)
+                FrameExtractionRequest(
+                    manifest,
+                    quality,
+                    proof,
+                    extraction_config(stride),
+                    request.job_id,
+                    video_preparation=manifest.video_preparation,
+                )
             )
         except FrameExtractionError as error:
-            stages.append(error.to_failed_stage())
+            stages.append(error.to_failed_stage().model_copy(update={"started_at": frame_started_at}))
             return self._failed(request, manifest, stages, error.to_execution_error())
-        stages.append(extracted.stage)
+        frame_stage, frame_set_ref = extracted.stage, extracted.reference
+        if request.anonymize:
+            try:
+                if self.deps.sanitizer is None:
+                    raise FrameExtractionError(
+                        "FRAME_ANONYMIZER_UNAVAILABLE",
+                        "Face/plate anonymization was requested but this worker has no anonymizer",
+                        "Configure the scene runtime and EgoBlur weights, or disable anonymization",
+                    )
+                frame_set_ref, _, _ = self.deps.sanitizer.sanitize(
+                    request.job_id, extracted.frame_set, extracted.reference
+                )
+            except FrameExtractionError as error:
+                stages.append(error.to_failed_stage().model_copy(update={"started_at": frame_started_at}))
+                return self._failed(request, manifest, stages, error.to_execution_error())
+            # Stage của job trỏ tới frame set đã che: các bước sau không còn ref tới frame gốc.
+            frame_stage = frame_stage.model_copy(
+                update={
+                    "artifact_uri": frame_set_ref.artifact_uri,
+                    "artifact_checksum": frame_set_ref.artifact_checksum,
+                    "completed_at": datetime.now(UTC),
+                }
+            )
+        stages.append(frame_stage.model_copy(update={"started_at": frame_started_at}))
+        return PrepareInputResult(
+            job_id=request.job_id,
+            input_manifest_checksum=manifest.input_manifest_checksum,
+            stage_artifacts=stages,
+            frame_set_ref=frame_set_ref,
+            frame_stride=stride,
+            video_duration_seconds=duration,
+            selected_frame_count=len(quality.selected_frame_ids),
+            extracted_frame_count=len(extracted.frame_set.frames),
+        )
+
+    def _prepare_dataset(self, request, manifest, stages, publisher, input_started_at):
+        """Use declared dataset image refs as extracted frames; never decode the composed input MP4."""
+        files = [file for file in manifest.files if file.media_type in {"image/png", "image/jpeg"}]
+        videos = [file for file in manifest.files if file.media_type in _VIDEO_MEDIA_TYPES]
+        supported_count = len(files) + len(videos)
+        if len(files) < 2 or len(videos) > 1 or supported_count != len(manifest.files):
+            return self._failed(
+                request,
+                manifest,
+                stages,
+                ExecutionError(
+                    error_code="RGB_INPUT_SHAPE_UNSUPPORTED",
+                    stage_id=StageId.INPUT_VALIDATE,
+                    human_message="Dataset preparation expects at least two PNG or JPEG frames",
+                    retryable=False,
+                    details={
+                        "action": "Declare ordered dataset images and at most one composed MP4 in the InputManifest"
+                    },
+                ),
+                input_started_at,
+            )
+        try:
+            selection = RGBManifestFrameSelection(
+                manifest=manifest,
+                frame_ids=tuple(range(len(files))),
+                selection_checksum=manifest.dataset_manifest_checksum or manifest.input_manifest_checksum,
+                profile=request.quality_profile,
+            )
+            quality = self.deps.validator.validate(
+                RGBManifestFrameAdapter(self.deps.resolve_uri).build_request(selection)
+            )
+            quality_ref = publisher.publish_quality(quality, request.job_id)
+            stages.append(_succeeded(StageId.INPUT_VALIDATE, quality_ref, input_started_at))
+        except RGBValidationError as error:
+            return self._failed(request, manifest, stages, error.to_execution_error(), input_started_at)
+        privacy_started_at = datetime.now(UTC)
+        gate = SelfAttestedPrivacyGate()
+        try:
+            proof = gate.issue(manifest, len(quality.selected_frame_ids))
+            privacy_ref = publisher.publish_privacy(proof.report, request.job_id)
+            stages.append(_succeeded(StageId.PRIVACY_GATE, privacy_ref, privacy_started_at))
+        except RGBValidationError as error:
+            failure = error.to_execution_error().model_copy(update={"stage_id": StageId.PRIVACY_GATE})
+            return self._failed(request, manifest, stages, failure, privacy_started_at)
+        frame_started_at = datetime.now(UTC)
+        extractor = RGBFrameExtractor(
+            FrameExtractionDependencies(
+                self.deps.writer, self.deps.resolve_uri, gate, self.deps.decoder, self.deps.require
+            )
+        )
+        try:
+            timestamps = {index: str(index / request.sample_fps) for index in range(len(files))}
+            extracted = extractor.execute(
+                FrameExtractionRequest(
+                    manifest,
+                    quality,
+                    proof,
+                    image_extraction_config(),
+                    request.job_id,
+                    timestamps=timestamps,
+                )
+            )
+        except FrameExtractionError as error:
+            stages.append(error.to_failed_stage().model_copy(update={"started_at": frame_started_at}))
+            return self._failed(request, manifest, stages, error.to_execution_error())
+        stages.append(extracted.stage.model_copy(update={"started_at": frame_started_at}))
         return PrepareInputResult(
             job_id=request.job_id,
             input_manifest_checksum=manifest.input_manifest_checksum,
             stage_artifacts=stages,
             frame_set_ref=extracted.reference,
-            frame_stride=stride,
-            video_duration_seconds=duration,
+            frame_stride=1,
+            video_duration_seconds=(len(files) - 1) / request.sample_fps,
             selected_frame_count=len(quality.selected_frame_ids),
             extracted_frame_count=len(extracted.frame_set.frames),
         )
@@ -158,12 +289,14 @@ class VideoInputPreparer:
         manifest: InputManifest,
         stages: list[StageArtifact],
         error: ExecutionError,
+        stage_started_at: datetime | None = None,
     ) -> PrepareInputResult:
         if not any(stage.stage_id == error.stage_id and stage.status == "FAILED" for stage in stages):
             stages.append(
                 StageArtifact(
                     stage_id=error.stage_id,
                     status=StageStatus.FAILED,
+                    started_at=stage_started_at,
                     completed_at=datetime.now(UTC),
                     error=error,
                 )
@@ -177,7 +310,7 @@ class VideoInputPreparer:
         )
 
 
-def _succeeded(stage_id: StageId, reference: ProductArtifactRef) -> StageArtifact:
+def _succeeded(stage_id: StageId, reference: ProductArtifactRef, started_at: datetime) -> StageArtifact:
     return StageArtifact(
         stage_id=stage_id,
         status=StageStatus.SUCCEEDED,
@@ -185,6 +318,7 @@ def _succeeded(stage_id: StageId, reference: ProductArtifactRef) -> StageArtifac
         artifact_uri=reference.artifact_uri,
         artifact_checksum=reference.artifact_checksum,
         data_class=ArtifactDataClass.DERIVED,
+        started_at=started_at,
         completed_at=datetime.now(UTC),
     )
 
@@ -217,12 +351,27 @@ def _execute(args: argparse.Namespace) -> int:
 
     request = PrepareInputRequest.model_validate_json(args.request.read_bytes())
     resolver = ArtifactResolver(args.store_root)
+    writer = IdempotentWriter(FilesystemArtifactStore(resolver), resolver.require)
+    sanitizer = None
+    if request.anonymize:
+        from src.config import get_settings
+
+        settings = get_settings()
+        if settings.product_scene_runtime_python is not None and settings.product_egoblur_weights is not None:
+            sanitizer = FrameSanitizer(
+                writer,
+                resolver.require,
+                subprocess_anonymizer(settings.product_scene_runtime_python, settings.product_egoblur_weights),
+                # Kho ở đây là kho cục bộ của worker; file bị xóa trước khi runner đồng bộ lên kho từ xa.
+                discard=lambda reference: resolver.resolve(reference.artifact_uri).unlink(missing_ok=True),
+            )
     deps = PrepareDependencies(
-        writer=IdempotentWriter(FilesystemArtifactStore(resolver), resolver.require),
+        writer=writer,
         resolve_uri=resolver.resolve,
         require=resolver.require,
         validator=RGBQualityValidator(FFmpegRGBProbe()),
         decoder=FFmpegFrameDecoder(),
+        sanitizer=sanitizer,
     )
     result = VideoInputPreparer(deps).run(request)
     print(json.dumps({"result": result.model_dump(mode="json")}))

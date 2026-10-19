@@ -103,7 +103,7 @@ class FFmpegRGBProbe:
             return [self._line_motion(line) for line in output.read_text().splitlines() if line.startswith("Frame ")]
 
     def blur_scores(self, frames: tuple[RGBFrameAsset, ...], profile: RGBQualityProfile) -> list[float]:
-        """Decode mọi PNG đã chọn ở fixed grayscale resolution."""
+        """Decode mọi ảnh đã chọn ở fixed grayscale resolution."""
         with self._sequence(frames) as (pattern, directory):
             output = directory / "blur.txt"
             filt = self._filter_prefix(profile) + f",format=gray,blurdetect,metadata=print:file={output}"
@@ -126,6 +126,14 @@ class FFmpegRGBProbe:
 
     @staticmethod
     def _filter_prefix(profile: RGBQualityProfile) -> str:
+        if profile.measurement_orientation == "fit_oriented_bounds":
+            return (
+                "scale=w='if(gte(dar,1),min(iw,"
+                f"{profile.measurement_width}),min(iw,{profile.measurement_height}))':"
+                "h='if(gte(dar,1),min(ih,"
+                f"{profile.measurement_height}),min(ih,{profile.measurement_width}))':"
+                "force_original_aspect_ratio=decrease:force_divisible_by=2:flags=bicubic"
+            )
         return f"scale={profile.measurement_width}:{profile.measurement_height}:flags=bicubic"
 
     def _command(self, pattern: Path, filt: str) -> list[str]:
@@ -186,16 +194,40 @@ class FFmpegRGBProbe:
             return None
         return math.hypot(statistics.median(dx for dx, _ in vectors), statistics.median(dy for _, dy in vectors))
 
-    @staticmethod
     @contextmanager
-    def _sequence(frames: tuple[RGBFrameAsset, ...]) -> Iterator[tuple[Path, Path]]:
-        if not frames or any(frame.path.suffix.lower() != ".png" for frame in frames):
-            raise FFmpegProbeError("RGB frame probe requires a nonempty PNG sequence")
+    def _sequence(self, frames: tuple[RGBFrameAsset, ...]) -> Iterator[tuple[Path, Path]]:
+        suffixes = {frame.path.suffix.lower() for frame in frames}
+        if not frames or not suffixes <= {".png", ".jpg", ".jpeg"}:
+            raise FFmpegProbeError("RGB frame probe requires a nonempty PNG or JPEG sequence")
+        formats = {".jpg" if suffix == ".jpeg" else suffix for suffix in suffixes}
         with tempfile.TemporaryDirectory(prefix="rec02_probe_") as temp_name:
             directory = Path(temp_name)
+            suffix = next(iter(formats)) if len(formats) == 1 else ".ppm"
             for index, frame in enumerate(frames):
-                (directory / f"{index:06d}.png").symlink_to(frame.path.resolve())
-            yield directory / "%06d.png", directory
+                target = directory / f"{index:06d}{suffix}"
+                if len(formats) == 1:
+                    target.symlink_to(frame.path.resolve())
+                else:
+                    # FFmpeg image2 fixes one codec per sequence. Mixed inputs need decoded
+                    # analysis frames only; COLMAP/Brush still receive the original bytes.
+                    self._run(
+                        [
+                            self.binary,
+                            "-v",
+                            "error",
+                            "-xerror",
+                            "-threads",
+                            "1",
+                            "-i",
+                            str(frame.path),
+                            "-frames:v",
+                            "1",
+                            "-threads",
+                            "1",
+                            str(target),
+                        ]
+                    )
+            yield directory / f"%06d{suffix}", directory
 
     def _run(self, command: list[str]) -> subprocess.CompletedProcess[str]:
         try:

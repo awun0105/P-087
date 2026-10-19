@@ -10,7 +10,6 @@ import { type SourceFrame } from "@/features/viewer/source-frame";
 import { useNavigationGuard } from "@/features/shell/NavigationGuard";
 import { queryEditorDirty } from "@/features/studio/editor-dirty";
 import { HelpDetails } from "@/components/studio/feedback";
-import { cn } from "@/lib/cn";
 
 /**
  * Entry của SuperSplat editor đã build (`npm run build:editor` → public/editor).
@@ -160,7 +159,7 @@ function WebGlViewer({
   const [runtime, setRuntime] = useState(INITIAL_RUNTIME);
   const [showNotice, setShowNotice] = useState(false);
   const [viewerControls, setViewerControls] = useState<ViewerControls | null>(null);
-  const [sourceFrame, setSourceFrame] = useState<SourceFrame>("colmap");
+  const sourceFrame: SourceFrame = "colmap";
   const fail = useCallback(() => setCapability("failed"), [setCapability]);
   const handleApp = useCallback((_app: unknown, controls?: ViewerControls) => {
     setViewerControls(controls ?? null);
@@ -184,10 +183,10 @@ function WebGlViewer({
               {description && <p className="mt-1.5 mb-2.5 text-xs text-ink-muted leading-relaxed">{description}</p>}
 
               <HelpDetails title="Vì sao chỉ xem?">
-                <p>Editor yêu cầu WebGPU để hoạt động. Vui lòng kiểm tra các cài đặt sau:</p>
+                <p>Bản xem scene dùng WebGL2. Chỉ editor chỉnh Gaussian mới cần WebGPU; trình duyệt hiện chưa cung cấp adapter WebGPU nên đang mở chế độ chỉ xem.</p>
                 <ul className="mt-2 ml-4 list-disc space-y-1">
                   <li>Bật <b>Hardware Acceleration</b> trong cài đặt trình duyệt.</li>
-                  <li>Trên Chrome/Edge, copy đoạn này dán vào thanh địa chỉ: <code className="bg-paper-sunken px-1 rounded font-mono select-all text-ember-strong">chrome://flags/#enable-unsafe-webgpu</code>, chuyển sang <b>Enabled</b> rồi khởi động lại.</li>
+                  <li>Nếu muốn chỉnh Gaussian, dùng trình duyệt hỗ trợ WebGPU và truy cập qua HTTPS hoặc localhost.</li>
                 </ul>
               </HelpDetails>
             </div>
@@ -208,7 +207,9 @@ function WebGlViewer({
       </div>
       {failed ? (
         <div className="grid size-full place-items-center p-6 text-center text-sm text-on-dark/80" role="alert">
-          Không render được 3DGS: trình duyệt cần WebGL2 hoặc WebGPU và đủ bộ nhớ GPU.
+          {capability === "unavailable"
+            ? "Không render được bản xem 3DGS: trình duyệt cần WebGL2 và đủ bộ nhớ GPU."
+            : "Không thể tải mô hình 3DGS (lỗi tải file hoặc dữ liệu không hợp lệ)."}
         </div>
       ) : (
         <>
@@ -253,48 +254,6 @@ function WebGlViewer({
                 >
                   <RotateCcw className="size-4" aria-hidden />
                 </button>
-                <div className="flex items-center gap-1 border-l border-line-dark px-2 text-xs text-on-dark/80">
-                  <span className="text-[11px] text-on-dark/60 select-none">Trục:</span>
-                  <button
-                    type="button"
-                    className={cn(
-                      "rounded px-1.5 py-0.5 text-xs transition-colors",
-                      sourceFrame === "colmap"
-                        ? "bg-ember-soft text-ember-strong font-medium"
-                        : "text-on-dark/70 hover:text-on-dark",
-                    )}
-                    onClick={() => setSourceFrame("colmap")}
-                    title="COLMAP / Brush (Y hướng xuống, xoay 180° quanh Z)"
-                  >
-                    COLMAP
-                  </button>
-                  <button
-                    type="button"
-                    className={cn(
-                      "rounded px-1.5 py-0.5 text-xs transition-colors",
-                      sourceFrame === "z_up"
-                        ? "bg-ember-soft text-ember-strong font-medium"
-                        : "text-on-dark/70 hover:text-on-dark",
-                    )}
-                    onClick={() => setSourceFrame("z_up")}
-                    title="Chuẩn Z-up (Quay trục Z lên trên, sàn z=0)"
-                  >
-                    Z-up
-                  </button>
-                  <button
-                    type="button"
-                    className={cn(
-                      "rounded px-1.5 py-0.5 text-xs transition-colors",
-                      sourceFrame === "identity"
-                        ? "bg-ember-soft text-ember-strong font-medium"
-                        : "text-on-dark/70 hover:text-on-dark",
-                    )}
-                    onClick={() => setSourceFrame("identity")}
-                    title="Gốc (Không xoay trục)"
-                  >
-                    Gốc
-                  </button>
-                </div>
               </div>
             }
           />

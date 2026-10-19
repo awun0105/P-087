@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -16,6 +17,8 @@ from src.services.orchestration.processing.observed import (
     load_usages,
     numeric_params,
     observed_budget,
+    observed_for_config,
+    resource_observation_params,
 )
 from src.services.orchestration.processing.telemetry import ResourceUsage
 from src.services.orchestration.projects.models import JobCreateInput
@@ -162,6 +165,41 @@ def test_requeue_never_touches_a_job_that_is_not_failed_and_survives_errors(
     assert runner._requeue_if_exhausted(attempt) is None
 
 
+def test_scene_exhaustion_never_forces_a_pipeline_requeue_decision(tmp_path: Path) -> None:
+    """Hai lượt Tạo mesh hết bộ nhớ không được tính như hai lượt pipeline: job vẫn được xếp lại một lần."""
+    attempt = _failed_attempt(tmp_path)
+    _record_exhaustion(attempt)  # đúng một lượt pipeline hết bộ nhớ
+    for _ in range(2):
+        scene = _usage(
+            "scene.geometry", 1.0, 2.0, job_id=attempt.job.job_id, outcome="failed", exit_code=1, exhausted=True
+        )
+        runner._persist_usage(attempt, scene)
+    requeued = runner._requeue_if_exhausted(attempt)
+    assert requeued is not None and requeued.status == JobStatus.QUEUED
+
+
+def test_benchmark_timings_skip_scene_operations(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Bản ghi `scene.*` có config_checksum theo mode (khác cấu hình job) nên không vào thời gian của benchmark."""
+    from datetime import timedelta
+
+    from src.services.orchestration import benchmark
+
+    pipeline = _usage("preview", 1.0, 1.0, config_checksum="job-config", runtime_manifest_checksum="runtime-1")
+    scene = _usage("scene.geometry", 1.0, 1.0, config_checksum="scene-config", runtime_manifest_checksum="runtime-1")
+    monkeypatch.setattr(benchmark, "load_usages", lambda _database: [pipeline, scene])
+    registry = SimpleNamespace(persistence=SimpleNamespace(database=None))
+    timings = benchmark._tool_timings(
+        registry,
+        "job-a",
+        "job-config",
+        "runtime-1",
+        NOW - timedelta(hours=1),
+        NOW + timedelta(hours=1),
+        NOW + timedelta(hours=2),
+    )
+    assert [timing.tool for timing in timings] == ["preview"]
+
+
 def test_processing_seconds_counts_machine_time_only() -> None:
     """Thời gian xử lý = tổng các bước đã chạy xong; lượt lỗi và lượt chạy lại cũ không cộng dồn."""
     from datetime import timedelta
@@ -179,3 +217,105 @@ def test_processing_seconds_counts_machine_time_only() -> None:
         _usage("preview", 1.0, 1.0, duration_seconds=5.0, job_id="job-c", outcome="failed", exit_code=1),
     ]
     assert processing_seconds(usages) == {"job-a": 60.0 + 300.0 + 90.0, "job-b": 10.0}
+
+
+def test_scene_steps_add_up_across_runs_while_pipeline_tools_keep_the_latest() -> None:
+    """Mỗi lượt `scene.*` hoàn tất là một việc thật nên cộng hết; tool pipeline vẫn chỉ lấy lượt mới nhất."""
+    from datetime import timedelta
+
+    from src.services.orchestration.processing.observed import processing_seconds
+
+    usages = [
+        _usage("scene.region", None, None, duration_seconds=20.0, params=None, attempt_id="r1"),
+        _usage("scene.region", None, None, duration_seconds=30.0, params=None, attempt_id="r2"),
+        _usage("scene.geometry", None, None, duration_seconds=40.0, params=None, attempt_id="g1"),
+        _usage("scene.geometry", None, None, duration_seconds=5.0, params=None, outcome="cancelled", exit_code=None),
+        _usage("scene.geometry", None, None, duration_seconds=7.0, params=None, outcome="failed", exit_code=1),
+        _usage("preview", 1.0, 1.0, duration_seconds=100.0, completed_at=NOW - timedelta(hours=1)),
+        _usage("preview", 1.0, 1.0, duration_seconds=10.0),
+    ]
+    assert processing_seconds(usages) == {"job-a": 20.0 + 30.0 + 40.0 + 10.0}
+
+
+def test_scene_records_do_not_change_the_observed_budget() -> None:
+    """Bản ghi `scene.*` không có `params`, nên không vào ngân sách VRAM/RAM của pipeline."""
+    preview = _usage("preview", 2.0, 4.0)
+    for scene in (
+        _usage("scene.geometry", 8.0, 16.0, params=None),
+        _usage("scene.geometry", 8.0, 16.0),  # có params khớp cấu hình job: vẫn không được tính
+        _usage("scene.region", 8.0, 16.0, outcome="failed", exit_code=1, exhausted=True),
+    ):
+        assert _budget([preview, scene]) == _budget([preview])
+
+
+def test_observed_for_config_returns_none_when_a_required_tool_is_unmeasured() -> None:
+    from src.services.orchestration.processing.observed import observed_for_config
+
+    preview = _usage("preview", 1.5, 2.0)
+    # Chỉ có preview (thiếu finalize và scene_extract) -> None
+    assert (
+        observed_for_config(
+            [preview],
+            params=JOB,
+            gpu_name="T4",
+            runtime_manifest_checksum="runtime-1",
+        )
+        is None
+    )
+
+
+def test_observed_for_config_uses_resource_maxima_across_phases() -> None:
+    preview = _usage("preview", 1.5, 2.0)
+    finalize = _usage("finalize", 0.5, 1.0)
+    extract = _usage("scene_extract", 2.2, 4.5)
+    # Đủ cả preview, finalize, scene_extract -> max(preview, finalize/extract)
+    # vram: max(1.5, 2.2) = 2.2
+    # ram: max(2.0, 4.5) = 4.5
+    assert observed_for_config(
+        [preview, finalize, extract],
+        params=JOB,
+        gpu_name="T4",
+        runtime_manifest_checksum="runtime-1",
+    ) == {"vram": 2.2, "ram": 4.5}
+
+
+def test_observed_for_config_separates_colmap_cpu_and_gpu_measurements() -> None:
+    cpu_usages = [
+        _usage("preview", 1.5, 2.0),
+        _usage("finalize", 0.5, 1.0),
+        _usage("scene_extract", 2.2, 4.5),
+    ]
+    gpu_params = resource_observation_params(JOB, colmap_use_gpu=True)
+    gpu_usages = [
+        _usage("preview", 2.5, 3.0, params=gpu_params),
+        _usage("finalize", 0.5, 1.0, params=gpu_params),
+        _usage("scene_extract", 2.2, 4.5, params=gpu_params),
+    ]
+
+    assert resource_observation_params(JOB, colmap_use_gpu=False) == JOB
+    assert gpu_params == {**JOB, "colmap.use_gpu": 1.0}
+    combined_usages = [*cpu_usages, *gpu_usages]
+    assert observed_for_config(
+        combined_usages,
+        params=JOB,
+        gpu_name="T4",
+        runtime_manifest_checksum="runtime-1",
+    ) == {"vram": 2.2, "ram": 4.5}
+    # CPU history cannot stand in for the GPU-enabled COLMAP path.
+    assert (
+        observed_for_config(
+            cpu_usages,
+            params=JOB,
+            gpu_name="T4",
+            runtime_manifest_checksum="runtime-1",
+            colmap_use_gpu=True,
+        )
+        is None
+    )
+    assert observed_for_config(
+        combined_usages,
+        params=JOB,
+        gpu_name="T4",
+        runtime_manifest_checksum="runtime-1",
+        colmap_use_gpu=True,
+    ) == {"vram": 2.5, "ram": 4.5}

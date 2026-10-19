@@ -24,7 +24,7 @@ def main(argv: list[str] | None = None) -> int:
     create = commands.add_parser("create-user", help="Tạo một tài khoản")
     create.add_argument("--email", required=True)
     create.add_argument("--name", required=True)
-    create.add_argument("--role", choices=["editor", "reviewer"], default="reviewer")
+    create.add_argument("--role", choices=["guest", "editor", "reviewer"], default="reviewer")
     args = parser.parse_args(argv)
 
     password = os.environ.get("R2S_BOOTSTRAP_PASSWORD") or getpass.getpass("Mật khẩu (≥ 10 ký tự): ")

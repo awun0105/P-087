@@ -14,6 +14,7 @@
 export type SourceFrame = "colmap" | "z_up" | "identity";
 
 export type Vec3 = [number, number, number];
+export type DisplayRotation = [number, number, number, number];
 
 /** Euler XYZ (độ) của entity nội dung trong không gian hiển thị Y-up. */
 export const DISPLAY_EULER: Record<SourceFrame, Vec3> = {
@@ -23,10 +24,25 @@ export const DISPLAY_EULER: Record<SourceFrame, Vec3> = {
 };
 
 /** Điểm hệ nguồn → không gian hiển thị (cùng phép xoay với `DISPLAY_EULER`). */
-export function toDisplay(frame: SourceFrame, [x, y, z]: Vec3): Vec3 {
+export function toDisplay(frame: SourceFrame, [x, y, z]: Vec3, displayRotation?: DisplayRotation): Vec3 {
+  if (displayRotation) return rotate(displayRotation, [x, y, z]);
   if (frame === "colmap") return [-x, -y, z];
   if (frame === "z_up") return [x, z, -y];
   return [x, y, z];
+}
+
+/** Nghịch đảo của `toDisplay("z_up", …)`: không gian hiển thị Y-up → canonical Z-up (mét, sàn z = 0). */
+export function displayToZUp([x, y, z]: Vec3): Vec3 {
+  return [x, -z, y];
+}
+
+/**
+ * Điểm trong hệ nguồn của splat → hệ canonical (mét, Z-up) để lưu ground truth. Chỉ khung `z_up` là canonical;
+ * với khung khác hàm ném lỗi thay vì lưu toạ độ sai hệ.
+ */
+export function sourceToCanonical(frame: SourceFrame, point: Vec3): Vec3 {
+  if (frame !== "z_up") throw new Error(`Khung ${frame} không phải hệ canonical; không lưu được toạ độ`);
+  return [point[0], point[1], point[2]];
 }
 
 /** Xoay vector bằng quaternion xyzw. */
@@ -63,6 +79,7 @@ export function recordingCameraPose(
   frame: SourceFrame,
   cameras: readonly CameraMarkerLike[],
   fov = 60,
+  displayRotation?: DisplayRotation,
 ): DisplayCameraPose | undefined {
   const first = cameras[0];
   if (!first) return undefined;
@@ -76,7 +93,7 @@ export function recordingCameraPose(
     first.center[1] + forward[1] * distance,
     first.center[2] + forward[2] * distance,
   ];
-  return { position: toDisplay(frame, first.center), target: toDisplay(frame, target), fov };
+  return { position: toDisplay(frame, first.center, displayRotation), target: toDisplay(frame, target, displayRotation), fov };
 }
 
 /**
@@ -120,4 +137,146 @@ export function objectViewPose(
   }
   const eye: Vec3 = [center[0] + dx * distance, center[1] + dy * distance, center[2] + Math.max(0.8, size)];
   return { position: toDisplay("z_up", eye), target: toDisplay("z_up", center), fov };
+}
+
+export interface BoundingBoxLike {
+  min: Vec3;
+  max: Vec3;
+}
+
+/**
+ * Fallback góc nhìn bên trong không gian khi scene không có quỹ đạo camera COLMAP
+ * (ví dụ người dùng import file PLY/SOG từ ngoài vào). Đặt camera ở tầm mắt (1.5m),
+ * nhìn dọc trục dài của không gian thay vì lùi ra ngoài hư không.
+ */
+export function interiorFallbackPose(
+  frame: SourceFrame,
+  box: BoundingBoxLike,
+  fov = 60,
+): DisplayCameraPose {
+  const dx = box.max[0] - box.min[0];
+  const dy = box.max[1] - box.min[1];
+  const dz = box.max[2] - box.min[2];
+  const midX = (box.min[0] + box.max[0]) / 2;
+  const midY = (box.min[1] + box.max[1]) / 2;
+  const midZ = (box.min[2] + box.max[2]) / 2;
+
+  let eye: Vec3;
+  let target: Vec3;
+
+  if (frame === "z_up") {
+    const eyeZ = Math.min(box.min[2] + 1.5, midZ);
+    if (dx >= dy) {
+      eye = [box.min[0] + dx * 0.2, midY, eyeZ];
+      target = [box.max[0], midY, eyeZ];
+    } else {
+      eye = [midX, box.min[1] + dy * 0.2, eyeZ];
+      target = [midX, box.max[1], eyeZ];
+    }
+  } else {
+    // colmap: Y hướng xuống, Z hướng tới trước; X sang phải.
+    const eyeY = box.min[1] + dy * 0.5;
+    eye = [midX, eyeY, box.min[2] + dz * 0.2];
+    target = [midX, eyeY, box.max[2]];
+  }
+
+  return { position: toDisplay(frame, eye), target: toDisplay(frame, target), fov };
+}
+
+/** Cấu trúc animation track camera theo format ExperienceSettings của supersplat-viewer. */
+export interface TrajectoryAnimTrack {
+  name: string;
+  duration: number;
+  frameRate: number;
+  loopMode: "none" | "repeat" | "pingpong";
+  interpolation: "step" | "spline";
+  smoothness: number;
+  keyframes: {
+    times: number[];
+    values: {
+      position: number[];
+      target: number[];
+      fov: number[];
+    };
+  };
+}
+
+/**
+ * Xây dựng spline animation track cho camera viewer theo đúng chuỗi camera quay gốc.
+ * Vị trí camera và điểm nhìn (target) được chuyển đổi đồng bộ sang hệ hiển thị Y-up.
+ */
+export function buildTrajectoryAnimTrack(
+  frame: SourceFrame,
+  cameras: readonly CameraMarkerLike[],
+  options?: {
+    frameRate?: number;
+    maxKeyframes?: number;
+    fov?: number;
+    displayRotation?: DisplayRotation;
+  },
+): TrajectoryAnimTrack | undefined {
+  if (!cameras || cameras.length < 2) return undefined;
+
+  const frameRate = Math.max(1, Math.min(120, Math.round(options?.frameRate ?? 30)));
+  const maxKeyframes = Math.min(options?.maxKeyframes ?? 600, 1000);
+  const fov = options?.fov ?? 60;
+
+  // Tính khoảng cách nhìn tới trước (lookDistance) từ bounding box của quỹ đạo
+  const low = [0, 1, 2].map((axis) => Math.min(...cameras.map((c) => c.center[axis])));
+  const high = [0, 1, 2].map((axis) => Math.max(...cameras.map((c) => c.center[axis])));
+  const diagonal = Math.hypot(high[0] - low[0], high[1] - low[1], high[2] - low[2]);
+  const lookDistance = Math.min(Math.max(diagonal * 0.35, 2), 15);
+
+  const total = cameras.length;
+  const stride = total > maxKeyframes ? Math.ceil(total / maxKeyframes) : 1;
+  const indices: number[] = [];
+  for (let i = 0; i < total; i += stride) {
+    indices.push(i);
+  }
+  if (indices[indices.length - 1] !== total - 1) {
+    indices.push(total - 1);
+  }
+
+  const times: number[] = [];
+  const positions: number[] = [];
+  const targets: number[] = [];
+  const fovs: number[] = [];
+
+  for (const idx of indices) {
+    const cam = cameras[idx];
+    const forward = rotate(cam.rotation_xyzw, [0, 0, 1]);
+    const targetPoint: Vec3 = [
+      cam.center[0] + forward[0] * lookDistance,
+      cam.center[1] + forward[1] * lookDistance,
+      cam.center[2] + forward[2] * lookDistance,
+    ];
+
+    const displayPos = toDisplay(frame, cam.center, options?.displayRotation);
+    const displayTarget = toDisplay(frame, targetPoint, options?.displayRotation);
+
+    times.push(idx);
+    positions.push(...displayPos);
+    targets.push(...displayTarget);
+    fovs.push(fov);
+  }
+
+  const lastTime = times[times.length - 1] ?? 0;
+  const duration = Math.max(0.1, lastTime / frameRate);
+
+  return {
+    name: "Video Trajectory",
+    duration,
+    frameRate,
+    loopMode: "none",
+    interpolation: "spline",
+    smoothness: 0,
+    keyframes: {
+      times,
+      values: {
+        position: positions,
+        target: targets,
+        fov: fovs,
+      },
+    },
+  };
 }

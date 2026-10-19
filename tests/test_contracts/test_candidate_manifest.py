@@ -3,6 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
+from src.models.contracts.artifacts import ProductArtifactRef
 from src.models.contracts.coordinates import CoordinateSystem
 from src.models.contracts.validation import CandidateManifest
 
@@ -31,6 +32,29 @@ def test_canonical_candidate_manifest_roundtrips() -> None:
     candidate = CandidateManifest.model_validate(_candidate_payload())
     assert candidate.coordinate_system == CoordinateSystem()
     assert CandidateManifest.model_validate_json(candidate.model_dump_json()) == candidate
+
+
+def test_candidate_rejects_collision_refs_from_different_jobs() -> None:
+    payload = _candidate_payload()
+    payload["collision_source_ref"] = ProductArtifactRef(
+        artifact_type="LidarCollisionCandidate",
+        schema_version="1.0",
+        artifact_uri="artifact://jobs/job-a/collider/lidar.glb",
+        artifact_checksum=CHECKSUM,
+        data_class="derived",
+        producer_stage="ST-COLLIDER",
+    ).model_dump(mode="json")
+    payload["collision_selection_ref"] = ProductArtifactRef(
+        artifact_type="CollisionSourceSelection",
+        schema_version="1.0",
+        artifact_uri="artifact://jobs/job-b/collider/selection.json",
+        artifact_checksum=CHECKSUM,
+        data_class="derived",
+        producer_stage="ST-COLLIDER",
+    ).model_dump(mode="json")
+
+    with pytest.raises(ValidationError, match="same job"):
+        CandidateManifest.model_validate(payload)
 
 
 @pytest.mark.parametrize(("field", "value"), [("unit", "feet"), ("up_axis", "Y"), ("handedness", "left")])

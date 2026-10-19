@@ -25,8 +25,8 @@ export function getJob(jobId: string): Promise<ApiResult<JobManifest>> {
   return fetchApi<JobManifest>(`${PRODUCT}/jobs/${encodeURIComponent(jobId)}`);
 }
 
-export function listJobArtifacts(jobId: string): Promise<ApiResult<ArtifactList>> {
-  return fetchApi<ArtifactList>(`${PRODUCT}/jobs/${encodeURIComponent(jobId)}/artifacts`);
+export function listJobArtifacts(jobId: string, signal?: AbortSignal): Promise<ApiResult<ArtifactList>> {
+  return fetchApi<ArtifactList>(`${PRODUCT}/jobs/${encodeURIComponent(jobId)}/artifacts`, { signal });
 }
 
 export function listJobAttempts(jobId: string): Promise<ApiResult<JobAttemptList>> {
@@ -82,11 +82,17 @@ export function jobWalkCollisionUrl(
   jobId: string,
   ref: { artifact_uri: string; artifact_checksum: string },
   dynamic: readonly string[] = [],
+  sceneRevision?: string,
+  frame: "canonical" | "display" = "display",
+  preview = false,
+  reconstruction = false,
 ): string {
   const filename = ref.artifact_uri.split("/").pop();
   return apiUrl(`/api/v1/jobs/${encodeURIComponent(jobId)}/walk-collision/${encodeURIComponent(filename ?? "collision.glb")}`, {
     artifact_uri: ref.artifact_uri,
     artifact_checksum: ref.artifact_checksum,
+    ...(sceneRevision ? { scene_revision: sceneRevision, frame, ...(preview ? { preview: "true" } : {}) } : {}),
     ...(dynamic.length ? { dynamic: [...dynamic].sort() } : {}),
+    ...(reconstruction ? { reconstruction: "true" } : {}),
   });
 }

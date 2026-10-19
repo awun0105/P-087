@@ -5,15 +5,24 @@ import json
 import subprocess
 from dataclasses import asdict
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from PIL import Image
 
 from src.models.contracts.artifacts import ArtifactDataClass, ProductArtifactRef
 from src.models.contracts.identity import canonical_content_checksum
-from src.models.contracts.manifests import InputManifest, PrivacyInspectionScope, PrivacyResult
+from src.models.contracts.manifests import InputManifest, PrivacyInspectionScope, PrivacyResult, StageId
+from src.models.contracts.video_preparation import (
+    ClientVideoPreparationManifest,
+    ServerVideoPreparationVerification,
+)
 from src.services.orchestration.artifacts.store import ArtifactResolver, FilesystemArtifactStore
+from src.services.reconstruction.adapters.brush_input import BrushInputAdapter
+from src.services.reconstruction.adapters.colmap import ColmapAdapter, ColmapDependencies, ColmapRequest
 from src.services.reconstruction.adapters.colmap_input import ColmapInputAdapter
 from src.services.reconstruction.adapters.torwic_frame_source import TorwicFrameSource, TorwicFrameSourceConfig
+from src.services.reconstruction.bundle_validation import BundleDependencies
 from src.services.reconstruction.rgb.frames.frame_extraction import (
     ExtractionConfig,
     FFmpegFrameDecoder,
@@ -23,6 +32,10 @@ from src.services.reconstruction.rgb.frames.frame_extraction import (
     RGBFrameExtractor,
 )
 from src.services.reconstruction.rgb.frames.frame_set import FrameSetResolver, NormalizedRGBFrameSet
+from src.services.reconstruction.rgb.frames.manifest_frames import RGBManifestFrameAdapter, RGBManifestFrameSelection
+from src.services.reconstruction.rgb.pose.camera_pose import CameraPose
+from src.services.reconstruction.rgb.pose.pose_publication import CameraPoseResolver
+from src.services.reconstruction.rgb.preflight.ffmpeg_probe import FFmpegRGBProbe
 from src.services.reconstruction.rgb.preflight.privacy import (
     PrivacyDispatchProof,
     PrivacyInspectionEvidence,
@@ -30,11 +43,15 @@ from src.services.reconstruction.rgb.preflight.privacy import (
     PrivacyReviewRequest,
     RGBPrivacyGate,
 )
+from src.services.reconstruction.rgb.preflight.quality import RGBQualityValidator
 from src.services.reconstruction.rgb.preflight.quality_models import (
     RGBFrameQuality,
     RGBMotionDiagnostics,
+    RGBQualityProfile,
     RGBQualityReport,
 )
+from tests.test_reconstruction.test_rec03_colmap import FixtureProcess
+from tests.test_reconstruction.test_rec03_colmap import config as colmap_config
 
 ROOT = Path(__file__).parents[2]
 
@@ -133,6 +150,45 @@ def _config(mode: str) -> ExtractionConfig:
     return ExtractionConfig.model_validate(payload)
 
 
+def _video_preparation_with_resolvable_map(tmp_path: Path):
+    fixture = json.loads((ROOT / "fixtures/contracts/video_preparation_v1.json").read_text())
+    rows = fixture["frame_map_rows"]
+    sidecar = b"".join(json.dumps(row, separators=(",", ":")).encode() + b"\n" for row in rows)
+    payload = fixture["preparation_manifest"]
+    payload["frame_map"].update(size_bytes=len(sidecar), checksum=_sha(sidecar))
+    payload["preparation_checksum"] = "sha256:" + "0" * 64
+    payload["preparation_checksum"] = canonical_content_checksum(payload, "preparation_checksum")
+    manifest = ClientVideoPreparationManifest.model_validate(payload)
+    upload_id = "upload-frame-map-test"
+    frame_map_ref = ProductArtifactRef(
+        artifact_type="VideoFrameMap",
+        schema_version="1.0",
+        artifact_uri=f"artifact://jobs/{upload_id}/input/video_frame_map.jsonl",
+        artifact_checksum=manifest.frame_map.checksum,
+        data_class=ArtifactDataClass.PRODUCT_INPUT,
+        producer_stage=StageId.INPUT_VALIDATE,
+        job_id=upload_id,
+    )
+    verification_payload = {
+        "schema_version": "1.0",
+        "status": "server_verified",
+        "uploaded_checksum": manifest.prepared_file.checksum,
+        "uploaded_size_bytes": manifest.prepared_file.size_bytes,
+        "client_manifest": manifest.model_dump(mode="json"),
+        "observed_video": manifest.prepared_video.model_dump(mode="json"),
+        "frame_map_ref": frame_map_ref.model_dump(mode="json"),
+        "original_source_status": "client_declared_unverified",
+        "verification_checksum": "sha256:" + "0" * 64,
+    }
+    verification_payload["verification_checksum"] = canonical_content_checksum(
+        verification_payload, "verification_checksum"
+    )
+    verification = ServerVideoPreparationVerification.model_validate(verification_payload)
+    resolver = ArtifactResolver(tmp_path / "map_artifacts")
+    FilesystemArtifactStore(resolver).publish(frame_map_ref, sidecar)
+    return verification, resolver
+
+
 def _service(
     root: Path, manifest: InputManifest, paths: tuple[Path, ...], gate: RGBPrivacyGate
 ) -> tuple[RGBFrameExtractor, ArtifactResolver]:
@@ -144,8 +200,35 @@ def _service(
     return RGBFrameExtractor(dependencies), resolver
 
 
+def test_image_refs_publish_job_owned_copies_accepted_by_bundle_gate(tmp_path: Path) -> None:
+    """Dataset images become job-owned frame artifacts with the source bytes, so the bundle gate accepts them."""
+    paths = tuple(tmp_path / f"input-{index}{suffix}" for index, suffix in enumerate((".jpg", ".png")))
+    for index, path in enumerate(paths):
+        path.write_bytes(f"image-{index}".encode())
+    payload = _manifest(paths, "image/png").model_dump(mode="json")
+    payload["files"][0]["media_type"] = "image/jpeg"
+    payload["input_manifest_checksum"] = canonical_content_checksum(payload, "input_manifest_checksum")
+    manifest = InputManifest.model_validate(payload)
+    quality = _quality(manifest, (0, 1), ())
+    gate, proof = _privacy(manifest, 2)
+    service, resolver = _service(tmp_path, manifest, paths, gate)
+    result = service.execute(
+        FrameExtractionRequest(manifest, quality, proof, _config("image_refs"), "dataset-job", {0: "0", 1: "1"})
+    )
+    images = [frame.image for frame in result.frame_set.frames]
+    assert [image.artifact_uri for image in images] == [
+        "artifact://jobs/dataset-job/rec02a/frames/000000.jpg",
+        "artifact://jobs/dataset-job/rec02a/frames/000001.png",
+    ]
+    assert {image.job_id for image in images} == {"dataset-job"}
+    assert {image.data_class for image in images} == {ArtifactDataClass.DERIVED}
+    assert [image.artifact_checksum for image in images] == [file.checksum for file in manifest.files]
+    dependencies = BundleDependencies(resolver.require)
+    assert [dependencies.require(image, "dataset-job").read_bytes() for image in images] == [b"image-0", b"image-1"]
+
+
 def test_image_refs_keep_source_frames_and_exclude_blur(tmp_path: Path) -> None:
-    """Frame-set chỉ tham chiếu input frames; held-out không có trong manifest."""
+    """Frame-set giữ đúng byte ảnh nguồn được chấp nhận; ảnh mờ bị loại."""
     paths = tuple(tmp_path / f"{index:06d}.png" for index in range(3))
     for index, path in enumerate(paths):
         path.write_bytes(f"png-{index}".encode())
@@ -159,18 +242,117 @@ def test_image_refs_keep_source_frames_and_exclude_blur(tmp_path: Path) -> None:
     result = service.execute(request)
     assert result.stage.status.value == "SUCCEEDED"
     assert [frame.frame_id for frame in result.frame_set.frames] == [10, 12]
-    assert result.frame_set.frames[0].image.data_class == ArtifactDataClass.PRODUCT_INPUT
-    mapping = {file.artifact_uri: path for file, path in zip(manifest.files, paths, strict=True)}
-    reader = FrameSetResolver(lambda ref: mapping[ref.artifact_uri], resolver.require)
+    assert result.frame_set.frames[0].image.data_class == ArtifactDataClass.DERIVED
+    reader = FrameSetResolver(resolver.require, resolver.require)
     loaded = reader.load(result.reference)
-    assert reader.materialize(loaded) == ((10, paths[0], "0.1"), (12, paths[2], "0.3"))
+    materialized = reader.materialize(loaded)
+    assert [(frame_id, path.read_bytes(), timestamp) for frame_id, path, timestamp in materialized] == [
+        (10, b"png-0", "0.1"),
+        (12, b"png-2", "0.3"),
+    ]
     colmap_input = ColmapInputAdapter(reader).prepare(result.reference, tmp_path / "colmap")
     assert colmap_input.frame_ids == (10, 12)
     assert (colmap_input.image_dir / "000010.png").read_bytes() == paths[0].read_bytes()
     assert (colmap_input.image_dir / "000012.png").read_bytes() == paths[2].read_bytes()
     (colmap_input.image_dir / "000010.png").write_bytes(b"workspace changed")
     assert paths[0].read_bytes() == b"png-0"
-    assert len(tuple((tmp_path / "artifacts").rglob("*.png"))) == 0
+    assert materialized[0][1].read_bytes() == b"png-0"
+    assert len(tuple((tmp_path / "artifacts").rglob("*.png"))) == 2
+
+
+@pytest.mark.parametrize(
+    "suffixes",
+    [(".png", ".png", ".png"), (".jpg", ".jpg", ".jpg"), (".jpeg", ".JPEG", ".jpg"), (".png", ".JPG", ".PNG")],
+    ids=["png", "jpg", "jpeg-aliases", "mixed"],
+)
+def test_image_formats_keep_source_bytes_through_quality_colmap_and_brush(
+    tmp_path: Path, suffixes: tuple[str, ...]
+) -> None:
+    """Real image decoding and fixture COLMAP preserve format, order and checksums through Brush input."""
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=640x480:rate=10",
+            "-frames:v",
+            "3",
+            "-threads",
+            "1",
+            str(tmp_path / "source-%06d.png"),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    paths = tuple(tmp_path / f"input-{index}{suffix}" for index, suffix in enumerate(suffixes))
+    for source, destination in zip(sorted(tmp_path.glob("source-*.png")), paths, strict=True):
+        with Image.open(source) as image:
+            image.save(destination)
+    original_bytes = {path: path.read_bytes() for path in paths}
+    payload = _manifest(paths, "image/png").model_dump(mode="json")
+    for file, path in zip(payload["files"], paths, strict=True):
+        file["media_type"] = "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
+    payload["input_manifest_checksum"] = canonical_content_checksum(payload, "input_manifest_checksum")
+    manifest = InputManifest.model_validate(payload)
+    mapping = {file.artifact_uri: path for file, path in zip(manifest.files, paths, strict=True)}
+    profile = json.loads((ROOT / "configs/product/upload_quality_v2.json").read_text())
+    profile["blur_exclude_gt"] = None
+    profile["profile_checksum"] = canonical_content_checksum(profile, "profile_checksum")
+    selection = RGBManifestFrameSelection(
+        manifest, (0, 1, 2), "sha256:" + "c" * 64, RGBQualityProfile.model_validate(profile)
+    )
+    quality = RGBQualityValidator(FFmpegRGBProbe()).validate(
+        RGBManifestFrameAdapter(mapping.__getitem__).build_request(selection)
+    )
+    assert quality.effective_reconstruction_frame_ids == [0, 1, 2]
+    assert "MOTION_PROBE_FAILED" not in quality.motion.warnings
+    gate, proof = _privacy(manifest, 3)
+    extractor, resolver = _service(tmp_path, manifest, paths, gate)
+    extracted = extractor.execute(
+        FrameExtractionRequest(
+            manifest, quality, proof, _config("image_refs"), "image-formats", {0: "0", 1: "1", 2: "2"}
+        )
+    )
+    frames = FrameSetResolver(lambda ref: mapping[ref.artifact_uri], resolver.require)
+
+    class FormatAwareColmap(FixtureProcess):
+        """Fixture output uses the image names actually staged for COLMAP."""
+
+        def run(self, arguments: list[str], workspace: Path) -> str:
+            result = super().run(arguments, workspace)
+            if arguments[0] == "model_converter":
+                model = workspace / arguments[arguments.index("--output_path") + 1] / "images.txt"
+                text = model.read_text()
+                for index, suffix in enumerate(suffixes):
+                    text = text.replace(f"{index:06d}.png", f"{index:06d}{suffix.lower()}")
+                model.write_text(text)
+            return result
+
+    colmap = ColmapAdapter(
+        ColmapDependencies(frames, FormatAwareColmap(), FilesystemArtifactStore(resolver), resolver.require)
+    )
+    poses_ref = colmap.execute(
+        ColmapRequest(extracted.reference, colmap_config(), tmp_path / "colmap", "image-formats")
+    ).reference
+    brush = BrushInputAdapter(CameraPoseResolver(resolver.require, frames))
+    brush.prepare(poses_ref, tmp_path / "brush")
+    expected_names = {f"{index:06d}{suffix.lower()}" for index, suffix in enumerate(suffixes)}
+    for directory in (tmp_path / "colmap/images", tmp_path / "brush/training/images"):
+        assert {path.name for path in directory.iterdir()} == expected_names
+        for index, source in enumerate(paths):
+            assert (directory / f"{index:06d}{source.suffix.lower()}").read_bytes() == original_bytes[source]
+    assert all(path.read_bytes() == original_bytes[path] for path in paths)
+
+
+@pytest.mark.parametrize("name", ["000002.jpg", "../000001.jpg", "000001.webp", "000001.jpeg/extra"])
+def test_camera_pose_rejects_foreign_identity_or_unsupported_image_name(name: str) -> None:
+    with pytest.raises(ValueError, match="image name"):
+        CameraPose(
+            frame_id=1, image_id=1, camera_id=1, image_name=name, translation=(0, 0, 0), rotation_xyzw=(0, 0, 0, 1)
+        )
 
 
 def test_privacy_and_timestamp_errors_publish_nothing(tmp_path: Path) -> None:
@@ -194,6 +376,26 @@ def test_privacy_and_timestamp_errors_publish_nothing(tmp_path: Path) -> None:
             FrameExtractionRequest(manifest, quality, proof, request.config, "rec02a-test", {0: "1", 1: "0"})
         )
     assert not resolver.resolve("artifact://jobs/rec02a-test/rec02a/frame_set.json").exists()
+
+
+def test_prepared_video_map_carries_source_indices_into_frame_set_input(tmp_path: Path) -> None:
+    verification, resolver = _video_preparation_with_resolvable_map(tmp_path)
+    service = RGBFrameExtractor(
+        FrameExtractionDependencies(
+            writer=None,  # This focused seam exercises only map loading and validation.
+            resolve_input=lambda _: tmp_path,
+            gate=None,
+            decoder=None,
+            resolve_product=resolver.require,
+        )
+    )
+    request = FrameExtractionRequest(None, None, None, None, "frame-map-test", video_preparation=verification)
+    decoded = SimpleNamespace(timestamps=["0", "0.0333333333", "0.0666666667"])
+    chosen = [SimpleNamespace(frame_id=index) for index in range(3)]
+
+    source_ids = service._source_frame_ids(request, chosen, decoded)
+
+    assert source_ids == {0: 0, 1: 2, 2: 4}
 
 
 def test_torwic_source_adapter_resolves_declared_inventory(tmp_path: Path) -> None:

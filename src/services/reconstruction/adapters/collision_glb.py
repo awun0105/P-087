@@ -36,7 +36,13 @@ def _chunks(payload: bytes) -> tuple[dict, bytes]:
 
 def _layout(document: dict, binary: bytes) -> None:
     # Pin upstream writer shape; unsupported node transforms/extensions phải fail closed.
-    if document.get("asset") != {"version": "2.0", "generator": "splat-transform"}:
+    asset = document.get("asset")
+    if (
+        not isinstance(asset, dict)
+        or set(asset) != {"version", "generator"}
+        or asset.get("version") != "2.0"
+        or asset.get("generator") not in {"splat-transform", "real2sim-lidar-collision"}
+    ):
         raise ValueError("unsupported collision GLB producer")
     if document.get("scene") != 0 or document.get("scenes") != [{"nodes": [0]}]:
         raise ValueError("unsupported collision scene")
@@ -136,6 +142,56 @@ def _is_degenerate(mesh: CollisionMesh, triangle: tuple[int, int, int]) -> bool:
     u, v = tuple(y - x for x, y in zip(p, q)), tuple(y - x for x, y in zip(p, r))
     cross = (u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0])
     return len({a, b, c}) < 3 or sum(x * x for x in cross) == 0
+
+
+def encode_collision_glb(mesh: CollisionMesh) -> bytes:
+    """Encode canonical world-space vertices in the bounded collision GLB layout."""
+    if len(mesh.positions) < 3 or not mesh.triangles:
+        raise ValueError("collision mesh needs vertices and triangles")
+    if any(not math.isfinite(value) for point in mesh.positions for value in point):
+        raise ValueError("collision mesh positions must be finite")
+    if any(index < 0 or index >= len(mesh.positions) for triangle in mesh.triangles for index in triangle):
+        raise ValueError("collision mesh contains an out-of-range triangle index")
+    if topology(mesh)["degenerate_triangles"]:
+        raise ValueError("collision mesh contains degenerate triangles")
+    if any(abs(value) > 3.4028234663852886e38 for point in mesh.positions for value in point):
+        raise ValueError("collision mesh positions exceed GLB float32 range")
+
+    position_bytes = b"".join(struct.pack("<fff", *point) for point in mesh.positions)
+    indices = tuple(index for triangle in mesh.triangles for index in triangle)
+    index_bytes = b"".join(struct.pack("<I", index) for index in indices)
+    binary = position_bytes + index_bytes
+    bounds = [min(point[axis] for point in mesh.positions) for axis in range(3)]
+    upper = [max(point[axis] for point in mesh.positions) for axis in range(3)]
+    document = {
+        "asset": {"version": "2.0", "generator": "real2sim-lidar-collision"},
+        "scene": 0,
+        "scenes": [{"nodes": [0]}],
+        "nodes": [{"mesh": 0}],
+        "meshes": [{"primitives": [{"attributes": {"POSITION": 0}, "indices": 1}]}],
+        "buffers": [{"byteLength": len(binary)}],
+        "bufferViews": [
+            {"buffer": 0, "byteOffset": 0, "byteLength": len(position_bytes), "target": 34962},
+            {"buffer": 0, "byteOffset": len(position_bytes), "byteLength": len(index_bytes), "target": 34963},
+        ],
+        "accessors": [
+            {
+                "bufferView": 0,
+                "componentType": 5126,
+                "count": len(mesh.positions),
+                "type": "VEC3",
+                "min": bounds,
+                "max": upper,
+            },
+            {"bufferView": 1, "componentType": 5125, "count": len(indices), "type": "SCALAR"},
+        ],
+    }
+    encoded = json.dumps(document, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    encoded += b" " * (-len(encoded) % 4)
+    payload = struct.pack("<4sII", b"glTF", 2, 28 + len(encoded) + len(binary))
+    payload += struct.pack("<I4s", len(encoded), b"JSON") + encoded
+    payload += struct.pack("<I4s", len(binary), b"BIN\0") + binary
+    return payload
 
 
 def canonicalize_collision(source: Path, destination: Path) -> CollisionMesh:

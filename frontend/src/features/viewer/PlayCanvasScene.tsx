@@ -23,8 +23,18 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
+import { loadCollisionMesh } from "@/features/viewer/collision-mesh";
+import { CombinedCollision } from "@/features/viewer/camera-collision";
+import type { CollisionQuery } from "@playcanvas/supersplat-viewer/viewer";
 import type { ViewMode } from "@/features/viewer/layers";
-import { DISPLAY_EULER, type DisplayCameraPose, type SourceFrame } from "@/features/viewer/source-frame";
+import {
+  DISPLAY_EULER,
+  buildTrajectoryAnimTrack,
+  type CameraMarkerLike,
+  type DisplayCameraPose,
+  type DisplayRotation,
+  type SourceFrame,
+} from "@/features/viewer/source-frame";
 import type { SplatInspection } from "./splat-inspection";
 import { EMPTY_INSPECTION, type InspectionState } from "./inspection-history";
 
@@ -41,10 +51,18 @@ export interface PlayCanvasRuntime {
   walkAllowed: boolean;
   /** Bộ điều khiển camera đang chạy trong viewer (đọc từ `state.cameraMode`). */
   cameraMode: CameraMode;
+  /** Có animation track camera (quỹ đạo video gốc) hay không. */
+  hasAnimation: boolean;
+  /** Trạng thái animation đang tạm dừng hay đang phát. */
+  animationPaused: boolean;
+  /** Thời lượng animation (giây). */
+  animationDuration: number;
+  /** Vị trí đầu đọc animation hiện tại (giây). */
+  animationTime: number;
   graphicsBackend?: string;
 }
 
-/** Chế độ camera của supersplat-viewer; `anim` là hoạt ảnh camera dựng sẵn (Studio không dùng). */
+/** Chế độ camera của supersplat-viewer; `anim` là hoạt ảnh camera dựng sẵn hoặc quỹ đạo video gốc. */
 export type CameraMode = "orbit" | "fly" | "walk" | "anim";
 
 export const INITIAL_RUNTIME: PlayCanvasRuntime = {
@@ -53,6 +71,10 @@ export const INITIAL_RUNTIME: PlayCanvasRuntime = {
   hasCollision: false,
   walkAllowed: false,
   cameraMode: "orbit",
+  hasAnimation: false,
+  animationPaused: true,
+  animationDuration: 0,
+  animationTime: 0,
 };
 
 /**
@@ -98,6 +120,16 @@ export function detectPlayCanvasCapability(): PlayCanvasCapability {
 const subscribeCapability = () => () => undefined;
 const serverCapability = (): PlayCanvasCapability => "unknown";
 
+export function playCanvasErrorMessage(capability: PlayCanvasCapability): string | null {
+  if (capability === "unavailable") {
+    return "Trình duyệt không render được 3DGS (cần WebGL2/WebGPU).";
+  }
+  if (capability === "failed") {
+    return "Không thể tải hoặc hiển thị mô hình 3DGS (lỗi tải file hoặc dữ liệu không hợp lệ).";
+  }
+  return null;
+}
+
 /** SSR/hydration cùng snapshot unknown; chỉ probe GPU ở client, một lần mỗi host. */
 export function usePlayCanvasCapability() {
   const cache = useRef<PlayCanvasCapability | null>(null);
@@ -122,6 +154,7 @@ export interface PlayCanvasSceneProps {
   showControls?: boolean;
   /** Collider GLB của cùng scene, để viewer nạp trong cùng app. */
   collisionUrl?: string | null;
+  onCollisionError?: (message: string | null) => void;
   mode: ViewMode;
   /** Đo một lần ở host, để degraded state của cả viewer chỉ có một nguồn sự thật. */
   capability: PlayCanvasCapability;
@@ -134,8 +167,14 @@ export interface PlayCanvasSceneProps {
   onInspectionState?: (state: InspectionState) => void;
   /** Hệ trục của nội dung; mặc định `colmap` (output Brush). Artifact hệ mét REC-06 là `z_up`. */
   sourceFrame?: SourceFrame;
+  /** Rotation source→display dùng chung cho Gaussian và quỹ đạo camera. */
+  displayRotation?: DisplayRotation;
+  /** Chuỗi camera quay của scene để sinh quỹ đạo replay mượt mà khớp video gốc. */
+  cameras?: readonly CameraMarkerLike[];
   /** Camera khởi đầu trong không gian hiển thị (vd camera quay đầu tiên); caller memo hoá. */
   initialCamera?: DisplayCameraPose;
+  /** Chế độ camera ban đầu khi viewer nạp xong; mặc định `fly` khi có `initialCamera`, hoặc `orbit`. */
+  initialCameraMode?: Exclude<CameraMode, "anim">;
   /**
    * Điểm đến của camera (không gian hiển thị), khai lúc tạo viewer; `ViewerControls.select(i)` bay
    * tới điểm thứ i bằng transition của viewer. Hotspot mặc định bị ẩn: host tự vẽ danh sách.
@@ -165,6 +204,7 @@ export interface ViewerControls {
   select(index: number): boolean;
   /** Bật/tắt điều khiển camera của viewer (tắt trong lúc kéo gizmo để hai bên không tranh con trỏ). */
   setInputEnabled(enabled: boolean): void;
+  setObjectCollision(collision: CollisionQuery | null): void;
   /**
    * Chuyển chế độ camera. `walk` chỉ được khi viewer báo `walkAllowed` (có dữ liệu va chạm và scene
    * đủ lớn). Trả false khi viewer chưa nạp xong hoặc chế độ không dùng được.
@@ -172,8 +212,18 @@ export interface ViewerControls {
   setCameraMode(mode: Exclude<CameraMode, "anim">): boolean;
   /** Đưa cả scene vào khung hình (chuyển về xoay quanh tâm); false nếu viewer chưa nạp xong. */
   frameScene(): boolean;
-  /** Về vị trí ban đầu của chế độ hiện tại; false nếu viewer chưa nạp xong. */
+  /** Về góc nhìn khởi đầu đã cấp cho viewer, không dùng spawn thay đổi theo chế độ. */
   resetCamera(): boolean;
+  /** Di chuyển mượt mà tới toạ độ camera chỉ định. */
+  gotoPose(pose: DisplayCameraPose): boolean;
+  /** Bắt đầu hoặc tiếp tục phát lại camera theo quỹ đạo video gốc; tua lại đầu nếu đã hết. */
+  playTrajectory(): boolean;
+  /** Tạm dừng phát lại quỹ đạo camera. */
+  pauseTrajectory(): boolean;
+  /** Nhảy tới thời điểm time (giây) trong quỹ đạo video. */
+  seekTrajectory(time: number): boolean;
+  /** Lấy toạ độ mắt và điểm nhìn hiện tại của camera viewer. */
+  getCameraPose(): DisplayCameraPose | null;
 }
 
 export function PlayCanvasScene({
@@ -183,6 +233,7 @@ export function PlayCanvasScene({
   contentFilename,
   showControls = false,
   collisionUrl,
+  onCollisionError,
   mode,
   capability,
   onFailed,
@@ -192,12 +243,32 @@ export function PlayCanvasScene({
   onInspectionReady,
   onInspectionState,
   sourceFrame = "colmap",
+  displayRotation,
+  cameras,
   initialCamera,
+  initialCameraMode,
   annotations,
   onApp,
   wheelFactor = 1,
   extraControls,
 }: PlayCanvasSceneProps) {
+  const [collisionViewer, setCollisionViewer] = useState<ViewerHandleLike | null>(null);
+  const collisionError = useRef(onCollisionError);
+  useEffect(() => { collisionError.current = onCollisionError; }, [onCollisionError]);
+  useEffect(() => {
+    if (!collisionViewer) return;
+    const controller = new AbortController();
+    collisionViewer.setCollisionMesh(null, null);
+    collisionError.current?.(null);
+    if (collisionUrl) {
+      void loadCollisionMesh(collisionUrl, controller.signal).then(async (mesh) => {
+        if (!controller.signal.aborted) await collisionViewer.setCollisionMeshAsync(mesh.positions, mesh.indices, controller.signal);
+      }).catch((error: unknown) => {
+        if (!controller.signal.aborted) collisionError.current?.(error instanceof Error ? error.message : String(error));
+      });
+    }
+    return () => controller.abort();
+  }, [collisionViewer, collisionUrl]);
   const container = useRef<HTMLDivElement | null>(null);
   const [controlsContainer, setControlsContainer] = useState<Element | null>(null);
   const wheel = useRef(wheelFactor);
@@ -252,30 +323,42 @@ export function PlayCanvasScene({
     const resolvedUrl = objectUrl ?? contentUrl!;
 
     let orient: (() => void) | null = null;
-    let hostModeRequest = false;
 
     void Promise.all([import("@playcanvas/supersplat-viewer/viewer"), import("@playcanvas/supersplat-viewer/settings")])
       .then(async ([module, settingsModule]) => {
         if (disposed) return;
+        const trajectoryTrack =
+          cameras && cameras.length >= 2 ? buildTrajectoryAnimTrack(sourceFrame, cameras, { displayRotation }) : undefined;
         const settings = settingsModule.defaultSettings("environment");
-        settings.cameras = initialCamera ? [{ initial: initialCamera }] : [];
+        if (initialCamera) settings.cameras = [{ initial: initialCamera }];
         settings.annotations = toViewerAnnotations(annotationsRef.current);
+        if (trajectoryTrack) {
+          settings.animTracks = [trajectoryTrack];
+          settings.startMode = "animTrack";
+        } else {
+          settings.animTracks = [];
+          settings.startMode = "default";
+        }
+        if (settings.background) {
+          settings.background.color = [0, 0, 0];
+        }
         const viewer = await module.createViewer({
           container: host,
           contentUrl: resolvedUrl,
           contentFilename: contentFile?.name ?? contentFilename ?? new URL(resolvedUrl, window.location.href).pathname.split("/").pop(),
-          collisionUrl: collisionUrl ?? undefined,
           // `{}` làm viewer 1.35.2 crash ("reading 'color'") khi chạy browser thật
           // (2026-09-29); dùng default chính thức của thư viện, camera khung môi trường.
           settings,
           renderer,
           ui: showControls,
+          noanim: true,
         });
         if (disposed) {
           viewer.destroy();
           return;
         }
         handle = viewer;
+        setCollisionViewer(viewer);
         if (showControls) {
           const buttonsEl = host.querySelector(".sse-buttonsContainer");
           if (buttonsEl) setControlsContainer(buttonsEl);
@@ -283,12 +366,13 @@ export function PlayCanvasScene({
         // Upstream tạo entity `gsplat` khi asset nạp xong, với phép xoay COLMAP cố định. Đặt lại
         // phép xoay theo hệ nguồn ở frame đầu tiên có entity (trước khi render), rồi bỏ listener.
         const app = viewer.app as unknown as ViewerAppLike | undefined;
-        if (app && sourceFrame !== "colmap") {
+        if (app && (sourceFrame !== "colmap" || displayRotation)) {
           const [ex, ey, ez] = DISPLAY_EULER[sourceFrame];
           orient = () => {
             const entity = app.root?.findByName("gsplat");
             if (!entity) return;
-            entity.setLocalEulerAngles(ex, ey, ez);
+            if (displayRotation) entity.setLocalRotation(...displayRotation);
+            else entity.setLocalEulerAngles(ex, ey, ez);
             app.off("update", orient!);
             orient = null;
           };
@@ -300,18 +384,25 @@ export function PlayCanvasScene({
         // tạo lại viewer (tạo lại = tải lại cả 3DGS) mỗi khi danh sách vật đổi.
         liveAnnotations.current = viewer.annotations as unknown as ViewerAnnotationSetting[];
         replaceAnnotations(liveAnnotations.current, annotationsRef.current);
-        // Sau khi phát lại animation camera (hết track hoặc người dùng ngắt), mặc định về Orbit thay vì
-        // fly/walk của upstream. Ghi trễ một microtask để không đổi state ngay trong handler `changed`.
         subscriptions.push(
-          viewer.events.on("cameraMode:changed", (value: CameraMode, prev: CameraMode) => {
-            if (disposed || prev !== "anim" || value === "orbit" || hostModeRequest) return;
-            queueMicrotask(() => {
-              if (!disposed && viewer.state.cameraMode === value) viewer.state.cameraMode = "orbit";
-            });
+          viewer.events.on("cameraMode:changed", (value: CameraMode) => {
+            if (disposed) return;
+            if (value === "anim") {
+              const state = viewer.state as unknown as { animationTime: number; animationDuration: number };
+              if (state.animationDuration > 0 && state.animationTime >= state.animationDuration - 1e-3) {
+                viewer.seek(0);
+              }
+            }
           }),
           viewer.events.on("animationPaused:changed", (paused: boolean) => {
             const state = viewer.state as unknown as { animationTime: number; animationDuration: number };
-            if (disposed || !paused || viewer.state.cameraMode !== "anim") return;
+            if (disposed) return;
+            if (!paused && viewer.state.cameraMode === "anim") {
+              if (state.animationDuration > 0 && state.animationTime >= state.animationDuration - 1e-3) {
+                viewer.seek(0);
+              }
+            }
+            if (!paused || viewer.state.cameraMode !== "anim") return;
             if (state.animationDuration > 0 && state.animationTime >= state.animationDuration - 1e-3) {
               queueMicrotask(() => {
                 if (!disposed && viewer.state.cameraMode === "anim") viewer.state.cameraMode = "orbit";
@@ -319,6 +410,16 @@ export function PlayCanvasScene({
             }
           }),
         );
+        const gotoPose = (pose: DisplayCameraPose): boolean => {
+          if (disposed || !viewer.state.loaded) return false;
+          const items = liveAnnotations.current;
+          if (!items) return false;
+          // Reserve one hidden navigation slot after the scene's object annotations.
+          const index = annotationsRef.current?.length ?? 0;
+          items[index] = { position: pose.target, title: "", text: "", camera: { initial: pose } };
+          viewer.selectAnnotation(index);
+          return true;
+        };
         if (app) {
           onAppRef.current?.(app, {
             select: (index) => {
@@ -326,18 +427,16 @@ export function PlayCanvasScene({
               viewer.selectAnnotation(index);
               return true;
             },
+            setObjectCollision: (objectCollision) => {
+              if (!disposed) viewer.setCollisionProvider((environment) => environment ? new CombinedCollision(() => objectCollision ? [environment, objectCollision] : [environment], environment.voxelResolution) : null);
+            },
             setInputEnabled: (enabled) => {
               if (!disposed) viewer.state.inputEnabled = enabled;
             },
             setCameraMode: (next) => {
               if (disposed || !viewer.state.loaded) return false;
               if (next === "walk" && !viewer.state.walkAllowed) return false;
-              hostModeRequest = true;
-              try {
-                viewer.state.cameraMode = next;
-              } finally {
-                hostModeRequest = false;
-              }
+              viewer.state.cameraMode = next;
               return true;
             },
             frameScene: () => {
@@ -351,20 +450,82 @@ export function PlayCanvasScene({
             },
             resetCamera: () => {
               if (disposed || !viewer.state.loaded) return false;
+              // Fly/Walk reset to their latest spawn. Orbit reset uses the scene's authored initial camera.
+              viewer.state.cameraMode = "orbit";
+              viewer.resetCamera();
+              return true;
+            },
+            gotoPose,
+            playTrajectory: () => {
+              if (disposed || !viewer.state.loaded || !viewer.state.hasAnimation) return false;
+              const state = viewer.state;
+              if (state.animationDuration > 0 && state.animationTime >= state.animationDuration - 1e-3) {
+                viewer.seek(0);
+              }
+              viewer.state.cameraMode = "anim";
+              viewer.state.animationPaused = false;
+              return true;
+            },
+            pauseTrajectory: () => {
+              if (disposed || !viewer.state.loaded) return false;
+              viewer.state.animationPaused = true;
+              return true;
+            },
+            seekTrajectory: (time: number) => {
+              if (disposed || !viewer.state.loaded || !viewer.state.hasAnimation) return false;
               try {
-                viewer.resetCamera();
+                viewer.seek(time);
                 return true;
               } catch {
                 return false;
               }
             },
+            getCameraPose: () => {
+              if (disposed || !viewer.state.loaded) return null;
+              const camera = viewer.app.root.findComponent("camera") as import("playcanvas").CameraComponent | null;
+              if (!camera) return null;
+              const position = camera.entity.getPosition();
+              const forward = camera.entity.forward;
+              return {
+                position: [position.x, position.y, position.z],
+                target: [position.x + forward.x * 2, position.y + forward.y * 2, position.z + forward.z * 2],
+                fov: camera.fov,
+              };
+            },
           });
         }
         // EventHandler của PlayCanvas bắn `<key>:changed`; `on` trả EventHandle
         // để huỷ. Không tự poll `state` vì đó là nguồn thật của thư viện.
-        for (const event of ["progress:changed", "loaded:changed", "hasCollision:changed", "walkAllowed:changed", "cameraMode:changed"]) {
-          subscriptions.push(viewer.events.on(event, () => { if (!disposed) publish(readRuntime(viewer)); }));
+        let activatedInitialMode = false;
+        const activateInitialMode = () => {
+          if (activatedInitialMode || disposed || !viewer.state.loaded) return;
+          const requested = initialCameraMode ?? (initialCamera ? "fly" : undefined);
+          if (!requested) return;
+          activatedInitialMode = true;
+          queueMicrotask(() => {
+            if (disposed || !viewer.state.loaded) return;
+            const targetMode = requested === "walk" && !viewer.state.walkAllowed ? "fly" : requested;
+            viewer.state.cameraMode = targetMode;
+          });
+        };
+        for (const event of [
+          "progress:changed",
+          "loaded:changed",
+          "hasCollision:changed",
+          "walkAllowed:changed",
+          "cameraMode:changed",
+          "hasAnimation:changed",
+          "animationPaused:changed",
+          "animationTime:changed",
+        ]) {
+          subscriptions.push(viewer.events.on(event, () => {
+            if (!disposed) {
+              if (event === "loaded:changed" && viewer.state.loaded) activateInitialMode();
+              publish(readRuntime(viewer));
+            }
+          }));
         }
+        if (viewer.state.loaded) activateInitialMode();
         if (viewer.app?.assets) {
           subscriptions.push(viewer.app.assets.on("error", () => { if (!disposed) onFailed(); }));
         }
@@ -392,6 +553,7 @@ export function PlayCanvasScene({
       disposed = true;
       subscriptions.forEach((subscription) => subscription.off());
       if (orient && handle?.app) (handle.app as unknown as ViewerAppLike).off("update", orient);
+      setCollisionViewer(null);
       onAppRef.current?.(null);
       onInspectionReady?.(null);
       const activeHandle = handle;
@@ -409,8 +571,8 @@ export function PlayCanvasScene({
       handle = null;
       liveAnnotations.current = null;
     };
-  }, [capability, collisionUrl, contentUrl, contentFile, contentFilename, showControls, mode, onFailed, publish,
-    enableInspection, inspectionMaxPoints, onInspectionReady, onInspectionState, renderer, sourceFrame, initialCamera]);
+  }, [capability, contentUrl, contentFile, contentFilename, showControls, mode, onFailed, publish,
+    enableInspection, inspectionMaxPoints, onInspectionReady, onInspectionState, renderer, sourceFrame, displayRotation, cameras, initialCamera, initialCameraMode]);
 
   return (
     <div
@@ -434,7 +596,7 @@ export function PlayCanvasScene({
 /** Phần của `pc.AppBase` mà host dùng (tìm entity, sự kiện frame, gắn lớp phủ). */
 export interface ViewerAppLike {
   readonly root: {
-    findByName(name: string): { setLocalEulerAngles(x: number, y: number, z: number): void; enabled: boolean } | null;
+    findByName(name: string): { setLocalEulerAngles(x: number, y: number, z: number): void; setLocalRotation(x: number, y: number, z: number, w: number): void; enabled: boolean } | null;
   };
   on(event: "update", handler: () => void): unknown;
   off(event: "update", handler: () => void): unknown;
@@ -460,11 +622,25 @@ function replaceAnnotations(target: ViewerAnnotationSetting[], items: readonly V
 /** Chỉ những field host thật sự dùng, để không phụ thuộc shape đầy đủ của thư viện. */
 interface ViewerHandleLike {
   readonly app?: { readonly graphicsDevice: { readonly deviceType: string } };
-  readonly state: { loaded: boolean; progress: number; hasCollision: boolean; walkAllowed: boolean; cameraMode: CameraMode };
+  readonly state: {
+    loaded: boolean;
+    progress: number;
+    hasCollision: boolean;
+    walkAllowed: boolean;
+    cameraMode: CameraMode;
+    hasAnimation: boolean;
+    animationPaused: boolean;
+    animationDuration: number;
+    animationTime: number;
+  };
   readonly events: { on(key: string, handler: () => void): { off(): void } };
+  setCollisionProvider(provider: ((environment: CollisionQuery | null) => CollisionQuery | null) | null): void;
+  setCollisionMesh(positions: Float32Array | null, indices: Uint32Array | null): void;
+  setCollisionMeshAsync(positions: Float32Array, indices: Uint32Array, signal: AbortSignal): Promise<void>;
   frameScene(): void;
   resetCamera(): void;
   toggleWalk(): void;
+  seek(time: number): void;
   destroy(): void;
 }
 
@@ -475,6 +651,10 @@ function readRuntime(viewer: ViewerHandleLike): PlayCanvasRuntime {
     hasCollision: viewer.state.hasCollision,
     walkAllowed: viewer.state.walkAllowed,
     cameraMode: viewer.state.cameraMode,
+    hasAnimation: Boolean(viewer.state.hasAnimation),
+    animationPaused: Boolean(viewer.state.animationPaused),
+    animationDuration: Number.isFinite(viewer.state.animationDuration) ? viewer.state.animationDuration : 0,
+    animationTime: Number.isFinite(viewer.state.animationTime) ? viewer.state.animationTime : 0,
     graphicsBackend: viewer.app?.graphicsDevice.deviceType,
   };
 }

@@ -6,11 +6,23 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.models.contracts.artifacts import ArtifactUri, Checksum, Identifier
+from src.models.contracts.video_preparation import ClientVideoPreparationManifest, ServerVideoPreparationVerification
 from src.services.orchestration.auth.models import Actor
 from src.services.reconstruction import InputDetection, InputKind
 
 VideoMediaType = Literal["video/mp4", "video/quicktime"]
-UploadMediaType = Literal["video/mp4", "video/quicktime", "application/x-ply", "application/x-pcd", "application/zip"]
+UploadMediaType = Literal[
+    "video/mp4",
+    "video/quicktime",
+    "application/x-ply",
+    "application/x-sog",
+    "application/x-pcd",
+    "application/zip",
+    "application/json",
+    "text/plain",
+    "text/csv",
+    "application/octet-stream",
+]
 
 #: Đuôi file video → media type ghi vào InputManifest (PRD FR-01, Playbook §2.1).
 VIDEO_EXTENSIONS: dict[str, VideoMediaType] = {".mp4": "video/mp4", ".mov": "video/quicktime"}
@@ -19,19 +31,33 @@ VIDEO_EXTENSIONS: dict[str, VideoMediaType] = {".mp4": "video/mp4", ".mov": "vid
 UPLOAD_EXTENSIONS: dict[str, UploadMediaType] = {
     **VIDEO_EXTENSIONS,
     ".ply": "application/x-ply",
+    ".sog": "application/x-sog",
     ".pcd": "application/x-pcd",
     ".zip": "application/zip",
+}
+# The unified assembly accepts unknown sidecars by bytes, but keeps their declared
+# media type separate from the legacy detector's supported upload kinds.
+ASSEMBLY_UPLOAD_EXTENSIONS: dict[str, UploadMediaType] = {
+    **UPLOAD_EXTENSIONS,
+    ".json": "application/json",
+    ".txt": "text/plain",
+    ".tum": "text/plain",
+    ".csv": "text/csv",
+    # Calibration ROS tf / Kalibr: YAML là văn bản; vai trò do bộ nhận diện theo nội dung quyết định.
+    ".yaml": "text/plain",
+    ".yml": "text/plain",
 }
 KIND_MEDIA_TYPES: dict[str, frozenset[str]] = {
     "rgb_video": frozenset({"video/mp4", "video/quicktime"}),
     "gaussian_ply": frozenset({"application/x-ply"}),
     "gaussian_ply_colmap": frozenset({"application/zip"}),
+    "gaussian_sog": frozenset({"application/x-sog"}),
     # ADR 0009: LiDAR đi kèm video — luôn là gói ZIP có quỹ đạo + calibration + thời điểm frame.
     "registered_lidar": frozenset({"application/zip"}),
     "lidar_scan_sequence": frozenset({"application/zip"}),
 }
 UNSUPPORTED_EXTENSION = (
-    "Hỗ trợ video .mp4/.mov; scene 3DGS .ply hoặc .zip (PLY 3DGS + model COLMAP); "
+    "Hỗ trợ video .mp4/.mov; scene 3DGS .ply, .sog hoặc .zip (PLY 3DGS + model COLMAP); "
     "gói LiDAR .zip (scan .pcd hoặc đám mây đã đăng ký, kèm quỹ đạo + calibration + thời điểm frame)"
 )
 
@@ -56,6 +82,9 @@ class UploadRecord(BaseModel):
     detection: InputDetection | None = None
     #: Người tải file lên; None với record cũ hoặc khi không bật đăng nhập.
     uploaded_by: Actor | None = None
+    #: Client declaration is untrusted until a server verification report is attached.
+    video_preparation_manifest: ClientVideoPreparationManifest | None = None
+    video_preparation: ServerVideoPreparationVerification | None = None
 
 
 UploadSessionStatus = Literal["UPLOADING", "VERIFYING", "READY", "FAILED"]
@@ -82,3 +111,7 @@ class UploadSession(BaseModel):
     error: str | None = None
     created_at: datetime
     uploaded_by: Actor | None = None
+    purpose: Literal["product", "input_assembly"] = Field(
+        default="product", exclude_if=lambda value: value == "product"
+    )
+    temporary: bool = Field(default=False, exclude_if=lambda value: value is False)

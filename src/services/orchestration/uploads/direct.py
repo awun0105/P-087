@@ -8,12 +8,17 @@ video là đã nhận. Phiên lưu trong DB nên rớt mạng/đóng tab vẫn n
 import math
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
+from typing import Literal
 from uuid import uuid4
 
+from src.models.contracts.artifacts import ArtifactDataClass
+from src.models.contracts.manifests import InputFile
 from src.services.orchestration.artifacts import ArtifactRemote, ArtifactResolver
 from src.services.orchestration.auth.models import Actor
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
+from src.services.orchestration.uploads.assembly_models import StagedInputUploadRecord
 from src.services.orchestration.uploads.models import (
+    ASSEMBLY_UPLOAD_EXTENSIONS,
     UNSUPPORTED_EXTENSION,
     UPLOAD_EXTENSIONS,
     UploadRecord,
@@ -25,6 +30,7 @@ from src.services.orchestration.uploads.service import (
     classify_upload,
     display_name,
 )
+from src.services.reconstruction.inputs.input_probe import classify_upload_reader
 
 #: Phần tối thiểu 16 MiB (S3 yêu cầu ≥ 5 MiB trừ phần cuối); tối đa 10.000 phần.
 MIN_PART_BYTES = 16 * 1024 * 1024
@@ -57,11 +63,23 @@ class DirectUploadService:
         self.remote: ArtifactRemote = resolver.remote
         self.max_bytes = max_bytes
 
-    def begin(self, filename: str, size_bytes: int, uploaded_by: Actor | None = None) -> UploadSession:
-        """Kiểm tên/đuôi/dung lượng khai báo rồi mở multipart trên kho file."""
+    def begin(
+        self,
+        filename: str,
+        size_bytes: int,
+        uploaded_by: Actor | None = None,
+        *,
+        purpose: Literal["product", "input_assembly"] = "product",
+        temporary: bool = False,
+    ) -> UploadSession:
+        """Open a resumable product or generic input-assembly upload session."""
         name = display_name(filename)
         suffix = PurePosixPath(name).suffix.lower()
-        media_type = UPLOAD_EXTENSIONS.get(suffix)
+        media_type = (
+            UPLOAD_EXTENSIONS.get(suffix)
+            if purpose == "product"
+            else ASSEMBLY_UPLOAD_EXTENSIONS.get(suffix, "application/octet-stream")
+        )
         if media_type is None:
             raise UploadError(UNSUPPORTED_EXTENSION)
         if size_bytes <= 0:
@@ -84,8 +102,14 @@ class DirectUploadService:
             status="UPLOADING",
             created_at=datetime.now(UTC),
             uploaded_by=uploaded_by,
+            purpose=purpose,
+            temporary=temporary,
         )
         with self.database.transaction(write=True) as tx:
+            if temporary:
+                from src.services.orchestration.uploads.temporary import register_temporary
+
+                register_temporary(tx, upload_id, uploaded_by.user_id if uploaded_by else "anonymous")
             tx.execute(
                 "INSERT INTO r2s_upload_sessions(upload_id, payload) VALUES (?, ?)",
                 (upload_id, session.model_dump_json()),
@@ -149,34 +173,96 @@ class DirectUploadService:
         if size != session.size_bytes or size > self.max_bytes:
             self.remote.delete(key)
             return self._update(session, status="FAILED", error="Kích thước file trên kho file khác khai báo")
-        try:
+        now = datetime.now(UTC)
+        record: UploadRecord | None = None
+        staged_record: StagedInputUploadRecord | None = None
+        if session.purpose == "input_assembly":
+            source_file = InputFile(
+                original_name=session.original_name,
+                media_type=session.media_type,
+                size_bytes=size,
+                checksum=checksum,
+                artifact_uri=session.artifact_uri,
+                data_class=ArtifactDataClass.PRODUCT_INPUT,
+            )
             with self.remote.open_ranged(key, size) as stream:
-                detection = classify_upload(stream, size, session.media_type, self.max_bytes)  # type: ignore[arg-type]
-        except UploadError as error:
-            self.remote.delete(key)
-            return self._update(session, status="FAILED", error=str(error))
-        record = UploadRecord(
-            upload_id=session.upload_id,
-            original_name=session.original_name,
-            media_type=session.media_type,
-            size_bytes=size,
-            checksum=checksum,
-            artifact_uri=session.artifact_uri,
-            received_at=datetime.now(UTC),
-            input_kind=detection.kind,
-            detection=detection,
-            uploaded_by=session.uploaded_by,
-        )
+                classified = classify_upload_reader(
+                    source_file,
+                    session.upload_id,
+                    session.upload_id,
+                    stream,
+                    suffix=PurePosixPath(session.original_name).suffix,
+                    max_uncompressed_bytes=self.max_bytes * 2,
+                )
+                # Preserve compatibility with the existing viewer/import routes when
+                # a generic assembly upload is also a legacy-supported media type.
+                stream.seek(0)
+                try:
+                    detection = classify_upload(stream, size, session.media_type, self.max_bytes)
+                except UploadError:
+                    detection = None
+                if detection is not None:
+                    record = UploadRecord(
+                        upload_id=session.upload_id,
+                        original_name=session.original_name,
+                        media_type=session.media_type,
+                        size_bytes=size,
+                        checksum=checksum,
+                        artifact_uri=session.artifact_uri,
+                        received_at=now,
+                        input_kind=detection.kind,
+                        detection=detection,
+                        uploaded_by=session.uploaded_by,
+                    )
+            staged_record = StagedInputUploadRecord(
+                upload_id=session.upload_id,
+                source_file=source_file,
+                staged_files=list(classified.files),
+                probes=list(classified.probes),
+                uploaded_by=session.uploaded_by,
+                received_at=now,
+            )
+        else:
+            try:
+                with self.remote.open_ranged(key, size) as stream:
+                    detection = classify_upload(stream, size, session.media_type, self.max_bytes)
+            except UploadError as error:
+                self.remote.delete(key)
+                return self._update(session, status="FAILED", error=str(error))
+            record = UploadRecord(
+                upload_id=session.upload_id,
+                original_name=session.original_name,
+                media_type=session.media_type,
+                size_bytes=size,
+                checksum=checksum,
+                artifact_uri=session.artifact_uri,
+                received_at=now,
+                input_kind=detection.kind,
+                detection=detection,
+                uploaded_by=session.uploaded_by,
+            )
         with self.database.transaction(write=True) as tx:
             row = tx.execute(
                 "SELECT payload FROM r2s_upload_sessions WHERE upload_id=?" + tx.lock_suffix(), (upload_id,)
             ).fetchone()
             if row is None or UploadSession.model_validate_json(row[0]).status != "VERIFYING":
                 raise RuntimeStateConflictError("phiên upload đã đổi trạng thái")
-            tx.execute(
-                "INSERT INTO r2s_uploads(upload_id, payload) VALUES (?, ?)",
-                (record.upload_id, record.model_dump_json()),
-            )
+            if session.temporary:
+                marker = tx.execute(
+                    "SELECT deleting FROM r2s_temporary_uploads WHERE upload_id=?" + tx.lock_suffix(), (upload_id,)
+                ).fetchone()
+                if marker is None or marker[0]:
+                    raise RuntimeStateConflictError("Upload tạm đã được hủy")
+            if record is not None:
+                tx.execute(
+                    "INSERT INTO r2s_uploads(upload_id, payload) VALUES (?, ?)",
+                    (record.upload_id, record.model_dump_json()),
+                )
+            if staged_record is not None:
+                tx.execute(
+                    "INSERT INTO r2s_input_uploads(upload_id,payload) VALUES (?,?)",
+                    (staged_record.upload_id, staged_record.model_dump_json()),
+                )
             ready = session.model_copy(update={"status": "READY"})
             tx.execute(
                 "UPDATE r2s_upload_sessions SET payload=? WHERE upload_id=?", (ready.model_dump_json(), upload_id)

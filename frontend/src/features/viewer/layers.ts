@@ -243,16 +243,49 @@ export function buildSceneLayers(scene: SceneIR, sceneChecksum: string): SceneLa
     }
   }
 
-  if (scene.environment.collider_ref) {
+  const collisionSource = scene.environment.collision_source_ref;
+  const environmentCollider = scene.environment.collider_ref;
+  const lidarSelected = collisionSource?.artifact_type === "LidarCollisionCandidate";
+  const sourceIsEffectiveCollider =
+    collisionSource != null && environmentCollider != null && collisionSource.artifact_checksum === environmentCollider.artifact_checksum;
+  if (collisionSource && !sourceIsEffectiveCollider) {
     colliders.unshift({
       kind: "collider",
       owner: "scene",
       object_id: null,
-      label: "Environment collider",
+      label: lidarSelected ? "LiDAR collision source" : "Selected collision source",
+      collider_id: "environment-source",
+      collider_type: "AABB",
+      reference: collisionSource,
+      checksum: collisionSource.artifact_checksum,
+      transform: {
+        parent_frame: scene.coordinate_system.world_frame,
+        local_frame: scene.coordinate_system.world_frame,
+        translation_xyz: [0, 0, 0],
+        rotation_quaternion_xyzw: [0, 0, 0, 1],
+      },
+      dimensions_xyz_m: MISSING_DIMENSIONS,
+      has_dimensions: false,
+      canonical_active: true,
+    });
+  }
+
+  if (environmentCollider) {
+    colliders.unshift({
+      kind: "collider",
+      owner: "scene",
+      object_id: null,
+      label: lidarSelected
+        ? sourceIsEffectiveCollider
+          ? "LiDAR collision candidate"
+          : "LiDAR-derived environment collider"
+        : collisionSource
+          ? "Selected-source environment collider"
+          : "Environment collider",
       collider_id: "environment",
       collider_type: "AABB",
-      reference: scene.environment.collider_ref,
-      checksum: scene.environment.collider_ref.artifact_checksum,
+      reference: environmentCollider,
+      checksum: environmentCollider.artifact_checksum,
       transform: {
         parent_frame: scene.coordinate_system.world_frame,
         local_frame: scene.coordinate_system.world_frame,

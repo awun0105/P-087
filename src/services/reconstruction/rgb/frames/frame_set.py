@@ -10,6 +10,7 @@ from pydantic import Field, model_validator
 
 from src.models.contracts.artifacts import Checksum, ContractModel, ProductArtifactRef, SchemaVersion
 from src.models.contracts.identity import canonical_content_checksum
+from src.models.contracts.video_preparation import ServerVideoPreparationVerification
 
 
 class NormalizedRGBFrame(ContractModel):
@@ -19,6 +20,7 @@ class NormalizedRGBFrame(ContractModel):
     timestamp_sec: str
     image: ProductArtifactRef
     source_checksum: Checksum
+    source_frame_id: int | None = Field(default=None, ge=0, exclude_if=lambda value: value is None)
 
 
 class NormalizedRGBFrameSet(ContractModel):
@@ -33,6 +35,11 @@ class NormalizedRGBFrameSet(ContractModel):
     extraction_config_checksum: Checksum
     ffmpeg_version: str
     frames: list[NormalizedRGBFrame]
+    video_preparation: ServerVideoPreparationVerification | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    #: Có khi các ảnh của frame set là bản đã che khuôn mặt/biển số (AUD-18): checksum của SanitizationManifest.
+    sanitization_manifest_checksum: Checksum | None = Field(default=None, exclude_if=lambda value: value is None)
     frame_set_checksum: Checksum
 
     @model_validator(mode="after")
@@ -91,6 +98,14 @@ class FrameSetResolver:
                 raise ValueError(f"frame artifact missing or checksum mismatch: {frame.frame_id}")
             rows.append((frame.frame_id, path, frame.timestamp_sec))
         return tuple(rows)
+
+
+def frame_image_name(frame_id: int, source: Path) -> str:
+    """Canonical frame identity keeps the source image format without re-encoding."""
+    suffix = source.suffix.lower()
+    if suffix not in {".png", ".jpg", ".jpeg"}:
+        raise ValueError("unsupported RGB frame image name")
+    return f"{frame_id:06d}{suffix}"
 
 
 def _sha256(path: Path) -> str:

@@ -91,10 +91,10 @@ def test_gpu_override_uses_same_host_data_and_nvidia_runtime() -> None:
     assert volume["target"] == "/data"
     assert environment["DATABASE_URL"] == "sqlite:////data/studio_local/runtime.db"
     assert environment["ARTIFACT_ROOT"] == "/data/studio_local/artifacts"
-    assert environment["REC03_COLMAP_COMMAND"] == '["colmap"]'
-    assert environment["REC04_BRUSH_COMMAND"] == '["/opt/real2sim/runtime/brush/brush_app"]'
-    assert environment["REC04_SPLAT_MODULE_PATH"].startswith("/opt/real2sim/runtime/")
-    assert environment["PRODUCT_SCENE_RUNTIME_PYTHON"].startswith("/opt/real2sim/scene_runtime/")
+    # Công cụ GPU không đặt đường dẫn ở compose: ô để trống, image (runtime.env do install.sh ghi) quyết định.
+    for key in ["R2S_COLMAP_COMMAND", "R2S_BRUSH_COMMAND", "R2S_SPLAT_MODULE_PATH", "PRODUCT_SCENE_RUNTIME_PYTHON"]:
+        assert key in environment and not environment[key], key
+    assert not [key for key in environment if key.startswith("REC")], "tên REC* cũ không còn trong compose"
     assert init["command"][:2] == ["bash", "-lc"]
     init_command = init["command"][2]
     assert 'manifest_backup="$${PRODUCT_RUNTIME_MANIFEST}.previous-' in init_command
@@ -107,7 +107,8 @@ def test_gpu_override_uses_same_host_data_and_nvidia_runtime() -> None:
     assert init["env_file"] == ["${STUDIO_ENV_FILE:-.env.studio}"]
     assert init["gpus"] == "all"
     assert init["environment"]["PRODUCT_RUNTIME_MANIFEST"] == "/data/studio_local/runtime_manifest.json"
-    assert init["environment"]["REC03_COLMAP_COMMAND"] == '["colmap"]'
+    assert "R2S_COLMAP_COMMAND" in init["environment"] and not init["environment"]["R2S_COLMAP_COMMAND"]
+    assert not [key for key in init["environment"] if key.startswith("REC")]
     assert document["services"]["api"]["environment"]["PRODUCT_PROCESSING_CONFIG"] == (
         "/app/configs/product/processing_presets_v1.json"
     )
@@ -303,6 +304,8 @@ def test_prepare_volume_rejects_path_outside_canonical_volume(tmp_path: Path, mo
 
 def test_prepare_volume_rejects_symlinked_managed_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A symlink must never be followed by the ownership preparation step."""
+    for variable in container_entrypoint.MANAGED_VOLUME_PATHS:
+        monkeypatch.delenv(variable, raising=False)
     data_root = tmp_path / "data"
     managed_root = data_root / "studio_local"
     managed_root.parent.mkdir(parents=True)
@@ -413,3 +416,20 @@ def test_bootstrap_refuses_disabled_packaged_account(tmp_path: Path, monkeypatch
     monkeypatch.setenv("R2S_BOOTSTRAP_PASSWORD", "password-three")
     with pytest.raises(container_entrypoint.StartupError, match="vô hiệu hóa"):
         container_entrypoint._bootstrap_reviewer(f"sqlite:///{database}")
+
+
+def test_gpu_entrypoint_defaults_pass_the_production_settings_check() -> None:
+    """Image GPU mặc định APP_ENV=production, nên entrypoint phải tự đặt AUTH_REQUIRED (Settings fail-closed)."""
+    from src.config import Settings
+
+    script = (ROOT / "scripts" / "gpu" / "docker_entrypoint.sh").read_text(encoding="utf-8")
+    assert 'export APP_ENV="${APP_ENV:-production}"' in script
+    assert 'export AUTH_REQUIRED="${AUTH_REQUIRED:-true}"' in script
+    settings = Settings(
+        _env_file=None,
+        openai_api_key="not-used-by-studio",
+        app_env="production",
+        auth_required=True,
+        artifact_root="/data/artifacts",
+    )
+    assert settings.auth_required is True

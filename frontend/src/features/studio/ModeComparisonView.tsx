@@ -2,7 +2,7 @@
 
 import { errorMessage } from "@/lib/ui-error";
 
-import { FlaskConical, Loader2, Radar, Ruler } from "lucide-react";
+import { BadgeCheck, Loader2, Radar, Sparkles } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 
 import { Badge, Card, Notice } from "@/components/studio/primitives";
@@ -10,15 +10,12 @@ import { getModeComparison } from "@/lib/api/studio";
 import type { ModeComparison, ModeResult } from "@/lib/contracts/studio";
 
 const ICONS: Record<ModeResult["mode"], ReactNode> = {
-  rgb_only: <FlaskConical className="size-4" aria-hidden />,
-  user_anchor: <Ruler className="size-4" aria-hidden />,
+  rgb_only: <Sparkles className="size-4" aria-hidden />,
+  user_anchor: <BadgeCheck className="size-4" aria-hidden />,
   lidar: <Radar className="size-4" aria-hidden />,
 };
 
-/**
- * Demo 3 hướng tỉ lệ trên cùng scene (ADR 0004 §5): RGB only (mô phỏng, không số),
- * anchor người dùng, LiDAR. Số liệu do backend tính từ artifact thật của scene.
- */
+/** Đề xuất tự động và nguồn của bản xác nhận, đọc từ artifact của đúng job. */
 export function ModeComparisonView({ jobId }: { jobId: string }) {
   const [data, setData] = useState<ModeComparison | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -42,9 +39,9 @@ export function ModeComparisonView({ jobId }: { jobId: string }) {
   const diff = data.difference;
   return (
     <div className="size-full overflow-y-auto bg-paper p-4 sm:p-6">
-      <h2 className="text-lg font-bold tracking-tight text-ink">So sánh 3 hướng khôi phục tỉ lệ</h2>
+      <h2 className="text-lg font-bold tracking-tight text-ink">Số đo & nguồn tỉ lệ mét</h2>
       <p className="mt-1 text-sm text-ink-muted">
-        Cùng video, cùng camera; khác nhau ở cách biết 1 đơn vị 3DGS dài bao nhiêu mét và mặt sàn nằm đâu.
+        Xem tỉ lệ được ước lượng từ đâu và kết quả nào đã được xác nhận để dùng cho scene.
       </p>
       <div className="mt-4 grid gap-4 lg:grid-cols-3">
         {data.modes.map((mode) => (
@@ -53,7 +50,7 @@ export function ModeComparisonView({ jobId }: { jobId: string }) {
       </div>
       {diff ? (
         <Card className="mt-4 p-4 text-sm">
-          <h3 className="font-bold text-ink">Anchor người dùng so với LiDAR</h3>
+          <h3 className="font-bold text-ink">Kết quả đã xác nhận so với LiDAR</h3>
           <dl className="mt-2 grid gap-x-6 gap-y-1 sm:grid-cols-2">
             <Row label="Chênh tỉ lệ" value={`${diff.scale_diff_percent.toFixed(2)} %`} />
             <Row label="Góc lệch mặt sàn" value={`${diff.floor_tilt_deg.toFixed(2)}°`} />
@@ -73,7 +70,7 @@ export function ModeComparisonView({ jobId }: { jobId: string }) {
           )}
         </Card>
       ) : (
-        <Notice className="mt-4">Cần cả anchor người dùng và LiDAR để tính độ lệch giữa hai hướng.</Notice>
+        <Notice className="mt-4">Chưa đủ kết quả đã xác nhận và LiDAR để so sánh độ lệch.</Notice>
       )}
     </div>
   );
@@ -87,21 +84,19 @@ function ModeCard({ mode }: { mode: ModeResult }) {
           {ICONS[mode.mode]}
           {mode.title}
         </h3>
-        {mode.status === "mock" && <Badge tone="ochre">Mô phỏng · P1</Badge>}
-        {mode.status === "missing" && <Badge tone="neutral">Chưa có</Badge>}
+        {mode.status === "estimated" && <Badge tone="ochre">Ước lượng</Badge>}
+        {mode.status === "confirmed" && <Badge tone="sage">Đã xác nhận</Badge>}
+        {(mode.status === "missing" || mode.status === "mock") && <Badge tone="neutral">{mode.mode === "rgb_only" ? "Chưa có đề xuất" : "Chưa có"}</Badge>}
         {mode.status === "measured" && <Badge tone="sage">Đã đo</Badge>}
       </div>
-      <p className="text-xs text-ink-muted">{mode.note}</p>
-      {mode.steps.length > 0 && (
-        <ol className="list-decimal space-y-1 pl-5 text-xs text-ink-muted">
-          {mode.steps.map((step) => (
-            <li key={step}>{step}</li>
-          ))}
-        </ol>
-      )}
-      {mode.status === "measured" && mode.scale_m_per_sfm_unit !== null && (
+      <p className="text-sm text-ink-muted">{mode.status === "mock" ? "Job này chưa có đề xuất MoGe-2 để hiển thị." : mode.note}</p>
+      {["estimated", "confirmed", "measured"].includes(mode.status) && mode.scale_m_per_sfm_unit !== null && (
         <dl className="mt-auto space-y-1 border-t border-line pt-2 text-sm">
           <Row label="Tỉ lệ" value={`${mode.scale_m_per_sfm_unit.toPrecision(5)} m/đơn vị`} />
+          {mode.relative_uncertainty != null && (
+            <Row label="Độ bất định ước tính" value={`±${(mode.relative_uncertainty * 100).toFixed(1)}%`} />
+          )}
+          {mode.frames_used != null && <Row label="Số ảnh dùng" value={String(mode.frames_used)} />}
           {mode.camera_height_mean_m !== null && (
             <Row
               label="Độ cao camera"
@@ -110,7 +105,17 @@ function ModeCard({ mode }: { mode: ModeResult }) {
           )}
         </dl>
       )}
-      {mode.status === "mock" && <p className="mt-auto border-t border-line pt-2 text-sm text-ink-subtle">Tỉ lệ ước lượng: chưa triển khai</p>}
+      {mode.mode === "rgb_only" && mode.relative_uncertainty != null && (
+        <p className="text-xs text-ink-subtle">Độ bất định phản ánh dao động giữa các ảnh, chưa bao gồm sai lệch có hệ thống của mô hình.</p>
+      )}
+      {mode.steps.length > 0 && (
+        <details className="border-t border-line pt-2 text-xs text-ink-muted">
+          <summary className="cursor-pointer font-medium">Cách ước lượng</summary>
+          <ol className="mt-2 list-decimal space-y-1 pl-5">
+            {mode.steps.map((step) => <li key={step}>{step}</li>)}
+          </ol>
+        </details>
+      )}
     </Card>
   );
 }

@@ -28,7 +28,7 @@ def _validate_artifact_uri(value: str) -> str:
 Checksum = Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
 Identifier = Annotated[str, Field(min_length=1)]
 ArtifactUri = Annotated[str, Field(min_length=1), AfterValidator(_validate_artifact_uri)]
-SchemaVersion = Annotated[str, Field(pattern=r"^1\.0$")]
+SchemaVersion = Annotated[str, Field(pattern=r"^1\.(?:0|1)$")]
 JsonObject = dict[str, JsonValue]
 
 

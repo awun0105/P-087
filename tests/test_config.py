@@ -31,3 +31,36 @@ def test_only_active_provider_api_key_is_required() -> None:
 def test_active_provider_api_key_is_required() -> None:
     with pytest.raises(ValidationError, match="Missing API key for LLM provider: anthropic"):
         Settings(_env_file=None, llm_provider="anthropic")
+
+
+def test_guest_signup_is_enabled_by_default_and_can_be_explicitly_disabled() -> None:
+    defaults = Settings(_env_file=None, openai_api_key="test-key")
+    disabled = Settings(_env_file=None, openai_api_key="test-key", auth_guest_signup_enabled=False)
+
+    assert defaults.auth_guest_signup_enabled is True
+    assert disabled.auth_guest_signup_enabled is False
+
+
+@pytest.mark.parametrize("app_env", ["staging", "production"])
+def test_auth_must_be_required_outside_development(app_env: str) -> None:
+    with pytest.raises(ValidationError, match="AUTH_REQUIRED"):
+        Settings(
+            _env_file=None,
+            openai_api_key="test-key",
+            app_env=app_env,
+            artifact_root="/data/artifacts",
+            auth_required=False,
+        )
+    ok = Settings(
+        _env_file=None,
+        openai_api_key="test-key",
+        app_env=app_env,
+        artifact_root="/data/artifacts",
+        auth_required=True,
+    )
+    assert ok.auth_required is True
+
+
+def test_auth_can_stay_off_in_development_and_test() -> None:
+    for app_env in ("development", "test"):
+        assert Settings(_env_file=None, openai_api_key="test-key", app_env=app_env).auth_required is False

@@ -1,0 +1,35 @@
+{
+  "scene": "01_LoiDi_Kho_Thuan_Aisle_CW",
+  "frames": 200,
+  "kiss_icp_voxel_m": 0.5,
+  "note": "Ghi lại thủ công từ đầu ra console của phiên đo 2026-10-10/11 (script tạm, không nằm trong repo); chưa tái lập bằng script chính thức.",
+  "e2_colmap_to_kiss_similarity": {
+    "no_lever_arm": {
+      "scale": 3.1071,
+      "median_cm": 7.1,
+      "p90_cm": 18.0,
+      "max_cm": 40.8
+    },
+    "with_lever_arm_os_to_cam": {
+      "scale": 3.0991,
+      "median_cm": 11.3,
+      "p90_cm": 24.8,
+      "max_cm": 57.7
+    }
+  },
+  "kiss_icp_fullpath_alignment_same_200_indices": {
+    "rigid": {
+      "ate_mean_cm": 7.9,
+      "median_cm": 7.6,
+      "p90_cm": 11.9,
+      "max_cm": 15.3
+    },
+    "sim3": {
+      "scale": 1.0042,
+      "ate_mean_cm": 6.3,
+      "median_cm": 6.1,
+      "p90_cm": 10.7,
+      "max_cm": 14.9
+    }
+  }
+}

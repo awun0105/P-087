@@ -1,0 +1,534 @@
+[
+  {
+    "name": "absl-py",
+    "version": "2.3.1"
+  },
+  {
+    "name": "addict",
+    "version": "2.4.0"
+  },
+  {
+    "name": "annotated-types",
+    "version": "0.7.0"
+  },
+  {
+    "name": "asttokens",
+    "version": "3.0.2"
+  },
+  {
+    "name": "attrs",
+    "version": "25.3.0"
+  },
+  {
+    "name": "backcall",
+    "version": "0.2.0"
+  },
+  {
+    "name": "blinker",
+    "version": "1.8.2"
+  },
+  {
+    "name": "certifi",
+    "version": "2022.12.7"
+  },
+  {
+    "name": "cffi",
+    "version": "1.17.1"
+  },
+  {
+    "name": "charset-normalizer",
+    "version": "2.1.1"
+  },
+  {
+    "name": "click",
+    "version": "8.1.8"
+  },
+  {
+    "name": "colorama",
+    "version": "0.4.6"
+  },
+  {
+    "name": "comm",
+    "version": "0.2.3"
+  },
+  {
+    "name": "ConfigArgParse",
+    "version": "1.8.0"
+  },
+  {
+    "name": "contourpy",
+    "version": "1.1.1"
+  },
+  {
+    "name": "cryptography",
+    "version": "47.0.0"
+  },
+  {
+    "name": "cycler",
+    "version": "0.12.1"
+  },
+  {
+    "name": "dash",
+    "version": "4.3.0"
+  },
+  {
+    "name": "decorator",
+    "version": "5.3.1"
+  },
+  {
+    "name": "docker-pycreds",
+    "version": "0.4.0"
+  },
+  {
+    "name": "einops",
+    "version": "0.8.1"
+  },
+  {
+    "name": "executing",
+    "version": "2.3.0"
+  },
+  {
+    "name": "fastjsonschema",
+    "version": "2.21.2"
+  },
+  {
+    "name": "filelock",
+    "version": "3.16.1"
+  },
+  {
+    "name": "Flask",
+    "version": "3.0.3"
+  },
+  {
+    "name": "fonttools",
+    "version": "4.57.0"
+  },
+  {
+    "name": "fsspec",
+    "version": "2025.3.0"
+  },
+  {
+    "name": "gitdb",
+    "version": "4.0.12"
+  },
+  {
+    "name": "GitPython",
+    "version": "3.2.1"
+  },
+  {
+    "name": "google-auth",
+    "version": "2.50.0"
+  },
+  {
+    "name": "google-auth-oauthlib",
+    "version": "1.0.0"
+  },
+  {
+    "name": "grpcio",
+    "version": "1.70.0"
+  },
+  {
+    "name": "idna",
+    "version": "3.4"
+  },
+  {
+    "name": "imageio",
+    "version": "2.35.1"
+  },
+  {
+    "name": "importlib_metadata",
+    "version": "8.5.0"
+  },
+  {
+    "name": "importlib_resources",
+    "version": "6.4.5"
+  },
+  {
+    "name": "ipython",
+    "version": "8.12.3"
+  },
+  {
+    "name": "ipywidgets",
+    "version": "8.1.9"
+  },
+  {
+    "name": "itsdangerous",
+    "version": "2.2.0"
+  },
+  {
+    "name": "janus",
+    "version": "1.0.0"
+  },
+  {
+    "name": "jaxtyping",
+    "version": "0.2.19"
+  },
+  {
+    "name": "jedi",
+    "version": "0.19.2"
+  },
+  {
+    "name": "Jinja2",
+    "version": "3.1.6"
+  },
+  {
+    "name": "joblib",
+    "version": "1.4.2"
+  },
+  {
+    "name": "jsonschema",
+    "version": "4.23.0"
+  },
+  {
+    "name": "jsonschema-specifications",
+    "version": "2023.12.1"
+  },
+  {
+    "name": "jupyter_core",
+    "version": "5.8.1"
+  },
+  {
+    "name": "jupyterlab_widgets",
+    "version": "3.0.17"
+  },
+  {
+    "name": "kiwisolver",
+    "version": "1.4.7"
+  },
+  {
+    "name": "kornia",
+    "version": "0.7.3"
+  },
+  {
+    "name": "kornia_rs",
+    "version": "0.2.0"
+  },
+  {
+    "name": "laspy",
+    "version": "2.5.4"
+  },
+  {
+    "name": "lpips",
+    "version": "0.1.4"
+  },
+  {
+    "name": "Markdown",
+    "version": "3.7"
+  },
+  {
+    "name": "markdown-it-py",
+    "version": "3.0.0"
+  },
+  {
+    "name": "MarkupSafe",
+    "version": "2.1.5"
+  },
+  {
+    "name": "matplotlib",
+    "version": "3.7.5"
+  },
+  {
+    "name": "matplotlib-inline",
+    "version": "0.1.7"
+  },
+  {
+    "name": "mdurl",
+    "version": "0.1.2"
+  },
+  {
+    "name": "mediapy",
+    "version": "1.2.2"
+  },
+  {
+    "name": "mpmath",
+    "version": "1.3.0"
+  },
+  {
+    "name": "narwhals",
+    "version": "1.42.1"
+  },
+  {
+    "name": "nbformat",
+    "version": "5.10.4"
+  },
+  {
+    "name": "nest-asyncio",
+    "version": "1.6.0"
+  },
+  {
+    "name": "networkx",
+    "version": "3.1"
+  },
+  {
+    "name": "ninja",
+    "version": "1.11.1.3"
+  },
+  {
+    "name": "numpy",
+    "version": "1.24.4"
+  },
+  {
+    "name": "oauthlib",
+    "version": "3.3.1"
+  },
+  {
+    "name": "open3d-cpu",
+    "version": "0.18.0"
+  },
+  {
+    "name": "opencv-python-headless",
+    "version": "4.10.0.84"
+  },
+  {
+    "name": "packaging",
+    "version": "26.2"
+  },
+  {
+    "name": "pandas",
+    "version": "2.0.3"
+  },
+  {
+    "name": "parso",
+    "version": "0.8.7"
+  },
+  {
+    "name": "pexpect",
+    "version": "4.9.0"
+  },
+  {
+    "name": "pickleshare",
+    "version": "0.7.5"
+  },
+  {
+    "name": "pillow",
+    "version": "10.4.0"
+  },
+  {
+    "name": "pip",
+    "version": "24.2"
+  },
+  {
+    "name": "pkgutil_resolve_name",
+    "version": "1.3.10"
+  },
+  {
+    "name": "platformdirs",
+    "version": "4.3.6"
+  },
+  {
+    "name": "plotly",
+    "version": "7.1.0"
+  },
+  {
+    "name": "plyfile",
+    "version": "1.0.3"
+  },
+  {
+    "name": "prompt_toolkit",
+    "version": "3.0.52"
+  },
+  {
+    "name": "protobuf",
+    "version": "5.29.6"
+  },
+  {
+    "name": "psutil",
+    "version": "7.2.2"
+  },
+  {
+    "name": "ptyprocess",
+    "version": "0.7.0"
+  },
+  {
+    "name": "pure_eval",
+    "version": "0.2.4"
+  },
+  {
+    "name": "pyasn1",
+    "version": "0.6.4"
+  },
+  {
+    "name": "pyasn1_modules",
+    "version": "0.4.2"
+  },
+  {
+    "name": "pycparser",
+    "version": "2.23"
+  },
+  {
+    "name": "pydantic",
+    "version": "2.10.6"
+  },
+  {
+    "name": "pydantic_core",
+    "version": "2.27.2"
+  },
+  {
+    "name": "Pygments",
+    "version": "2.19.2"
+  },
+  {
+    "name": "pyparsing",
+    "version": "3.1.4"
+  },
+  {
+    "name": "pyquaternion",
+    "version": "0.9.9"
+  },
+  {
+    "name": "python-dateutil",
+    "version": "2.9.0.post0"
+  },
+  {
+    "name": "pytz",
+    "version": "2026.5"
+  },
+  {
+    "name": "PyYAML",
+    "version": "6.0.2"
+  },
+  {
+    "name": "referencing",
+    "version": "0.35.1"
+  },
+  {
+    "name": "requests",
+    "version": "2.28.1"
+  },
+  {
+    "name": "requests-oauthlib",
+    "version": "2.0.0"
+  },
+  {
+    "name": "retrying",
+    "version": "1.4.2"
+  },
+  {
+    "name": "rich",
+    "version": "13.9.4"
+  },
+  {
+    "name": "rpds-py",
+    "version": "0.20.1"
+  },
+  {
+    "name": "scikit-learn",
+    "version": "1.3.2"
+  },
+  {
+    "name": "scipy",
+    "version": "1.10.1"
+  },
+  {
+    "name": "sentry-sdk",
+    "version": "2.72.0"
+  },
+  {
+    "name": "setproctitle",
+    "version": "1.3.8"
+  },
+  {
+    "name": "setuptools",
+    "version": "75.3.0"
+  },
+  {
+    "name": "six",
+    "version": "1.17.0"
+  },
+  {
+    "name": "smmap",
+    "version": "5.0.3"
+  },
+  {
+    "name": "stack-data",
+    "version": "0.6.3"
+  },
+  {
+    "name": "sympy",
+    "version": "1.13.3"
+  },
+  {
+    "name": "tensorboard",
+    "version": "2.14.0"
+  },
+  {
+    "name": "tensorboard-data-server",
+    "version": "0.7.2"
+  },
+  {
+    "name": "threadpoolctl",
+    "version": "3.5.0"
+  },
+  {
+    "name": "torch",
+    "version": "2.1.2+cu118"
+  },
+  {
+    "name": "torch-scatter",
+    "version": "2.1.2+pt21cu118"
+  },
+  {
+    "name": "torchaudio",
+    "version": "2.1.2+cu118"
+  },
+  {
+    "name": "torchvision",
+    "version": "0.16.2+cu118"
+  },
+  {
+    "name": "tqdm",
+    "version": "4.70.1"
+  },
+  {
+    "name": "traitlets",
+    "version": "5.14.3"
+  },
+  {
+    "name": "trimesh",
+    "version": "4.5.3"
+  },
+  {
+    "name": "triton",
+    "version": "2.1.0"
+  },
+  {
+    "name": "typeguard",
+    "version": "4.4.0"
+  },
+  {
+    "name": "typing_extensions",
+    "version": "4.13.2"
+  },
+  {
+    "name": "tzdata",
+    "version": "2026.5"
+  },
+  {
+    "name": "urllib3",
+    "version": "1.26.13"
+  },
+  {
+    "name": "wandb",
+    "version": "0.18.7"
+  },
+  {
+    "name": "wcwidth",
+    "version": "0.8.5"
+  },
+  {
+    "name": "Werkzeug",
+    "version": "3.0.6"
+  },
+  {
+    "name": "wheel",
+    "version": "0.45.1"
+  },
+  {
+    "name": "widgetsnbextension",
+    "version": "4.0.16"
+  },
+  {
+    "name": "zipp",
+    "version": "3.20.2"
+  }
+]

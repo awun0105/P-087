@@ -8,7 +8,7 @@ và xác nhận hoặc sửa. Sai số ở đây là của **đề xuất**, tr�
         --calibration "<dataset>/calibrations.txt" --start 100 --label <nhãn> --out-dir eval/results [--create]
 
 `--create`: job cũ chưa có đề xuất thì chạy đúng bước đề xuất của sản phẩm (cần runtime MoGe đã cấu hình qua
-`REC06_MOGE_PYTHON` / `REC06_MOGE_MODEL`) rồi mới chấm. Không có đề xuất và không `--create` → dừng, không bịa số.
+`R2S_MOGE_PYTHON` / `R2S_MOGE_MODEL`) rồi mới chấm. Không có đề xuất và không `--create` → dừng, không bịa số.
 """
 
 import argparse
@@ -39,7 +39,7 @@ def run(args: argparse.Namespace) -> dict:
     if proposal is None and args.create:
         settings = MogeSettings()
         if settings.python is None or settings.model is None:
-            raise SystemExit("Chưa cấu hình runtime MoGe (REC06_MOGE_PYTHON, REC06_MOGE_MODEL)")
+            raise SystemExit("Chưa cấu hình runtime MoGe (R2S_MOGE_PYTHON, R2S_MOGE_MODEL)")
         with tempfile.TemporaryDirectory(dir=args.scratch) as scratch:
             propose_metric(
                 args.job,

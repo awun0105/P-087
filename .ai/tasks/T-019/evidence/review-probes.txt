@@ -1,0 +1,5 @@
+REOPEN {'local_min': [-0.19963207840919495, -0.599989652633667, -0.19748476147651672], 'local_max': [0.19899395108222961, 0.19999945163726807, 0.19973519444465637], 'initial_half': (0.19931301474571225, 0.39999455213546764, 0.19860997796058655), 'removed_without_user_change': 121, 'remaining': 479}
+.CLAIM {'preview_claimed': {'candidate-002': 400}, 'apply_error': 'vật candidate-002 còn dưới 50 Gaussian; dùng Xoá vật thay vì thu box'}
+.IGNORED_SHELL Vỏ của Object 1 không dựng được: audit sparse shell. Sửa vùng vật rồi thử lại.
+.
+3 passed in 12.73s

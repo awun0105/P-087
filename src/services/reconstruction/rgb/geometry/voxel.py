@@ -1,20 +1,36 @@
 """Config REC-05; không suy mét, footprint hoặc opacity từ defaults upstream."""
 
 import hashlib
+import math
 from typing import Literal, Self
 
-from pydantic import Field, FiniteFloat, model_validator
+from pydantic import Field, FiniteFloat, SerializerFunctionWrapHandler, model_serializer, model_validator
 
 from src.models.contracts.artifacts import ContractModel
 from src.models.contracts.identity import canonical_json_bytes
 
 Vector3 = tuple[FiniteFloat, FiniteFloat, FiniteFloat]
+MAX_VOXEL_CELLS = 1_500_000_000
+
+
+class StatisticalOutlierRemovalConfig(ContractModel):
+    """Opt-in metric-space SOR with explicit neighbor and memory bounds."""
+
+    neighbors: int = Field(ge=2, le=64, strict=True)
+    standard_deviation_ratio: FiniteFloat = Field(gt=0)
+    max_gaussians: int = Field(ge=3, le=5_000_000, strict=True)
+
+    @model_validator(mode="after")
+    def _enough_rows_for_neighbors(self) -> Self:
+        if self.max_gaussians <= self.neighbors:
+            raise ValueError("SOR max_gaussians must exceed the neighbor count")
+        return self
 
 
 class VoxelConfig(ContractModel):
     """Seeds thuộc canonical Z-up; cluster seed và capsule seed có vai trò riêng."""
 
-    schema_version: Literal["1.0"] = "1.0"
+    schema_version: Literal["1.0", "1.1", "1.2"] = "1.0"
     resolution_m: FiniteFloat = Field(default=0.05, gt=0)
     opacity: FiniteFloat = Field(gt=0, lt=1)
     cluster_resolution_m: FiniteFloat = Field(gt=0)
@@ -35,6 +51,21 @@ class VoxelConfig(ContractModel):
     #: dày). `floaters`: bỏ Gaussian không góp vào voxel đặc nào — hiệu chỉnh 2026-09-30 trên
     #: Aisle_CW: preview thưa (~98k Gaussian) vỡ thành hàng trăm cụm nên `cluster` xoá gần hết.
     cleanup: Literal["cluster", "floaters"] = "cluster"
+    #: Disabled unless a versioned product geometry profile explicitly opts in.
+    statistical_outlier_removal: StatisticalOutlierRemovalConfig | None = None
+    #: Giới hạn log-scale tối đa của Gaussian để tránh floaters khổng lồ làm phình lưới voxel.
+    max_gaussian_scale_log: FiniteFloat | None = None
+    external_fill_size_m: FiniteFloat | None = Field(default=None, gt=0)
+    collision_mesh: Literal["smooth", "faces"] = Field(default="smooth", exclude_if=lambda value: value == "smooth")
+    floor_fill_size_m: FiniteFloat | None = Field(default=None, gt=0, exclude_if=lambda value: value is None)
+
+    @model_serializer(mode="wrap")
+    def _versioned_payload(self, handler: SerializerFunctionWrapHandler) -> dict:
+        """Preserve legacy receipt bytes and hashes when reading schema 1.0/1.1/1.2."""
+        payload = handler(self)
+        if self.schema_version != "1.2":
+            payload.pop("external_fill_size_m", None)
+        return payload
 
     @model_validator(mode="after")
     def _crop_order(self) -> Self:
@@ -42,6 +73,10 @@ class VoxelConfig(ContractModel):
             low, high = self.crop_box_world
             if any(a >= b for a, b in zip(low, high, strict=True)):
                 raise ValueError("crop box min phải nhỏ hơn max trên mọi trục")
+        if self.statistical_outlier_removal is not None and self.schema_version not in ("1.1", "1.2"):
+            raise ValueError("statistical outlier removal requires VoxelConfig schema 1.1 or 1.2")
+        if self.external_fill_size_m is not None and self.schema_version != "1.2":
+            raise ValueError("external fill requires VoxelConfig schema 1.2")
         return self
 
     def checksum(self) -> str:
@@ -78,11 +113,23 @@ def _crop_arguments(config: VoxelConfig) -> tuple[str, ...]:
     return ("--filter-box", ",".join(str(value) for value in (*native_low, *native_high)))
 
 
-def cluster_command(config: VoxelConfig) -> tuple[str, ...]:
+def cluster_command(config: VoxelConfig, *, input_filename: str = "input.ply") -> tuple[str, ...]:
     """Input PLY raw xyz đã canonical; bỏ PLY flip rồi đổi sang native Y-up."""
     cluster = f"{config.cluster_resolution_m},{config.cluster_opacity},{config.cluster_min_contribution}"
+    scale_filters = (
+        (
+            "--filter-value",
+            f"scale_0,lte,{config.max_gaussian_scale_log}",
+            "--filter-value",
+            f"scale_1,lte,{config.max_gaussian_scale_log}",
+            "--filter-value",
+            f"scale_2,lte,{config.max_gaussian_scale_log}",
+        )
+        if config.max_gaussian_scale_log is not None
+        else ()
+    )
     return (
-        "input.ply",
+        input_filename,
         "--gpu",
         str(config.gpu_index),
         "--rotate",
@@ -90,6 +137,7 @@ def cluster_command(config: VoxelConfig) -> tuple[str, ...]:
         "--rotate",
         "-90,0,0",
         *_crop_arguments(config),
+        *scale_filters,
         *(
             ("--filter-floaters", cluster)
             if config.cleanup == "floaters"
@@ -109,18 +157,19 @@ def collision_command(config: VoxelConfig) -> tuple[str, ...]:
         str(config.resolution_m),
         "--voxel-opacity",
         str(config.opacity),
+        *_fill_arguments(config),
         "--seed-pos",
         _vector(native_from_world(config.navigation_seed_world)),
         "--voxel-carve",
         f"{config.capsule_height_m},{config.capsule_radius_m}",
         "--collision-mesh",
-        "smooth",
+        config.collision_mesh,
         "geometry.voxel.json",
     )
 
 
 def occupancy_command(config: VoxelConfig) -> tuple[str, ...]:
-    """Cùng filtered occupancy của carve, không floor/exterior fill hoặc relocation."""
+    """Occupancy after the configured fill, before capsule carve or seed relocation."""
     return (
         "cluster.ply",
         "--gpu",
@@ -129,5 +178,31 @@ def occupancy_command(config: VoxelConfig) -> tuple[str, ...]:
         str(config.resolution_m),
         "--voxel-opacity",
         str(config.opacity),
+        *_fill_arguments(config),
+        *(
+            ("--seed-pos", _vector(native_from_world(config.navigation_seed_world)))
+            if config.external_fill_size_m
+            else ()
+        ),
         "occupancy.voxel.json",
     )
+
+
+def _fill_arguments(config: VoxelConfig) -> tuple[str, ...]:
+    external = ("--voxel-external-fill", str(config.external_fill_size_m)) if config.external_fill_size_m else ()
+    floor = ("--voxel-floor-fill", str(config.floor_fill_size_m)) if config.floor_fill_size_m else ()
+    return external + floor
+
+
+def require_voxel_capacity(lengths: Vector3, resolution_m: float, fill_size_m: float) -> None:
+    """Bound padded grid cells, including the pinned runtime's four-voxel alignment."""
+    if not all(math.isfinite(value) and value >= 0 for value in lengths):
+        raise ValueError("invalid Gaussian extent for voxel capacity")
+    try:
+        padding = (math.ceil(fill_size_m / resolution_m) + 1) * resolution_m
+        block = 4 * resolution_m
+        cells = math.prod((math.ceil((length + 2 * padding) / block) + 1) * 4 for length in lengths)
+    except OverflowError as error:
+        raise ValueError("external fill exceeds finite voxel capacity") from error
+    if cells > MAX_VOXEL_CELLS:
+        raise ValueError("external fill exceeds voxel capacity; reduce crop or explicitly choose a coarser profile")

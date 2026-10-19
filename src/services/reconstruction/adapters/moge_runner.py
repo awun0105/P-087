@@ -52,7 +52,9 @@ def main() -> None:
     model = MoGeModel.from_pretrained(request["model"]).to(device).eval()
     arrays: dict[str, np.ndarray] = {}
     half_precision = device.type == "cuda"
-    for frame in request["frames"]:
+    # Một dòng tiến độ mỗi ảnh: log tăng là dấu hiệu tiến triển để worker phát hiện treo (T-043).
+    print(json.dumps({"model_loaded": True, "frames": len(request["frames"])}), flush=True)
+    for index, frame in enumerate(request["frames"], start=1):
         pixels = np.asarray(frame["pixels"], dtype=np.float64).reshape(-1, 2)
         image = np.asarray(Image.open(frame["image"]).convert("RGB"), dtype=np.float32) / 255.0
         tensor = torch.from_numpy(image).permute(2, 0, 1).to(device)
@@ -74,6 +76,7 @@ def main() -> None:
         arrays[f"{key}_depth"] = depth.astype(np.float32)
         arrays[f"{key}_normal"] = normal.astype(np.float32)
         arrays[f"{key}_valid"] = mask.astype(bool) & np.isfinite(depth) & (depth > 0)
+        print(json.dumps({"frame": index, "of": len(request["frames"])}), flush=True)
     np.savez(args.result, **arrays)
     if device.type == "cuda":
         peak = torch.cuda.max_memory_allocated(device) / 1024**3

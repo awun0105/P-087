@@ -29,15 +29,17 @@ from pathlib import Path
 from typing import Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from src.config import Settings
 from src.models.contracts.artifacts import ArtifactRef, Identifier
+from src.models.contracts.identity import verify_content_checksum
 from src.models.contracts.manifests import JobManifest, JobStatus, StageId
 from src.services.orchestration.artifacts import ArtifactResolver, ArtifactStoreError
 from src.services.orchestration.auth.models import AuditEntry
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError, RuntimeTransaction
-from src.services.orchestration.jobs.progress import metric_confirmation_stage
+from src.services.orchestration.jobs.progress import awaiting_anonymization_review, metric_confirmation_stage
+from src.services.orchestration.scene.heads import PendingScenePublication
 from src.services.orchestration.storage import runtime_resolver
 from src.services.orchestration.uploads.models import UploadRecord
 
@@ -51,20 +53,59 @@ _SAFE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 #: SQL trong module này chỉ ghép từ các hằng số ở đây, giá trị luôn đi qua bind parameter.
 _TABLE_COLUMNS: dict[str, tuple[str, ...]] = {
     "r2s_projects": ("project_id", "payload"),
-    "r2s_jobs": ("job_id", "project_id", "version", "manifest_ref"),
+    "r2s_jobs": ("job_id", "project_id", "version", "manifest_ref", "owner_user_id"),
+    "r2s_input_runs": (
+        "requester_id",
+        "idempotency_key",
+        "request_fingerprint",
+        "job_id",
+        "project_id",
+        "assembly_id",
+        "revision",
+        "report_checksum",
+        "recipe_checksum",
+        "recipe_ref",
+        "payload",
+    ),
     "r2s_job_events": ("job_id", "version", "payload"),
     "r2s_scene_requests": ("job_id", "status", "payload"),
+    "r2s_scene_heads": ("job_id", "generation", "allocation_sequence", "head_checksum", "payload"),
+    "r2s_scene_head_repairs": ("job_id", "status", "generation", "repair_checksum", "payload"),
+    "r2s_scene_head_backfill_items": ("job_id", "scene_revision", "item_checksum", "payload"),
+    "r2s_scene_publications": ("job_id", "expected_generation", "target_revision", "lease_expires_at", "payload"),
     "r2s_uploads": ("upload_id", "payload"),
     "r2s_upload_sessions": ("upload_id", "payload"),
     "r2s_imports": ("import_id", "upload_id", "payload"),
+    "r2s_import_operations": (
+        "operation_id",
+        "import_id",
+        "status",
+        "attempt",
+        "requester_id",
+        "idempotency_key",
+        "request_fingerprint",
+        "created_at",
+        "updated_at",
+        "owner_id",
+        "fencing_token",
+        "lease_expires_at",
+        "heartbeat_at",
+        "payload",
+    ),
 }
-_KEY_WIDTH = {"r2s_job_events": 2}
+_KEY_WIDTH = {"r2s_input_runs": 2, "r2s_job_events": 2, "r2s_scene_head_backfill_items": 2}
 #: Con trước cha, theo khoá ngoại của schema runtime.
 _DELETE_ORDER = (
     "r2s_scene_requests",
+    "r2s_scene_publications",
+    "r2s_scene_head_backfill_items",
+    "r2s_scene_head_repairs",
+    "r2s_scene_heads",
     "r2s_job_events",
+    "r2s_input_runs",
     "r2s_jobs",
     "r2s_projects",
+    "r2s_import_operations",
     "r2s_imports",
     "r2s_upload_sessions",
     "r2s_uploads",
@@ -77,6 +118,10 @@ class DeletionRefusedError(ValueError):
     def __init__(self, reasons: list[str]) -> None:
         super().__init__("; ".join(reasons))
         self.reasons = reasons
+
+
+class GuestOwnershipError(PermissionError):
+    """A Guest cannot mutate a trash entry with a foreign or unknown owner."""
 
 
 class DeletionRequest(BaseModel):
@@ -99,7 +144,7 @@ class StoredRow(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     table: str
-    values: dict[str, str | int]
+    values: dict[str, str | int | None]
 
 
 class UploadUnlink(BaseModel):
@@ -227,6 +272,8 @@ def _tree_size(paths: list[Path]) -> int:
 
 def _busy_reason(job: JobManifest) -> str | None:
     """Job còn có thể được worker đụng tới thì chưa gỡ được; job chờ người dùng xác nhận tỉ lệ thì đã dừng."""
+    if awaiting_anonymization_review(job):
+        return "job đang chờ bạn xem bản đã che; huỷ job trước khi gỡ"
     if job.status == JobStatus.QUEUED:
         return "job đang chờ worker (QUEUED); huỷ job trước khi gỡ"
     if job.status == JobStatus.RUNNING:
@@ -302,7 +349,40 @@ class _Collector:
         requests = self._select("r2s_scene_requests", "job_id=?", (job_id,))
         if any(row.values["status"] in {"queued", "running"} for row in requests):
             self.blockers.append(f"{job_id}: yêu cầu dựng lại vật thể đang chờ hoặc đang chạy")
-        self.rows += requests + self._select("r2s_job_events", "job_id=? ORDER BY version", (job_id,))
+        heads = self._select("r2s_scene_heads", "job_id=?", (job_id,))
+        repairs = self._select("r2s_scene_head_repairs", "job_id=?", (job_id,))
+        backfill_items = self._select("r2s_scene_head_backfill_items", "job_id=?", (job_id,))
+        publications = self._select("r2s_scene_publications", "job_id=?", (job_id,))
+        active_publications = []
+        for row in publications:
+            try:
+                publication = PendingScenePublication.model_validate_json(str(row.values["payload"]))
+                verify_content_checksum(publication, "publication_checksum")
+                if (
+                    publication.job_id != row.values["job_id"]
+                    or publication.expected_generation != row.values["expected_generation"]
+                    or publication.target_scene_revision != row.values["target_revision"]
+                    or publication.lease_expires_at.isoformat() != row.values["lease_expires_at"]
+                ):
+                    raise ValueError("scene publication columns do not match checksummed payload")
+            except (TypeError, ValueError, ValidationError):
+                publication = None
+            if publication is None or publication.status != "ABORTED":
+                active_publications.append(row)
+        if active_publications:
+            self.blockers.append(f"{job_id}: scene publication đang chờ commit hoặc cần phục hồi")
+        repair_statuses = {str(row.values["status"]).upper() for row in repairs}
+        if repair_statuses - {"COMPLETE", "BLOCKED"}:
+            self.blockers.append(f"{job_id}: scene revision head đang backfill hoặc có trạng thái repair chưa hỗ trợ")
+        self.rows += (
+            requests
+            + heads
+            + repairs
+            + backfill_items
+            + publications
+            + self._select("r2s_job_events", "job_id=? ORDER BY version", (job_id,))
+            + self._select("r2s_input_runs", "job_id=?", (job_id,))
+        )
         for kind in ("artifact", "worker", "rerun"):
             self._add_item(kind, job_id)
         try:
@@ -324,9 +404,13 @@ class _Collector:
             self.blockers.append(f"{import_id}: không tìm thấy scene nhập")
             return
         payload = json.loads(str(found[0].values["payload"]))
-        if payload.get("status") == "PACKAGING":
+        operations = self._select("r2s_import_operations", "import_id=?", (import_id,))
+        active_operations = [row for row in operations if row.values["status"] in {"QUEUED", "WAITING", "RUNNING"}]
+        if active_operations:
+            self.blockers.append(f"{import_id}: scene import đang được đóng gói (chờ worker hoặc worker đang xử lý)")
+        elif payload.get("status") == "PACKAGING":
             self.blockers.append(f"{import_id}: scene nhập đang được đóng gói")
-        self.rows += found
+        self.rows += found + operations
         self._add_item("artifact", import_id)
         self._add_item("import_worker", import_id)
         detail = f"{payload.get('status', '?')}, từ {found[0].values['upload_id']}"
@@ -483,7 +567,64 @@ def _take_entry(tx: RuntimeTransaction, record: DeletionRecord) -> None:
         raise RuntimeStateConflictError(f"Mục thùng rác {record.entry_id} vừa được xử lý ở nơi khác")
 
 
-def apply_deletion(context: DeletionContext, request: DeletionRequest, actor: str | None = None) -> DeletionRecord:
+def _record_owner_user_id(row: StoredRow) -> str | None:
+    """Read owner IDs only from persisted creator fields; never infer a legacy owner."""
+    if row.table == "r2s_jobs":
+        owner = row.values.get("owner_user_id")
+        return str(owner) if owner is not None else None
+    if row.table not in {"r2s_projects", "r2s_imports", "r2s_uploads", "r2s_upload_sessions"}:
+        return None
+    try:
+        payload = json.loads(str(row.values["payload"]))
+    except (KeyError, TypeError, ValueError):
+        return None
+    if row.table == "r2s_projects":
+        creator = payload.get("created_by")
+        owner = creator.get("user_id") if isinstance(creator, dict) else None
+    elif row.table == "r2s_imports":
+        owner = payload.get("created_by")
+    else:
+        uploader = payload.get("uploaded_by")
+        owner = uploader.get("user_id") if isinstance(uploader, dict) else None
+    return str(owner) if owner is not None else None
+
+
+def _assert_guest_owns_plan(plan: DeletionPlan, guest_owner_user_id: str) -> None:
+    """Fail before DB, artifact, or filesystem mutation if any affected owner is foreign/unknown."""
+    owned_tables = {"r2s_projects", "r2s_jobs", "r2s_imports", "r2s_uploads", "r2s_upload_sessions"}
+    for row in plan.rows:
+        if row.table not in owned_tables:
+            continue
+        if _record_owner_user_id(row) != guest_owner_user_id:
+            resource_id = next(iter(row.values.values()), "unknown")
+            raise GuestOwnershipError(f"Guest không thể sửa resource {resource_id}: owner không khớp hoặc chưa biết")
+    for unlink in plan.upload_unlinks:
+        try:
+            payload = json.loads(unlink.original_payload)
+            uploader = payload.get("uploaded_by")
+            owner_user_id = uploader.get("user_id") if isinstance(uploader, dict) else None
+        except (TypeError, ValueError):
+            owner_user_id = None
+        if owner_user_id != guest_owner_user_id:
+            raise GuestOwnershipError(f"Guest không thể thay đổi liên kết upload {unlink.upload_id} của tài khoản khác")
+
+
+def guest_owns_deletion_plan(plan: DeletionPlan, guest_owner_user_id: str) -> bool:
+    """Return the same all-resources ownership decision used by restore/delete guards."""
+    try:
+        _assert_guest_owns_plan(plan, guest_owner_user_id)
+    except GuestOwnershipError:
+        return False
+    return True
+
+
+def apply_deletion(
+    context: DeletionContext,
+    request: DeletionRequest,
+    actor: str | None = None,
+    *,
+    guest_owner_user_id: str | None = None,
+) -> DeletionRecord:
     """Chuyển scene/bản nhập theo yêu cầu vào thùng rác; trả bản ghi của mục vừa tạo.
 
     Kế hoạch được tính lại trong chính transaction ghi, nên điều kiện từ chối được kiểm trên trạng thái mới nhất.
@@ -491,6 +632,8 @@ def apply_deletion(context: DeletionContext, request: DeletionRequest, actor: st
     entry_id = f"{datetime.now(UTC):%Y%m%dT%H%M%SZ}-{uuid4().hex[:6]}"
     with context.database.transaction(write=True) as tx:
         plan = _Collector(context, tx, request).plan()
+        if guest_owner_user_id is not None:
+            _assert_guest_owns_plan(plan, guest_owner_user_id)
         if plan.blockers:
             raise DeletionRefusedError(plan.blockers)
         record = DeletionRecord(entry_id=entry_id, created_at=datetime.now(UTC), deleted_by=actor, plan=plan)
@@ -516,7 +659,9 @@ def _restore_row(tx: RuntimeTransaction, row: StoredRow) -> None:
     columns = _TABLE_COLUMNS[row.table]
     where, parameters = _key(row)
     existing = tx.execute(f"SELECT {', '.join(columns)} FROM {row.table} WHERE {where}", parameters).fetchone()
-    values = tuple(row.values[column] for column in columns)
+    values = tuple(
+        None if column == "owner_user_id" and column not in row.values else row.values[column] for column in columns
+    )
     if existing is None:
         marks = ", ".join("?" for _ in columns)
         tx.execute(f"INSERT INTO {row.table}({', '.join(columns)}) VALUES ({marks})", values)
@@ -524,12 +669,20 @@ def _restore_row(tx: RuntimeTransaction, row: StoredRow) -> None:
         raise RuntimeStateConflictError(f"{row.table} đã có dòng khác nội dung cho {parameters}")
 
 
-def restore_deletion(context: DeletionContext, entry_id: str, actor: str | None = None) -> DeletionRecord:
+def restore_deletion(
+    context: DeletionContext,
+    entry_id: str,
+    actor: str | None = None,
+    *,
+    guest_owner_user_id: str | None = None,
+) -> DeletionRecord:
     """Đưa một mục thùng rác trở lại: thư mục trước, dòng DB sau, để DB không trỏ tới file chưa có.
 
     Deployment có kho file thì file thiếu trên máy này không phải lỗi: artifact được tải lại từ kho khi cần.
     """
     record = get_trash_entry(context.database, entry_id)
+    if guest_owner_user_id is not None:
+        _assert_guest_owns_plan(record.plan, guest_owner_user_id)
     entry = context.entry_dir(entry_id)
     moves: list[tuple[Path, Path]] = []
     problems: list[str] = []

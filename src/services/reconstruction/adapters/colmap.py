@@ -2,7 +2,9 @@
 
 import json
 import logging
+import re
 import shutil
+import struct
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -19,6 +21,8 @@ from src.services.reconstruction.adapters.colmap_priors import (
     prepare_guidance,
 )
 from src.services.reconstruction.adapters.colmap_runtime import ColmapError, ColmapProcess, reconstruction_commands
+from src.services.reconstruction.adapters.log_excerpt import redacted_excerpt
+from src.services.reconstruction.adapters.vocab_tree import get_vocab_tree_path
 from src.services.reconstruction.resume import ResumeCache, content_key
 from src.services.reconstruction.rgb.frames.frame_set import FrameSetResolver, _sha256
 from src.services.reconstruction.rgb.pose.camera_pose import CameraPoseArtifact, ColmapConfig
@@ -95,17 +99,27 @@ class ColmapAdapter:
 
     def _execute(self, request: ColmapRequest) -> ColmapResult:
         images = ColmapInputAdapter(self.deps.frames).prepare(request.frame_set, request.workspace)
-        self._vocabulary(request)
-        version, feature, match = self.deps.process.capabilities(request.workspace)
+        if request.config.matching_mode == "sequential":
+            version, feature, match = self.deps.process.capabilities(request.workspace)
+        else:
+            version, feature, match = self.deps.process.capabilities(request.workspace, request.config.matching_mode)
+        vocabulary_checksum = self._vocabulary(request, version)
         resume = self.deps.resume
         key = content_key(
             request.frame_set.artifact_checksum,
             request.config.checksum(),
             self.deps.process.settings.runtime_identity,
             version,
+            *([request.config.matching_mode, vocabulary_checksum] if vocabulary_checksum is not None else []),
             *([request.guidance.checksum()] if request.guidance is not None else []),
         )
-        reused = resume is not None and resume.restore_colmap(key, request.workspace)
+        reused = False
+        if resume is not None:
+            try:
+                reused = resume.restore_colmap(key, request.workspace)
+            except (OSError, shutil.Error) as error:
+                # A failed cache read/restore is a miss; COLMAP still takes the ordinary cold path.
+                logging.getLogger(__name__).warning("REC-03 không phục hồi resume cache cause=%s", type(error).__name__)
         if not reused:
             (request.workspace / "sparse").mkdir()
             commands = reconstruction_commands(request.config, (feature, match))
@@ -119,10 +133,35 @@ class ColmapAdapter:
             for command in commands:
                 self.deps.process.run(command, request.workspace)
         models = self._models(request.workspace, images.frame_ids)
+        if not models:
+            log_path = request.workspace / "process.log"
+            log_text = log_path.read_text(encoding="utf-8", errors="replace") if log_path.exists() else ""
+            no_initial_pair = log_text.count("Discarding reconstruction due to no initial pair")
+            insufficient_size = log_text.count("Discarding reconstruction due to insufficient size")
+            excerpt = redacted_excerpt(log_text, request.workspace)
+            raise ColmapError(
+                "COLMAP_NO_MODEL",
+                "COLMAP produced no sparse model",
+                details={
+                    "diagnostics": {
+                        "no_initial_pair": no_initial_pair,
+                        "insufficient_size": insufficient_size,
+                    },
+                    "log_excerpt": excerpt,
+                },
+            )
         best = select_sparse_model(models)
         ratio = len(best.poses) / len(images.frame_ids)
         if len(best.poses) < request.config.min_registered_frames or ratio < request.config.min_registered_ratio:
-            raise ColmapError("COLMAP_REGISTRATION_LOW", "Best COLMAP model is below configured registration threshold")
+            raise ColmapError(
+                "COLMAP_REGISTRATION_LOW",
+                "Best COLMAP model is below configured registration threshold",
+                details={
+                    "registered_frames": len(best.poses),
+                    "input_frames": len(images.frame_ids),
+                    "min_registered_ratio": request.config.min_registered_ratio,
+                },
+            )
         payload = self._payload(request, images, best)
         payload.update(colmap_version=version, models=[model.stats.model_dump() for model in models])
         artifact, reference = PosePublisher(self.deps.writer, request.job_id, request.attempt_id).manifest(payload)
@@ -138,7 +177,11 @@ class ColmapAdapter:
         )
         if resume is not None and not reused:
             # Chỉ giữ sau khi artifact đã publish và consumer đọc lại được: kho không chứa kết quả hỏng.
-            resume.store_colmap(key, request.workspace)
+            try:
+                resume.store_colmap(key, request.workspace)
+            except (OSError, ValueError) as error:
+                # Cache chỉ tăng tốc retry; cache I/O lỗi không được biến pose đã verify thành job failure.
+                logging.getLogger(__name__).warning("REC-03 không lưu resume cache cause=%s", type(error).__name__)
         guidance_ref = self._guidance_record(request, artifact, reference) if request.guidance is not None else None
         return ColmapResult(artifact, reference, stage, key if resume is not None else None, guidance_ref)
 
@@ -169,14 +212,45 @@ class ColmapAdapter:
         publisher = PosePublisher(self.deps.writer, request.job_id, request.attempt_id)
         return publisher.publish("pose_guidance.json", json.dumps(record, indent=2).encode() + b"\n")
 
-    def _vocabulary(self, request: ColmapRequest) -> None:
+    def _vocabulary(self, request: ColmapRequest, version: str) -> str | None:
         reference = request.config.vocab_tree
-        if reference is None:
-            return
-        path = self.deps.resolve(reference)
-        if not path.is_file() or _sha256(path) != reference.artifact_checksum:
-            raise ValueError("COLMAP vocabulary missing or checksum mismatch")
-        shutil.copyfile(path, request.workspace / "vocab_tree.bin")
+        if reference is None and request.config.matching_mode != "sequential_vocab_tree":
+            return None
+        release = re.search(r"COLMAP (\d+)\.(\d+)", version)
+        if request.config.matching_mode == "sequential_vocab_tree" and release is None:
+            raise ColmapError("COLMAP_VERSION_UNKNOWN", "Cannot select vocabulary format without a COLMAP version")
+        faiss = release is not None and (int(release[1]), int(release[2])) >= (3, 12)
+        if reference is not None:
+            path = self.deps.resolve(reference)
+            if not path.is_file() or _sha256(path) != reference.artifact_checksum:
+                raise ValueError("COLMAP vocabulary missing or checksum mismatch")
+            checksum = reference.artifact_checksum
+        else:
+            path = get_vocab_tree_path(format="faiss" if faiss else "flann")
+            if path is None:
+                raise ColmapError(
+                    "VOCAB_TREE_MISSING",
+                    "Loop matching requires a verified COLMAP vocabulary",
+                    details={
+                        "action": f"Run scripts/assets/download_vocab_tree.py --format {'faiss' if faiss else 'flann'} on the worker, or configure PRODUCT_COLMAP_VOCAB_TREE"
+                    },
+                )
+            checksum = _sha256(path)
+        if request.config.matching_mode == "sequential_vocab_tree":
+            with path.open("rb") as handle:
+                header = handle.read(4)
+            is_faiss = len(header) == 4 and struct.unpack("<i", header)[0] in (1, 2)
+            if is_faiss != faiss:
+                raise ColmapError(
+                    "VOCAB_TREE_INCOMPATIBLE",
+                    "Vocabulary format does not match the COLMAP runtime",
+                    details={"action": f"Use a {'FAISS' if faiss else 'FLANN'} vocabulary for this worker"},
+                )
+        target = request.workspace / "vocab_tree.bin"
+        shutil.copyfile(path, target)
+        if _sha256(target) != checksum:
+            raise ValueError("COLMAP vocabulary changed during staging")
+        return checksum
 
     def _models(self, workspace: Path, frame_ids: tuple[int, ...]) -> list[ParsedSparseModel]:
         models = []
@@ -198,7 +272,10 @@ class ColmapAdapter:
                 ],
                 workspace,
             )
-            models.append(read_sparse_model(output, frame_ids))
+            model = read_sparse_model(output, frame_ids)
+            if any(not (workspace / "images" / pose.image_name).is_file() for pose in model.poses):
+                raise ValueError("COLMAP model image name differs from staged source format")
+            models.append(model)
         return models
 
     def _payload(self, request: ColmapRequest, images: ColmapImageInput, best: ParsedSparseModel) -> dict:

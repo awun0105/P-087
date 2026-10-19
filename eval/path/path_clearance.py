@@ -2,7 +2,7 @@
 
 Camera Aisle_CW gắn trên robot OTTO, nên capsule robot đặt tại mọi vị trí camera (chiếu
 xuống sàn) phải trống. Mesh chiếm chỗ trong capsule đó là vật cản giả (ghost-block, REC-05
-§tiêu chí 1). Chạy lại đúng các lệnh REC-05 (vùng cắt + floaters + carve) ở nhiều mức voxel.
+§tiêu chí 1). Dùng pipeline REC-05 (lọc + fill theo profile + clearance + carve) ở nhiều mức voxel.
 
 Không dùng GT: chỉ dùng camera canonical của chính scene (sản phẩm) và mesh REC-05.
 
@@ -20,9 +20,9 @@ from pathlib import Path
 import numpy as np
 
 from src.services.reconstruction.adapters.collision_glb import canonicalize_collision, topology
+from src.services.reconstruction.adapters.voxel import SplatTransformVoxelAdapter
 from src.services.reconstruction.adapters.voxel_runtime import VoxelProcess, VoxelRuntimeSettings
-from src.services.reconstruction.finalize import GeometryProfile, floor_seed
-from src.services.reconstruction.rgb.geometry.voxel import VoxelConfig, cluster_command, collision_command
+from src.services.reconstruction.finalize import GeometryProfile, build_voxel_config, floor_seed
 
 
 def blocked_positions(vertices: np.ndarray, centers: np.ndarray, radius: float, height: float) -> list[int]:
@@ -54,31 +54,20 @@ def run(args: argparse.Namespace) -> list[dict]:
         ),
     )
     process = VoxelProcess(VoxelRuntimeSettings())
+    adapter = SplatTransformVoxelAdapter(process)
     rows = []
     for resolution in args.resolutions:
         workspace = args.work / f"res-{resolution}"
         workspace.mkdir(parents=True, exist_ok=False)
         (workspace / "input.ply").symlink_to(args.input_ply.resolve())
-        config = VoxelConfig(
-            resolution_m=resolution,
-            opacity=profile.opacity,
-            cluster_resolution_m=profile.cluster_resolution_m,
-            cluster_opacity=profile.cluster_opacity,
-            cluster_min_contribution=profile.cluster_min_contribution,
-            cluster_seed_world=(seed[0], seed[1], profile.cluster_seed_height_m),
-            navigation_seed_world=seed,
-            capsule_height_m=profile.capsule_height_m,
-            capsule_radius_m=profile.capsule_radius_m,
-            max_seed_relocation_m=profile.max_seed_relocation_m,
-            gpu_index=args.gpu,
-            crop_box_world=crop,
-            cleanup=profile.cleanup,
-        )
         start = time.monotonic()
         row: dict = {"resolution_m": resolution}
         try:
-            process.cli(cluster_command(config), (workspace, "cluster"))
-            process.cli(collision_command(config), (workspace, "collision"))
+            config = build_voxel_config(
+                profile.model_copy(update={"resolution_m": resolution, "gpu_index": args.gpu}), crop, seed
+            )
+            # Technical evaluation of an already metric input; no product confirmation or publication is asserted.
+            adapter._pipeline(config, workspace)
             mesh = canonicalize_collision(workspace / "geometry.collision.glb", workspace / "collision.glb")
             vertices = np.array(mesh.positions, dtype=float)
             blocked = blocked_positions(vertices, centers, profile.capsule_radius_m, profile.capsule_height_m)

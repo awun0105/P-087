@@ -1,0 +1,22 @@
+{
+  "schema_version": "1.0",
+  "object_id": "object-pallet-001",
+  "source_geometry_ref": {
+    "artifact_type": "EnvironmentGeometry",
+    "schema_version": "1.0",
+    "artifact_uri": "artifact://jobs/job-fixture-001/scene/environment_geometry.ply",
+    "artifact_checksum": "sha256:2cb521d29b503e80a7c21a57877e30fafb12e9d81c21b3b381f08b6c3af7920d",
+    "data_class": "derived",
+    "producer_stage": "ST-SCENE-DECOMPOSE",
+    "job_id": "job-fixture-001"
+  },
+  "extraction_revision": "rev-001",
+  "source_transform": {
+    "parent_frame": "world",
+    "local_frame": "object-pallet-001",
+    "translation_xyz": [1.0, 2.0, 0.0],
+    "rotation_quaternion_xyzw": [0.0, 0.0, 0.0, 1.0]
+  },
+  "region_kind": "source_obb",
+  "source_obb_dimensions_xyz_m": [1.0, 1.0, 1.0]
+}

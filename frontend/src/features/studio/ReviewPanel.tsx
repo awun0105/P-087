@@ -10,7 +10,7 @@ import { useEffect, useState } from "react";
 import { Badge, Button, Notice, buttonVariants } from "@/components/studio/primitives";
 import { TraceList } from "@/features/studio/TraceList";
 import { useAuth } from "@/features/studio/AuthProvider";
-import { isReviewer } from "@/lib/api/auth";
+import { canDecideReview } from "@/lib/api/auth";
 import {
   getReviewState,
   releaseDownloadUrl,
@@ -37,9 +37,10 @@ const STATUS_LABEL: Record<RevisionStatus, { label: string; tone: "neutral" | "o
  * panel chỉ gửi quyết định kèm checksum gói/báo cáo đang hiển thị để backend phát hiện màn hình cũ.
  * Duyệt xong hệ thống tự phát hành (không có bước duyệt thứ hai).
  */
-export function ReviewPanel({ jobId, sceneRevision, onState }: {
+export function ReviewPanel({ jobId, sceneRevision, refreshToken = 0, onState }: {
   jobId: string;
   sceneRevision: string;
+  refreshToken?: number;
   /** Màn cha (tab Kiểm tra & duyệt) dùng lại trạng thái panel đã tải để vẽ báo cáo chi tiết, không gọi API lần hai. */
   onState?: (state: ReviewStateView | null) => void;
 }) {
@@ -69,7 +70,7 @@ export function ReviewPanel({ jobId, sceneRevision, onState }: {
       },
     );
     return () => controller.abort();
-  }, [jobId, sceneRevision, reload]);
+  }, [jobId, sceneRevision, reload, refreshToken]);
 
   // Chỉ đưa ra ngoài trạng thái của đúng revision đang xem; đang tải lại thì báo null để màn cha ẩn báo cáo cũ.
   const current = state && loadedRevision === sceneRevision ? state : null;
@@ -99,8 +100,16 @@ export function ReviewPanel({ jobId, sceneRevision, onState }: {
   if (record.scene_revision !== sceneRevision) {
     return <Notice tone="ochre" className="m-4">Trạng thái duyệt đang thuộc {record.scene_revision}; scene hiện tại là {sceneRevision}. Tải lại scene trước khi quyết định.</Notice>;
   }
-  const reviewer = isReviewer(me);
+  const reviewer = canDecideReview(me);
   const status = STATUS_LABEL[record.status];
+  const trustedValidation =
+    state.isaac_runtime_proof === true &&
+    validation?.overall_result === "PASS" &&
+    validation.candidate_checksum === record.candidate_checksum &&
+    validation.report_checksum === record.validation_report_checksum &&
+    record.candidate_checksum !== null &&
+    record.validation_report_checksum !== null;
+  const canReview = record.status === "READY_FOR_REVIEW" && trustedValidation && state.blockers.length === 0;
   const decision = (value: "APPROVE" | "REJECT") =>
     run(() =>
       submitReviewDecision(jobId, {
@@ -121,12 +130,15 @@ export function ReviewPanel({ jobId, sceneRevision, onState }: {
         <Badge tone={status.tone}>{status.label}</Badge>
       </div>
       <ReviewSteps state={state} />
-      {/* Thiếu gói/validation đã hiện ở các chặng; lý do chặn chỉ thêm khi đã có báo cáo (vd. FAIL). */}
-      {state.validation && state.blockers.map((blocker) => (
-        <p key={blocker} className="text-ink-muted">
-          {blocker}
-        </p>
-      ))}
+      {state.blockers.length > 0 && (
+        <Notice tone="ochre">
+          <p className="font-semibold text-ink">Chưa đủ điều kiện duyệt</p>
+          <ul className="mt-1 list-disc space-y-1 pl-5">
+            {state.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}
+          </ul>
+        </Notice>
+      )}
+      {state.release_seal_error && <Notice tone="ochre">{state.release_seal_error}</Notice>}
       {validation && (
         <p className="text-ink-muted">
           Validation <span className="font-medium text-ink">{validation.overall_result}</span> · {validation.validator_version} ·{" "}
@@ -134,17 +146,30 @@ export function ReviewPanel({ jobId, sceneRevision, onState }: {
         </p>
       )}
       {validation && state.isaac_runtime_proof !== true && (
-        <Notice tone="ochre">Báo cáo này chưa có bằng chứng chạy Isaac Sim thật; đọc phần cảnh báo trong báo cáo trước khi quyết định.</Notice>
+        <Notice tone="ochre">Báo cáo này chưa gắn với validation run worker và runtime manifest đã xác minh; chỉ dùng để xem thông tin.</Notice>
       )}
-      {record.status === "READY_FOR_REVIEW" && !reviewer && <Notice tone="ochre">Chỉ Reviewer có quyền phê duyệt hoặc yêu cầu sửa. Bạn có thể xem báo cáo và bằng chứng của revision này.</Notice>}
-      {record.status === "READY_FOR_REVIEW" && reviewer && (
+      {record.status === "READY_FOR_REVIEW" && !canReview && state.blockers.length === 0 && (
+        <Notice tone="rust">Backend chưa cung cấp eligibility hợp lệ cho revision này. Tải lại trạng thái trước khi quyết định.</Notice>
+      )}
+      {canReview && !reviewer && (
+        <Notice tone="ochre">
+          {me?.auth_required === false
+            ? "Deployment chưa bật đăng nhập nên không thể duyệt. Đặt AUTH_REQUIRED=true và đăng nhập bằng tài khoản Reviewer để duyệt hoặc yêu cầu sửa."
+            : "Chỉ Reviewer có quyền phê duyệt hoặc yêu cầu sửa. Bạn có thể xem báo cáo và bằng chứng của revision này."}
+        </Notice>
+      )}
+      {canReview && reviewer && (
         <div className="space-y-2">
           {state.warning_ids.length > 0 && (
             <fieldset className="space-y-1">
               <legend className="text-ink-muted">Chấp nhận từng cảnh báo trước khi duyệt:</legend>
               {state.warning_ids.map((id) => {
                 const check = validation?.checks.find((item) => item.check_id === id);
-                const describedBy = check ? `warning-${id}` : undefined;
+                const pathId = id.startsWith("path:") ? id.slice("path:".length) : null;
+                const path = pathId ? validation?.path_results.find((item) => item.pair_id === pathId) : undefined;
+                const message = check?.message ?? path?.message;
+                const evidenceCount = check?.evidence_refs.length ?? path?.evidence_refs.length ?? 0;
+                const describedBy = check || path ? `warning-${id.replaceAll(":", "-")}` : undefined;
                 return (
                   <div key={id}>
                     <label className="flex items-center gap-1.5">
@@ -158,9 +183,9 @@ export function ReviewPanel({ jobId, sceneRevision, onState }: {
                       />
                       {id}
                     </label>
-                    {check && (
+                    {(check || path) && (
                       <p id={describedBy} className="ml-5 text-xs text-ink-muted">
-                        {check.message ?? "Check không kèm thông điệp."} · {check.evidence_refs.length > 0 ? `${check.evidence_refs.length} bằng chứng trong báo cáo` : "không kèm bằng chứng"}
+                        {message ?? (path ? `Kết quả ${path.result}.` : "Check không kèm thông điệp.")} · {evidenceCount > 0 ? `${evidenceCount} bằng chứng trong báo cáo` : "không kèm bằng chứng"}
                       </p>
                     )}
                   </div>
@@ -248,33 +273,43 @@ export function ReviewPanel({ jobId, sceneRevision, onState }: {
 type StepState = "done" | "next" | "unavailable" | "blocked";
 
 /**
- * Bốn chặng gói → validation Isaac → duyệt → phát hành (S09–S12). Validation Isaac cần máy RTX và
- * simulation worker (SIM-06..09) chưa có trong repo: khi chưa có báo cáo, chặng này và các chặng
- * sau hiện "Chưa khả dụng" (STUDIO_UX_SPEC.md Q2) thay vì giả như đang chờ.
+ * Bốn chặng gói → validation Isaac → duyệt → phát hành. Backend là thẩm quyền về eligibility;
+ * panel chỉ hiển thị trusted proof, blockers và status đã được xác minh.
  */
 function ReviewSteps({ state }: { state: ReviewStateView }) {
   const status = state.record.status;
-  const hasPackage = status !== "DRAFT" || state.validation !== null;
-  const validated = state.validation?.overall_result === "PASS";
+  const hasPackage = state.record.candidate_checksum !== null;
+  const validated =
+    state.isaac_runtime_proof === true &&
+    state.validation?.overall_result === "PASS" &&
+    state.validation.candidate_checksum === state.record.candidate_checksum &&
+    state.validation.report_checksum === state.record.validation_report_checksum &&
+    state.record.candidate_checksum !== null &&
+    state.record.validation_report_checksum !== null &&
+    state.blockers.length === 0;
   const decided = status === "APPROVED" || status === "REJECTED" || status === "RELEASED";
   const steps: { label: string; state: StepState; note: string }[] = [
-    { label: "Gói mô phỏng + preflight", state: hasPackage ? "done" : "next", note: hasPackage ? "Có gói cho revision này" : "Tạo gói ở khung bên cạnh" },
+    { label: "Gói mô phỏng + preflight", state: hasPackage ? "done" : "next", note: hasPackage ? "Có gói cho revision này" : "Tạo gói ở mục Gói mô phỏng" },
     {
       label: "Validation Isaac Sim",
-      state: state.validation ? (validated ? "done" : "blocked") : hasPackage ? "unavailable" : "blocked",
+      state: validated ? "done" : state.blockers.length > 0 || state.validation ? "blocked" : hasPackage ? "unavailable" : "blocked",
       note: state.validation
-        ? `Kết quả ${state.validation.overall_result}`
-        : "Chưa khả dụng: cần máy RTX chạy Isaac Sim (SIM-06..09 chưa triển khai)",
+        ? validated
+          ? `Kết quả ${state.validation.overall_result} từ run worker đã xác minh`
+          : "Báo cáo chưa đủ điều kiện làm validation proof"
+        : state.blockers.length > 0
+          ? "Có lý do chặn, xem bên dưới"
+          : "Chưa khả dụng: chưa có validation run được chọn",
     },
     {
       label: "Người duyệt quyết định",
-      state: decided ? "done" : status === "READY_FOR_REVIEW" ? "next" : state.validation ? "blocked" : "unavailable",
-      note: decided ? (status === "REJECTED" ? "Bị từ chối" : "Đã duyệt") : "Chỉ mở khi validation đạt",
+      state: decided ? "done" : validated && status === "READY_FOR_REVIEW" ? "next" : state.blockers.length > 0 ? "blocked" : hasPackage ? "unavailable" : "blocked",
+      note: decided ? (status === "REJECTED" ? "Bị từ chối" : "Đã duyệt") : validated ? "Chờ Reviewer xem xét" : "Chỉ mở khi đủ validation proof",
     },
     {
       label: "Phát hành",
-      state: status === "RELEASED" ? "done" : status === "APPROVED" ? "next" : state.validation ? "blocked" : "unavailable",
-      note: status === "RELEASED" ? "Đã có bản phát hành" : "Tự đóng gói ngay sau khi được duyệt",
+      state: status === "RELEASED" ? "done" : status === "APPROVED" ? "next" : state.blockers.length > 0 ? "blocked" : hasPackage ? "unavailable" : "blocked",
+      note: status === "RELEASED" ? "Đã có bản phát hành" : validated ? "Tự đóng gói ngay sau khi được duyệt" : "Chưa thể phát hành",
     },
   ];
   const icon = (value: StepState) =>

@@ -6,13 +6,22 @@ store qua API (local/không có kho file). File I/O đồng bộ chạy qua thre
 """
 
 import logging
+import tempfile
+from pathlib import Path
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.api.auth import require_editor
+from src.api.auth import require_contributor
+from src.api.ownership import authorize_upload_mutation, authorize_upload_session_mutation
 from src.api.studio import deps
+from src.models.contracts.video_preparation import (
+    ClientVideoPreparationManifest,
+    ServerVideoPreparationVerification,
+    default_video_normalization_profile,
+)
 from src.services.orchestration.artifacts import ArtifactAlreadyExistsError, ArtifactTooLargeError
 from src.services.orchestration.auth import UserRecord, actor_of
 from src.services.orchestration.jobs.database import RuntimeStateConflictError
@@ -23,10 +32,61 @@ from src.services.orchestration.uploads import (
     UploadRecord,
     UploadSession,
 )
+from src.services.orchestration.uploads.video_preparation import (
+    ServerVideoPreparationVerifier,
+    VideoPreparationVerificationError,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+class TemporaryUploadRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    upload_ids: list[Annotated[str, Field(pattern=r"^upload-[a-zA-Z0-9_-]+$")]] = Field(max_length=100)
+
+
+@router.post("/uploads/temporary/{action}")
+def temporary_uploads(
+    action: Literal["heartbeat", "discard"],
+    request: TemporaryUploadRequest,
+    user: UserRecord | None = Depends(require_contributor),
+) -> dict[str, list[str]]:
+    from src.services.orchestration.uploads.temporary import TemporaryUploadService
+
+    uploads = deps.uploads()
+    service = TemporaryUploadService(uploads.database, uploads.resolver)
+    owner_id = user.user_id if user else "anonymous"
+    try:
+        if action == "heartbeat":
+            service.renew(request.upload_ids, owner_id)
+            return {"deleted": []}
+        return {"deleted": service.discard(request.upload_ids, owner_id)}
+    except PermissionError as error:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(error)) from error
+    except RuntimeStateConflictError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+
+
+class UploadResponse(UploadRecord):
+    """Public shape; local source fingerprints and verification internals stay server-side."""
+
+    video_preparation_status: Literal["pending", "verified"] | None = None
+    video_preparation_manifest: ClientVideoPreparationManifest | None = Field(default=None, exclude=True)
+    video_preparation: ServerVideoPreparationVerification | None = Field(default=None, exclude=True)
+
+    @classmethod
+    def from_record(cls, record: UploadRecord) -> "UploadResponse":
+        payload = record.model_dump(mode="python")
+        payload["video_preparation_status"] = (
+            "verified"
+            if record.video_preparation is not None
+            else "pending"
+            if record.video_preparation_manifest is not None
+            else None
+        )
+        return cls.model_validate(payload)
 
 
 class UploadListResponse(BaseModel):
@@ -34,15 +94,16 @@ class UploadListResponse(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    uploads: list[UploadRecord]
+    uploads: list[UploadResponse]
 
 
-@router.post("/uploads", response_model=UploadRecord, status_code=status.HTTP_201_CREATED)
+@router.post("/uploads", response_model=UploadResponse, status_code=status.HTTP_201_CREATED)
 async def upload_video(
     request: Request,
     filename: str = Query(..., min_length=1, max_length=255),
-    user: UserRecord | None = Depends(require_editor),
-) -> UploadRecord:
+    temporary: bool = Query(default=False),
+    user: UserRecord | None = Depends(require_contributor),
+) -> UploadResponse:
     """Nhận bytes video trong body; bytes gốc được giữ nguyên, checksum tính khi ghi."""
     service = deps.uploads()
     try:
@@ -53,7 +114,8 @@ async def upload_video(
         async for chunk in request.stream():
             if chunk:
                 await run_in_threadpool(pending.publication.write, chunk)
-        return await run_in_threadpool(service.finish, pending, actor_of(user))
+        record = await run_in_threadpool(service.finish, pending, actor_of(user), temporary=temporary)
+        return UploadResponse.from_record(record)
     except ArtifactTooLargeError as error:
         raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail=str(error)) from error
     except ValueError as error:
@@ -68,7 +130,80 @@ async def upload_video(
 @router.get("/uploads", response_model=UploadListResponse)
 def list_uploads() -> UploadListResponse:
     """Danh sách video đã upload để người dùng chọn."""
-    return UploadListResponse(uploads=deps.uploads().list())
+    return UploadListResponse(uploads=[UploadResponse.from_record(item) for item in deps.uploads().list()])
+
+
+@router.put("/uploads/{upload_id}/video-preparation/manifest", response_model=UploadResponse)
+def save_video_preparation_manifest(
+    upload_id: str,
+    manifest: ClientVideoPreparationManifest,
+    user: UserRecord | None = Depends(require_contributor),
+) -> UploadResponse:
+    """Store the client declaration as pending; server verification is a separate request."""
+    service = deps.uploads()
+    try:
+        current = service.get(upload_id)
+        authorize_upload_mutation(user, current, operation="cập nhật metadata upload")
+        return UploadResponse.from_record(service.save_video_preparation_manifest(upload_id, manifest))
+    except (UploadError, UploadNotFoundError, RuntimeStateConflictError) as error:
+        raise _upload_errors(error) from error
+
+
+@router.put("/uploads/{upload_id}/video-preparation/frame-map", response_model=UploadResponse)
+async def upload_video_frame_map(
+    upload_id: str,
+    request: Request,
+    user: UserRecord | None = Depends(require_contributor),
+) -> UploadResponse:
+    """Stream a bounded JSONL frame map, then verify it against the received MP4 with ffprobe."""
+    service = deps.uploads()
+    try:
+        current = service.get(upload_id)
+        authorize_upload_mutation(user, current, operation="xác minh frame map upload")
+    except (UploadError, UploadNotFoundError, RuntimeStateConflictError) as error:
+        raise _upload_errors(error) from error
+    if current.video_preparation_manifest is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cần gửi video preparation manifest trước frame map",
+        )
+    limit = default_video_normalization_profile().max_frame_map_bytes
+    length = request.headers.get("content-length")
+    if length and length.isdecimal() and int(length) > limit:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail="Video frame map vượt giới hạn 32 MiB"
+        )
+
+    path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(prefix="r2s_video_frame_map_", suffix=".jsonl", delete=False) as frame_map:
+            path = Path(frame_map.name)
+            size = 0
+            async for chunk in request.stream():
+                if not chunk:
+                    continue
+                size += len(chunk)
+                if size > limit:
+                    raise HTTPException(
+                        status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                        detail="Video frame map vượt giới hạn 32 MiB",
+                    )
+                await run_in_threadpool(frame_map.write, chunk)
+        verification = await run_in_threadpool(
+            ServerVideoPreparationVerifier(service.resolver).verify_and_publish,
+            current,
+            current.video_preparation_manifest,
+            path,
+        )
+        record = await run_in_threadpool(service.save_video_preparation_verification, upload_id, verification)
+        return UploadResponse.from_record(record)
+    except VideoPreparationVerificationError as error:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)) from error
+    except (UploadError, UploadNotFoundError, RuntimeStateConflictError, ValueError) as error:
+        raise _upload_errors(error) from error
+    finally:
+        if path is not None:
+            path.unlink(missing_ok=True)
 
 
 class UploadConfig(BaseModel):
@@ -87,6 +222,8 @@ class DirectUploadRequest(BaseModel):
 
     filename: str = Field(min_length=1, max_length=255)
     size_bytes: int = Field(gt=0)
+    purpose: Literal["product", "input_assembly"] = "product"
+    temporary: bool = False
 
 
 class DirectUploadState(BaseModel):
@@ -151,11 +288,19 @@ def upload_config() -> UploadConfig:
 
 @router.post("/uploads/direct", response_model=DirectUploadState, status_code=status.HTTP_201_CREATED)
 def begin_direct_upload(
-    request: DirectUploadRequest, user: UserRecord | None = Depends(require_editor)
+    request: DirectUploadRequest, user: UserRecord | None = Depends(require_contributor)
 ) -> DirectUploadState:
     """Mở phiên upload thẳng; client xin link từng nhóm phần qua `/urls`."""
     try:
-        return _state(deps.direct_uploads().begin(request.filename, request.size_bytes, actor_of(user)))
+        return _state(
+            deps.direct_uploads().begin(
+                request.filename,
+                request.size_bytes,
+                actor_of(user),
+                purpose=request.purpose,
+                temporary=request.temporary,
+            )
+        )
     except (UploadError, ArtifactAlreadyExistsError) as error:
         raise _upload_errors(error) from error
 
@@ -172,11 +317,18 @@ def get_direct_upload(upload_id: str) -> DirectUploadState:
 
 
 @router.post("/uploads/direct/{upload_id}/urls", response_model=PartUrlsResponse)
-def direct_upload_urls(upload_id: str, request: PartUrlsRequest) -> PartUrlsResponse:
+def direct_upload_urls(
+    upload_id: str,
+    request: PartUrlsRequest,
+    user: UserRecord | None = Depends(require_contributor),
+) -> PartUrlsResponse:
     """Link PUT có hạn cho tối đa 50 phần mỗi lần."""
     expires = deps.settings().artifact_presign_seconds
     try:
-        urls = deps.direct_uploads().part_urls(upload_id, request.part_numbers, expires)
+        service = deps.direct_uploads()
+        session = service.get(upload_id)
+        authorize_upload_session_mutation(user, session, operation="tạo link upload cho")
+        urls = service.part_urls(upload_id, request.part_numbers, expires)
     except (UploadError, UploadNotFoundError, RuntimeStateConflictError) as error:
         raise _upload_errors(error) from error
     return PartUrlsResponse(urls=urls, expires_in=expires)
@@ -196,7 +348,11 @@ def _verify_in_background(upload_id: str) -> None:
 
 
 @router.post("/uploads/direct/{upload_id}/complete", response_model=DirectUploadState)
-def complete_direct_upload(upload_id: str, background: BackgroundTasks) -> DirectUploadState:
+def complete_direct_upload(
+    upload_id: str,
+    background: BackgroundTasks,
+    user: UserRecord | None = Depends(require_contributor),
+) -> DirectUploadState:
     """Ghép các phần; server tự tính checksum trong nền, client poll tới READY/FAILED.
 
     Gọi lại khi phiên đang VERIFYING sẽ lên lịch kiểm tra lại: tác vụ nền mất khi API
@@ -208,6 +364,7 @@ def complete_direct_upload(upload_id: str, background: BackgroundTasks) -> Direc
         current = service.get(upload_id)
     except UploadNotFoundError as error:
         raise _upload_errors(error) from error
+    authorize_upload_session_mutation(user, current, operation="hoàn tất upload của")
     if current.status == "VERIFYING":
         background.add_task(_verify_in_background, upload_id)
         return _state(current)
@@ -220,9 +377,12 @@ def complete_direct_upload(upload_id: str, background: BackgroundTasks) -> Direc
 
 
 @router.post("/uploads/direct/{upload_id}/abort", response_model=DirectUploadState)
-def abort_direct_upload(upload_id: str) -> DirectUploadState:
+def abort_direct_upload(upload_id: str, user: UserRecord | None = Depends(require_contributor)) -> DirectUploadState:
     """Hủy upload dở, xóa các phần trên kho file."""
     try:
-        return _state(deps.direct_uploads().abort(upload_id))
+        service = deps.direct_uploads()
+        session = service.get(upload_id)
+        authorize_upload_session_mutation(user, session, operation="hủy upload của")
+        return _state(service.abort(upload_id))
     except (UploadNotFoundError, RuntimeStateConflictError) as error:
         raise _upload_errors(error) from error

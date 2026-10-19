@@ -130,6 +130,10 @@ experiment, nhưng không được claim independent GT accuracy. Producer phả
 khai báo class trung thực tại publication; chỉ đổi class trong ref không phải
 bằng chứng đã declassify một artifact.
 
+`schema_version` là version của artifact được tham chiếu, không phải version của
+repository hay của tài liệu này. Shared artifact ref hiện nhận minor version
+`1.0` và `1.1`; consumer vẫn phải kiểm tra đúng loại và version mà nó hỗ trợ.
+
 Không hard-code:
 
 ```text

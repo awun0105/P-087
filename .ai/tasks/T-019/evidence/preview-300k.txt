@@ -1,0 +1,49 @@
+300k preview elapsed=1.873s
+F
+=================================== FAILURES ===================================
+_______________ test_preview_three_hundred_thousand_rows_budget ________________
+
+tmp_path = PosixPath('/tmp/pytest-of-lqaq/pytest-284/test_preview_three_hundred_tho0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x76fefaebb890>
+
+    def test_preview_three_hundred_thousand_rows_budget(tmp_path, monkeypatch):
+        from time import perf_counter
+    
+        from src.services.orchestration.scene.object_region import preview_region
+    
+        rng = np.random.default_rng(90)
+        rows = np.repeat(_source_rows()[:1], 300_000)
+        xyz = rng.uniform(-0.2, 0.2, (len(rows), 3)) + (1.5, 0.1, 1.1)
+        for axis, name in enumerate(("x", "y", "z")):
+            rows[name] = xyz[:, axis]
+        fixture = _fixture(tmp_path, source_rows=rows, source_labels=np.zeros(len(rows), dtype=np.int32))
+        item = fixture.scene.objects[0]
+        item = item.model_copy(update={"provenance": {"source_transform": item.transform.model_dump(mode="json")}})
+        scene = fixture.editor.publish_next(
+            JOB,
+            fixture.scene.scene_revision,
+            fixture.scene.model_copy(update={"objects": [item, *fixture.scene.objects[1:]]}),
+            "benchmark-fixture",
+        ).revision.scene
+        registry = SimpleNamespace(scene=fixture.editor, runtime_resolver=fixture.editor.resolver)
+        monkeypatch.setattr(membership_regeneration, "fit_canonical_floor_model", lambda *args: None)
+        monkeypatch.setattr(membership_regeneration, "above_floor_mask", lambda xyz, _: np.ones(len(xyz), dtype=bool))
+        command = ObjectRegionCommand(
+            expected_scene_revision=scene.scene_revision,
+            membership_checksum=fixture.membership.labels_ref.artifact_checksum,
+            boxes=[RegionBox(op="add", center_m=(0, 0, 0), half_extents_m=(0.3, 0.3, 0.3), yaw_rad=0)],
+        )
+        started = perf_counter()
+        result = preview_region(registry, JOB, TARGET, command)
+        elapsed = perf_counter() - started
+        print(f"300k preview elapsed={elapsed:.3f}s")
+        assert result["object_gaussian_count"] == 300_000
+        assert result["shell_glb_base64"] is not None
+        assert result["shell_sample_rows"] <= 100_000
+>       assert elapsed <= 1.5
+E       assert 1.8734918259942788 <= 1.5
+
+tests/test_scene/test_object_region.py:259: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_scene/test_object_region.py::test_preview_three_hundred_thousand_rows_budget
+1 failed in 2.85s

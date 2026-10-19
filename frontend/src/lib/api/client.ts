@@ -13,6 +13,8 @@
  *    gọi thẳng backend bằng `REAL2SIM_API_URL`.
  */
 
+import { demoApiPath } from "./demo-session";
+
 const SERVER_BASE = process.env.REAL2SIM_API_URL ?? "http://127.0.0.1:8000";
 
 export class ApiError extends Error {
@@ -57,7 +59,7 @@ async function toApiError(response: Response): Promise<ApiError> {
 
 export async function fetchApi<T>(path: string, init?: RequestInit): Promise<ApiResult<T>> {
   try {
-    const response = await fetch(`${apiBase()}${path}`, {
+    const response = await fetch(`${apiBase()}${demoApiPath(path)}`, {
       ...init,
       headers: { "Content-Type": "application/json", ...init?.headers },
       cache: "no-store",
@@ -85,5 +87,5 @@ export function apiUrl(path: string, params: Record<string, string | readonly st
   const query = new URLSearchParams(
     Object.entries(params).flatMap(([key, value]) => (typeof value === "string" ? [[key, value]] : value.map((item) => [key, item]))),
   ).toString();
-  return `${apiBase()}${path}?${query}`;
+  return `${apiBase()}${demoApiPath(path)}?${query}`;
 }

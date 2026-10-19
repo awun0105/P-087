@@ -8,13 +8,16 @@ Covers the properties the viewer depends on:
 """
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
-from src.models.contracts.scene import SceneIR
-from src.services.orchestration.artifacts import ArtifactResolver
+from src.models.contracts.artifacts import ProductArtifactRef
+from src.models.contracts.object_membership import ObjectMembershipArtifact
+from src.models.contracts.scene import SceneIR, SceneObjectState, SourceCollisionRegion
+from src.services.orchestration.artifacts import ArtifactResolver, with_canonical_checksum
 from src.services.orchestration.scene import (
     SceneEditCommand,
     SceneEditor,
@@ -24,6 +27,9 @@ from src.services.orchestration.scene import (
     TransformEdit,
 )
 from src.services.orchestration.scene.editor import scene_artifact_uri
+from src.services.orchestration.scene.errors import ObjectGeometryNotReadyError
+from src.services.orchestration.scene.objects import apply_object_action, restore_revision
+from src.services.scene.geometry_state import object_geometry_state
 
 _FIXTURE_ROOT = Path(__file__).resolve().parents[2] / "fixtures"
 _JOB_ID = "job-fixture-001"
@@ -41,6 +47,27 @@ def move_pallet() -> SceneEditCommand:
         expected_scene_revision="rev-001",
         edits=[TransformEdit(object_id="object-pallet-001", translation_xyz=(3.0, 2.0, 0.0))],
     )
+
+
+@pytest.fixture
+def draft_editor(tmp_path) -> SceneEditor:
+    """Editor whose only revision is a Draft scene; rack and floor are candidates awaiting review."""
+    scene = SceneIR.model_validate_json((_FIXTURE_ROOT / "scene_ir" / "scene.json").read_text(encoding="utf-8"))
+    candidates = {"object-rack-001", "object-floor-001"}
+    objects = [
+        item.model_copy(update={"state": SceneObjectState.CANDIDATE}) if item.id in candidates else item
+        for item in scene.objects
+    ]
+    draft = scene.model_copy(
+        update={"objects": objects, "provenance": {**scene.provenance, "object_geometry": "awaiting_review"}}
+    )
+    root = tmp_path / "fixtures"
+    (root / "scene_ir").mkdir(parents=True)
+    (root / "scene_ir" / "scene.json").write_text(
+        with_canonical_checksum(draft, "scene_ir_checksum").model_dump_json(), encoding="utf-8"
+    )
+    shutil.copytree(_FIXTURE_ROOT / "reconstruction_bundle", root / "reconstruction_bundle")
+    return SceneEditor(root, ArtifactResolver(tmp_path / "artifacts"))
 
 
 # ── baseline revision ────────────────────────────────────────────────────────
@@ -318,6 +345,67 @@ def test_artifact_references_cover_geometry_and_colliders(editor: SceneEditor) -
     assert len(uris) == len(set(uris)), "ref không được lặp"
 
 
+def test_artifact_references_include_collision_source_and_selection(editor: SceneEditor) -> None:
+    scene = editor.current(_JOB_ID).scene
+    assert scene.environment.collider_ref is not None
+    selection_ref = ProductArtifactRef.model_validate(
+        {
+            "artifact_type": "CollisionSourceSelection",
+            "schema_version": "1.0",
+            "artifact_uri": f"artifact://jobs/{_JOB_ID}/collision/selection.json",
+            "artifact_checksum": "sha256:" + "a" * 64,
+            "data_class": "derived",
+            "producer_stage": "ST-CANDIDATE-BUILD",
+            "job_id": _JOB_ID,
+        }
+    )
+    environment = scene.environment.model_copy(
+        update={
+            "collision_source_ref": scene.environment.collider_ref,
+            "collision_selection_ref": selection_ref,
+        }
+    )
+    selected_scene = scene.model_copy(update={"environment": environment})
+
+    references = SceneEditor.artifact_references(selected_scene)
+
+    assert scene.environment.collider_ref in references
+    assert selection_ref in references
+    assert len(references) == len({reference.artifact_uri for reference in references})
+
+
+def test_artifact_references_include_exact_object_collision_membership(editor: SceneEditor) -> None:
+    scene = editor.current(_JOB_ID).scene
+    item = scene.objects[0]
+    membership_ref = ProductArtifactRef.model_validate(
+        {
+            "artifact_type": "SourceCollisionMembership",
+            "schema_version": "1.0",
+            "artifact_uri": f"artifact://jobs/{_JOB_ID}/collider/membership.json",
+            "artifact_checksum": "sha256:" + "c" * 64,
+            "data_class": "derived",
+            "producer_stage": "ST-COLLIDER",
+            "job_id": _JOB_ID,
+        }
+    )
+    ownership = SourceCollisionRegion(
+        object_id=item.id,
+        source_geometry_ref=scene.environment.geometry_ref,
+        extraction_revision=scene.scene_revision,
+        source_transform=item.transform,
+        region_kind="triangle_indices",
+        region_ref=membership_ref,
+    )
+    selected_scene = scene.model_copy(
+        update={"objects": [item.model_copy(update={"source_collision": ownership}), *scene.objects[1:]]},
+        deep=True,
+    )
+
+    references = SceneEditor.artifact_references(selected_scene)
+
+    assert membership_ref in references
+
+
 def test_artifact_references_are_product_visible_only(editor: SceneEditor) -> None:
     scene = editor.current(_JOB_ID).scene
     for reference in SceneEditor.artifact_references(scene):
@@ -352,3 +440,101 @@ def test_publish_next_bumps_revision_and_rejects_stale_client(editor: SceneEdito
     assert editor.current(_JOB_ID).scene.objects == []
     with pytest.raises(SceneRevisionConflictError):
         editor.publish_next(_JOB_ID, "rev-001", scene, "confirm_object")
+
+
+def test_draft_scene_refuses_transform_and_keeps_the_revision(
+    draft_editor: SceneEditor, move_pallet: SceneEditCommand
+) -> None:
+    with pytest.raises(ObjectGeometryNotReadyError, match="Cần tạo mesh trước khi di chuyển/xoay vật"):
+        draft_editor.apply(_JOB_ID, move_pallet)
+    assert draft_editor.current(_JOB_ID).scene.scene_revision == "rev-001"
+
+
+def test_draft_scene_keeps_review_actions(draft_editor: SceneEditor) -> None:
+    """Confirm, ignore, hide, delete, restore và đổi tên vẫn chạy trên scene chờ tách vật, và giữ trạng thái Draft."""
+    steps = [
+        ("object-pallet-001", "rename", {"name": "Pallet A"}),
+        ("object-pallet-001", "hide", {"active": False}),
+        ("object-pallet-001", "delete", {}),
+        ("object-pallet-001", "restore", {}),
+        ("object-rack-001", "confirm", {}),
+        ("object-floor-001", "ignore", {}),
+    ]
+    revision = "rev-001"
+    for object_id, action, options in steps:
+        result = apply_object_action(draft_editor, _JOB_ID, object_id, action, revision, **options)
+        revision = result.revision.scene.scene_revision
+        assert result.revision.scene.provenance["object_geometry"] == "awaiting_review"
+    assert revision == "rev-007"
+
+
+def _with_geometry(scene: SceneIR, state: str) -> SceneIR:
+    return scene.model_copy(update={"provenance": {**scene.provenance, "object_geometry": state}})
+
+
+def test_restoring_a_draft_revision_from_a_ready_scene_reopens_review(editor: SceneEditor) -> None:
+    ready = editor.current(_JOB_ID).scene
+    draft = editor.publish_next(
+        _JOB_ID, ready.scene_revision, _with_geometry(ready, "awaiting_review"), "test_draft"
+    ).revision.scene
+    ready_again = editor.publish_next(
+        _JOB_ID, draft.scene_revision, _with_geometry(draft, "ready"), "test_ready"
+    ).revision.scene
+
+    restored = restore_revision(editor, _JOB_ID, ready_again.scene_revision, draft.scene_revision).revision.scene
+
+    assert object_geometry_state(ready_again) == "ready"
+    assert object_geometry_state(restored) == "awaiting_review"
+
+
+def _object_aware_ready(scene: SceneIR) -> SceneIR:
+    """Scene sẵn sàng có membership và manifest object-aware, dựng như helper của test contract."""
+    geometry = scene.environment.geometry_ref
+    job_id = geometry.artifact_uri.removeprefix("artifact://jobs/").partition("/")[0]
+    geometry = geometry.model_copy(update={"job_id": job_id})
+    membership = ObjectMembershipArtifact(
+        source_visual_ref=geometry.model_copy(update={"artifact_type": "GaussianPLY"}),
+        source_geometry_ref=geometry,
+        extraction_revision=scene.scene_revision,
+        coordinate_system=scene.coordinate_system,
+        gaussian_count=10,
+        labels_ref=geometry.model_copy(update={"artifact_type": "ObjectMembershipLabels"}),
+        label_to_object_id={"0": "object-pallet-001"},
+    )
+    manifest = geometry.model_copy(update={"artifact_type": "ObjectAwareEnvironmentManifest"})
+    environment = scene.environment.model_copy(
+        update={"membership": membership, "object_aware_collision_ref": manifest}
+    )
+    return _with_geometry(scene, "ready").model_copy(update={"environment": environment})
+
+
+def test_restoring_a_ready_revision_from_a_draft_brings_back_its_colliders(editor: SceneEditor) -> None:
+    ready = editor.current(_JOB_ID).scene
+    target = editor.publish_next(
+        _JOB_ID, ready.scene_revision, _object_aware_ready(ready), "test_ready_with_manifest"
+    ).revision.scene
+    target_pallet = next(item for item in target.objects if item.id == "object-pallet-001")
+    assert target_pallet.collider is not None
+    assert target.environment.object_aware_collision_ref is not None
+
+    draft_objects = [
+        item.model_copy(update={"collider": None}) if item.id == "object-pallet-001" else item
+        for item in target.objects
+    ]
+    draft_environment = target.environment.model_copy(update={"membership": None, "object_aware_collision_ref": None})
+    draft = editor.publish_next(
+        _JOB_ID,
+        target.scene_revision,
+        _with_geometry(target, "awaiting_review").model_copy(
+            update={"objects": draft_objects, "environment": draft_environment}
+        ),
+        "test_draft",
+    ).revision.scene
+    assert next(item for item in draft.objects if item.id == "object-pallet-001").collider is None
+
+    restored = restore_revision(editor, _JOB_ID, draft.scene_revision, target.scene_revision).revision.scene
+
+    assert object_geometry_state(restored) == "ready"
+    assert next(item for item in restored.objects if item.id == "object-pallet-001").collider == target_pallet.collider
+    assert restored.environment.object_aware_collision_ref == target.environment.object_aware_collision_ref
+    assert restored.environment.membership == target.environment.membership

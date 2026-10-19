@@ -1,0 +1,384 @@
+"use client";
+
+import { useEffect, useState, type RefObject } from "react";
+
+import { Loader2 } from "lucide-react";
+import { Button, Notice } from "@/components/studio/primitives";
+import { toCommandBoxes, validateBoxes } from "@/features/studio/region/box-model";
+import {
+  addAddBox,
+  addSubtractBox,
+  boxLabel,
+  canRemoveBox,
+  initialRegionSession,
+  removeRegionBox,
+  selectRegionBox,
+  setRegionClaim,
+  type RegionSession,
+  type RegionViewApi,
+} from "@/features/studio/region/region-session";
+import { useRegionPreview } from "@/features/studio/region/useRegionPreview";
+import type { ViewPreset } from "@/features/viewer/region-overlay";
+import { ApiError } from "@/lib/api/client";
+import { applyObjectRegion, type RegionFit, type RegionPreview } from "@/lib/api/studio";
+import type { SceneObject } from "@/lib/contracts/api";
+
+const VIEWS: { preset: ViewPreset; label: string }[] = [
+  { preset: "top", label: "Trên" },
+  { preset: "front", label: "Trước" },
+  { preset: "side", label: "Cạnh" },
+];
+
+const NOT_READY_VIEW = "Góc nhìn chưa sẵn sàng: viewer chưa nối lệnh chuyển camera.";
+
+/** Kết quả Apply: 201 trên Draft (scene mới) hoặc 202 trên Ready (đang dựng lại vật). */
+type ApplyResult = Awaited<ReturnType<typeof applyObjectRegion>>;
+
+/** Phím Delete đang gõ trong ô nhập thì không được xoá box. */
+function isTextField(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
+}
+
+/** Một dòng "Vật chồng lấn": vật đã lấy về, vật còn chồng lên box, hoặc vật đang tick mà không còn trong box. */
+interface OverlapRow {
+  id: string;
+  kind: "claimed" | "overlap" | "stale" | "unknown";
+  count: number;
+}
+
+/**
+ * Dòng hiện trong panel: hợp của `claimed`, `overlaps` và `claimFrom`. Máy chủ chuyển vật đã lấy về sang `claimed` và
+ * bỏ mọi vật trong `claim_from` khỏi `overlaps`, nên chỉ lấy từ `overlaps` thì dòng biến mất ngay sau khi tick.
+ */
+function overlapRows(preview: RegionPreview | null, claimFrom: readonly string[]): OverlapRow[] {
+  // Chưa có kết quả (đang tính hoặc lỗi): vật đã tick vẫn hiện để người dùng thấy lựa chọn không bị mất.
+  if (!preview) return claimFrom.map((id) => ({ id, kind: "unknown", count: 0 }));
+  const rows: OverlapRow[] = [];
+  const seen = new Set<string>();
+  const add = (row: OverlapRow) => {
+    if (seen.has(row.id)) return;
+    seen.add(row.id);
+    rows.push(row);
+  };
+  for (const [id, count] of Object.entries(preview.claimed)) {
+    if (count > 0) add({ id, kind: "claimed", count });
+  }
+  for (const [id, count] of Object.entries(preview.overlaps)) {
+    if (count > 0) add({ id, kind: "overlap", count });
+  }
+  for (const id of claimFrom) add({ id, kind: "stale", count: 0 });
+  return rows;
+}
+
+/** Chữ của một dòng; `claimed` là vật đang được tick (nằm trong `claimFrom`). */
+function rowText({ kind, count }: OverlapRow, name: string, claimed: boolean): string {
+  if (kind === "claimed") return `Box lấy ${count} Gaussian từ ${name} — sẽ lấy về vật này`;
+  if (kind === "stale") return `${name} không còn trong box`;
+  if (kind === "unknown") return `${name} — chưa có kết quả xem trước`;
+  return `Box chồng lên ${name} (${count} Gaussian) — ${claimed ? "sẽ lấy về vật này" : "giữ chủ cũ"}`;
+}
+
+/**
+ * Panel chỉnh vùng một vật: danh sách box cộng/trừ, thêm và xoá box, góc nhìn, và kết quả xem trước (bộ đếm, vật
+ * chồng lấn, cảnh báo vỏ). Phiên nằm ở cha và được đổi qua `onSession`, nên viewport và panel luôn đọc cùng một
+ * danh sách box.
+ */
+export function RegionEditor({
+  embedded = false,
+  jobId,
+  object,
+  fit,
+  sceneRevision,
+  membershipChecksum,
+  nameOf,
+  session,
+  onSession,
+  onApplied,
+  onReload,
+  onClose,
+  viewApi,
+}: {
+  embedded?: boolean;
+  jobId: string;
+  object: SceneObject;
+  /** Box ban đầu do máy chủ tính (T-023); "Đặt lại" trở về đúng box này. */
+  fit: RegionFit;
+  /** Revision của scene khi mở panel: máy chủ từ chối (409) nếu scene đã đổi. */
+  sceneRevision: string;
+  /** Checksum membership đang dùng: máy chủ từ chối (409) nếu membership đã đổi. */
+  membershipChecksum: string;
+  /** Tên hiển thị của một vật theo id, để nêu tên vật chồng lấn. */
+  nameOf(id: string): string;
+  session: RegionSession;
+  onSession(next: RegionSession): void;
+  /** Máy chủ đã nhận Apply: cha đóng panel và tải lại theo kết quả (201 scene mới, 202 đang dựng lại). */
+  onApplied(result: ApplyResult): void;
+  /** Tải lại scene sau xung đột (409); box trong panel được giữ nguyên. */
+  onReload(): void;
+  onClose(): void;
+  /** Cầu nối tới overlay vùng trong viewer; null khi viewer chưa sẵn sàng. */
+  viewApi: RefObject<RegionViewApi | null>;
+}) {
+  // Góc nhìn chưa nối là trạng thái thật của viewer: sau lần đầu trả false thì khoá các nút góc nhìn.
+  const [viewsReady, setViewsReady] = useState(true);
+  const boxError = validateBoxes(session.boxes);
+  const region = useRegionPreview({
+    jobId,
+    objectId: object.id,
+    expectedRevision: sceneRevision,
+    membershipChecksum,
+    boxes: session.boxes,
+    claimFrom: session.claimFrom,
+    enabled: boxError === null,
+  });
+  // Kết quả chỉ có khi khớp box hiện tại; đổi box thì bộ đếm cũ ẩn đi trong lúc tính lại.
+  const preview = region.preview;
+  const rows = overlapRows(preview, session.claimFrom);
+  const [applying, setApplying] = useState(false);
+  const [applyError, setApplyError] = useState<string | null>(null);
+  const [conflict, setConflict] = useState(false);
+  // 409 ở preview cũng là scene đã đổi: có nút Tải lại như ở Apply, và box/claim vẫn giữ nguyên.
+  const staleScene = region.errorStatus === 409 || conflict;
+  // Apply chỉ bật khi có xem trước khớp box hiện tại và box hợp lệ; đổi box là tắt lại tới khi xem trước mới về.
+  // Vật "Lấy luôn" mà áp box này sẽ còn dưới tối thiểu: máy chủ từ chối Apply, nên khoá nút và nêu tên trước.
+  const donorBlockers = preview?.blockers ?? [];
+  const canApply = preview !== null && boxError === null && donorBlockers.length === 0 && !applying;
+
+  async function apply() {
+    if (!canApply) return;
+    setApplying(true);
+    setApplyError(null);
+    setConflict(false);
+    try {
+      const result = await applyObjectRegion(jobId, object.id, {
+        expected_scene_revision: sceneRevision,
+        membership_checksum: membershipChecksum,
+        boxes: toCommandBoxes(session.boxes),
+        claim_from: [...session.claimFrom],
+      });
+      // Apply đã được nhận: shell cũ có thể hết quyền tải trước khi viewer nhận scene mới.
+      viewApi.current?.showPreview(object.id, null, false, { restoreBase: false });
+      onApplied(result);
+    } catch (cause) {
+      if (cause instanceof ApiError && cause.status === 409) setConflict(true);
+      else setApplyError(cause instanceof ApiError ? cause.detail : "Không áp dụng được vùng.");
+    } finally {
+      setApplying(false);
+    }
+  }
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Delete") {
+        if (!isTextField(event.target) && session.selectedId && canRemoveBox(session, session.selectedId)) {
+          onSession(removeRegionBox(session, session.selectedId));
+        }
+        return;
+      }
+      // Khi đang kéo tay nắm, Esc thuộc về overlay (huỷ kéo); chỉ đóng panel khi không kéo.
+      if (event.key === "Escape" && !viewApi.current?.isGesturing()) onClose();
+    }
+    // Pha bắt: đọc trạng thái kéo trước khi overlay nhận Esc và huỷ cử chỉ, không phụ thuộc thứ tự đăng ký.
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [session, onSession, onClose, viewApi]);
+
+  // Vỏ và điểm của lần xem trước đi lên viewer; đang tính thì viewer làm mờ vỏ cũ. Panel đóng thì viewer trả vỏ gốc.
+  useEffect(() => {
+    viewApi.current?.showPreview(object.id, preview, region.loading);
+  }, [viewApi, object.id, preview, region.loading]);
+  useEffect(() => {
+    // Handle của viewer ổn định suốt đời MetricSceneView; giữ lại lúc mở để gọi được cả khi panel đóng.
+    const api = viewApi.current;
+    const id = object.id;
+    return () => api?.showPreview(id, null, false);
+  }, [viewApi, object.id]);
+
+  function look(preset: ViewPreset) {
+    const moved = viewApi.current?.viewFrom(preset) ?? false;
+    if (!moved) setViewsReady(false);
+  }
+
+  return (
+    <section
+      aria-label="Chỉnh vùng"
+      className={embedded ? "space-y-3 p-3 text-xs text-on-dark" : "pointer-events-auto w-80 max-w-full space-y-3 rounded-md border border-line-dark bg-viewport-deep/95 p-3 text-xs text-on-dark shadow-2xl backdrop-blur-md"}
+    >
+      <header className="flex items-center justify-between gap-2">
+        <h3 className="truncate text-sm font-semibold">Chỉnh vùng · {object.name}</h3>
+        <button
+          type="button"
+          aria-label="Đóng chỉnh vùng"
+          onClick={onClose}
+          className="rounded p-1 text-on-dark/70 hover:bg-on-dark/10 hover:text-on-dark"
+        >
+          ×
+        </button>
+      </header>
+
+      <ul aria-label="Box vùng" className="space-y-1">
+        {session.boxes.map((box, index) => {
+          const label = boxLabel(box, index);
+          const removable = canRemoveBox(session, box.id);
+          const selected = box.id === session.selectedId;
+          return (
+            <li key={box.id} className="flex items-center gap-1">
+              <button
+                type="button"
+                aria-pressed={selected}
+                onClick={() => onSession(selectRegionBox(session, box.id))}
+                className={`flex-1 rounded px-2 py-1 text-left ${selected ? "bg-ember-soft text-ember-strong font-medium" : "hover:bg-on-dark/10"}`}
+              >
+                {label}
+              </button>
+              <button
+                type="button"
+                aria-label={`Xoá ${label}`}
+                disabled={!removable}
+                title={removable ? "Xoá box" : "Không xoá box cộng cuối cùng"}
+                onClick={() => onSession(removeRegionBox(session, box.id))}
+                className="rounded px-2 py-1 hover:bg-on-dark/10 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                ×
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" variant="secondary" onClick={() => onSession(addAddBox(session))}>
+          + Box cộng
+        </Button>
+        <Button size="sm" variant="secondary" onClick={() => onSession(addSubtractBox(session))}>
+          − Box trừ
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => {
+            onSession(initialRegionSession(object, fit));
+          }}
+        >
+          Đặt lại
+        </Button>
+      </div>
+
+      <div role="group" aria-label="Góc nhìn" className="flex flex-wrap gap-2">
+        {VIEWS.map(({ preset, label }) => (
+          <Button
+            key={preset}
+            size="sm"
+            variant="ghost"
+            disabled={!viewsReady || !session.selectedId}
+            title={viewsReady ? undefined : NOT_READY_VIEW}
+            onClick={() => look(preset)}
+          >
+            {label}
+          </Button>
+        ))}
+      </div>
+
+      <div aria-live="polite" className="space-y-2">
+        {region.loading && (
+          <p className="flex items-center gap-2 text-on-dark/70">
+            <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" aria-hidden /> Đang tính vùng…
+          </p>
+        )}
+        {preview && (
+          <div className="space-y-1">
+            <p className="font-medium">
+              +{preview.added_count} / −{preview.removed_count} · tổng {preview.object_gaussian_count}
+            </p>
+            <p className="text-on-dark/70">Bảo vệ sàn: {preview.protected_floor_count}</p>
+          </div>
+        )}
+        {rows.length > 0 && (
+          <ul aria-label="Vật chồng lấn" className="space-y-2">
+            {rows.map((row) => {
+              const name = nameOf(row.id);
+              const claimed = session.claimFrom.includes(row.id);
+              const blocked = donorBlockers.find((item) => item.object_id === row.id);
+              return (
+                <li key={row.id} className="space-y-1 rounded border border-line-dark p-2">
+                  <p>{rowText(row, name, claimed)}</p>
+                  {blocked && (
+                    <p className="text-rust">
+                      {name} sẽ chỉ còn {blocked.remaining} Gaussian (tối thiểu {blocked.minimum})
+                    </p>
+                  )}
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      aria-label={`Lấy luôn từ ${name}`}
+                      checked={claimed}
+                      onChange={(event) => onSession(setRegionClaim(session, row.id, event.target.checked))}
+                    />
+                    Lấy luôn
+                  </label>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        {preview?.shell_error && (
+          <Notice tone="ochre">
+            Vỏ chưa dựng được: {preview.shell_error}. Apply vẫn được nhưng Tạo mesh sẽ báo lỗi cho vật này.
+          </Notice>
+        )}
+      </div>
+
+      {region.error && !staleScene && (
+        <p role="alert" className="text-rust">
+          {region.error}
+        </p>
+      )}
+      {boxError && (
+        <p role="alert" className="text-rust">
+          {boxError}
+        </p>
+      )}
+      {staleScene && (
+        <div role="alert" className="space-y-2 text-rust">
+          <p>Scene đã đổi ở lượt khác. Tải lại để chỉnh tiếp.</p>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => {
+              setConflict(false);
+              onReload();
+            }}
+          >
+            Tải lại
+          </Button>
+        </div>
+      )}
+      {applyError && (
+        <p role="alert" className="text-rust">
+          {applyError}
+        </p>
+      )}
+
+      {donorBlockers.length > 0 && (
+        <p className="text-rust">
+          Chưa Apply được: {donorBlockers.map((item) => nameOf(item.object_id)).join(", ")} sẽ còn dưới{" "}
+          {donorBlockers[0].minimum} Gaussian. Bỏ “Lấy luôn” hoặc thu box để tiếp tục.
+        </p>
+      )}
+      <div className="flex justify-end gap-2 border-t border-line-dark pt-3">
+        <Button size="sm" variant="ghost" onClick={onClose}>
+          Huỷ
+        </Button>
+        <Button
+          size="sm"
+          disabled={!canApply}
+          title={donorBlockers.length > 0 ? "Vật lấy luôn sẽ còn dưới tối thiểu" : undefined}
+          onClick={() => void apply()}
+        >
+          {applying && <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden />}
+          Apply
+        </Button>
+      </div>
+    </section>
+  );
+}

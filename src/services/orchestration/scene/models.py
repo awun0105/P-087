@@ -1,11 +1,38 @@
 """Commands and revision views for the scene edit flow (PRODUCT-06)."""
 
-from typing import Self
+import math
+from typing import Annotated, Self
 
-from pydantic import model_validator
+from pydantic import Field, FiniteFloat, model_validator
 
 from src.models.contracts.artifacts import ArtifactRef, Checksum, ContractModel, Identifier
 from src.models.contracts.scene import SceneIR
+
+_PositiveFinite = Annotated[FiniteFloat, Field(gt=0)]
+
+
+class ColliderEditCommand(ContractModel):
+    """Revision-bound edits for the dimensions and local pose of a box collider."""
+
+    expected_scene_revision: Identifier
+    object_id: Identifier
+    dimensions_xyz_m: tuple[_PositiveFinite, _PositiveFinite, _PositiveFinite] | None = None
+    local_translation_xyz_m: tuple[FiniteFloat, FiniteFloat, FiniteFloat] | None = None
+    local_rotation_quaternion_xyzw: tuple[FiniteFloat, FiniteFloat, FiniteFloat, FiniteFloat] | None = None
+
+    @model_validator(mode="after")
+    def _require_change(self) -> Self:
+        if (
+            self.dimensions_xyz_m is None
+            and self.local_translation_xyz_m is None
+            and self.local_rotation_quaternion_xyzw is None
+        ):
+            raise ValueError("collider edit phải đổi ít nhất kích thước hoặc local pose")
+        if self.local_rotation_quaternion_xyzw is not None:
+            norm = math.sqrt(sum(component * component for component in self.local_rotation_quaternion_xyzw))
+            if not math.isclose(norm, 1.0, rel_tol=1e-6, abs_tol=1e-6):
+                raise ValueError("local_rotation_quaternion_xyzw phải được chuẩn hóa")
+        return self
 
 
 class TransformEdit(ContractModel):

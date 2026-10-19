@@ -1,0 +1,102 @@
+name: Build Studio release images
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_gpu:
+        description: Build GPU runtime on a prepared self-hosted studio-release runner
+        type: boolean
+        default: false
+      build_isaac:
+        description: Build the optional GPU image with Isaac Sim 5.1
+        type: boolean
+        default: false
+      isaac_accept_eula:
+        description: Operator has accepted the NVIDIA Isaac/Omniverse license for the Isaac image
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: studio-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  api:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Image name
+        id: image
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: echo "name=ghcr.io/${REPOSITORY,,}/studio-api" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        id: build
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: ${{ steps.image.outputs.name }}:${{ github.sha }}
+      - name: Record digest
+        env:
+          IMAGE: ${{ steps.image.outputs.name }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: echo "$IMAGE@$DIGEST" >> "$GITHUB_STEP_SUMMARY"
+
+  gpu:
+    if: ${{ inputs.build_gpu || inputs.build_isaac }}
+    runs-on: [self-hosted, linux, x64, studio-release]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Pinned image inputs
+        id: image
+        env:
+          REPOSITORY: ${{ github.repository }}
+          BUILD_ISAAC: ${{ inputs.build_isaac }}
+          ACCEPT_EULA: ${{ inputs.isaac_accept_eula }}
+        run: |
+          suffix=""
+          target="production"
+          accept="NO"
+          if [ "$BUILD_ISAAC" = true ]; then
+            [ "$ACCEPT_EULA" = true ] || { echo "Isaac license acceptance is required" >&2; exit 1; }
+            suffix="-isaac"
+            target="isaac"
+            accept="YES"
+          fi
+          echo "name=ghcr.io/${REPOSITORY,,}/studio-gpu$suffix" >> "$GITHUB_OUTPUT"
+          echo "target=$target" >> "$GITHUB_OUTPUT"
+          echo "accept=$accept" >> "$GITHUB_OUTPUT"
+          sed -n 's/^COLMAP_IMAGE=/colmap=/p' configs/runtime/pins.env >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        id: build
+        with:
+          context: .
+          file: Dockerfile.gpu
+          target: ${{ steps.image.outputs.target }}
+          build-args: |
+            COLMAP_IMAGE=${{ steps.image.outputs.colmap }}
+            ISAAC_ACCEPT_EULA=${{ steps.image.outputs.accept }}
+          push: true
+          tags: ${{ steps.image.outputs.name }}:${{ github.sha }}
+      - name: Record digest
+        env:
+          IMAGE: ${{ steps.image.outputs.name }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: echo "$IMAGE@$DIGEST" >> "$GITHUB_STEP_SUMMARY"
