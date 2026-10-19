@@ -199,6 +199,7 @@ def post_demo_publish(
             title=title,
             description=request.description.strip(),
             source=DemoSource(dataset="Real2Sim Studio", sequence=project.name[:200], note=""),
+            recording_dir=deps.settings().product_rerun_recording_dir,
         )
     except AlreadyPublishedError as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error

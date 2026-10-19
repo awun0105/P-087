@@ -89,6 +89,22 @@ describe("MetricSceneView effective collision", () => {
     expect(after.contentUrl).toBe(before.contentUrl);
   });
 
+  it("does not reload an invisible collision overlay after a pose save; enables it for the current revision", () => {
+    loadCollision.mockClear();
+    const props = { jobId: "j", visual, collision, cameras };
+    const { rerender } = render(<MetricSceneView {...props} sceneRevision="rev-1" />);
+    act(() => renderViewer.mock.lastCall![0].onApp({}, { setObjectCollision: vi.fn() }));
+    expect(loadCollision).not.toHaveBeenCalled();
+    rerender(<MetricSceneView {...props} sceneRevision="rev-2" />);
+    expect(loadCollision).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByLabelText("Collision mesh"));
+    expect(loadCollision).toHaveBeenCalledOnce();
+    expect(loadCollision.mock.lastCall![0]).toContain("scene_revision=rev-2");
+    fireEvent.click(screen.getByLabelText("Collision mesh"));
+    rerender(<MetricSceneView {...props} sceneRevision="rev-3" />);
+    expect(loadCollision).toHaveBeenCalledOnce();
+  });
+
   it("does not silently omit a confirmed static collider after removing its source region", () => {
     const object: PhysicsObjectInput = { id: "static-A", dynamic: false, position: [7, 8, 9], rotation_xyzw: [0, 0, 0, 1], colliderUrl: null, colliderLocalTransform: null, dimensions: [1, 2, 3], mass_kg: 0, friction: .5, restitution: 0 };
     render(<MetricSceneView jobId="j" visual={visual} collision={collision} cameras={cameras} sceneRevision="rev-3" physicsObjects={[object]} />);
@@ -134,7 +150,7 @@ it("does not rebuild live object layers when environment load finishes or mesh d
   let finish!: (triangles: number) => void;
   loadCollision.mockImplementationOnce(() => new Promise<number>((resolve) => {finish = resolve;}));
   const boxes = [{id: "A", center: [0,0,1] as [number,number,number], rotation_xyzw: [0,0,0,1] as [number,number,number,number], dimensions: [1,2,3] as [number,number,number], color: "#ffffff", emphasized: false}];
-  render(<MetricSceneView jobId="j" visual={visual} collision={collision} sceneRevision="rev-1" cameras={cameras} boxes={boxes} />);
+  render(<MetricSceneView jobId="j" visual={visual} collision={collision} sceneRevision="rev-1" cameras={cameras} boxes={boxes} defaultLayers={{ splat: true, collision: true, boxes: true }} />);
   act(() => renderViewer.mock.lastCall![0].onApp({}, {setObjectCollision: vi.fn()}));
   setBoxes.mockClear(); setColliders.mockClear();
   await act(async () => finish(100));
@@ -153,10 +169,10 @@ it("uses preview URLs and sends a picked canonical triangle to surface annotatio
   expect(within(screen.getByLabelText("Chọn layer hiển thị")).queryByRole("button", {name: "Đánh dấu sàn"})).toBeNull();
   expect(within(panel).getByRole("button", {name: "Đánh dấu sàn"})).toBeInTheDocument();
   expect(renderViewer.mock.lastCall![0].collisionUrl).toContain("preview=true");
-  expect(loadCollision.mock.lastCall![0]).toContain("preview=true");
   const points=[[0,0,0],[1,0,0],[0,1,0]];
   pickCollisionTriangle.mockReturnValue(points);
   fireEvent.click(screen.getByRole("button",{name:"Đánh dấu sàn"}));
+  expect(loadCollision.mock.lastCall![0]).toContain("preview=true");
   const canvas=document.createElement("canvas");
   screen.getByTestId("viewer-surface").appendChild(canvas);
   fireEvent.pointerDown(canvas,{clientX:20,clientY:20});

@@ -5,6 +5,7 @@
  */
 
 import { Mat4, Quat, Vec3 } from "playcanvas";
+import { runCooperatively } from "./cooperative";
 
 const MAGIC = 0x46546c67;
 const JSON_CHUNK = 0x4e4f534a;
@@ -107,6 +108,15 @@ export function parseGlbMesh(buffer: ArrayBuffer): TriangleMesh {
   return parse(buffer, false);
 }
 
+export async function parseGlbMeshAsync(buffer: ArrayBuffer, signal?: AbortSignal): Promise<TriangleMesh> {
+  try {
+    return await runCooperatively(readBakedMeshSteps(buffer, false), signal);
+  } catch (error: unknown) {
+    if (signal?.aborted || error instanceof GlbMeshError) throw error;
+    throw new GlbMeshError(`GLB không hợp lệ: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 function parse(buffer: ArrayBuffer, nodeTransforms: boolean): TriangleMesh {
   try {
     return readBakedMesh(buffer, nodeTransforms);
@@ -117,6 +127,13 @@ function parse(buffer: ArrayBuffer, nodeTransforms: boolean): TriangleMesh {
 }
 
 function readBakedMesh(buffer: ArrayBuffer, nodeTransforms: boolean): TriangleMesh {
+  const steps = readBakedMeshSteps(buffer, nodeTransforms);
+  let next = steps.next();
+  while (!next.done) next = steps.next();
+  return next.value;
+}
+
+function* readBakedMeshSteps(buffer: ArrayBuffer, nodeTransforms: boolean): Generator<void, TriangleMesh> {
   const view = new DataView(buffer);
   requireLayout(buffer.byteLength >= 20 && view.getUint32(0, true) === MAGIC && view.getUint32(4, true) === 2 && view.getUint32(8, true) === buffer.byteLength, "không phải GLB 2.0 đầy đủ");
   const jsonLength = view.getUint32(12, true);
@@ -132,11 +149,13 @@ function readBakedMesh(buffer: ArrayBuffer, nodeTransforms: boolean): TriangleMe
   const positions: number[] = [];
   const indices: number[] = [];
   const meshParts: ColliderMeshPart[][] = [];
+  let partCount = 0;
   for (const mesh of document.meshes ?? []) {
     const parts: ColliderMeshPart[] = [];
     meshParts.push(parts);
     requireLayout(!mesh.weights?.length, "mesh morph weights chưa hỗ trợ");
     for (const primitive of mesh.primitives) {
+      partCount++;
       const indexStart = indices.length;
       const position = primitive.attributes.POSITION;
       requireLayout(position !== undefined && (primitive.mode ?? 4) === 4 && !primitive.targets?.length && primitive.extensions === undefined, "primitive phải là triangle POSITION, không morph/compression");
@@ -144,6 +163,7 @@ function readBakedMesh(buffer: ArrayBuffer, nodeTransforms: boolean): TriangleMe
       requireLayout(accessor.componentType === FLOAT && accessor.type === "VEC3" && accessor.count > 0 && start % 4 === 0 && stride % 4 === 0, "POSITION phải là float32 VEC3");
       const base = positions.length / 3;
       for (let i = 0; i < accessor.count; i += 1) {
+        if ((i & 2047) === 0) yield;
         const offset = binStart + start + i * stride;
         const point = [view.getFloat32(offset, true), view.getFloat32(offset + 4, true), view.getFloat32(offset + 8, true)];
         requireLayout(point.every(Number.isFinite), "POSITION có giá trị không hữu hạn");
@@ -151,7 +171,10 @@ function readBakedMesh(buffer: ArrayBuffer, nodeTransforms: boolean): TriangleMe
       }
       if (primitive.indices === undefined) {
         requireLayout(accessor.count % 3 === 0, "triangle không có indices cần số đỉnh chia hết cho 3");
-        for (let i = 0; i + 2 < accessor.count; i += 3) indices.push(base + i, base + i + 1, base + i + 2);
+        for (let i = 0; i + 2 < accessor.count; i += 3) {
+          if (i % 2048 === 0) yield;
+          indices.push(base + i, base + i + 1, base + i + 2);
+        }
       } else {
       const indexAccessor = document.accessors[primitive.indices];
       const Kind = INDEX_ARRAYS[indexAccessor?.componentType as keyof typeof INDEX_ARRAYS];
@@ -159,17 +182,18 @@ function readBakedMesh(buffer: ArrayBuffer, nodeTransforms: boolean): TriangleMe
       const range = accessorRange(document, primitive.indices, document.buffers[0].byteLength, Kind.BYTES_PER_ELEMENT);
       requireLayout(indexAccessor.type === "SCALAR" && indexAccessor.count % 3 === 0 && range.bufferView.byteStride === undefined && range.start % Kind.BYTES_PER_ELEMENT === 0, "indices phải là SCALAR triangles không interleaved");
       for (let i = 0; i < indexAccessor.count; i += 1) {
+        if ((i & 2047) === 0) yield;
         const offset = binStart + range.start + i * Kind.BYTES_PER_ELEMENT;
         const index = Kind === Uint8Array ? view.getUint8(offset) : Kind === Uint16Array ? view.getUint16(offset, true) : view.getUint32(offset, true);
         requireLayout(index < accessor.count, "indices vượt ngoài POSITION");
         indices.push(base + index);
       }
       }
-      parts.push({ positions: new Float32Array(positions.slice(base * 3)), indices: new Uint32Array(indices.slice(indexStart).map((index) => index - base)) });
+      if (nodeTransforms) parts.push({ positions: new Float32Array(positions.slice(base * 3)), indices: new Uint32Array(indices.slice(indexStart).map((index) => index - base)) });
     }
   }
   requireLayout(indices.length > 0, "không có tam giác");
-  if (!nodeTransforms) return { positions: new Float32Array(positions), indices: new Uint32Array(indices), partCount: meshParts.flat().length };
+  if (!nodeTransforms) return { positions: new Float32Array(positions), indices: new Uint32Array(indices), partCount };
   const parts = colliderInstances(document, meshParts);
   return { ...joinMeshParts(parts), partCount: parts.length, parts };
 }

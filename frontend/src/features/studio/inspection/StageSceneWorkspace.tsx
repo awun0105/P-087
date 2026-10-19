@@ -12,6 +12,7 @@ import { getPreview, jobArtifactContentUrl } from "@/lib/api/endpoints";
 import { getTrainingRecording } from "@/lib/api/studio";
 import type { StageId } from "@/lib/contracts/api";
 import type { ReconstructionPreview } from "@/lib/contracts/preview";
+import { demoSessionId } from "@/lib/api/demo-session";
 
 const StageViewer = dynamic(() => import("@/features/studio/StageViewer").then((m) => m.StageViewer), { ssr: false });
 const ObjectReview = dynamic(() => import("@/features/studio/ObjectReviewView").then((m) => m.ObjectReviewView), { ssr: false });
@@ -43,7 +44,7 @@ export function StageSceneWorkspace({ jobId, stageId, title }: { jobId: string; 
     <div className="relative min-h-0 flex-1">
       {mode === "training" ? <RerunTraining jobId={jobId} />
         : stageId === "ST-VISUAL-RECON" ? <GaussianWorkspace jobId={jobId} title={title} />
-        : stageId === "ST-OBJECT-EXTRACT" ? <ObjectReview jobId={jobId} />
+        : stageId === "ST-OBJECT-EXTRACT" ? <ObjectReview jobId={jobId} canMutateJob={Boolean(demoSessionId())} />
           : mode === "comparison" ? <Comparison jobId={jobId} />
             : <StageViewer jobId={jobId} stageId={stageId} fallbackStageId={stageId === "ST-METRIC-CANONICALIZE" ? "ST-VISUAL-RECON" : undefined} />}
     </div>

@@ -24,6 +24,7 @@ from src.services.orchestration.processing.models import ParamValue
 from src.services.orchestration.processing.observed import load_usages, observed_for_config
 from src.services.orchestration.projects import ProjectRegistry, get_project_registry
 from src.services.orchestration.samples import DemoLibrary
+from src.services.orchestration.samples.session_context import demo_runtime
 from src.services.orchestration.storage import runtime_resolver
 from src.services.orchestration.uploads import DirectUploadService, VideoUploadService
 from src.services.orchestration.uploads.scene_imports import ImportService
@@ -31,12 +32,14 @@ from src.services.orchestration.uploads.scene_imports import ImportService
 
 def settings() -> Settings:
     """Settings hiện hành (patch được trong test)."""
-    return get_settings()
+    scoped = demo_runtime.get()
+    return scoped.settings if scoped is not None else get_settings()
 
 
 def registry() -> ProjectRegistry:
     """Registry project/job dùng chung của API."""
-    return get_project_registry()
+    scoped = demo_runtime.get()
+    return scoped.registry if scoped is not None else get_project_registry()
 
 
 def uploads() -> VideoUploadService:

@@ -11,11 +11,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AppBase, Entity } from "playcanvas";
 
-import { parseGlbCollider, parseGlbMesh, type ColliderMeshPart, type TriangleMesh } from "@/features/viewer/glb-mesh";
+import { parseGlbCollider, type ColliderMeshPart, type TriangleMesh } from "@/features/viewer/glb-mesh";
 import type { OverlayObject, SceneOverlay } from "@/features/viewer/scene-overlay";
 import { ScenePhysics, displayToCanonical, loadAmmo, physicsTransformBlocker, validateConvexPart, validateTriangleMesh, type AmmoModule, type PhysicsObjectSpec } from "@/features/viewer/scene-physics";
 import type { Vec3 } from "@/features/viewer/source-frame";
 import { ObjectCameraCollision } from "@/features/viewer/camera-collision";
+import { loadCollisionMesh } from "@/features/viewer/collision-mesh";
 import type { CollisionQuery } from "@playcanvas/supersplat-viewer/viewer";
 import { WALK_EYE_HEIGHT_M } from "@/features/viewer/third-person";
 
@@ -61,14 +62,16 @@ export function browserPhysicsBlocker(objects: readonly PhysicsObjectInput[]): s
 }
 
 async function fetchMesh(url: string, signal: AbortSignal, frame: "display_world" | "canonical_collider_local"): Promise<TriangleMesh> {
-  const response = await fetch(url, { signal });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  const mesh = parseGlbMesh(await response.arrayBuffer());
+  const mesh = await loadCollisionMesh(url, signal);
   return frame === "display_world" ? toCanonical(mesh) : mesh;
 }
 
+const canonicalMeshes = new WeakMap<TriangleMesh, TriangleMesh>();
+
 /** Lưới va chạm của viewer ở không gian hiển thị → hệ canonical của thế giới vật lý. */
 function toCanonical(mesh: TriangleMesh): TriangleMesh {
+  const previous = canonicalMeshes.get(mesh);
+  if (previous) return previous;
   const positions = new Float32Array(mesh.positions.length);
   for (let i = 0; i < positions.length; i += 3) {
     const [x, y, z] = displayToCanonical([mesh.positions[i], mesh.positions[i + 1], mesh.positions[i + 2]]);
@@ -76,7 +79,9 @@ function toCanonical(mesh: TriangleMesh): TriangleMesh {
     positions[i + 1] = y;
     positions[i + 2] = z;
   }
-  return { positions, indices: mesh.indices };
+  const canonical = { positions, indices: mesh.indices };
+  canonicalMeshes.set(mesh, canonical);
+  return canonical;
 }
 
 export function transformColliderHullToObjectFrame(

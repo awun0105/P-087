@@ -1,12 +1,13 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import React from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PreviewScene } from "@/features/studio/scene/PreviewScene";
 import { SampleScene } from "@/features/studio/SampleScene";
 import { getSample, getStageViews } from "@/lib/api/studio";
 import { parseDemoManifest } from "@/lib/contracts/studio";
 import type { StageView } from "@/lib/contracts/studio";
+import { apiFetch, ApiError } from "@/lib/api/client";
 
 const viewer = vi.hoisted(() => ({
   props: [] as {
@@ -18,6 +19,7 @@ const viewer = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/api/studio", () => ({ getStageViews: vi.fn(), getSample: vi.fn(), sampleFileUrl: (id: string, name: string) => `/samples/${id}/${name}` }));
 vi.mock("@/features/shell/Breadcrumbs", () => ({ usePageTitle: vi.fn() }));
+vi.mock("@/lib/api/client", async (original) => ({ ...(await original<typeof import("@/lib/api/client")>()), apiFetch: vi.fn() }));
 vi.mock("@/features/viewer/PlayCanvasScene", async (original) => ({
   ...(await original<typeof import("@/features/viewer/PlayCanvasScene")>()),
   usePlayCanvasCapability: () => ["ready", vi.fn()],
@@ -61,7 +63,10 @@ const cameraView: StageView = { stage_id: "ST-CAMERA-POSE", kind: "cameras", tit
 beforeEach(() => {
   vi.clearAllMocks();
   viewer.props = [];
+  vi.mocked(apiFetch).mockRejectedValue(new ApiError(409, "Mẫu cũ chỉ có file 3DGS"));
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}")));
 });
+afterEach(() => vi.unstubAllGlobals());
 
 describe("PreviewScene mở đầu bên trong scene", () => {
   it.each([true, false])("demo truyền hướng cho cả Gaussian và camera, tương thích mẫu cũ: %s", async (aligned) => {
@@ -73,6 +78,7 @@ describe("PreviewScene mở đầu bên trong scene", () => {
     });
     vi.mocked(getSample).mockResolvedValue({ ok: true, data: demo });
     render(<SampleScene sampleId="sample" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Xem file 3DGS của mẫu" }));
     await screen.findByTestId("viewer");
     const props = viewer.props.at(-1)!;
     expect(props.displayRotation).toEqual(aligned ? rotation : undefined);
@@ -81,6 +87,23 @@ describe("PreviewScene mở đầu bên trong scene", () => {
     props.initialCamera!.position.forEach((value, axis) => expect(value).toBeCloseTo(expectedPosition[axis]));
     props.initialCamera!.target.forEach((value, axis) => expect(value).toBeCloseTo(expectedTarget[axis]));
     expect(getStageViews).not.toHaveBeenCalled();
+  });
+
+  it("mở workspace riêng, reset và thoát đóng đúng phiên", async () => {
+    const first = "a".repeat(32);
+    const second = "b".repeat(32);
+    vi.mocked(apiFetch).mockResolvedValueOnce({ session_id: first, job_id: "job-a" })
+      .mockResolvedValueOnce({ session_id: second, job_id: "job-a" });
+    const demo = parseDemoManifest({ schema_version: "1.0", origin: "pipeline_job", title: "Sample", frames: [], stages: [], splat: { name: "scene.sog" } });
+    vi.mocked(getSample).mockResolvedValue({ ok: true, data: demo });
+    const view = render(<SampleScene sampleId="sample" />);
+    await waitFor(() => expect(screen.getByTitle("Workspace demo: Sample")).toHaveAttribute("src", `/demo-workspace/${first}?job=job-a&tab=progress`));
+    expect(screen.queryByTestId("viewer")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Khôi phục mẫu" }));
+    await waitFor(() => expect(screen.getByTitle("Workspace demo: Sample")).toHaveAttribute("src", `/demo-workspace/${second}?job=job-a&tab=progress`));
+    expect(fetch).toHaveBeenCalledWith(`/api/v1/demo-sessions/${first}`, expect.objectContaining({ method: "DELETE", keepalive: true }));
+    view.unmount();
+    expect(fetch).toHaveBeenCalledWith(`/api/v1/demo-sessions/${second}`, expect.objectContaining({ method: "DELETE" }));
   });
 
   it.each([[0, 0, 0, 0], [0, 0, 0, 2], [0, 1], [0, 0, 0, NaN]])("từ chối hướng demo không hợp lệ: %s", (...rotation) => {

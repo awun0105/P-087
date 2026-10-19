@@ -383,7 +383,7 @@ def test_sample_optional_object_geometry_is_validated(tmp_path: Path) -> None:
 @pytest.mark.parametrize("objectgs", [False, True])
 @pytest.mark.parametrize("request_status", ["done", "failed", "stale"])
 def test_sample_exports_recorded_metric_collision_objects_and_geometry(
-    tmp_path: Path, source: str, objectgs: bool, request_status: str
+    tmp_path: Path, source: str, objectgs: bool, request_status: str, monkeypatch
 ) -> None:
     import json
     from contextlib import contextmanager
@@ -479,6 +479,8 @@ def test_sample_exports_recorded_metric_collision_objects_and_geometry(
         }
         yield SimpleNamespace(execute=lambda *_: SimpleNamespace(fetchone=lambda: (json.dumps(payload),)))
 
+    # This test supplies synthetic stage evidence, not a complete durable workspace.
+    monkeypatch.setattr("src.services.orchestration.samples.workspace.freeze_workspace", lambda *args, **kwargs: None)
     registry.persistence = SimpleNamespace(database=SimpleNamespace(transaction=transaction))
     job = registry.get_job(JOB_ID)
     records = [

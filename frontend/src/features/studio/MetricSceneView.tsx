@@ -362,8 +362,9 @@ export function MetricSceneView({
     };
   }, [placementDims, cancelPlacement, selectedObject, onDeselect, overlay, regionEdit]);
 
+  const overlayCollisionWanted = layers.collision || surfaceTool !== null || (thirdPerson && runtime.cameraMode === "walk");
   useEffect(() => {
-    if (!overlay || !collisionUrl) return;
+    if (!overlay || !collisionUrl || !overlayCollisionWanted) return;
     let active = true;
     rig?.setCollision(null);
     queueMicrotask(() => { if (active) setCollisionState(null); });
@@ -374,15 +375,15 @@ export function MetricSceneView({
     return () => {
       active = false;
     };
-  }, [overlay, collisionUrl, rig]);
+  }, [overlay, collisionUrl, rig, overlayCollisionWanted]);
 
   // Góc nhìn thứ ba chỉ có nghĩa khi đang đi bộ; lưới va chạm (nạp xong mới có) giữ camera không lùi xuyên tường.
   const walking = runtime.cameraMode === "walk";
   useWalkSession({ walking, sceneRevision });
   useEffect(() => {
     // Trích đỉnh của lưới va chạm một lần mỗi khi lưới nạp xong, không lặp lại mỗi lần bật/tắt.
-    rig?.setCollision(overlay?.collisionPositions() ?? null);
-  }, [rig, overlay, collisionState]);
+    if (thirdPerson && walking) rig?.setCollision(overlay?.collisionPositions() ?? null);
+  }, [rig, overlay, collisionState, thirdPerson, walking]);
   useEffect(() => {
     if (!rig) return;
     rig.setActive(thirdPerson && walking);

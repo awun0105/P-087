@@ -23,7 +23,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
-import { parseGlbMesh } from "@/features/viewer/glb-mesh";
+import { loadCollisionMesh } from "@/features/viewer/collision-mesh";
 import { CombinedCollision } from "@/features/viewer/camera-collision";
 import type { CollisionQuery } from "@playcanvas/supersplat-viewer/viewer";
 import type { ViewMode } from "@/features/viewer/layers";
@@ -261,14 +261,8 @@ export function PlayCanvasScene({
     collisionViewer.setCollisionMesh(null, null);
     collisionError.current?.(null);
     if (collisionUrl) {
-      void fetch(collisionUrl, { signal: controller.signal }).then(async (response) => {
-        if (!response.ok) {
-          const body: unknown = await response.json().catch(() => null);
-          const detail = body && typeof body === "object" && "detail" in body ? body.detail : null;
-          throw new Error(typeof detail === "string" ? detail : `Không tải được lưới va chạm (HTTP ${response.status}).`);
-        }
-        const mesh = parseGlbMesh(await response.arrayBuffer());
-        if (!controller.signal.aborted) collisionViewer.setCollisionMesh(mesh.positions, mesh.indices);
+      void loadCollisionMesh(collisionUrl, controller.signal).then(async (mesh) => {
+        if (!controller.signal.aborted) await collisionViewer.setCollisionMeshAsync(mesh.positions, mesh.indices, controller.signal);
       }).catch((error: unknown) => {
         if (!controller.signal.aborted) collisionError.current?.(error instanceof Error ? error.message : String(error));
       });
@@ -642,6 +636,7 @@ interface ViewerHandleLike {
   readonly events: { on(key: string, handler: () => void): { off(): void } };
   setCollisionProvider(provider: ((environment: CollisionQuery | null) => CollisionQuery | null) | null): void;
   setCollisionMesh(positions: Float32Array | null, indices: Uint32Array | null): void;
+  setCollisionMeshAsync(positions: Float32Array, indices: Uint32Array, signal: AbortSignal): Promise<void>;
   frameScene(): void;
   resetCamera(): void;
   toggleWalk(): void;

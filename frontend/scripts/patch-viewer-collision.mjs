@@ -111,7 +111,69 @@ export function isWalkStepSupported(collision, x, groundY, z, radius) {
 }
 export { createViewer };`],
 ], "REAL2SIM_WALK_SUPPORT");
+
+// Keep the pinned collision algorithm, but let environment preparation yield to input/paint.
+patch("dist/viewer.js", [
+  ["function buildBVH(tris, start, count) {", "function* buildBVH(tris, start, count) {"],
+  ["    for (let i = start; i < start + count; i++) {", "    for (let i = start; i < start + count; i++) {\n        if ((i & 2047) === 0) yield;"],
+  ["    while (left <= right) {", "    while (left <= right) {\n        if (((left + count - 1 - right) & 2047) === 0) yield;"],
+  ["        left: buildBVH(tris, start, leftCount),", "        left: yield* buildBVH(tris, start, leftCount),"],
+  ["        right: buildBVH(tris, start + leftCount, count - leftCount),", "        right: yield* buildBVH(tris, start + leftCount, count - leftCount),"],
+  ["    constructor(positions, indices) {", `    constructor(positions, indices, deferred = false) {
+        this._buildSteps = this.buildSteps(positions, indices);
+        if (!deferred) {
+            while (!this._buildSteps.next().done) {}
+            this._buildSteps = null;
+        }
+    }
+    *buildSteps(positions, indices) {`],
+  ["        for (let i = 0; i < numTris; i++) {", "        for (let i = 0; i < numTris; i++) {\n            if ((i & 2047) === 0) yield;"],
+  ["        this._root = buildBVH(tris, 0, numTris);", "        this._root = yield* buildBVH(tris, 0, numTris);"],
+  ["        let hostCollision = false;", `        let hostCollision = false;
+        // REAL2SIM_COOPERATIVE_COLLISION: one prepared environment per viewer lifetime.
+        let preparedEnvironment = null;
+        this.setCollisionMeshAsync = async (positions, indices, signal) => {
+            signal.throwIfAborted();
+            const previous = preparedEnvironment;
+            const collision = previous?.positions === positions && previous?.indices === indices
+                ? previous.collision : await createMeshCollisionAsync(positions, indices, signal);
+            if (this.destroyed || signal.aborted) return;
+            preparedEnvironment = { positions, indices, collision };
+            hostCollision = true;
+            collisionReady = collision;
+            attachCollision?.(collisionReady);
+        };`],
+  ["                    this.meshOverlay = new MeshDebugOverlay(app, collision, camera, !!this.cameraFrame);", "                    // Allocate the large debug mesh only when it is visible."],
+  ["                        if (this.meshOverlay) this.meshOverlay.enabled = value;", "                        if (value && !this.meshOverlay) this.meshOverlay = new MeshDebugOverlay(app, collision, camera, !!this.cameraFrame);\n                        if (this.meshOverlay) this.meshOverlay.enabled = value;"],
+  ["        setCollisionMesh: (positions, indices) => viewer.setCollisionMesh(positions, indices),", "        setCollisionMesh: (positions, indices) => viewer.setCollisionMesh(positions, indices),\n        setCollisionMeshAsync: (positions, indices, signal) => viewer.setCollisionMeshAsync(positions, indices, signal),"],
+  ["export { createViewer };", `export async function createMeshCollisionAsync(positions, indices, signal) {
+    signal?.throwIfAborted();
+    const collision = new MeshCollision(positions, indices, true);
+    const steps = collision._buildSteps;
+    let deadline = performance.now() + 8;
+    try {
+        while (true) {
+            signal?.throwIfAborted();
+            if (steps.next().done) return collision;
+            if (performance.now() >= deadline) {
+                await new Promise(resolve => setTimeout(resolve, 0));
+                deadline = performance.now() + 8;
+            }
+        }
+    } finally {
+        steps.return();
+        collision._buildSteps = null;
+    }
+}
+export { createViewer };`],
+], "REAL2SIM_COOPERATIVE_COLLISION");
+patch("dist/viewer.d.ts", [
+  ["type ViewerHandle = {", `/** REAL2SIM_COOPERATIVE_COLLISION: abortable, UI-friendly environment preparation. */
+export declare function createMeshCollisionAsync(positions: Float32Array, indices: Uint32Array, signal?: AbortSignal): Promise<CollisionQuery>;
+type ViewerHandle = {
+    setCollisionMeshAsync(positions: Float32Array, indices: Uint32Array, signal: AbortSignal): Promise<void>;`],
+], "REAL2SIM_COOPERATIVE_COLLISION");
 patch("dist/viewer.d.ts", [
   ["    voxelResolution: number;", "    /** REAL2SIM_WALK_SUPPORT: block walking into unsupported footprints. */\n    preventUnsupportedWalk?: boolean;\n    voxelResolution: number;"],
-  ["export declare function createMeshCollision", "export declare function isWalkStepSupported(collision: CollisionQuery, x: number, groundY: number, z: number, radius: number): boolean;\nexport declare function createMeshCollision"],
+  ["export declare function createMeshCollision(", "export declare function isWalkStepSupported(collision: CollisionQuery, x: number, groundY: number, z: number, radius: number): boolean;\nexport declare function createMeshCollision("],
 ], "REAL2SIM_WALK_SUPPORT");

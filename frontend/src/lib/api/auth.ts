@@ -1,3 +1,4 @@
+import { demoApiPath } from "@/lib/api/demo-session";
 /**
  * Client đăng nhập và quản lý role. Cookie phiên httpOnly do backend đặt qua
  * proxy `/api/v1` cùng domain — JavaScript không đọc được token.
@@ -58,7 +59,7 @@ export function login(email: string, password: string): Promise<PublicUser> {
 }
 
 export async function logout(): Promise<void> {
-  const response = await fetch(`${API}/logout`, { method: "POST", cache: "no-store" });
+  const response = await fetch(demoApiPath(`${API}/logout`), { method: "POST", cache: "no-store" });
   if (!response.ok) throw new ApiError(response.status, "Không đăng xuất được.");
 }
 

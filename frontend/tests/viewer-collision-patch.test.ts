@@ -35,6 +35,8 @@ it("the installed bridge updates camera/input/navigation and releases overlays w
   expect(host.cameraManager.setCollision).toHaveBeenLastCalledWith(host.inputController.collision);
   expect(state.walkAllowed).toBe(true);
   expect(listeners.size).toBe(1);
+  expect(host.meshOverlay).toBeNull(); // Hidden debug geometry must not allocate a second million-triangle mesh.
+  (Array.from(listeners)[0] as (value: boolean) => void)(true);
   const previous = host.meshOverlay!;
   host.setCollisionMesh(points, indices);
   expect(previous.destroy).toHaveBeenCalledOnce();
@@ -53,4 +55,43 @@ it("the installed bridge updates camera/input/navigation and releases overlays w
   expect(state.walkAllowed).toBe(false);
   expect(state.cameraMode).toBe("fly");
   expect(listeners.size).toBe(0);
+});
+
+it("reuses prepared environment geometry across fresh revision reads and ignores aborted preparations", async () => {
+  const source = readFileSync(new URL("../node_modules/@playcanvas/supersplat-viewer/dist/viewer.js", import.meta.url), "utf8");
+  const init = source.slice(source.indexOf("let collisionReady = null;"), source.indexOf("collisionLoad?.then"));
+  const attach = source.slice(source.indexOf("attachCollision = (collision) => {"), source.indexOf("// collision may already have landed"));
+  class MeshCollision {}
+  const prepare = vi.fn<(points: Float32Array, indices: Uint32Array, signal: AbortSignal) => Promise<MeshCollision>>(async () => new MeshCollision());
+  const host = {
+    destroyed: false, inputController: { collision: null }, cameraManager: { setCollision: vi.fn() },
+    navCursor: { collision: null }, meshOverlay: null,
+    setCollisionMesh: vi.fn<(positions: Float32Array | null, indices: Uint32Array | null) => void>(),
+    setCollisionMeshAsync: vi.fn<(positions: Float32Array, indices: Uint32Array, signal: AbortSignal) => Promise<void>>(),
+  };
+  const state = { hasCollision: false, hasCollisionOverlay: false, walkAllowed: false, cameraMode: "fly", collisionOverlayEnabled: false };
+  runInNewContext(`(function () { ${init} ${attach} }).call(host)`, {
+    host, state, MeshCollision, createMeshCollisionAsync: prepare,
+    MeshDebugOverlay: class {}, VoxelCollision: class {}, VoxelDebugOverlay: class {},
+    events: { on: vi.fn(), off: vi.fn() }, sceneBound: {}, isWalkAllowed: () => true,
+    app: {}, camera: {}, config: {},
+  });
+  const positions = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+  const indices = new Uint32Array([0, 1, 2]);
+  await host.setCollisionMeshAsync(positions, indices, new AbortController().signal);
+  const collision = host.inputController.collision;
+  host.setCollisionMesh(null, null);
+  await host.setCollisionMeshAsync(positions, indices, new AbortController().signal);
+  expect(prepare).toHaveBeenCalledOnce();
+  expect(host.inputController.collision).toBe(collision);
+  expect(state.walkAllowed).toBe(true);
+
+  let finish!: (value: MeshCollision) => void;
+  prepare.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+  const controller = new AbortController();
+  const pending = host.setCollisionMeshAsync(positions.slice(), indices, controller.signal);
+  controller.abort();
+  finish(new MeshCollision());
+  await pending;
+  expect(host.inputController.collision).toBe(collision);
 });

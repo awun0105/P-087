@@ -108,7 +108,11 @@ def library(tmp_path, monkeypatch):
     from src.api.studio import deps as studio_deps
 
     root = tmp_path / "library"
-    monkeypatch.setattr(studio_deps, "settings", lambda: SimpleNamespace(product_demo_dir=root))
+    monkeypatch.setattr(
+        studio_deps,
+        "settings",
+        lambda: SimpleNamespace(product_demo_dir=root, product_rerun_recording_dir=root / "recordings"),
+    )
     return root
 
 
@@ -141,7 +145,7 @@ def _fake_publish(calls):
 
     from src.services.orchestration.samples import DemoFile, DemoManifest
 
-    def fake(registry, job_id, root, *, title, description, source, frames=12):
+    def fake(registry, job_id, root, *, title, description, source, frames=12, recording_dir=None):
         calls.append((job_id, root, title, description, source))
         (root / "kho-1").mkdir(parents=True)
         manifest = DemoManifest(

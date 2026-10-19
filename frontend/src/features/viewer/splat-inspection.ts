@@ -1,7 +1,7 @@
 /** REUSE PlayCanvas Picker + ADAPT SuperSplat measurement/history interactions.
  * Xem THIRD_PARTY_NOTICES.md. Không sửa Gaussian, collider hoặc metric authority.
  */
-import { CameraComponent, Color, GSplatComponent, Mat4, Picker, Vec3 } from "playcanvas";
+import { CameraComponent, Color, Entity, Mat4, Picker, Vec3 } from "playcanvas";
 import type { ViewerHandle } from "@playcanvas/supersplat-viewer/viewer";
 import { subscribeTheme, themeColor } from "@/lib/theme";
 import { EMPTY_INSPECTION, InspectionHistory, type InspectionPoint, type InspectionState } from "./inspection-history";
@@ -68,12 +68,12 @@ export class SplatInspection {
     return cameras[0];
   }
 
-  private splat(): GSplatComponent {
-    const splats = this.viewer.app.root.findComponents("gsplat").filter(
-      (component): component is GSplatComponent => component instanceof GSplatComponent && component.enabled && component.entity.enabled,
-    );
-    if (splats.length !== 1) throw new Error("Chọn điểm cần một Gaussian asset đang hiển thị");
-    return splats[0];
+  private worldFromSource(): Mat4 {
+    // Entity nội dung của viewer định nghĩa hệ nguồn chung, kể cả khi lớp nền đang ẩn.
+    // Không dùng transform của vật được chọn: world point đã chứa pose hiện tại của vật.
+    const content = this.viewer.app.root.findByName("gsplat");
+    if (!(content instanceof Entity) || !content.gsplat) throw new Error("Chưa có khung tọa độ Gaussian của scene; chờ scene tải xong");
+    return content.getWorldTransform();
   }
 
   private publish(): void {
@@ -144,9 +144,8 @@ export class SplatInspection {
     if (x < 0 || x >= 1 || y < 0 || y >= 1) return;
     this.schedule(async () => {
       const camera = this.camera();
-      const splat = this.splat();
       // Viewer xoay nội dung (hiện upstream Z=180°); không gửi viewer-world làm anchor SfM.
-      const worldFromSource = splat.entity.getWorldTransform().clone();
+      const worldFromSource = this.worldFromSource().clone();
       const m = worldFromSource.data;
       const determinant = m[0] * (m[5] * m[10] - m[6] * m[9]) - m[4] * (m[1] * m[10] - m[2] * m[9]) + m[8] * (m[1] * m[6] - m[2] * m[5]);
       if (!Number.isFinite(determinant) || Math.abs(determinant) < 1e-12) throw new Error("Gaussian transform không khả nghịch");
@@ -168,7 +167,7 @@ export class SplatInspection {
     if (this.disposed || !this.state.points.length || !this.viewer.state.loaded) return;
     try {
       const camera = this.camera();
-      const transform = this.splat().entity.getWorldTransform();
+      const transform = this.worldFromSource();
       const points = this.state.points.map((point) => transform.transformPoint(new Vec3(...point)));
       points.forEach((point, index) => {
         const size = Math.max(point.distance(camera.entity.getPosition()) * 0.004, 0.00001);

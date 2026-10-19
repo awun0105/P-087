@@ -7,6 +7,7 @@
  */
 
 import { apiFetch } from "@/lib/api/client";
+import { demoApiPath } from "@/lib/api/demo-session";
 
 const API = "/api/v1/jobs";
 
@@ -49,7 +50,7 @@ function retryable(error: unknown): boolean {
 async function sendOnce(path: string, body: unknown, options: SendOptions): Promise<void> {
   let response: Response;
   try {
-    response = await fetch(`${API}${path}`, {
+    response = await fetch(demoApiPath(`${API}${path}`), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -286,9 +287,9 @@ export function getBenchmarkMetrics(signal?: AbortSignal): Promise<BenchmarkResp
 
 /** Đường dẫn tải thật tới API (không tạo file ở phía client). */
 export function valueMetricsUrl(jobId: string, format: "md" | "csv"): string {
-  return `${VALUE_API}/jobs/${encodeURIComponent(jobId)}/value-metrics.${format}`;
+  return demoApiPath(`${VALUE_API}/jobs/${encodeURIComponent(jobId)}/value-metrics.${format}`);
 }
 
 export function benchmarkMetricsUrl(format: "md" | "csv"): string {
-  return `${VALUE_API}/value-metrics/benchmark.${format}`;
+  return demoApiPath(`${VALUE_API}/value-metrics/benchmark.${format}`);
 }

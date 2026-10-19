@@ -35,6 +35,7 @@ from src.services.orchestration.auth.quota_ledger import (
     QuotaOperation,
 )
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
+from src.services.orchestration.samples.session_context import demo_runtime
 
 SESSION_COOKIE = "r2s_session"
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -42,7 +43,8 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 def settings() -> Settings:
     """Settings hiện hành (patch được trong test)."""
-    return get_settings()
+    scoped = demo_runtime.get()
+    return scoped.settings if scoped is not None else get_settings()
 
 
 def auth_service() -> AuthService:
@@ -53,12 +55,15 @@ def auth_service() -> AuthService:
 
 def current_user(request: Request) -> UserRecord | None:
     """Tài khoản của cookie phiên (None nếu chưa đăng nhập)."""
+    scoped = demo_runtime.get()
+    if scoped is not None:
+        return scoped.actor
     return auth_service().session_user(request.cookies.get(SESSION_COOKIE))
 
 
 def _require(role: Role):  # noqa: ANN202 - trả dependency FastAPI
     def dependency(request: Request) -> UserRecord | None:
-        if not settings().auth_required:
+        if not settings().auth_required and demo_runtime.get() is None:
             return None
         user = current_user(request)
         if user is None:

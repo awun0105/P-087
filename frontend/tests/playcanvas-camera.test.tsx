@@ -28,6 +28,7 @@ function fixture() {
     app: { root: { findComponent: () => camera }, graphicsDevice: { deviceType: "webgl" } },
     state, events, annotations,
     setCollisionMesh: vi.fn(),
+    setCollisionMeshAsync: vi.fn(async () => undefined),
     setCollisionProvider: vi.fn(),
     selectAnnotation: vi.fn(), frameScene: vi.fn(), resetCamera: vi.fn(), seek: vi.fn(), destroy: vi.fn(),
   };
@@ -137,11 +138,12 @@ it("replaces collision without recreating the viewer or reloading 3DGS and rejec
     const { rerender, unmount } = render(<PlayCanvasScene contentUrl="/scene.sog" collisionUrl="/collision-rev-1.glb" capability="ready" mode="VISUAL" onFailed={failed} onCollisionError={collisionError} />);
     await waitFor(() => expect(fetcher).toHaveBeenCalledWith("/collision-rev-1.glb", expect.anything()));
     rerender(<PlayCanvasScene contentUrl="/scene.sog" collisionUrl="/collision-rev-2.glb" capability="ready" mode="VISUAL" onFailed={failed} onCollisionError={collisionError} />);
-    await waitFor(() => expect(viewer.setCollisionMesh).toHaveBeenCalledWith(expect.any(Float32Array), expect.any(Uint32Array)));
+    await waitFor(() => expect(viewer.setCollisionMeshAsync).toHaveBeenCalledWith(expect.any(Float32Array), expect.any(Uint32Array), expect.any(AbortSignal)));
+    expect(viewer.setCollisionMesh.mock.calls.every(([positions]) => positions === null)).toBe(true);
     expect(mocks.createViewer).toHaveBeenCalledTimes(1);
-    const count = viewer.setCollisionMesh.mock.calls.length;
+    const count = viewer.setCollisionMeshAsync.mock.calls.length;
     await act(async () => { releaseOld?.({ ok: true, arrayBuffer: async () => colliderGlb() }); });
-    expect(viewer.setCollisionMesh).toHaveBeenCalledTimes(count);
+    expect(viewer.setCollisionMeshAsync).toHaveBeenCalledTimes(count);
     expect(viewer.destroy).not.toHaveBeenCalled();
     expect(failed).not.toHaveBeenCalled();
     unmount();

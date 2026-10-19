@@ -6,6 +6,7 @@ reclaim RUNNING theo timeout vì trainer có thể vẫn còn sống trên host 
 
 import argparse
 import logging
+import os
 import signal
 import time
 from collections.abc import Callable
@@ -47,6 +48,7 @@ from src.services.orchestration.projects.errors import PrivacyGateBlockedError
 from src.services.orchestration.projects.privacy import require_project_dispatch
 from src.services.orchestration.projects.registry import ProjectRegistry, get_project_registry
 from src.services.orchestration.review.validation_worker import IsaacValidationWorker
+from src.services.orchestration.samples.session_worker import process_demo_session
 from src.services.orchestration.scene.objectify_queue import process_next, recover_interrupted
 from src.services.orchestration.storage import runtime_resolver
 from src.services.orchestration.uploads.scene_imports import ImportService
@@ -447,9 +449,13 @@ def main(argv: list[str] | None = None) -> int:
     """Worker cần cùng DB/store/profile với API; không tạo background thread ở HTTP."""
     parser = argparse.ArgumentParser(description="Consume durable prepared RGB jobs")
     parser.add_argument("--once", action="store_true", help="Process at most one eligible job, then exit")
+    parser.add_argument("--demo-operation", choices=["pipeline", "registration", "validation", "scene"])
+    parser.add_argument("--demo-parent-pid", type=int)
     args = parser.parse_args(argv)
     configure_worker_logging()
     settings = get_settings()
+    if args.demo_operation and not settings.product_demo_session_worker:
+        parser.error("--demo-operation is restricted to disposable demo workers")
     registry = get_project_registry()
     if registry.execution_profile is None or settings.product_processing_config is None:
         logger.error("Configure PRODUCT_PROCESSING_CONFIG and PRODUCT_RUNTIME_MANIFEST before starting worker")
@@ -484,6 +490,17 @@ def main(argv: list[str] | None = None) -> int:
     signal.signal(signal.SIGTERM, interrupt)
     pause = Event()
     try:
+        if args.demo_operation:
+            import ctypes
+
+            # Linux PR_SET_PDEATHSIG: a killed dispatcher must not orphan a GPU demo worker.
+            if args.demo_parent_pid != os.getppid():
+                return 130
+            libc = ctypes.CDLL(None, use_errno=True)
+            if libc.prctl(1, signal.SIGTERM) != 0:
+                raise OSError(ctypes.get_errno(), "Cannot bind demo worker to its dispatcher")
+            if args.demo_parent_pid != os.getppid():
+                return 130
         recover_interrupted_jobs(registry, settings)
         recover_expired_leases(registry)
         recover_interrupted(settings)
@@ -491,13 +508,22 @@ def main(argv: list[str] | None = None) -> int:
         while True:
             recover_expired_leases(registry)
             # Job trong hàng đợi đi trước; rảnh mới nhận yêu cầu chạy lại tách theo vật (cùng dùng GPU).
-            handled = (
-                dispatch_next(registry, admission=admission)
-                or registration_worker.process_next()
-                or validation_worker.process_next()
-                or process_next(registry, settings)
-                or import_service.process_next(admission=admission)
-            )
+            if args.demo_operation:
+                handled = {
+                    "pipeline": lambda: dispatch_next(registry, admission=admission),
+                    "registration": registration_worker.process_next,
+                    "validation": validation_worker.process_next,
+                    "scene": lambda: process_next(registry, settings),
+                }[args.demo_operation]()
+            else:
+                handled = (
+                    dispatch_next(registry, admission=admission)
+                    or registration_worker.process_next()
+                    or validation_worker.process_next()
+                    or process_next(registry, settings)
+                    or import_service.process_next(admission=admission)
+                    or process_demo_session(settings, registry, admission)
+                )
             if args.once:
                 return 0
             if not handled:

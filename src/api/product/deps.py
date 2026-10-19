@@ -19,18 +19,21 @@ from src.services.orchestration.projects import (
     ProjectRegistry,
     get_project_registry,
 )
+from src.services.orchestration.samples.session_context import demo_runtime
 from src.services.orchestration.scene import SceneEditor, SceneEditResult, SceneError, SceneRevisionConflictError
 from src.services.orchestration.scene.errors import SceneHeadNotReadyError, SceneNotAvailableError
 
 
 def registry() -> ProjectRegistry:
     """Registry dùng chung; fixture chỉ được nạp một lần."""
-    return get_project_registry()
+    scoped = demo_runtime.get()
+    return scoped.registry if scoped is not None else get_project_registry()
 
 
 def settings() -> Settings:
     """Settings hiện hành; đi qua đây để test thay được thư mục và cấu hình."""
-    return get_settings()
+    scoped = demo_runtime.get()
+    return scoped.settings if scoped is not None else get_settings()
 
 
 def project_or_404(project_id: str) -> ProjectRecord:

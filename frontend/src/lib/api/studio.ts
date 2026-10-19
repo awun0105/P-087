@@ -4,6 +4,7 @@
  */
 
 import { ApiError, apiFetch, apiUrl, fetchApi, type ApiResult } from "@/lib/api/client";
+import { demoApiPath } from "@/lib/api/demo-session";
 import { clearDirectUploadResume, directUpload, xhrPutPart } from "@/lib/api/directUpload";
 import { verifyVideoPreparationChecksum } from "@/lib/contracts/videoPreparation";
 import type { VideoPreparedArtifact } from "@/lib/media/video-normalization";
@@ -226,7 +227,7 @@ export async function getSample(sampleId: string): Promise<ApiResult<DemoManifes
 
 /** URL tương đối cùng origin để `<img>`, `<video>` và editor nhúng dùng được. */
 export function sampleFileUrl(sampleId: string, name: string): string {
-  return `${API}/samples/${encodeURIComponent(sampleId)}/files/${encodeURIComponent(name)}`;
+  return demoApiPath(`${API}/samples/${encodeURIComponent(sampleId)}/files/${encodeURIComponent(name)}`);
 }
 
 export interface UploadHandle {
@@ -441,7 +442,7 @@ function formatLimit(bytes: number): string {
 function proxyUpload(file: File, onProgress: (fraction: number) => void, temporary = false): UploadHandle {
   const request = new XMLHttpRequest();
   const promise = new Promise<UploadRecord>((resolve, reject) => {
-    request.open("POST", `${API}/uploads?filename=${encodeURIComponent(file.name)}${temporary ? "&temporary=true" : ""}`);
+    request.open("POST", demoApiPath(`${API}/uploads?filename=${encodeURIComponent(file.name)}${temporary ? "&temporary=true" : ""}`));
     request.setRequestHeader("Content-Type", file.type || "application/octet-stream");
     request.upload.onprogress = (event) => {
       if (event.lengthComputable && event.total > 0) onProgress(event.loaded / event.total);
@@ -1051,11 +1052,11 @@ export async function getTrainingRecording(jobId: string, signal?: AbortSignal):
 }
 
 export function trainingRecordingUrl(jobId: string): string {
-  return `${API}/jobs/${encodeURIComponent(jobId)}/training-recording.rrd`;
+  return demoApiPath(`${API}/jobs/${encodeURIComponent(jobId)}/training-recording.rrd`);
 }
 
 export function simulationPackageDownloadUrl(jobId: string): string {
-  return `${API}/jobs/${encodeURIComponent(jobId)}/simulation-package/download`;
+  return demoApiPath(`${API}/jobs/${encodeURIComponent(jobId)}/simulation-package/download`);
 }
 
 // ── duyệt & phát hành (PRODUCT-10/11) ────────────────────────────────────────
@@ -1323,7 +1324,7 @@ export async function selectValidationRun(
 }
 
 export function validationArtifactUrl(jobId: string, runId: string, artifactName: string): string {
-  return `${API}/jobs/${encodeURIComponent(jobId)}/validation-runs/${encodeURIComponent(runId)}/artifacts/${encodeURIComponent(artifactName)}`;
+  return demoApiPath(`${API}/jobs/${encodeURIComponent(jobId)}/validation-runs/${encodeURIComponent(runId)}/artifacts/${encodeURIComponent(artifactName)}`);
 }
 
 function parseReviewState(value: unknown): ReviewStateView {
@@ -1399,7 +1400,7 @@ export async function retryReleaseSeal(jobId: string): Promise<ReviewStateView> 
 }
 
 export function releaseDownloadUrl(jobId: string): string {
-  return `${API}/jobs/${encodeURIComponent(jobId)}/release-download`;
+  return demoApiPath(`${API}/jobs/${encodeURIComponent(jobId)}/release-download`);
 }
 
 /** Một thứ nằm trong mục thùng rác: scene, scene nhập, hoặc upload chỉ scene đó dùng. */
@@ -1569,7 +1570,7 @@ export async function getJobEvaluation(jobId: string, signal?: AbortSignal): Pro
 
 /** Link tải báo cáo Markdown của bảng đánh giá (backend đặt tên file). */
 export function evaluationReportUrl(jobId: string): string {
-  return `${API}/jobs/${encodeURIComponent(jobId)}/evaluation/report.md`;
+  return demoApiPath(`${API}/jobs/${encodeURIComponent(jobId)}/evaluation/report.md`);
 }
 
 

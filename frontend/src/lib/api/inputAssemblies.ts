@@ -1,4 +1,5 @@
 import { apiFetch, ApiError } from "@/lib/api/client";
+import { demoApiPath } from "@/lib/api/demo-session";
 import { directUpload, xhrPutPart } from "@/lib/api/directUpload";
 import type { JobManifest, ProjectResponse } from "@/lib/contracts/api";
 import type {
@@ -91,7 +92,7 @@ export function uploadAssemblyFile(
     return new Promise<AssemblyUploadResponse>((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       request = xhr;
-      xhr.open("POST", `${API}/input-assemblies/uploads?filename=${encodeURIComponent(file.name)}${temporary ? "&temporary=true" : ""}`);
+      xhr.open("POST", demoApiPath(`${API}/input-assemblies/uploads?filename=${encodeURIComponent(file.name)}${temporary ? "&temporary=true" : ""}`));
       xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
       xhr.upload.onprogress = (event) => {
         if (event.lengthComputable && event.total > 0) onProgress(event.loaded / event.total);

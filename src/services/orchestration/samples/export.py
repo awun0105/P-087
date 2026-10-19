@@ -388,6 +388,7 @@ def export_job_bundle(
     source: DemoSource,
     frames: int = 12,
     stage_assets: Mapping[StageId, Sequence[StageAssetSpec]] | None = None,
+    recording_dir: Path | None = None,
 ) -> DemoManifest:
     """Bundle từ job thật: video gốc, frame đại diện, SOG preview, thời lượng từ journal, thẻ kết quả khai báo.
 
@@ -411,18 +412,24 @@ def export_job_bundle(
             stage_assets=stage_assets,
         )
         DemoManifest.model_validate_json((out / "manifest.json").read_text(encoding="utf-8"))
+        if registry.persistence is not None and registry.get_job(job_id).status == JobStatus.SUCCEEDED:
+            from src.services.orchestration.samples.bundle import DemoBundle
+            from src.services.orchestration.samples.workspace import freeze_workspace
+
+            freeze_workspace(registry, DemoBundle(out), recording_dir=recording_dir)
         return demo
     except Exception as error:
         _discard(out)
         if isinstance(error, SampleExportError):
             raise
-        if isinstance(error, ValueError):  # gồm ValidationError của manifest
+        if isinstance(error, (ValueError, DemoUnavailableError)):  # gồm ValidationError của manifest
             raise SampleExportError(f"Bundle không hợp lệ: {error}") from error
         raise
 
 
 def _discard(out: Path) -> None:
     """Xoá phần bundle dở dang (chỉ `files/` và `manifest.json` do mình tạo)."""
+    shutil.rmtree(out / "workspace", ignore_errors=True)
     shutil.rmtree(out / "files", ignore_errors=True)
     (out / "manifest.json").unlink(missing_ok=True)
 
@@ -476,6 +483,7 @@ def publish_job_bundle(
     description: str,
     source: DemoSource,
     frames: int = 12,
+    recording_dir: Path | None = None,
 ) -> DemoManifest:
     """Xuất job vào thư viện mẫu: dựng trong thư mục tạm rồi đổi tên một lần, không bao giờ ghi đè.
 
@@ -506,6 +514,7 @@ def publish_job_bundle(
                 description=description,
                 source=source,
                 frames=frames,
+                recording_dir=recording_dir,
             )
             if target.exists():
                 raise SampleExportError(f"Thư viện đã có mẫu {demo_id}")

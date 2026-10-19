@@ -140,6 +140,11 @@ class Settings(BaseSettings):
     # Thư viện video mẫu đã xử lý sẵn: mỗi thư mục con là một bundle export từ job
     # thật (scripts/demo/export_demo_bundle.py); thư mục chứa manifest.json = một mẫu.
     product_demo_dir: Path = Path("./data/demo/library")
+    product_demo_max_sessions: int = Field(default=32, ge=1, le=256)
+    product_demo_session_seconds: int = Field(default=14400, ge=60, le=86400)
+    product_demo_idle_seconds: int = Field(default=180, ge=60, le=3600)
+    #: Child workers must not dispatch another demo session recursively.
+    product_demo_session_worker: bool = False
 
     # Kho vector
     chroma_persist_dir: str = "./data/chroma"
