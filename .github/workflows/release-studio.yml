@@ -3,10 +3,21 @@ name: Build Studio release images
 on:
   workflow_dispatch:
     inputs:
+      build_api:
+        description: Build the CPU API image
+        type: boolean
+        default: true
       build_gpu:
         description: Build GPU runtime on a prepared self-hosted studio-release runner
         type: boolean
         default: false
+      gpu_runner:
+        description: Worker image build runner; standard hosted Linux is free for public repositories
+        type: choice
+        options:
+          - self-hosted
+          - github-hosted
+        default: self-hosted
       build_isaac:
         description: Build the optional GPU image with Isaac Sim 5.1
         type: boolean
@@ -26,6 +37,7 @@ concurrency:
 
 jobs:
   api:
+    if: ${{ inputs.build_api }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -55,8 +67,18 @@ jobs:
 
   gpu:
     if: ${{ inputs.build_gpu || inputs.build_isaac }}
-    runs-on: [self-hosted, linux, x64, studio-release]
+    runs-on: ${{ fromJSON(inputs.gpu_runner == 'github-hosted' && '["ubuntu-24.04"]' || '["self-hosted", "linux", "x64", "studio-release"]') }}
+    timeout-minutes: 120
+    env:
+      DOCKER_BUILD_RECORD_UPLOAD: false
     steps:
+      - name: Prepare disposable hosted runner disk
+        if: ${{ inputs.gpu_runner == 'github-hosted' }}
+        run: |
+          # Only remove preinstalled tools on GitHub's disposable hosted VM.
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache
+          docker image prune --all --force
+          df -h /
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
