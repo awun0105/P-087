@@ -45,7 +45,8 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=colmap /export/colmap /opt/real2sim/colmap
-COPY --from=ghcr.io/astral-sh/uv:0.9.4 /uv /usr/local/bin/uv
+# uv 0.9.4 predates the managed Python 3.12.14 required below.
+COPY --from=ghcr.io/astral-sh/uv:0.12.5@sha256:e85be844203885286c60ffad8a858d48afb6c5a5c237ca0e67f12e74b8f174b1 /uv /usr/local/bin/uv
 
 # Runtime GPU: install.sh là nơi duy nhất cài và ghi đường dẫn. Chỉ chép những file nó cần để lớp cache không vỡ
 # khi đổi code app.
