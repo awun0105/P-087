@@ -84,10 +84,13 @@ mode="${1:-worker}"
 [ "$#" -gt 0 ] && shift
 case "$mode" in
   worker)
+    if [ -n "${GPU_BOOT_TOKEN:-}" ]; then
+      "$PY" -m scripts.kaggle.preflight
+    fi
     exec "$PY" -m scripts.gpu.run_workers --workers "${STUDIO_WORKERS:-auto}"
     ;;
   stack)
-    "$PY" -m uvicorn src.main:app --host 0.0.0.0 --port "${APP_PORT:-8000}" &
+    "$PY" -m uvicorn src.main:app --host 0.0.0.0 --port "${APP_PORT:-8000}" --no-access-log &
     api=$!
     trap 'kill -TERM "$api" 2>/dev/null || true' EXIT
     "$PY" -m scripts.gpu.run_workers --workers "${STUDIO_WORKERS:-auto}"

@@ -9,7 +9,9 @@ verify_colmap() {
       [ -f "$COLMAP_LAUNCHER" ] && grep -qF "$(pin COLMAP_IMAGE)" "$COLMAP_LAUNCHER" && grep -qF "docker run" "$COLMAP_LAUNCHER"
       ;;
     binary)
-      [ -x "$COLMAP_BINARY_WRAPPER" ] \
+      [ -f "$GOC/colmap/LICENSES/COLMAP-LICENSE.txt" ] \
+        && [ -f "$GOC/colmap/LICENSES/onnxruntime-LICENSE.txt" ] \
+        && [ -x "$COLMAP_BINARY_WRAPPER" ] \
         && "$COLMAP_BINARY_WRAPPER" help 2>&1 | grep -q "^COLMAP 4\." \
         && "$COLMAP_BINARY_WRAPPER" pose_prior_mapper -h 2>&1 | grep -q -- "--prior_position_std_x"
       ;;
@@ -46,6 +48,9 @@ LAUNCHER
 LD_LIBRARY_PATH="$GOC/colmap/lib\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}" exec "$GOC/colmap/bin/colmap" "\$@"
 WRAPPER
       chmod +x "$COLMAP_BINARY_WRAPPER"
+      mkdir -p "$GOC/colmap/LICENSES"
+      fetch "$(pin COLMAP_LICENSE_URL)" "$GOC/colmap/LICENSES/COLMAP-LICENSE.txt" "$(pin COLMAP_LICENSE_SHA)"
+      fetch "$(pin ONNXRUNTIME_LICENSE_URL)" "$GOC/colmap/LICENSES/onnxruntime-LICENSE.txt" "$(pin ONNXRUNTIME_LICENSE_SHA)"
       ;;
   esac
 }

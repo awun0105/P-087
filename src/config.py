@@ -57,6 +57,7 @@ class Settings(BaseSettings):
     product_runtime_manifest: Path | None = None
     #: T-040: API không cần manifest; job mới lấy runtime mà GPU worker đã công bố vào DB (cần PRODUCT_PROCESSING_CONFIG).
     product_runtime_from_workers: bool = False
+    product_gpu_release_catalog: Path | None = None
     #: Runtime qualification registry for grouped input recipes; absent means no new recipe dispatch is enabled.
     product_input_runtime_registry: Path | None = None
     #: Server-owned policy/profile for durable Isaac validation; not accepted from request payloads.
@@ -145,6 +146,15 @@ class Settings(BaseSettings):
     product_demo_idle_seconds: int = Field(default=180, ge=60, le=3600)
     #: Child workers must not dispatch another demo session recursively.
     product_demo_session_worker: bool = False
+    #: Immutable library objects, separate from normal job artifacts and disposable outputs.
+    product_demo_object_prefix: str = "demo/library"
+    #: Internal read-only fallback used only by a scoped demo runtime.
+    product_demo_baseline_prefix: str | None = None
+    product_demo_archive_key: str | None = None
+    product_demo_archive_checksum: str | None = None
+    #: Compressed bootstrap archive uses ephemeral disk; extracted data stays beside demo_dir.
+    product_demo_download_dir: Path | None = None
+    product_demo_required: bool = False
 
     # Kho vector
     chroma_persist_dir: str = "./data/chroma"

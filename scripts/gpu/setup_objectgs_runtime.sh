@@ -10,6 +10,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+export REPO="$ROOT"
+source "$ROOT/scripts/gpu/install.d/_lib.sh"
 LISTS="$ROOT/configs/runtime/objectgs"
 
 # micromamba: bản ghim nằm ở configs/runtime/pins.env (một nguồn cho mọi runtime GPU). Chi tiết nguồn và checksum ở đó.
@@ -75,7 +77,8 @@ if [ "$PRINT_PLAN" = 1 ]; then
 fi
 
 # Thư mục đích đã có nội dung mà không có dấu của script này: không cài đè lên, dừng trước mọi bước tải.
-if [ -d "$DEST" ] && [ -n "$(ls -A "$DEST" 2>/dev/null)" ] && [ ! -f "$DEST/.r2s-installed" ]; then
+if [ -d "$DEST" ] && [ -n "$(ls -A "$DEST" 2>/dev/null)" ] && [ ! -f "$DEST/.r2s-installed" ] \
+  && ! { [ -f "$DEST/.r2s-installing" ] && [ "$(cat "$DEST/.r2s-installing")" = r2s-objectgs-runtime-1 ]; }; then
   die "thư mục đích $DEST đã có nội dung nhưng không có .r2s-installed (không phải lần dựng của script này). \
 Chọn một thư mục rỗng khác, hoặc xoá nội dung cũ bằng tay rồi chạy lại. Script không tự xoá gì."
 fi
@@ -94,19 +97,13 @@ MAMBA_ROOT="$DEST/.mamba"
 trap 'rm -rf "$TMP"' EXIT
 
 # Dấu đã cài: cùng công thức + cùng commit + cùng danh sách thì thoát ngay.
-RECIPE="objectgs-runtime-2 $OBJECTGS_COMMIT $GSPLAT_COMMIT $GLM_COMMIT $(cd "$LISTS" && sha256sum requirements.lock.txt torch.lock.txt conda-python.txt conda-cuda.txt | cut -d' ' -f1 | tr '\n' ' ')"
+RECIPE="objectgs-runtime-3 $(sha_of "${BASH_SOURCE[0]}") $(sha_of "$ROOT/configs/runtime/pins.env") $OBJECTGS_COMMIT $GSPLAT_COMMIT $GLM_COMMIT $(cd "$LISTS" && sha256sum requirements.lock.txt torch.lock.txt conda-python.txt conda-cuda.txt | cut -d' ' -f1 | tr '\n' ' ')"
 STAMP="$DEST/.r2s-installed"
 if [ -f "$STAMP" ] && [ "$(cat "$STAMP")" = "$RECIPE" ]; then
   echo "[bỏ qua] đã cài đúng công thức này ở $DEST"
 else
+  printf '%s' r2s-objectgs-runtime-1 > "$DEST/.r2s-installing"
   mkdir -p "$TMP"
-  fetch() {  # fetch <url> <đích> <sha256>: tải lại nếu thiếu hoặc sai checksum, dừng nếu checksum vẫn sai
-    if [ ! -f "$2" ] || [ "$(sha_of "$2")" != "$3" ]; then
-      echo "[tải] $(basename "$2")"; curl -L --fail -o "$2" "$1"
-    fi
-    [ "$(sha_of "$2")" = "$3" ] || die "sai checksum: $2"
-  }
-
   if [ ! -x "$TMP/bin/micromamba" ]; then
     fetch "$MICROMAMBA_URL" "$TMP/micromamba.tar.bz2" "$MICROMAMBA_SHA"
     tar -xjf "$TMP/micromamba.tar.bz2" -C "$TMP" bin/micromamba
@@ -118,10 +115,16 @@ else
   if [ ! -x "$PY" ]; then
     # shellcheck disable=SC2086
     "$MM" create -y -p "$DEST/python" -c conda-forge $PY_SPECS
+  else
+    # shellcheck disable=SC2086
+    "$MM" install -y -p "$DEST/python" -c conda-forge $PY_SPECS
   fi
   if [ ! -x "$CXX_BIN" ]; then
     # shellcheck disable=SC2086
     "$MM" create -y -p "$DEST/cuda" --override-channels -c conda-forge -c nvidia $CUDA_SPECS
+  else
+    # shellcheck disable=SC2086
+    "$MM" install -y -p "$DEST/cuda" --override-channels -c conda-forge -c nvidia $CUDA_SPECS
   fi
 
   # Torch: khoá có hash, cài --no-deps (phụ thuộc nằm trong khoá chính). Online: index cu118 + PyG; offline: thư mục wheel.
@@ -165,6 +168,7 @@ else
 
   rm -rf "$TMP"
   printf '%s' "$RECIPE" > "$STAMP"
+  rm -f "$DEST/.r2s-installing"
 fi
 
 cat <<EOF

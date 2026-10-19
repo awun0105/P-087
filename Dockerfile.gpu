@@ -22,7 +22,7 @@ RUN mkdir -p /export/colmap/bin /export/colmap/lib \
     && cp -L /usr/local/lib/libonnxruntime.so.1 /usr/local/lib/libonnxruntime_providers_shared.so /export/colmap/lib/ \
     && cp -L /usr/local/cuda/lib64/libcudart.so.12 /usr/local/cuda/lib64/libOpenCL.so.1 /export/colmap/lib/
 
-FROM nvidia/cuda:12.6.3-devel-ubuntu24.04
+FROM nvidia/cuda:12.6.3-devel-ubuntu24.04 AS pipeline
 
 # `all` để NVIDIA runtime mount cả thư viện đồ hoạ: Brush và splat-transform cần Vulkan trên GPU.
 # TORCH_CUDA_ARCH_LIST: build không có GPU nên không dò được kiến trúc; runtime cũng nhận đúng giá trị này.
@@ -33,6 +33,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     R2S_STATE=/data \
     TORCH_EXTENSIONS_DIR=/opt/real2sim/torch_extensions \
     TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;8.9" \
+    TORCH_HOME=/opt/real2sim/torch_cache \
     UV_PYTHON_INSTALL_DIR=/opt/real2sim/python
 
 WORKDIR /opt/real2sim/app
@@ -53,10 +54,15 @@ COPY requirements-lidar-odometry.lock.txt ./
 COPY src/services/scene/objectgs.py src/services/scene/objectgs.py
 COPY scripts/gpu/install.sh scripts/gpu/doctor.sh scripts/gpu/setup_scene_runtime.sh scripts/gpu/setup_objectgs_runtime.sh scripts/gpu/
 COPY scripts/gpu/install.d/ scripts/gpu/install.d/
+# ObjectGS verification imports preflight, which imports src.runtime_env.
+COPY scripts/kaggle/preflight.py scripts/kaggle/preflight.py
+COPY src/runtime_env.py src/runtime_env.py
 
 # Venv của app theo lockfile (lớp cache riêng: đổi code không cài lại).
 COPY requirements.lock.txt ./
-RUN uv venv --python 3.12 .venv && uv pip sync --python .venv/bin/python requirements.lock.txt
+RUN uv venv --python 3.12.14 .venv \
+    && uv pip sync --python .venv/bin/python --require-hashes requirements.lock.txt \
+    && uv pip check --python .venv/bin/python
 
 # Scene và ObjectGS cần header của đúng Python venv (CPATH). Không có GPU lúc build: kiểm gsplat không đòi GPU.
 RUN CPATH="$(.venv/bin/python -c 'import sysconfig; print(sysconfig.get_paths()["include"])')" \
@@ -64,9 +70,19 @@ RUN CPATH="$(.venv/bin/python -c 'import sysconfig; print(sysconfig.get_paths()[
     && uv cache clean
 
 COPY . .
-RUN chmod +x scripts/gpu/docker_entrypoint.sh
+RUN chmod +x scripts/gpu/docker_entrypoint.sh scripts/gpu/isaac_python.sh
+ENV R2S_REQUIRE_FULL_RUNTIME=1
 
 VOLUME ["/data"]
 EXPOSE 8000
 ENTRYPOINT ["scripts/gpu/docker_entrypoint.sh"]
 CMD ["worker"]
+
+# Optional full pipeline + Isaac image. Select --target isaac explicitly.
+# The operator must accept the NVIDIA license; the default image needs no Isaac download.
+FROM pipeline AS isaac
+ARG ISAAC_ACCEPT_EULA=NO
+RUN ISAAC_ACCEPT_EULA="$ISAAC_ACCEPT_EULA" bash scripts/gpu/setup_isaac_runtime.sh /opt/real2sim/isaac_runtime
+ENV PRODUCT_ISAAC_VALIDATION_LAUNCHER=/opt/real2sim/app/scripts/gpu/isaac_python.sh
+
+FROM pipeline AS production

@@ -1883,6 +1883,19 @@ class ProjectRegistry:
             return self.execution_profile
         if not self.runtime_from_workers or self.persistence is None or self.processing_config_checksum is None:
             return None
+        from src.config import get_settings
+        from src.services.orchestration.gpu.catalog import load_catalog
+
+        catalog_path = get_settings().product_gpu_release_catalog
+        if catalog_path is not None:
+            profiles = load_catalog(catalog_path).compatible("pipeline")
+            for release in profiles:
+                if (
+                    release.execution.config_checksum == self.processing_config_checksum
+                    and release.execution.seed == self.job_seed
+                ):
+                    return release.execution
+            return None  # A configured release must not silently fall back to an unprovisionable old image.
         runtime = worker_runtimes.select(
             self.persistence.database,
             config_checksum=self.processing_config_checksum,
@@ -1993,7 +2006,7 @@ class ProjectRegistry:
             return None
         canonical = self.authorized_artifact(job_id, reference)
         key = self.runtime_resolver.relative_key(canonical.artifact_uri)
-        if remote.store.head(remote.key(key)) is None:
+        if remote.head(key) is None:
             return None
         return remote.presign(key, expires_seconds)
 

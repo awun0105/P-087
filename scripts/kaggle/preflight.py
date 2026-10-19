@@ -238,6 +238,8 @@ def main() -> int:
     """In bảng kết quả; trả 1 nếu thiếu mục bắt buộc."""
     blocked = False
     for name, check, required, consequence in CHECKS:
+        if os.environ.get("R2S_REQUIRE_FULL_RUNTIME") == "1" and check in {scene_runtime, objectgs_runtime}:
+            required = True
         ok, detail = check()
         mark = "OK  " if ok else ("LỖI " if required else "THIẾU")
         print(f"{mark} {name:<24} {detail}" + ("" if ok else f"  → {consequence}"))

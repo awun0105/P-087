@@ -4,12 +4,14 @@ SQL chỉ chứa hằng số nội bộ; mọi giá trị đi qua bind parameter
 chia sẻ giữa các thread của FastAPI. Không mở database khi import module.
 """
 
+import re
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from threading import Lock
 from typing import Protocol, cast
+from urllib.parse import urlsplit, urlunsplit
 
 
 class RuntimeStateConflictError(RuntimeError):
@@ -443,7 +445,40 @@ MIGRATIONS += (
         ),
     ),
 )
+MIGRATIONS += (
+    (
+        24,
+        (
+            "CREATE TABLE r2s_demo_sessions (session_id TEXT PRIMARY KEY, state TEXT NOT NULL, "
+            "created_at TEXT NOT NULL, last_seen_at TEXT NOT NULL, expires_at TEXT NOT NULL, payload TEXT NOT NULL)",
+            "CREATE INDEX r2s_demo_sessions_by_state ON r2s_demo_sessions(state, expires_at)",
+            "CREATE TABLE r2s_demo_summaries (session_id TEXT PRIMARY KEY, completed_at TEXT NOT NULL, payload TEXT NOT NULL)",
+            "CREATE TABLE r2s_demo_unpublished (sample_id TEXT PRIMARY KEY, at TEXT NOT NULL)",
+        ),
+    ),
+)
+MIGRATIONS += (
+    (
+        25,
+        (
+            "CREATE TABLE r2s_gpu_control (deployment_id TEXT PRIMARY KEY, payload TEXT NOT NULL)",
+            "CREATE TABLE r2s_gpu_history (intent_id TEXT PRIMARY KEY, deployment_id TEXT NOT NULL, payload TEXT NOT NULL)",
+            "CREATE INDEX r2s_gpu_history_by_deployment ON r2s_gpu_history(deployment_id)",
+        ),
+    ),
+)
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
+
+
+def demo_database_url(url: str, session_id: str) -> str:
+    """Carry an internal schema scope through existing database factories."""
+    if re.fullmatch(r"[a-f0-9]{32}", session_id) is None:
+        raise ValueError("Invalid demo session namespace")
+    parsed = urlsplit(url)
+    if parsed.scheme not in {"postgres", "postgresql"} or parsed.fragment:
+        raise ValueError("Distributed demos require an unscoped PostgreSQL database")
+    return urlunsplit(parsed._replace(fragment=f"r2s_demo_{session_id}"))
+
 
 #: DB đã kiểm/chạy migration trong tiến trình này. API tạo RuntimeDatabase mỗi request;
 #: chỉ lần đầu mới cần transaction bootstrap (tránh khóa ghi + vòng mạng mỗi request).
@@ -457,6 +492,15 @@ class RuntimeDatabase:
     def __init__(self, url: str) -> None:
         self._url = url
         self.postgres = url.startswith(("postgresql://", "postgres://"))
+        self.scope: str | None = None
+        self._connection_url = url
+        if self.postgres:
+            parsed = urlsplit(url)
+            if parsed.fragment:
+                if re.fullmatch(r"r2s_demo_[a-f0-9]{32}", parsed.fragment) is None:
+                    raise ValueError("Invalid runtime database scope")
+                self.scope = parsed.fragment
+                self._connection_url = urlunsplit(parsed._replace(fragment=""))
         self._sqlite_path: Path | None = None
         if not self.postgres:
             if not url.startswith("sqlite:///"):
@@ -477,7 +521,7 @@ class RuntimeDatabase:
                 import psycopg
             except ImportError as error:
                 raise RuntimeError("PostgreSQL cần psycopg 3; cài dependency runtime trước khi khởi động") from error
-            return cast(SqlConnection, psycopg.connect(self._url, autocommit=True, connect_timeout=10))
+            return cast(SqlConnection, psycopg.connect(self._connection_url, autocommit=True, connect_timeout=10))
         connection = sqlite3.connect(str(self._sqlite_path), timeout=30, isolation_level=None)
         connection.execute("PRAGMA foreign_keys=ON")
         return cast(SqlConnection, connection)
@@ -489,6 +533,12 @@ class RuntimeDatabase:
         try:
             connection.execute("BEGIN IMMEDIATE" if write and not self.postgres else "BEGIN")
             try:
+                if self.scope is not None:
+                    # Scope is server-generated and regex-validated. Never fall back to public.
+                    connection.execute(f'SET LOCAL search_path TO "{self.scope}"')
+                    found = connection.execute("SELECT 1 FROM pg_namespace WHERE nspname=%s", (self.scope,)).fetchone()
+                    if found is None:
+                        raise RuntimeStateConflictError("Demo database namespace has been removed")
                 yield RuntimeTransaction(connection, self.postgres)
             except BaseException:
                 # Kể cả KeyboardInterrupt phải nhả transaction; không swallow lỗi.
@@ -503,7 +553,10 @@ class RuntimeDatabase:
         """Tạo bảng version rồi chạy các migration còn thiếu trong một transaction có khóa."""
         with self.transaction(write=True) as tx:
             if self.postgres:
-                tx.execute("SELECT pg_advisory_xact_lock(hashtext('real2sim.runtime.schema'))")
+                tx.execute(
+                    "SELECT pg_advisory_xact_lock(hashtext(?))",
+                    (f"real2sim.runtime.schema:{self.scope}" if self.scope else "real2sim.runtime.schema",),
+                )
             tx.execute(
                 "CREATE TABLE IF NOT EXISTS r2s_schema (id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL)"
             )

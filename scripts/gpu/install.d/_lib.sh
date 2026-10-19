@@ -26,7 +26,17 @@ py_bin() { if [ -x "$REPO/.venv/bin/python" ]; then printf '%s' "$REPO/.venv/bin
 fetch() {
   if [ ! -f "$2" ] || [ "$(sha_of "$2")" != "$3" ]; then
     echo "[tải] $(basename "$2")"
-    curl -L --fail -o "$2" "$1"
+    local partial
+    partial="$(mktemp "$2.download.XXXXXX")"
+    if ! curl -L --fail --retry 4 --retry-delay 2 --connect-timeout 30 -o "$partial" "$1"; then
+      rm -f "$partial"
+      die "không tải được $(basename "$2")"
+    fi
+    if [ "$(sha_of "$partial")" != "$3" ]; then
+      rm -f "$partial"
+      die "sai checksum: $2"
+    fi
+    mv "$partial" "$2"
   fi
   [ "$(sha_of "$2")" = "$3" ] || die "sai checksum: $2"
 }

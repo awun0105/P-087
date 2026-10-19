@@ -29,6 +29,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.gpu
+      args:
+        COLMAP_IMAGE: ${COLMAP_IMAGE:?Export COLMAP_IMAGE from configs/runtime/pins.env}
       network: ${STUDIO_BUILD_NETWORK:-default}
     env_file:
       - ${STUDIO_ENV_FILE:-.env.studio}
@@ -101,6 +103,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.gpu
+      args:
+        COLMAP_IMAGE: ${COLMAP_IMAGE:?Export COLMAP_IMAGE from configs/runtime/pins.env}
       network: ${STUDIO_BUILD_NETWORK:-default}
     env_file:
       - ${STUDIO_ENV_FILE:-.env.studio}

@@ -11,9 +11,8 @@
 FROM node:24.15.0-bookworm-slim AS node-runtime
 
 WORKDIR /opt/real2sim/runtime
-RUN npm init -y >/dev/null 2>&1 \
-    && npm install --no-audit --no-fund --omit=dev \
-       @playcanvas/splat-transform@3.6.6
+COPY configs/runtime/splat/package.json configs/runtime/splat/package-lock.json ./
+RUN npm ci --no-audit --no-fund --omit=dev
 
 FROM python:3.12.14-slim-bookworm AS dependencies
 
@@ -21,13 +20,13 @@ WORKDIR /app
 
 RUN pip install --no-cache-dir uv==0.9.4
 COPY requirements.in requirements.lock.txt ./
-RUN uv pip sync --system requirements.lock.txt \
+RUN uv pip sync --system --require-hashes requirements.lock.txt \
     && uv pip check
 
 # API-side USD export is intentionally kept separate from the core lockfile.
 COPY requirements-usd.lock.txt ./
 RUN uv venv /opt/usd_runtime --python /usr/local/bin/python \
-    && uv pip sync --python /opt/usd_runtime/bin/python requirements-usd.lock.txt \
+    && uv pip sync --python /opt/usd_runtime/bin/python --require-hashes requirements-usd.lock.txt \
     && uv pip check --python /opt/usd_runtime/bin/python
 
 FROM python:3.12.14-slim-bookworm

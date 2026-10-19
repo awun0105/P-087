@@ -7,7 +7,8 @@ verify_lidar_odometry() {
 }
 
 install_lidar_odometry() {
-  command -v python3 >/dev/null || die "không thấy python3"
-  python3 -m venv "$LIDAR"
-  "$LIDAR/bin/python" -m pip install --quiet --require-hashes -r "$REPO/requirements-lidar-odometry.lock.txt"
+  command -v uv >/dev/null || die "không thấy uv"
+  [ -x "$LIDAR/bin/python" ] || uv venv --python 3.12.14 "$LIDAR"
+  uv pip sync --python "$LIDAR/bin/python" --require-hashes "$REPO/requirements-lidar-odometry.lock.txt"
+  uv pip check --python "$LIDAR/bin/python"
 }

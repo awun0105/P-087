@@ -16,6 +16,7 @@ from datetime import UTC, datetime, timedelta
 from threading import Event, Thread
 from uuid import uuid4
 
+from src.services.orchestration.gpu.state import claim_allowed
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError, RuntimeTransaction
 
 #: Lease không được gia hạn trong mức này thì coi như worker đã mất.
@@ -78,6 +79,8 @@ def acquire(
     current = now or datetime.now(UTC)
     held = HeldLease(job_id=job_id, token=uuid4().hex)
     with database.transaction(write=True) as tx:
+        if not claim_allowed(tx, "pipeline", mark_busy=True):
+            return None
         changed = tx.execute(
             "INSERT INTO r2s_job_leases(job_id, lease_token, worker_id, lease_expires_at) VALUES (?,?,?,?) "
             "ON CONFLICT(job_id) DO UPDATE SET lease_token=excluded.lease_token, worker_id=excluded.worker_id, "

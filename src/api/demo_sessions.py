@@ -11,6 +11,7 @@ from starlette.types import Receive, Scope, Send
 from src.api.studio import deps
 from src.config import Settings
 from src.services.orchestration.artifacts import ArtifactStoreError
+from src.services.orchestration.jobs.database import RuntimeStateConflictError
 from src.services.orchestration.projects.errors import JobNotFoundError
 from src.services.orchestration.samples import DemoUnavailableError
 from src.services.orchestration.samples.session_context import DemoRuntime, demo_runtime
@@ -67,7 +68,7 @@ def end_demo_session(session_id: str) -> dict[str, str]:
 def heartbeat_demo_session(session_id: str) -> Response:
     try:
         touch_session(deps.settings(), session_id)
-    except DemoSessionUnavailableError as error:
+    except (DemoSessionUnavailableError, RuntimeStateConflictError) as error:
         raise HTTPException(status_code=410, detail=str(error)) from error
     return Response(status_code=204)
 
@@ -119,7 +120,9 @@ class _SessionResponse(Response):
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         try:
-            with hold_session(self.settings, self.session.session_id):
+            ownership = hold_session(self.settings, self.session.session_id)
+            await run_in_threadpool(ownership.__enter__)
+            try:
                 token = demo_runtime.set(self.runtime)
                 try:
                     child = dict(scope)
@@ -129,6 +132,8 @@ class _SessionResponse(Response):
                     await _session_api()(child, receive, send)
                 finally:
                     demo_runtime.reset(token)
+            finally:
+                await run_in_threadpool(ownership.__exit__, None, None, None)
         except (DemoSessionUnavailableError, FileNotFoundError):
             await JSONResponse(status_code=410, content={"detail": "Phiên demo đã kết thúc; mở lại mẫu"})(
                 scope, receive, send
@@ -163,6 +168,6 @@ async def demo_api(session_id: str, path: str, request: Request) -> Response:
         if session.protected_uris and path.endswith("/thumbnail.jpg"):
             raise HTTPException(status_code=404, detail="Mẫu chỉ dùng ảnh đã che trong bộ frame công khai")
         runtime = await run_in_threadpool(load_runtime, current, source, session)
-    except DemoSessionUnavailableError as error:
+    except (DemoSessionUnavailableError, RuntimeStateConflictError) as error:
         raise HTTPException(status_code=410, detail=str(error)) from error
     return _SessionResponse(runtime, session, "/api/v1/" + path, current)

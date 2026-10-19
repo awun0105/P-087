@@ -27,6 +27,8 @@ from src.models.contracts.manifests import JobManifest
 from src.models.contracts.object_membership import ObjectMembershipReassignCommand, ObjectRegionCommand
 from src.models.contracts.reconstruction import ReconstructionBundle
 from src.services.orchestration.artifacts import ArtifactStoreError, sha256_bytes
+from src.services.orchestration.gpu.classification import scene_gpu
+from src.services.orchestration.gpu.state import claim_allowed, cpu_lane
 from src.services.orchestration.jobs.admission import (
     OperationAdmissionRequest,
     OperationAdmissionResult,
@@ -524,14 +526,23 @@ def _claim(settings: Settings) -> tuple[str, _Record] | None:
     worker_id, host, pid = worker_identity()
     now = datetime.now(UTC)
     with _database(settings).transaction(write=True) as tx:
-        row = tx.execute(
-            "SELECT job_id FROM r2s_scene_requests WHERE status=? ORDER BY job_id LIMIT 1", ("queued",)
-        ).fetchone()
-        if row is None:
+        if not claim_allowed(tx, "scene"):
             return None
-        job_id = str(row[0])
-        record = _read(tx, job_id, lock=True)
+        rows = tx.execute(
+            "SELECT job_id FROM r2s_scene_requests WHERE status=? ORDER BY job_id", ("queued",)
+        ).fetchall()
+        record = None
+        job_id = ""
+        for row in rows:
+            candidate = _read(tx, str(row[0]), lock=True)
+            if candidate is not None and (
+                not cpu_lane() or not scene_gpu(candidate.mode, box_candidates_require_gpu(settings))
+            ):
+                job_id, record = str(row[0]), candidate
+                break
         if record is None or record.status != "queued":
+            return None
+        if not claim_allowed(tx, "scene", mark_busy=True):
             return None
         running = record.model_copy(
             update={
@@ -816,9 +827,7 @@ def process_next(registry: ProjectRegistry, settings: Settings) -> bool:
             raise ObjectifyError(bind_error or "không thể giữ snapshot operation")
         running = bound
 
-        uses_gpu = running.mode in {"objectify", "membership", "geometry", "region"} or box_candidates_require_gpu(
-            settings
-        )
+        uses_gpu = scene_gpu(running.mode, box_candidates_require_gpu(settings))
         profile = admission.operation_profile_for_job(job, gpu_required=uses_gpu)
         request = OperationAdmissionRequest(
             operation_kind="reobjectify",

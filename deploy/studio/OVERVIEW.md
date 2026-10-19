@@ -103,6 +103,11 @@ ghi vào trong repo. Ba file `api.env.example`, `worker.env.example`, `web.env.e
 
 ## Chưa có trong đóng gói
 
+Demo tương tác có runbook riêng tại [DEMO_RUNBOOK.md](DEMO_RUNBOOK.md): code bundle,
+thư viện mẫu có checksum, bootstrap API từ R2, schema PostgreSQL/output R2 riêng từng
+phiên, ownership và janitor giữa các host. Image/GPU/cloud vẫn cần bằng chứng chạy
+thật; việc có code và bundle không thay thế acceptance đó.
+
 - `PRODUCT_INPUT_RUNTIME_REGISTRY` vẫn là file chép tay từ pod lên volume của API (ngoài phạm vi chuyển sang
   worker-công-bố; cần task riêng để bỏ).
 - `docker-compose.gpu.yml` là cấu hình chạy cục bộ (`APP_ENV: development`, SQLite), không phải production.

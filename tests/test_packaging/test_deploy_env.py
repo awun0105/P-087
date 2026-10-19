@@ -81,7 +81,7 @@ def test_filled_template_passes_and_unfilled_template_lists_what_is_missing() ->
             "PRODUCT_EGOBLUR_WEIGHTS trống",
         ),
         ({"PRODUCT_ANONYMIZE_INPUT=false": "PRODUCT_ANONYMIZE_INPUT=true"}, "PRODUCT_ANONYMIZE_INPUT=true cần"),
-        ({"STUDIO_WORKERS=3": "STUDIO_WORKERS=many"}, "STUDIO_WORKERS"),
+        ({"STUDIO_WORKERS=1": "STUDIO_WORKERS=many"}, "STUDIO_WORKERS"),
         ({"REAL2SIM_API_URL=https://api.example.com": "REAL2SIM_API_URL=https://api.example.com/api/v1"}, "/api/v1"),
         ({"REAL2SIM_API_URL=https://api.example.com": "REAL2SIM_API_URL=http://api.example.com"}, "https"),
     ],
@@ -116,7 +116,12 @@ def test_anonymizer_wiring_between_api_and_worker() -> None:
     weights = {"# PRODUCT_EGOBLUR_WEIGHTS=/data/egoblur": "PRODUCT_EGOBLUR_WEIGHTS=/data/egoblur"}
     assert any("UI không hiện ô chọn che" in m for m in _messages(_filled(**weights), "warning"))
     both = {**weights, "PRODUCT_ANONYMIZE_REMOTE_WORKER=false": "PRODUCT_ANONYMIZE_REMOTE_WORKER=true"}
-    assert _messages(_filled(**both), "error") == [] and _messages(_filled(**both), "warning") == []
+    pinned = {
+        **both,
+        "PRODUCT_DEMO_ARCHIVE_KEY=": "PRODUCT_DEMO_ARCHIVE_KEY=demo/library.zip",
+        "PRODUCT_DEMO_ARCHIVE_CHECKSUM=": "PRODUCT_DEMO_ARCHIVE_CHECKSUM=sha256:" + "1" * 64,
+    }
+    assert _messages(_filled(**pinned), "error") == [] and _messages(_filled(**pinned), "warning") == []
     enforced = {**both, "PRODUCT_ANONYMIZE_INPUT=false": "PRODUCT_ANONYMIZE_INPUT=true"}
     assert _messages(_filled(**enforced), "error") == []
 
@@ -153,3 +158,22 @@ def test_cli_renders_outside_the_repo_and_refuses_inside_it(tmp_path: Path, caps
     assert main(["check", "--source", str(source)]) == 1
     assert main(["render", "--source", str(source), "--out-dir", str(tmp_path / "blocked")]) == 1
     assert not (tmp_path / "blocked").exists()
+
+
+def test_provisioning_credentials_never_reach_worker_or_frontend() -> None:
+    source = parse(_filled())
+    for target in ("worker", "web"):
+        assert "RUNPOD_API_KEY=" not in render(source, target)
+        assert "GPU_WORKER_ENV_FILE=" not in render(source, target)
+
+
+def test_enabled_provisioning_requires_cost_and_outage_configuration() -> None:
+    text = _filled(
+        **{
+            "GPU_AUTOPROVISION_ENABLED=false": "GPU_AUTOPROVISION_ENABLED=true",
+            "GPU_AUTOPROVISION_DRY_RUN=true": "GPU_AUTOPROVISION_DRY_RUN=false",
+        }
+    )
+    errors = _messages(text, "error")
+    assert any("GPU_PROJECT_BUDGET_USD" in e for e in errors)
+    assert any("outage policy" in e for e in errors)

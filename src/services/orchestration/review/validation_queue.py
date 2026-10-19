@@ -19,6 +19,7 @@ from src.models.contracts.validation_run import (
 )
 from src.services.orchestration.artifacts import ArtifactAlreadyExistsError, ArtifactResolver, FilesystemArtifactStore
 from src.services.orchestration.artifacts.checksum import sha256_bytes
+from src.services.orchestration.gpu.state import claim_allowed
 from src.services.orchestration.jobs.admission import OperationAdmissionRequest, OperationResourceProfile
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError, RuntimeTransaction
 from src.services.orchestration.review.validation_runs import ValidationRunError, ValidationRunRepository
@@ -345,6 +346,8 @@ class ValidationQueue:
         now = datetime.now(UTC)
         self.recover_expired(now=now)
         with self.database.transaction(write=True) as tx:
+            if not claim_allowed(tx, "validation"):
+                return None
             row = tx.execute(
                 """SELECT r.run_id,r.job_id,r.candidate_checksum,r.config_checksum,r.attempt,r.status,r.run_checksum,r.payload,
                           o.payload
@@ -359,6 +362,8 @@ class ValidationQueue:
                 ),
             ).fetchone()
             if row is None:
+                return None
+            if not claim_allowed(tx, "validation", mark_busy=True):
                 return None
             run = self.runs._parse_run_row(row[:8])
             operation = ValidationOperationRecord.model_validate_json(row[8])

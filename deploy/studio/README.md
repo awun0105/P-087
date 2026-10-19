@@ -1,5 +1,11 @@
 # Real2Sim Studio deployment handoff
 
+For interactive disposable demos across separate API/GPU hosts, use
+[DEMO_RUNBOOK.md](DEMO_RUNBOOK.md). It covers the versioned demo-library bundle,
+PostgreSQL session schemas, R2 isolation, startup provisioning and cleanup.
+The main data-package import below is optional for migrating existing real jobs;
+it is not needed to bootstrap a demo-only deployment from frozen workspaces.
+
 This directory contains reviewable production configuration templates.  It
 does not contain credentials and it does not deploy an account or mutate
 Railway, Supabase, Cloudflare, Vast.ai, RunPod, or Vercel.  The accepted

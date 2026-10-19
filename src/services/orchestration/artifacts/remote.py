@@ -116,10 +116,16 @@ class ObjectStore(Protocol):
 class ArtifactRemote:
     """Đồng bộ cache filesystem ↔ object store theo key logical `jobs/...`."""
 
-    def __init__(self, store: ObjectStore, prefix: str = "") -> None:
+    def __init__(self, store: ObjectStore, prefix: str = "", *, fallback: "ArtifactRemote | None" = None) -> None:
         cleaned = prefix.strip("/")
         self.store = store
         self.prefix = f"{cleaned}/" if cleaned else ""
+        self.fallback = fallback
+
+    def head(self, relative: str) -> RemoteObject | None:
+        """Read session output first, then an immutable baseline when configured."""
+        found = self.store.head(self.key(relative))
+        return self.fallback.head(relative) if found is None and self.fallback is not None else found
 
     def key(self, relative: str) -> str:
         """Key object của một đường dẫn tương đối `jobs/<ns>/<path>`."""
@@ -132,6 +138,9 @@ class ArtifactRemote:
         """
         remote = self.store.head(self.key(relative))
         if remote is None:
+            if self.fallback is not None:
+                self.fallback.fetch(relative, destination, expected_checksum)
+                return
             raise ArtifactNotFoundError(f"artifact does not exist: {relative}")
         expected = expected_checksum or remote.checksum
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -203,6 +212,8 @@ class ArtifactRemote:
 
     def presign(self, relative: str, expires_seconds: int) -> str:
         """Link tải có hạn cho trình duyệt."""
+        if self.fallback is not None and self.store.head(self.key(relative)) is None:
+            return self.fallback.presign(relative, expires_seconds)
         return self.store.presign_get(self.key(relative), expires_seconds)
 
     # --- upload thẳng từ trình duyệt (multipart) ---------------------------

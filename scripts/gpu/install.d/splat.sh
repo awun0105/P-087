@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # splat-transform (npm) và Node chạy nó. Node ghim (--system-node tắt việc này: dùng Node hệ thống, ví dụ laptop qua mise).
-recipe_splat() { echo "splat $(pin SPLAT_TRANSFORM_VERSION) node=$(pin NODE_VERSION)/$SYSTEM_NODE"; }
+recipe_splat() { echo "splat $(pin SPLAT_TRANSFORM_VERSION) node=$(pin NODE_VERSION)/$SYSTEM_NODE $(sha_of "$REPO/configs/runtime/splat/package-lock.json")"; }
 
 verify_splat() {
   [ -f "$SPLAT_MODULE" ] || return 1
@@ -24,5 +24,6 @@ install_splat() {
   fi
   command -v npm >/dev/null || die "không thấy npm; bỏ --system-node để dùng Node ghim"
   mkdir -p "$RECON"
-  (cd "$RECON" && npm install --silent --no-audit --no-fund "@playcanvas/splat-transform@$(pin SPLAT_TRANSFORM_VERSION)")
+  cp "$REPO/configs/runtime/splat/package.json" "$REPO/configs/runtime/splat/package-lock.json" "$RECON/"
+  (cd "$RECON" && npm ci --no-audit --no-fund --omit=dev)
 }

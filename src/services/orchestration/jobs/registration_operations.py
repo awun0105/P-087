@@ -14,6 +14,7 @@ from src.models.contracts.rgb_lidar_registration import (
     RegistrationRequest,
     validate_registration_transition,
 )
+from src.services.orchestration.gpu.state import claim_allowed
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError, RuntimeTransaction
 
 _COLUMNS = (
@@ -541,6 +542,8 @@ class RegistrationOperationStore:
             raise ValueError("worker ID and positive lease duration are required")
         current = _utc_now(now)
         with self.database.transaction(write=True) as tx:
+            if not claim_allowed(tx, "registration"):
+                return None
             expired_row = tx.execute(
                 f"SELECT {_COLUMNS} FROM r2s_registration_operations WHERE state=? AND lease_expires_at<=? "
                 "ORDER BY lease_expires_at, created_at LIMIT 1" + tx.lock_suffix(),
@@ -570,6 +573,8 @@ class RegistrationOperationStore:
                 (RegistrationOperationState.QUEUED.value, RegistrationOperationState.WAITING_RESOURCES.value),
             ).fetchone()
             if row is None:
+                return None
+            if not claim_allowed(tx, "registration", mark_busy=True):
                 return None
             queued = self._decode(row)
             validate_registration_transition(queued.state, RegistrationOperationState.RUNNING)

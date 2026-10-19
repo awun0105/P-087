@@ -56,6 +56,7 @@ check_system() {  # in gói apt còn thiếu; với --apt và quyền root thì 
   echo "[hệ thống] thiếu ${#missing[@]} gói apt: ${missing[*]}"
   if [ "$USE_APT" = 1 ]; then
     [ "$(id -u)" = 0 ] || die "--apt cần quyền root (chạy bằng sudo)"
+    apt-get update
     apt-get install -y --no-install-recommends "${missing[@]}"
   else
     return 1
@@ -72,6 +73,9 @@ mkdir -p "$TMP_DIR"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 selected=()
+for component in ${ONLY//,/ } ${SKIP//,/ }; do
+  [[ " ${ALL[*]} " == *" $component "* ]] || die "thành phần lạ: $component"
+done
 for component in "${ALL[@]}"; do
   if [ -n "$ONLY" ] && ! [[ ",$ONLY," == *",$component,"* ]]; then continue; fi
   if [ -n "$SKIP" ] && [[ ",$SKIP," == *",$component,"* ]]; then continue; fi
@@ -80,10 +84,10 @@ done
 
 ready=()
 for component in "${selected[@]}"; do
-  recipe="$(recipe_"$component")"
+  recipe="$(recipe_"$component") $(sha_of "$REPO/scripts/gpu/install.d/$component.sh") $(sha_of "$REPO/scripts/gpu/install.d/_lib.sh")"
   if verify_"$component" && stamp_ok "$component" "$recipe"; then
     echo "[bỏ qua] $component: đã cài đúng công thức"
-  elif verify_"$component"; then
+  elif [ ! -f "$(stamp_path "$component")" ] && verify_"$component"; then
     echo "[nhận ra] $component: đã có sẵn đúng phiên bản, không cài lại"
     write_stamp "$component" "$recipe"
   else

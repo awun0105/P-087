@@ -13,6 +13,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+export REPO="$ROOT"
+source "$ROOT/scripts/gpu/install.d/_lib.sh"
 RUNTIME="${1:-$ROOT/data/scene_runtime}"
 SAM2_COMMIT="2b90b9f5ceec907a1c18123530e92e794ad901a4"
 SAM2_CHECKPOINT_URL="https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_tiny.pt"
@@ -40,14 +42,7 @@ python3.12 -c "import sysconfig, os, sys; sys.exit(0 if os.path.isfile(os.path.j
   || [ -f "${CPATH:-/nonexistent}/Python.h" ] || {
   echo "[!] Thiếu header Python 3.12 (Python.h). Cài: sudo apt install python3.12-dev" >&2; exit 1; }
 
-fetch() {  # fetch <url> <đích> <sha256>
-  if [ ! -f "$2" ] || [ "$(sha256sum "$2" | cut -d' ' -f1)" != "$3" ]; then
-    echo "[tải] $(basename "$2")"; curl -L --fail -o "$2" "$1"
-  fi
-  [ "$(sha256sum "$2" | cut -d' ' -f1)" = "$3" ] || { echo "[!] Sai checksum: $2" >&2; exit 1; }
-}
-
-[ -x "$RUNTIME/bin/python" ] || uv venv --python 3.12 "$RUNTIME"
+[ -x "$RUNTIME/bin/python" ] || uv venv --python 3.12.14 "$RUNTIME"
 PY="$RUNTIME/bin/python"
 uv pip install --python "$PY" --index-url https://download.pytorch.org/whl/cu126 \
   torch==2.7.1 torchvision==0.22.1
@@ -58,7 +53,7 @@ uv pip install --python "$PY" \
 uv pip install --python "$PY" --no-deps \
   "moge @ git+https://github.com/microsoft/MoGe.git@${MOGE_COMMIT}" \
   "utils3d @ git+https://github.com/EasternJournalist/utils3d.git@${UTILS3D_COMMIT}"
-uv pip install --python "$PY" huggingface_hub click
+uv pip install --python "$PY" huggingface_hub==2.1.1 click==8.5.0
 # Gói egoblur ghim torch 2.9.1 và kéo moviepy/av/vrs; chỉ cần phần detector nên cài --no-deps. Hai model đã
 # chạy trên torch 2.7.1 của runtime này (kiểm 2026-10-09).
 uv pip install --python "$PY" --no-deps egoblur==2.0.1
@@ -115,9 +110,9 @@ PY
 fi
 
 # LPIPS chấm ảnh giữ lại sau khi train 3DGS: tải sẵn trọng số VGG vào cache của torch để worker không cần mạng lúc
-# chạy job. Tải lỗi thì bỏ qua — bảng chỉ số sẽ ghi LPIPS "chưa đo", PSNR/SSIM vẫn có.
-"$PY" -c "import lpips; lpips.LPIPS(net='vgg', verbose=False)" >/dev/null 2>&1 \
-  || echo "[cảnh báo] chưa tải được trọng số LPIPS-VGG; LPIPS sẽ không được chấm cho tới khi tải được."
+# chạy job. Không phát hành image thiếu trọng số rồi mới tải lúc đang xử lý scene.
+"$PY" -c "import lpips; lpips.LPIPS(net='vgg', verbose=False)"
+uv pip freeze --python "$PY" > "$RUNTIME/installed.txt"
 
 cat <<EOF
 

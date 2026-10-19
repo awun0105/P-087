@@ -18,6 +18,15 @@ const nextConfig: NextConfig = {
   // Không để `next dev` sinh AGENTS.md/CLAUDE.md trong frontend/: harness của repo
   // nằm ở AGENTS.md gốc, file sinh tự động sẽ mâu thuẫn với authority map.
   agentRules: false,
+  async headers() {
+    return [{
+      source: "/demo-workspace/:path*",
+      headers: [
+        { key: "Referrer-Policy", value: "no-referrer" },
+        { key: "Cache-Control", value: "no-store" },
+      ],
+    }];
+  },
   /**
    * UI cũ (trang project/job/viewer P0) đã xoá ngày 02/10/2026 sau khi phần validation/duyệt/phát hành có trong Studio
    * (STUDIO_UX_SPEC.md D-10). Vẫn chuyển hướng các URL cũ về trang chính của app để link đã lưu không rơi vào 404

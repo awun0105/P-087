@@ -18,6 +18,8 @@ from typing import Protocol
 from src.config import Settings, get_settings
 from src.models.contracts.manifests import ExecutionError, JobManifest, JobStatus, StageId
 from src.models.contracts.retryability import classify_retryability
+from src.services.orchestration.gpu.state import supports
+from src.services.orchestration.gpu.worker import ManagedWorker
 from src.services.orchestration.jobs.admission import ResourceAdmission
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
 from src.services.orchestration.jobs.dispatch import load_prepared_profile, prepared_frame_reference, require_profile
@@ -481,6 +483,7 @@ def main(argv: list[str] | None = None) -> int:
         else None
     )
     heartbeat = _start_capability_heartbeat(registry, settings.product_worker_root, admission, publish_runtime)
+    managed = ManagedWorker(settings, registry.execution_profile)
     previous = signal.getsignal(signal.SIGTERM)
 
     def interrupt(signum: int, frame: object) -> None:
@@ -508,22 +511,27 @@ def main(argv: list[str] | None = None) -> int:
         while True:
             recover_expired_leases(registry)
             # Job trong hàng đợi đi trước; rảnh mới nhận yêu cầu chạy lại tách theo vật (cùng dùng GPU).
-            if args.demo_operation:
-                handled = {
-                    "pipeline": lambda: dispatch_next(registry, admission=admission),
-                    "registration": registration_worker.process_next,
-                    "validation": validation_worker.process_next,
-                    "scene": lambda: process_next(registry, settings),
-                }[args.demo_operation]()
-            else:
-                handled = (
-                    dispatch_next(registry, admission=admission)
-                    or registration_worker.process_next()
-                    or validation_worker.process_next()
-                    or process_next(registry, settings)
-                    or import_service.process_next(admission=admission)
-                    or process_demo_session(settings, registry, admission)
-                )
+            handled = False
+            with managed.operation() as allowed:
+                if allowed:
+                    if args.demo_operation:
+                        handled = {
+                            "pipeline": lambda: dispatch_next(registry, admission=admission),
+                            "registration": registration_worker.process_next,
+                            "validation": validation_worker.process_next,
+                            "scene": lambda: process_next(registry, settings),
+                        }[args.demo_operation]()
+                    else:
+                        handled = (
+                            (supports("pipeline") and dispatch_next(registry, admission=admission))
+                            or (supports("registration") and registration_worker.process_next())
+                            or (supports("validation") and validation_worker.process_next())
+                            or (supports("scene") and process_next(registry, settings))
+                            or (supports("import") and import_service.process_next(admission=admission))
+                            or process_demo_session(settings, registry, admission)
+                        )
+            if not handled:
+                admission.release()
             if args.once:
                 return 0
             if not handled:
@@ -532,6 +540,7 @@ def main(argv: list[str] | None = None) -> int:
         return 130
     finally:
         heartbeat.set()
+        managed.close()
         admission.release()
         signal.signal(signal.SIGTERM, previous)
 

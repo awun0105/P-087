@@ -1,0 +1,9 @@
+{
+  "source_files_verified": 1553,
+  "required_build_inputs_verified": 13,
+  "docker_copy_inputs_present": 25,
+  "source_archive_bytes": 7542131,
+  "demo_archive_bytes": 3373872210,
+  "demo_shared_inode": true,
+  "no_secret_env_names": true
+}

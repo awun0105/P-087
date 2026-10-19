@@ -5,7 +5,10 @@ objectgs_pin() {
   sed -n "s/^$1 = \"\([0-9a-f]\{40\}\)\"\$/\1/p" "$REPO/src/services/scene/objectgs.py" | head -n1
 }
 
-recipe_objectgs() { echo "objectgs $(objectgs_pin OBJECTGS_COMMIT) $(objectgs_pin GSPLAT_COMMIT) $(objectgs_pin GLM_COMMIT)"; }
+recipe_objectgs() {
+  echo "objectgs $(objectgs_pin OBJECTGS_COMMIT) $(objectgs_pin GSPLAT_COMMIT) $(objectgs_pin GLM_COMMIT) $(sha_of "$REPO/scripts/gpu/setup_objectgs_runtime.sh") $(sha_of "$REPO/configs/runtime/pins.env")"
+  sha256sum "$REPO"/configs/runtime/objectgs/*.txt
+}
 
 objectgs_repos_ok() {
   [ -x "$OBJGS/python/bin/python" ] || return 1
@@ -36,11 +39,6 @@ verify_objectgs() {
 }
 
 install_objectgs() {
-  if objectgs_repos_ok; then
-    echo "[biên dịch] gsplat-object trong môi trường ObjectGS (lần đầu mất vài phút)…"
-    objectgs_probe || die "gsplat không nạp được trong môi trường ObjectGS (xem lỗi ở trên)"
-    return
-  fi
   local args=("$OBJGS")
   [ -n "${OBJECTGS_WHEELS:-}" ] && args+=(--wheels "$OBJECTGS_WHEELS")
   [ "$SKIP_GPU_CHECK" = 1 ] && args+=(--skip-gpu-check)

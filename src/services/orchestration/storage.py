@@ -27,14 +27,20 @@ def artifact_remote(settings: Settings) -> ArtifactRemote | None:
         return None
     if settings.artifact_s3_access_key_id is None or settings.artifact_s3_secret_access_key is None:
         raise ValueError("ARTIFACT_S3_BUCKET cần access key và secret key")
-    return _remote(
+    base = _remote(
         settings.artifact_s3_bucket,
         settings.artifact_s3_endpoint,
         settings.artifact_s3_region,
         settings.artifact_s3_access_key_id,
         settings.artifact_s3_secret_access_key.get_secret_value(),
-        settings.artifact_s3_prefix,
+        "",
     )
+    fallback = (
+        ArtifactRemote(base.store, settings.product_demo_baseline_prefix)
+        if settings.product_demo_baseline_prefix
+        else None
+    )
+    return ArtifactRemote(base.store, settings.artifact_s3_prefix, fallback=fallback)
 
 
 def runtime_resolver(settings: Settings) -> ArtifactResolver:

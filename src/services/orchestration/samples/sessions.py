@@ -1,4 +1,4 @@
-"""Disposable, revision-fenced Studio workspaces backed by private SQLite and artifacts."""
+"""Disposable Studio workspaces: local SQLite or isolated PostgreSQL/R2 namespaces."""
 
 import fcntl
 import re
@@ -17,14 +17,16 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict
 from src.config import Settings
 from src.services.orchestration.artifacts import ArtifactResolver
 from src.services.orchestration.auth import AuthService
-from src.services.orchestration.jobs.database import RuntimeDatabase
+from src.services.orchestration.jobs.database import RuntimeDatabase, demo_database_url
 from src.services.orchestration.jobs.models import JobAttemptRecord
 from src.services.orchestration.projects.models import DemoBaseline
 from src.services.orchestration.projects.registry import ProjectRegistry
+from src.services.orchestration.samples import distributed
 from src.services.orchestration.samples.bundle import DemoLibrary, DemoUnavailableError
 from src.services.orchestration.samples.session_context import DemoRuntime
 from src.services.orchestration.samples.snapshot import copy_artifact_graph
 from src.services.orchestration.samples.workspace import load_workspace
+from src.services.orchestration.storage import artifact_remote
 
 _TOKEN = re.compile(r"[a-f0-9]{32}")
 # ponytail: keep at most 32 runtime handles; every request still checks the descriptor and lifetime.
@@ -66,18 +68,31 @@ def session_path(settings: Settings, session_id: str) -> Path:
     return session_root(settings) / session_id
 
 
-def session_settings(settings: Settings, session_id: str) -> Settings:
+def session_settings(settings: Settings, session_id: str, sample_id: str | None = None) -> Settings:
     root = session_path(settings, session_id)
+    remote = distributed.enabled(settings)
+    if remote and sample_id is None:
+        sample_id = distributed.get(settings, session_id).sample_id
+    baseline = "/".join(
+        part
+        for part in (settings.product_demo_object_prefix.strip("/"), sample_id or "", "workspace/artifacts")
+        if part
+    )
     return settings.model_copy(
         update={
-            "database_url": f"sqlite:///{root / 'runtime.db'}",
+            "database_url": demo_database_url(settings.database_url, session_id)
+            if remote
+            else f"sqlite:///{root / 'runtime.db'}",
             "artifact_root": root / "artifacts",
             "product_worker_root": root / "workers",
             "product_rerun_recording_dir": root / "recordings",
             "product_demo_dir": root / "library",
             "product_trash_root": root / "trash",
-            "auth_required": False,
-            "artifact_s3_bucket": None,
+            "artifact_s3_bucket": settings.artifact_s3_bucket if remote else None,
+            "artifact_s3_prefix": distributed.output_prefix(settings, session_id)
+            if remote
+            else settings.artifact_s3_prefix,
+            "product_demo_baseline_prefix": baseline if remote else None,
             "product_fixture_mode": False,
         }
     )
@@ -88,28 +103,31 @@ def _registry(settings: Settings, source: ProjectRegistry) -> ProjectRegistry:
         fixture_root=source.fixture_root,
         runtime_root=settings.artifact_root,
         database=RuntimeDatabase(settings.database_url),
-        execution_profile=source.execution_profile,
+        execution_profile=source.job_profile(),
+        remote=artifact_remote(settings),
         runtime_from_workers=False,
         processing_config_checksum=source.processing_config_checksum,
         job_seed=source.job_seed,
     )
 
 
-def _create_session(settings: Settings, registry: ProjectRegistry, sample_id: str) -> DemoSession:
+def _create_session(
+    settings: Settings, registry: ProjectRegistry, sample_id: str, *, reserved_id: str | None = None
+) -> DemoSession:
     """Clone the frozen published workspace; never read the source job's current state."""
     bundle = DemoLibrary(settings.product_demo_dir).bundle(sample_id)
     snapshot = load_workspace(bundle)
     job, project, head = snapshot.job, snapshot.project, snapshot.head
     job_id = job.job_id
     resolver = ArtifactResolver(bundle.root / "workspace" / "artifacts")
-    session_id = uuid4().hex
+    session_id = reserved_id or uuid4().hex
     root = session_path(settings, session_id)
     root.mkdir(parents=True, mode=0o700, exist_ok=False)
     creating = _SessionCreation(session_id=session_id, created_at=datetime.now(UTC))
     (root / "initializing.json").write_text(creating.model_dump_json())
     ownership = (root / "session.lock").open("a")
     fcntl.flock(ownership, fcntl.LOCK_SH)
-    private_settings = session_settings(settings, session_id)
+    private_settings = session_settings(settings, session_id, sample_id)
     try:
         private = _registry(private_settings, registry)
         assert private.persistence is not None
@@ -201,6 +219,8 @@ def _create_session(settings: Settings, registry: ProjectRegistry, sample_id: st
         temporary.replace(root / "session.json")
         (root / "heartbeat").touch()
         (root / "initializing.json").unlink()
+        if distributed.enabled(settings):
+            distributed.publish(settings, session)
         return session
     except BaseException:
         shutil.rmtree(root)
@@ -210,6 +230,16 @@ def _create_session(settings: Settings, registry: ProjectRegistry, sample_id: st
 
 
 def create_session(settings: Settings, registry: ProjectRegistry, sample_id: str) -> DemoSession:
+    if distributed.enabled(settings):
+        # Validate the published baseline before reserving a database namespace.
+        load_workspace(DemoLibrary(settings.product_demo_dir).bundle(sample_id))
+        distributed.purge(settings)
+        session_id = distributed.reserve(settings, sample_id)
+        try:
+            return _create_session(settings, registry, sample_id, reserved_id=session_id)
+        except BaseException:
+            distributed.close(settings, session_id)
+            raise
     base = session_root(settings)
     base.mkdir(parents=True, mode=0o700, exist_ok=True)
     with (base / "creation.lock").open("a") as lock:
@@ -224,6 +254,8 @@ def create_session(settings: Settings, registry: ProjectRegistry, sample_id: str
 
 
 def get_session(settings: Settings, session_id: str) -> DemoSession:
+    if distributed.enabled(settings):
+        return distributed.get(settings, session_id)
     root = session_path(settings, session_id)
     try:
         session = DemoSession.model_validate_json((root / "session.json").read_bytes())
@@ -242,6 +274,9 @@ def get_session(settings: Settings, session_id: str) -> DemoSession:
 
 
 def touch_session(settings: Settings, session_id: str) -> None:
+    if distributed.enabled(settings):
+        distributed.touch(settings, session_id)
+        return
     get_session(settings, session_id)
     try:
         (session_path(settings, session_id) / "heartbeat").touch()
@@ -256,8 +291,20 @@ def load_runtime(settings: Settings, source: ProjectRegistry, session: DemoSessi
         cached = _runtimes.get(key)
         if cached is not None:
             _runtimes.move_to_end(key)
+            cached.registry.execution_profile = source.job_profile()
             return cached
     registry = _registry(private_settings, source)
+    # Rerun recordings are mutable files, so each host materializes its own private copy.
+    recording = settings.product_demo_dir / session.sample_id / "workspace/recordings" / f"{session.job_id}.rrd"
+    destination = private_settings.product_rerun_recording_dir / recording.name
+    if recording.is_file() and not destination.exists():
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temporary = destination.with_name(f".{destination.name}-{uuid4().hex}.tmp")
+        try:
+            shutil.copyfile(recording, temporary)
+            temporary.replace(destination)
+        finally:
+            temporary.unlink(missing_ok=True)
     assert registry.persistence is not None
     actor = AuthService(registry.persistence.database).get_user(session.actor_id)
     if actor is None:
@@ -274,6 +321,10 @@ def load_runtime(settings: Settings, source: ProjectRegistry, session: DemoSessi
 @contextmanager
 def hold_session(settings: Settings, session_id: str, *, exclusive: bool = False) -> Iterator[None]:
     """Cross-process ownership: cleanup never removes files still used by an API or worker."""
+    if distributed.enabled(settings):
+        with distributed.hold(settings, session_id):
+            yield
+        return
     root = session_path(settings, session_id)
     with (root / "session.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
@@ -285,6 +336,11 @@ def hold_session(settings: Settings, session_id: str, *, exclusive: bool = False
 
 
 def close_session(settings: Settings, session_id: str) -> None:
+    if distributed.enabled(settings):
+        distributed.close(settings, session_id)
+        with _runtime_lock:
+            _runtimes.pop(str(session_path(settings, session_id) / "artifacts"), None)
+        return
     root = session_path(settings, session_id)
     try:
         if root.is_dir():
@@ -297,6 +353,13 @@ def close_session(settings: Settings, session_id: str) -> None:
 
 def purge_sessions(settings: Settings) -> int:
     """Remove only expired/closed session directories with no API/worker owner."""
+    if distributed.enabled(settings):
+        removed = distributed.purge(settings)
+        with _runtime_lock:
+            for key in list(_runtimes):
+                if not Path(key).exists():
+                    _runtimes.pop(key, None)
+        return removed
     base = session_root(settings)
     if not base.is_dir():
         return 0

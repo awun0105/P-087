@@ -121,6 +121,28 @@ def check(source: Source) -> list[Finding]:
     def warning(message: str) -> None:
         found.append(Finding("warning", message))
 
+    if _is_true(api.get("GPU_AUTOPROVISION_ENABLED")):
+        for key in (
+            "GPU_DEPLOYMENT_ID",
+            "RUNPOD_API_KEY",
+            "GPU_RELEASE_CATALOG",
+            "PRODUCT_GPU_RELEASE_CATALOG",
+            "GPU_WORKER_ENV_FILE",
+            "GPU_MAX_HOURLY_USD",
+            "GPU_PROJECT_BUDGET_USD",
+        ):
+            if not api.get(key):
+                error(f"[api] {key} required for GPU provisioning")
+        if api.get("GPU_MAX_PODS", "1") != "1" or worker.get("STUDIO_WORKERS") != "1":
+            error("GPU deployment requires GPU_MAX_PODS=1 and STUDIO_WORKERS=1")
+        if api.get("GPU_RELEASE_CATALOG") != api.get("PRODUCT_GPU_RELEASE_CATALOG"):
+            error("API and controller must use the same pinned GPU release catalog")
+        if not _is_true(api.get("GPU_AUTOPROVISION_DRY_RUN")):
+            if api.get("GPU_OUTAGE_POLICY", "blocked") == "blocked" or not api.get("GPU_OUTAGE_POLICY_REFERENCE"):
+                error("Live GPU provisioning requires an accepted outage policy reference")
+    if _is_true(api.get("GPU_CPU_LANE_ENABLED")) and not api.get("GPU_CPU_LANE_QUALIFICATION_REFERENCE"):
+        error("CPU lane requires GPU_CPU_LANE_QUALIFICATION_REFERENCE")
+
     for section, names in REQUIRED.items():
         for name in names:
             if not source.values[section].get(name):
@@ -128,6 +150,14 @@ def check(source: Source) -> list[Finding]:
 
     if shared.get("APP_ENV") != "production":
         warning("[shared] APP_ENV không phải production")
+    archive_key = shared.get("PRODUCT_DEMO_ARCHIVE_KEY")
+    archive_checksum = shared.get("PRODUCT_DEMO_ARCHIVE_CHECKSUM")
+    if bool(archive_key) != bool(archive_checksum):
+        error("[shared] PRODUCT_DEMO_ARCHIVE_KEY và PRODUCT_DEMO_ARCHIVE_CHECKSUM phải khai báo cùng nhau")
+    if archive_checksum and re.fullmatch(r"sha256:[a-f0-9]{64}", archive_checksum) is None:
+        error("[shared] PRODUCT_DEMO_ARCHIVE_CHECKSUM phải là sha256:<64 hex>")
+    if not archive_key:
+        warning("[shared] chưa ghim demo archive: deployment cần provision PRODUCT_DEMO_DIR trước khi mở demo")
     if shared.get("PRODUCT_PRIVACY_MODE") == "qa_verified":
         # Chế độ này che mọi video và chờ người upload chấp nhận: thiếu bộ che thì không tạo được scene nào.
         if not source.values["worker"].get("PRODUCT_EGOBLUR_WEIGHTS"):

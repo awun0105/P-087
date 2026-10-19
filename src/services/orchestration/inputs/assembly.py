@@ -363,25 +363,32 @@ class InputAssemblyService:
 
     def runtime_registry(self) -> RuntimeQualificationRegistry:
         """Load only an explicit, checksummed deployment registry; absent config stays unavailable."""
-        if self.runtime_registry_path is None:
-            return seal_runtime_registry(
-                {
-                    "schema_version": "1.0",
-                    "registry_version": "unconfigured",
-                    "capabilities": [],
-                    "registry_checksum": "sha256:" + "0" * 64,
-                }
-            )
         from pathlib import Path
 
+        from src.config import get_settings
+        from src.services.orchestration.gpu.catalog import load_catalog
+
         try:
-            registry = RuntimeQualificationRegistry.model_validate_json(
-                Path(self.runtime_registry_path).read_text(encoding="utf-8")
-            )
+            if self.runtime_registry_path is not None:
+                registry = RuntimeQualificationRegistry.model_validate_json(
+                    Path(self.runtime_registry_path).read_text(encoding="utf-8")
+                )
+            else:
+                catalog_path = get_settings().product_gpu_release_catalog
+                registry = load_catalog(catalog_path).input_registry if catalog_path is not None else None
+                if registry is None:
+                    return seal_runtime_registry(
+                        {
+                            "schema_version": "1.0",
+                            "registry_version": "unconfigured",
+                            "capabilities": [],
+                            "registry_checksum": "sha256:" + "0" * 64,
+                        }
+                    )
             verify_runtime_registry_checksum(registry)
         except (OSError, ValueError) as error:
             raise InputAssemblyRuntimeConfigError(
-                "PRODUCT_INPUT_RUNTIME_REGISTRY is unreadable or has an invalid checksum"
+                "PRODUCT_INPUT_RUNTIME_REGISTRY / PRODUCT_GPU_RELEASE_CATALOG is unreadable or has an invalid checksum"
             ) from error
         capabilities = [
             item

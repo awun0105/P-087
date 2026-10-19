@@ -36,6 +36,8 @@ from src.services.orchestration.artifacts.errors import (
     ArtifactStoreError,
 )
 from src.services.orchestration.auth.models import DisplayName, Role
+from src.services.orchestration.gpu.classification import import_gpu
+from src.services.orchestration.gpu.state import claim_allowed, cpu_lane
 from src.services.orchestration.jobs.admission import (
     OperationAdmissionRequest,
     OperationAdmissionResult,
@@ -1140,15 +1142,29 @@ class ImportService:
         now = datetime.now(UTC)
         worker_id = worker_id or f"{socket.gethostname()}:{os.getpid()}:{uuid4().hex[:8]}"
         with self.database.transaction(write=True) as tx:
-            row = tx.execute(
+            if not claim_allowed(tx, "import"):
+                return False
+            rows = tx.execute(
                 "SELECT payload FROM r2s_import_operations WHERE status IN ('QUEUED','WAITING') "
                 "OR (status='RUNNING' AND (lease_expires_at IS NULL OR lease_expires_at<=?)) "
-                "ORDER BY created_at, operation_id LIMIT 1" + tx.lock_suffix(),
+                "ORDER BY created_at, operation_id" + tx.lock_suffix(),
                 (now.isoformat(),),
-            ).fetchone()
-            if row is None:
+            ).fetchall()
+            operation = None
+            for row in rows:
+                candidate = ImportOperationRecord.model_validate_json(row[0])
+                if cpu_lane():
+                    source_row = tx.execute(
+                        "SELECT payload FROM r2s_imports WHERE import_id=?", (candidate.import_id,)
+                    ).fetchone()
+                    if source_row is None or import_gpu(json.loads(source_row[0])["input_kind"], candidate.gpu_index):
+                        continue
+                operation = candidate
+                break
+            if operation is None:
                 return False
-            operation = ImportOperationRecord.model_validate_json(row[0])
+            if not claim_allowed(tx, "import", mark_busy=True):
+                return False
             attempt_history = list(operation.attempt_history)
             if operation.status == "RUNNING":
                 for index in range(len(attempt_history) - 1, -1, -1):
@@ -1291,7 +1307,7 @@ class ImportService:
             if evidence is None:
                 raise InputRejectedError("source has no validated Gaussian count")
             gaussian_count = evidence.gaussian_count
-            gpu_required = record.input_kind != GaussianViewFormat.SOG and claimed.gpu_index is not None
+            gpu_required = import_gpu(record.input_kind, claimed.gpu_index)
             profile = admission.operation_profile_for_import(
                 gaussian_count=gaussian_count,
                 source_size_bytes=upload.size_bytes,

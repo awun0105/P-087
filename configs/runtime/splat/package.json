@@ -1,0 +1,8 @@
+{
+  "name": "real2sim-splat-runtime",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "@playcanvas/splat-transform": "3.6.6"
+  }
+}

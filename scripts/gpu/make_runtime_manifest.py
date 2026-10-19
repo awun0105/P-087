@@ -53,6 +53,18 @@ def collect() -> dict[str, dict[str, str]]:
         splat = json.loads(package.read_text()).get("version") if package.is_file() else None
     gpu = _run(["nvidia-smi", "--query-gpu=name,memory.total,driver_version", "--format=csv,noheader"])
     gpu_fields = [field.strip() for field in gpu.splitlines()[0].split(",")] if gpu else []
+    scene_python = os.environ.get("PRODUCT_SCENE_RUNTIME_PYTHON")
+    usd = (
+        _run([scene_python, "-c", "from pxr import Usd; print('.'.join(map(str, Usd.GetVersion())))"])
+        if scene_python
+        else None
+    )
+    launcher = os.environ.get("PRODUCT_ISAAC_VALIDATION_LAUNCHER")
+    isaac = (
+        _run([launcher, "-c", "import importlib.metadata as m; print('.'.join(m.version('isaacsim').split('.')[:3]))"])
+        if launcher
+        else None
+    )
     return {
         "python": _component(sys.version.split()[0], "python không đọc được"),
         "ffmpeg": _component(ffmpeg.splitlines()[0] if ffmpeg else None, "ffmpeg không có trong PATH"),
@@ -62,8 +74,8 @@ def collect() -> dict[str, dict[str, str]]:
         "gpu_model": _component(gpu_fields[0] if gpu_fields else None, "không có nvidia-smi"),
         "vram": _component(gpu_fields[1] if len(gpu_fields) > 1 else None, "không có nvidia-smi"),
         "nvidia_driver": _component(gpu_fields[2] if len(gpu_fields) > 2 else None, "không có nvidia-smi"),
-        "isaac_sim": _component(None, "không dùng trong Studio MVP"),
-        "openusd": _component(None, "không dùng trong Studio MVP"),
+        "isaac_sim": _component(isaac, "Isaac launcher chưa cấu hình hoặc không đọc được phiên bản"),
+        "openusd": _component(usd, "USD runtime chưa cấu hình hoặc không nạp được pxr.Usd"),
     }
 
 
