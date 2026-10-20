@@ -11,7 +11,7 @@ import { SimulationPackagePanel } from "@/features/studio/SimulationPackagePanel
 import { ObjectifyContext, type ObjectifyHandle } from "@/features/studio/scene/objectifyContext";
 import { jobArtifactContentUrl } from "@/lib/api/endpoints";
 
-vi.mock("@/features/studio/StageViewer", () => ({
+vi.mock("@/features/studio/StageViewer3D", () => ({
   CollisionMeshCanvas: () => <div data-testid="mesh" />,
 }));
 vi.mock("@/features/studio/MetricSceneView", () => ({

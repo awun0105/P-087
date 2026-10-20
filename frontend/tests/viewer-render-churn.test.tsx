@@ -6,7 +6,7 @@ import { ObjectReviewView } from "@/features/studio/ObjectReviewView";
 import { clearSceneCache } from "@/lib/api/studio";
 
 const seen: Record<string, unknown>[] = [];
-vi.mock("@/features/studio/StageViewer", () => ({ CollisionMeshCanvas: () => <div /> }));
+vi.mock("@/features/studio/StageViewer3D", () => ({ CollisionMeshCanvas: () => <div /> }));
 vi.mock("@/features/studio/MetricSceneView", () => ({
   MetricSceneView: (props: Record<string, unknown>) => {
     seen.push(props);

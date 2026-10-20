@@ -7,7 +7,7 @@ import { ObjectReviewView } from "@/features/studio/ObjectReviewView";
 import { clearSceneCache, getStageViews } from "@/lib/api/studio";
 
 const mounts: unknown[] = [];
-vi.mock("@/features/studio/StageViewer", () => ({ CollisionMeshCanvas: () => <div /> }));
+vi.mock("@/features/studio/StageViewer3D", () => ({ CollisionMeshCanvas: () => <div /> }));
 vi.mock("@/features/studio/MetricSceneView", () => ({
   MetricSceneView: ({ cameras }: { cameras: unknown }) => {
     // Viewer thật dựng lại khi `cameras` đổi; đếm như vậy.

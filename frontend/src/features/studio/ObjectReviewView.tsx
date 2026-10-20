@@ -70,7 +70,7 @@ import type { StageView } from "@/lib/contracts/studio";
 import { GEOMETRY_NOT_READY_REASON, objectGeometryState } from "@/lib/scene/geometry-state";
 
 // Chỉ dùng khi scene không có 3DGS: tải three.js theo nhu cầu, không kéo vào mọi lần mở Studio.
-const CollisionMeshCanvas = dynamic(() => import("@/features/studio/StageViewer").then((m) => m.CollisionMeshCanvas), { ssr: false });
+const CollisionMeshCanvas = dynamic(() => import("@/features/studio/StageViewer3D").then((m) => m.CollisionMeshCanvas), { ssr: false });
 
 /** Hình riêng của một vật trong viewer: Gaussian của vật tách từ scene, hoặc GLB của asset thư viện. */
 function objectVisual(jobId: string, object: SceneObject, previews: ReadonlySet<string>): Pick<OverlayObject, "url" | "kind"> {
