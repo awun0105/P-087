@@ -57,6 +57,13 @@ class FFmpegRGBProbe:
 
     def video_has_identical_frames(self, video: Path, expected_count: int) -> bool:
         """Decoded frames trùng hệt là tín hiệu static input chắc chắn."""
+        hashes = self.video_frame_hashes(video)
+        if len(hashes) != expected_count:
+            raise FFmpegProbeError("RGB video decoded-frame inventory is incomplete")
+        return len(set(hashes)) == 1
+
+    def video_frame_hashes(self, video: Path) -> list[str]:
+        """MD5 ảnh xám của từng frame đã decode; không cần biết trước số frame nên chạy song song được."""
         command = [
             self.binary,
             "-hide_banner",
@@ -79,9 +86,9 @@ class FFmpegRGBProbe:
         ]
         lines = [line for line in self._run(command).stdout.splitlines() if line and not line.startswith("#")]
         hashes = [line.rsplit(",", 1)[-1].strip() for line in lines]
-        if len(hashes) != expected_count or not all(hashes):
+        if not all(hashes):
             raise FFmpegProbeError("RGB video decoded-frame inventory is incomplete")
-        return len(set(hashes)) == 1
+        return hashes
 
     def video_blur_scores(self, video: Path, profile: RGBQualityProfile) -> list[float]:
         """Decode toàn video qua cùng blur filter đã chuẩn hóa."""
