@@ -16,7 +16,8 @@ class GpuSettings(BaseSettings):
     runpod_api_key: SecretStr | None = Field(default=None, validation_alias="RUNPOD_API_KEY")
     release_catalog: Path | None = None
     worker_env_file: Path | None = None
-    max_pods: Literal[1] = 1
+    # Exactly one managed pod; an int field (not Literal[1]) so the documented env value "1" parses.
+    max_pods: int = Field(default=1, ge=1, le=1)
     poll_seconds: float = Field(default=15, ge=1, le=300)
     idle_seconds: int = Field(default=240, ge=1)
     startup_timeout_seconds: int = Field(default=1200, ge=60)

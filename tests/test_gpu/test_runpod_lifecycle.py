@@ -799,3 +799,12 @@ def test_persisted_resource_wait_excludes_undersized_profile(tmp_path, profile, 
     assert result.pending[0].profiles == ("larger",)
     result = workload.scan_scope(db, SimpleNamespace(), ReleaseCatalog(profiles=(profile,), checksum="fixture"))
     assert not result.pending and result.blocked
+
+
+def test_max_pods_from_environment_is_accepted_as_documented(monkeypatch):
+    """The runbook sets GPU_MAX_PODS=1; env values arrive as strings and must not crash the API at boot."""
+    monkeypatch.setenv("GPU_MAX_PODS", "1")
+    assert GpuSettings().max_pods == 1
+    monkeypatch.setenv("GPU_MAX_PODS", "2")
+    with pytest.raises(ValueError):
+        GpuSettings()
