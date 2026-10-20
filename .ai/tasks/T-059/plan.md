@@ -128,3 +128,12 @@ cd frontend && npm run typecheck
 
 ## Commit
 Theo Steps. `graphify update .`, `report.md` (kèm số đo), `status.md`.
+
+## Bổ sung 20/10: trạng thái máy GPU (phối hợp phiên deploy)
+- Phiên deploy làm `src/services/orchestration/gpu/status.py` với `gpu_capacity(database, settings) -> GpuCapacity`
+  (`state: "off"|"starting"|"ready"|"draining"|"blocked"|"unmanaged"`, `since`, `expected_startup_seconds`, …) và route
+  riêng `GET /api/v1/gpu/status`. **Không sửa các file đó.** Đợi commit của họ (họ nhắn tên commit); chưa có thì bỏ qua
+  phần này và ghi report.
+- `PipelineView` thêm `gpu: GpuCapacity | None = None`, chỉ đọc khi job `QUEUED` hoặc `progress.waiting_for` ∈
+  {`resources`, `runtime`}. `version` chỉ gồm `gpu.state` và `gpu.since` (không gồm thời gian đã trôi / còn lại).
+- Test: `test_pipeline_includes_gpu_capacity_only_while_waiting_for_a_worker`, `test_gpu_elapsed_time_does_not_change_version`.

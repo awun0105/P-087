@@ -68,3 +68,9 @@ cd frontend && npm run typecheck && ./node_modules/.bin/eslint <file đã sửa>
 
 ## Commit
 Theo Steps. `graphify update .`, `report.md`, `status.md`.
+
+## Bổ sung 20/10: chờ khởi động máy GPU
+- `nextActionView`: `wait_system` khi job chờ máy và `gpu.state` ∈ {`off`, `starting`} → tiêu đề "Đang khởi động máy GPU",
+  mô tả có thời gian ước tính còn lại (tính từ `gpu.since` + `expected_startup_seconds`), cùng câu ở chuông và nhãn đầu
+  trang; chuông dùng `GpuStartupNotice` trong popover.
+- Test: `gpu starting wording is identical in header and bell`.

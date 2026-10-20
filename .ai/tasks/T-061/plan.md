@@ -64,3 +64,10 @@ cd frontend && npm run typecheck && ./node_modules/.bin/eslint <file đã sửa>
 
 ## Commit
 Theo Steps. `graphify update .`, `report.md`, `status.md`.
+
+## Bổ sung 20/10: thông báo khởi động máy GPU
+- Khi `view.gpu?.state` ∈ {`off`, `starting`} và job đang chờ máy (QUEUED hoặc `waiting_for` resources/runtime): hiện
+  `GpuStartupNotice` (component của phiên deploy, `frontend/src/features/studio/GpuStartupNotice.tsx`, nhận `{capacity}`)
+  ở khung "Đang chờ máy xử lý" của `ProgressTab` thay cho câu chung. Không sửa component đó; truyền `now` của đồng hồ chung
+  nếu component nhận.
+- Test: `shows GPU startup notice while the GPU machine is starting`, `no GPU notice once the GPU is ready`.
