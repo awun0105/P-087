@@ -104,7 +104,7 @@ describe("Inspect theo giai đoạn", () => {
     const stages = [{ stage_id: stage.id, state: "failed" as const, seconds: null, fraction: null }];
     render(<PipelineTimeline stages={stages} stageList={[stage]} jobId="job-a" />);
 
-    fireEvent.click(screen.getByRole("button", { name: /QA calibration LiDAR/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Kiểm tra căn chỉnh LiDAR/ }));
     expect(screen.getByRole("link", { name: /^Xem giai đoạn/ })).toHaveAttribute(
       "href",
       "/scenes/job-a/stages/ST-LIDAR-CALIBRATION-QA",
@@ -117,7 +117,7 @@ describe("Inspect theo giai đoạn", () => {
     const waiting: JobProgress = { ...progress, status: "RUNNING", waiting_for: "metric_confirmation", stages: progress.stages.map((stage) => stage.stage_id === "ST-METRIC-CANONICALIZE" ? { ...stage, state: "waiting" } : stage) };
     expect(canInspect(waiting, "ST-METRIC-CANONICALIZE")).toBe(false);
     expect(canInspect(waiting, "ST-VISUAL-RECON")).toBe(true);
-    expect(inspectionStage("ST-LIDAR-CALIBRATION-QA")?.title).toBe("QA calibration LiDAR");
+    expect(inspectionStage("ST-LIDAR-CALIBRATION-QA")?.title).toBe("Kiểm tra căn chỉnh LiDAR");
     expect(inspectionStage(LIDAR_ODOMETRY_STAGE.id)).toBe(LIDAR_ODOMETRY_STAGE);
     expect(stagesFor([LIDAR_ODOMETRY_STAGE.id]).map((stage) => stage.id).slice(3, 4)).toEqual([
       LIDAR_ODOMETRY_STAGE.id,
