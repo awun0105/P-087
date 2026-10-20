@@ -14,11 +14,11 @@ import os
 import re
 import shutil
 import subprocess
-import tempfile
 import time
 import zipfile
 from pathlib import Path
 from typing import Protocol
+from uuid import uuid4
 
 from src.runtime_env import runtime_env
 
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 MIN_LOD_SPLATS = 600_000
 INDEX = "lod-meta.json"
 _TIMEOUT_SECONDS = 3600
-_BUNDLE_PATH = re.compile(r"^(lod-meta\.json|\d+_\d+/(meta\.json|[A-Za-z0-9_]+\.webp))$")
+_BUNDLE_PATH = re.compile(r"^(lod-meta\.json|(b[0-9a-f]{12}/)?\d+_\d+/(meta\.json|[A-Za-z0-9_]+\.webp))$")
 
 
 class LodBuildError(RuntimeError):
@@ -97,24 +97,41 @@ def build_lod_bundle(cli: Path, source_sog: Path, workspace: Path) -> Path | Non
     return out
 
 
-def publish_lod_bundle(artifact_root: Path, remote: _Pusher | None, job_id: str, checksum: str, bundle: Path) -> None:
-    """Chép bộ LOD vào cache cục bộ và kho file; file mục lục chép và đẩy sau cùng."""
+def publish_lod_bundle(artifact_root: Path, remote: _Pusher | None, job_id: str, checksum: str, bundle: Path) -> bool:
+    """Chép bộ LOD vào cache cục bộ và kho file; trả False khi một lần tạo khác đã công bố trước.
+
+    Mỗi lần tạo ghi các khối vào thư mục riêng `b<id>/` và file mục lục trỏ vào thư mục đó; mục lục ghi sau cùng, lần nào
+    ghi được mục lục trước thì thắng. Hai worker cùng tạo một SOG không bao giờ trộn khối của nhau.
+    """
+    from src.services.orchestration.artifacts.remote import ArtifactAlreadyExistsError
+
     relative = lod_relative_dir(job_id, checksum)
     target = artifact_root / relative
+    build = f"b{uuid4().hex[:12]}"
+    index = json.loads((bundle / INDEX).read_text(encoding="utf-8"))
+    index["filenames"] = [f"{build}/{name}" for name in index["filenames"]]
     files = sorted(path for path in bundle.rglob("*") if path.is_file() and path.name != INDEX)
     target.mkdir(parents=True, exist_ok=True)
-    for path in [*files, bundle / INDEX]:
-        name = path.relative_to(bundle).as_posix()
+    for path in files:
+        name = f"{build}/{path.relative_to(bundle).as_posix()}"
         if not valid_bundle_path(name):
             raise LodBuildError(f"unexpected bundle file {name}")
         destination = target / name
         destination.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(dir=destination.parent, delete=False) as handle:
-            temporary = Path(handle.name)
-        shutil.copyfile(path, temporary)
-        temporary.replace(destination)
+        shutil.copyfile(path, destination)
         if remote is not None:
             remote.push(f"{relative}/{name}", destination)
+    staged = target / f".{build}.{INDEX}"
+    staged.write_text(json.dumps(index), encoding="utf-8")
+    if remote is not None:
+        try:
+            remote.push(f"{relative}/{INDEX}", staged)
+        except ArtifactAlreadyExistsError:
+            staged.unlink(missing_ok=True)
+            logger.info("Bộ LOD job=%s đã được lần tạo khác công bố trước", job_id)
+            return False
+    staged.replace(target / INDEX)
+    return True
 
 
 #: Lần tạo lỗi được thử lại sau khoảng này (lỗi có thể do máy, không phải do SOG).

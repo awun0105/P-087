@@ -28,7 +28,9 @@ def fake_cli(monkeypatch, tmp_path):  # noqa: ANN001, ANN201
         if output.name == "lod-meta.json":
             (output.parent / "0_0").mkdir(parents=True, exist_ok=True)
             (output.parent / "0_0" / "meta.json").write_text("{}")
-            (output.parent / "0_0" / "means_l.webp").write_bytes(b"webp")
+            (output.parent / "0_0" / "means_l.webp").write_bytes(str(output).encode())  # khác nhau giữa hai lần tạo
+            output.write_text(json.dumps({"lodLevels": 1, "filenames": ["0_0/meta.json"]}))
+            return
         output.write_text("{}" if output.suffix == ".json" else "ply")
 
     monkeypatch.setattr(lod, "_run", run)
@@ -59,15 +61,25 @@ def test_publish_writes_index_last_and_pushes_to_remote(tmp_path, fake_cli) -> N
     assert lod.lod_ready(root, None, "job-a", _CHECKSUM) is False
     lod.publish_lod_bundle(root, Remote(), "job-a", _CHECKSUM, out)
     assert lod.lod_ready(root, None, "job-a", _CHECKSUM) is True
-    assert (root / lod.lod_relative_dir("job-a", _CHECKSUM) / "0_0" / "means_l.webp").is_file()
+    assert len(list((root / lod.lod_relative_dir("job-a", _CHECKSUM)).glob("b*/0_0/means_l.webp"))) == 1
     assert pushed[-1].endswith("/lod-meta.json")
     assert any(item.endswith("0_0/means_l.webp") for item in pushed[:-1])
 
 
 def test_valid_bundle_paths_only() -> None:
-    for good in ("lod-meta.json", "0_0/meta.json", "12_3/shN_labels.webp"):
+    for good in ("lod-meta.json", "0_0/meta.json", "12_3/shN_labels.webp", "b0123456789ab/0_0/meta.json"):
         assert lod.valid_bundle_path(good)
-    for bad in ("../x", "0_0/../../secret", "0_0/x.png", "/etc/passwd", "0_0/meta.json/..", "a_b/meta.json", ""):
+    for bad in (
+        "../x",
+        "0_0/../../secret",
+        "0_0/x.png",
+        "/etc/passwd",
+        "0_0/meta.json/..",
+        "a_b/meta.json",
+        "",
+        "bxyz/0_0/meta.json",
+        "b0123456789ab/lod-meta.json",
+    ):
         assert not lod.valid_bundle_path(bad)
 
 
@@ -193,3 +205,30 @@ def test_job_view_lods_builds_each_large_sog_once(tmp_path, fake_cli) -> None:  
     assert lod.build_job_view_lods(resolver, "job-a", refs, tmp_path / "cli.mjs", tmp_path / "work") == 1
     assert lod.lod_ready(tmp_path / "artifacts", None, "job-a", big)
     assert lod.build_job_view_lods(resolver, "job-a", refs, tmp_path / "cli.mjs", tmp_path / "work") == 0
+
+
+def test_each_build_publishes_into_its_own_folder_and_the_first_index_wins(tmp_path, fake_cli) -> None:  # noqa: ANN001
+    """Review fix: two builders of the same SOG never mix chunks; the index names the folder of one complete build."""
+    from src.services.orchestration.artifacts.remote import ArtifactAlreadyExistsError
+
+    stored: dict[str, bytes] = {}
+
+    class Remote:
+        def push(self, relative, path):  # noqa: ANN001, ANN202
+            data = path.read_bytes()
+            if relative in stored and stored[relative] != data:
+                raise ArtifactAlreadyExistsError(relative)
+            stored[relative] = data
+
+    root_a, root_b = tmp_path / "pod-a", tmp_path / "pod-b"
+    first = lod.build_lod_bundle(tmp_path / "cli.mjs", _sog(tmp_path / "s.sog", 1_860_000), tmp_path / "wa")
+    second = lod.build_lod_bundle(tmp_path / "cli.mjs", _sog(tmp_path / "t.sog", 1_860_000), tmp_path / "wb")
+    assert lod.publish_lod_bundle(root_a, Remote(), "job-a", _CHECKSUM, first) is True
+    assert lod.publish_lod_bundle(root_b, Remote(), "job-a", _CHECKSUM, second) is False
+    index_key = f"{lod.lod_relative_dir('job-a', _CHECKSUM)}/lod-meta.json"
+    names = json.loads(stored[index_key])["filenames"]
+    folders = {name.split("/")[0] for name in names}
+    assert len(folders) == 1 and next(iter(folders)).startswith("b")
+    for name in names:
+        assert lod.valid_bundle_path(name)
+        assert f"{lod.lod_relative_dir('job-a', _CHECKSUM)}/{name}" in stored
