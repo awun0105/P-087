@@ -53,6 +53,20 @@ WORKER_KEYS = frozenset(
 _RUNPOD_NEWEST_CUDA_FILTER = "13.0"
 
 
+#: Upper bound for workers on one managed Pod; each worker re-checks VRAM/RAM before it claims, so the count only caps
+#: parallelism. `auto` is refused: the operator picks the number for the qualified GPU profile.
+_MAX_WORKERS_PER_POD = 4
+
+
+def _worker_count(raw: str | None) -> str:
+    """STUDIO_WORKERS for a managed Pod from worker.env; anything missing or out of range runs one worker."""
+    try:
+        count = int(str(raw).strip())
+    except ValueError:
+        return "1"
+    return str(count) if 1 <= count <= _MAX_WORKERS_PER_POD else "1"
+
+
 def _cuda_filter(versions: tuple[str, ...]) -> dict:
     """allowedCudaVersions for the create payload; omitted when the profile accepts the newest filterable CUDA."""
     if _RUNPOD_NEWEST_CUDA_FILTER in versions:
@@ -116,7 +130,7 @@ class Controller:
                 "GPU_BOOT_TOKEN": c.boot_token,
                 "GPU_EXPECTED_PROFILE": profile.model_dump_json(),
                 "GPU_MANAGED_CLAIMS_REQUIRED": "true",
-                "STUDIO_WORKERS": "1",
+                "STUDIO_WORKERS": _worker_count(values.get("STUDIO_WORKERS")),
                 "PRODUCT_DEMO_REQUIRED": "false",
                 "PRODUCT_DEMO_ARCHIVE_KEY": "",
             }

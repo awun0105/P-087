@@ -859,6 +859,17 @@ def test_create_payload_matches_runpod_types(world, profile):
     assert "allowedCudaVersions" not in controller._payload(store_control(), newest, "qualified-gpu")
 
 
+@pytest.mark.parametrize(("configured", "expected"), [("3", "3"), (None, "1"), ("auto", "1"), ("0", "1"), ("9", "1")])
+def test_pod_runs_the_configured_worker_count_within_bounds(world, profile, tmp_path, configured, expected):
+    controller, *_ = world
+    env = Path(controller.policy.worker_env_file).read_text()
+    env = "\n".join(line for line in env.splitlines() if not line.startswith("STUDIO_WORKERS="))
+    worker_env = tmp_path / "worker.env"
+    worker_env.write_text(env + (f"\nSTUDIO_WORKERS={configured}\n" if configured is not None else "\n"))
+    controller.policy = controller.policy.model_copy(update={"worker_env_file": worker_env})
+    assert controller._payload(store_control(), profile, "qualified-gpu")["env"]["STUDIO_WORKERS"] == expected
+
+
 def store_control():
     from src.services.orchestration.gpu.state import Control
 
