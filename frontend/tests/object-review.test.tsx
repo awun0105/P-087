@@ -538,7 +538,7 @@ describe("ObjectReviewView", () => {
 
     expect(await screen.findByText(/Scene đã đổi ở lượt khác/)).toBeInTheDocument();
     expect(screen.getByText(/Lệnh gắn với revision rev-001/)).toBeInTheDocument();
-    expect(calls("/scene").filter(([url]) => String(url).endsWith("/scene"))).toHaveLength(2);
+    await waitFor(() => expect(calls("/scene").filter(([url]) => String(url).endsWith("/scene"))).toHaveLength(2));
   });
 
   it("nói rõ khi scene cũ chưa có membership và khóa correction commands", async () => {
