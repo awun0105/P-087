@@ -483,25 +483,23 @@ def list_scenes(user: UserRecord | None = Depends(require_contributor)) -> Scene
             can_delete_project = all(
                 owner_mutation_allowed(user, registry.get_job_owner_user_id(job.job_id)) for job in jobs
             )
+        # Mỗi cờ đọc một lần cho scene (mỗi lần đọc preview/lựa chọn vật chạm DB và file).
+        preview_ready = latest is not None and deps.preview_ready(registry, latest.job_id)
+        awaiting_review = latest is not None and awaiting_anonymization_review(latest)
+        awaiting_choice = latest is not None and _awaiting_object_choice(registry, latest)
         scenes.append(
             SceneSummary(
                 project=schemas.project_response(project).model_copy(
                     update={"created_by": with_current_role(project.created_by, actors)}
                 ),
                 latest_job=latest,
-                preview_ready=latest is not None and deps.preview_ready(registry, latest.job_id),
-                awaiting_anonymization_review=latest is not None and awaiting_anonymization_review(latest),
-                awaiting_object_choice=latest is not None and _awaiting_object_choice(registry, latest),
+                preview_ready=preview_ready,
+                awaiting_anonymization_review=awaiting_review,
+                awaiting_object_choice=awaiting_choice,
                 geometry_review=None if latest is None else _geometry_review(registry, latest),
                 next_action=None
                 if latest is None
-                else _list_next_action(
-                    registry,
-                    latest,
-                    deps.preview_ready(registry, latest.job_id),
-                    awaiting_anonymization_review(latest),
-                    _awaiting_object_choice(registry, latest),
-                ),
+                else _list_next_action(registry, latest, preview_ready, awaiting_review, awaiting_choice),
                 processing_seconds=None if latest is None else measured.get(latest.job_id),
                 requested_by=None if latest is None else with_current_role(requester_actors.get(latest.job_id), actors),
                 capabilities=SceneCapabilities(can_delete_project=can_delete_project),
