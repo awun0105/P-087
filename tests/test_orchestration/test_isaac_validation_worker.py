@@ -242,3 +242,37 @@ def test_validation_heartbeat_aborts_on_persistent_errors(monkeypatch) -> None: 
 
     beat = _run_heartbeat(monkeypatch, heartbeat, 3)
     assert beat.reason == "heartbeat_failed" and beat.cancel_event.is_set()
+
+
+def test_validation_wait_fails_after_limit(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001
+    """T-050: a non-busy resource wait longer than the limit fails the run as retryable."""
+    from datetime import timedelta
+
+    registry, submitted, worker, admission, _ = _world(tmp_path)
+    admission.admit_operation = lambda request: SimpleNamespace(
+        status="waiting_resources", reasons={"vram": "gate_error"}
+    )
+    later = submitted.requested_at + timedelta(seconds=1801)
+    monkeypatch.setattr(worker_module, "_now", lambda: later)
+
+    assert worker.process_next() is True
+
+    view = ValidationQueue(registry.persistence.database, registry.runtime_resolver).get(
+        submitted.job_id, submitted.run_id
+    )
+    assert view.status.value == "FAILED"
+    assert view.error_code == "RESOURCE_WAIT_EXCEEDED" and view.retryable is True
+
+
+def test_validation_busy_wait_keeps_waiting(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001
+    from datetime import timedelta
+
+    registry, submitted, worker, admission, _ = _world(tmp_path)
+    admission.admit_operation = lambda request: SimpleNamespace(status="waiting_resources", reasons={"vram": "busy"})
+    monkeypatch.setattr(worker_module, "_now", lambda: submitted.requested_at + timedelta(days=1))
+
+    assert worker.process_next() is False
+    view = ValidationQueue(registry.persistence.database, registry.runtime_resolver).get(
+        submitted.job_id, submitted.run_id
+    )
+    assert view.status.value == "WAITING_RESOURCES"

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import shutil
+from datetime import UTC, datetime
 from pathlib import Path
 from threading import Event, Thread
 from typing import Protocol
@@ -38,6 +39,7 @@ from src.services.orchestration.jobs.admission import (
     OperationAdmissionRequest,
     OperationResourceProfile,
     ResourceAdmission,
+    wait_exceeded,
 )
 from src.services.orchestration.jobs.database import RuntimeStateConflictError
 from src.services.orchestration.jobs.heartbeat import HeartbeatTolerance
@@ -62,6 +64,11 @@ _HEARTBEAT_SECONDS = 20
 _MAX_LOG_BYTES = 64 * 1024 * 1024
 _MAX_OBSERVATION_BYTES = 16 * 1024 * 1024
 _VALIDATOR_VERSION = "r2s-isaac-candidate-validator-1.0"
+
+
+def _now() -> datetime:
+    """Giờ hiện tại (UTC); tách hàm để test thay được."""
+    return datetime.now(UTC)
 
 
 class IsaacProcess(Protocol):
@@ -207,6 +214,14 @@ class IsaacValidationWorker:
         if admitted.status != "admitted":
             if admitted.status == "identity_conflict":
                 self.queue.fail(claim, error_code="ISAAC_RESOURCE_IDENTITY_CONFLICT", retryable=False)
+                return True
+            # T-050: chờ không phải vì máy bận quá hạn → dừng lượt, cho chạy lại. Mốc chờ là lúc yêu cầu kiểm định
+            # (lượt chưa bắt đầu chạy), không cần thêm cột vào bản ghi operation.
+            limit = getattr(self.settings, "product_resource_wait_max_seconds", 1800)
+            reasons = getattr(admitted, "reasons", None) or {}
+            if claim.run.started_at is None and wait_exceeded(reasons, claim.run.requested_at, _now(), limit):
+                self.queue.fail(claim, error_code="RESOURCE_WAIT_EXCEEDED", retryable=True)
+                logger.warning("Isaac validation resource wait exceeded run=%s", claim.run.run_id)
                 return True
             self.queue.wait_for_resources(claim)
             return False
