@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import time
 import zipfile
+from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
 from uuid import uuid4
@@ -147,13 +148,33 @@ class _LodRegistry(Protocol):
 
 
 class LodBuilder:
-    """Worker GPU rảnh thì tạo bộ LOD cho một SOG còn thiếu mỗi lượt; scene nhỏ và lần lỗi được ghi dấu."""
+    """Worker GPU rảnh thì tạo bộ LOD cho một SOG còn thiếu mỗi lượt; scene nhỏ và lần lỗi được ghi dấu.
 
-    def __init__(self, registry: _LodRegistry, cli: Path, workspace: Path, skip_root: Path) -> None:
+    Danh sách ứng viên (đọc mọi job trong DB) chỉ dựng lại mỗi `refresh_seconds`; SOG đã xong / đã bỏ qua được nhớ trong
+    tiến trình. Job đang có lease (runner đang chạy, gồm bước LOD chính thức) thuộc về runner, không đụng tới.
+    """
+
+    def __init__(
+        self,
+        registry: _LodRegistry,
+        cli: Path,
+        workspace: Path,
+        skip_root: Path,
+        *,
+        busy: Callable[[str], bool] | None = None,
+        now: Callable[[], float] = time.monotonic,
+        refresh_seconds: float = 900.0,
+    ) -> None:
         self.registry = registry
         self.cli = cli
         self.workspace = workspace
         self.skip_root = skip_root
+        self.busy = busy or (lambda job_id: False)
+        self.now = now
+        self.refresh_seconds = refresh_seconds
+        self._candidates: list[tuple[str, object]] | None = None
+        self._fetched_at = 0.0
+        self._settled: set[str] = set()
 
     def _skipped(self, checksum: str) -> bool:
         marker = self.skip_root / checksum.removeprefix("sha256:")
@@ -168,23 +189,36 @@ class LodBuilder:
         self.skip_root.mkdir(parents=True, exist_ok=True)
         (self.skip_root / checksum.removeprefix("sha256:")).write_text(reason, encoding="utf-8")
 
+    def _candidates_now(self) -> list[tuple[str, object]]:
+        if self._candidates is None or self.now() - self._fetched_at >= self.refresh_seconds:
+            self._candidates = self.registry.lod_candidates()
+            self._fetched_at = self.now()
+        return self._candidates
+
     def tick(self) -> bool:
         """True khi lượt này đã xử lý một SOG (tạo xong, ghi dấu nhỏ hoặc lỗi)."""
         resolver = self.registry.runtime_resolver
         root = resolver.artifact_root  # type: ignore[attr-defined]
         remote = getattr(resolver, "remote", None)
-        for job_id, reference in self.registry.lod_candidates():
+        for job_id, reference in self._candidates_now():
             checksum = reference.artifact_checksum  # type: ignore[attr-defined]
-            if self._skipped(checksum) or lod_ready(root, remote, job_id, checksum):
+            if checksum in self._settled or self.busy(job_id):
                 continue
+            if small_marked(remote, job_id, checksum) or lod_ready(root, remote, job_id, checksum):
+                self._settled.add(checksum)
+                continue
+            if self._skipped(checksum):
+                continue  # scene nhỏ (cục bộ) hoặc lần lỗi còn trong hạn 24 giờ
             work = self.workspace / checksum.removeprefix("sha256:")
             try:
                 bundle = build_lod_bundle(self.cli, self.registry.resolve_artifact(job_id, reference), work)
                 if bundle is None:
                     self._mark(checksum, "small")
+                    mark_small(remote, root, job_id, checksum)
                 else:
                     publish_lod_bundle(root, remote, job_id, checksum, bundle)  # type: ignore[arg-type]
                     logger.info("Đã tạo bộ LOD job=%s sog=%s", job_id, checksum[:19])
+                self._settled.add(checksum)
             except Exception as error:  # noqa: BLE001 - một SOG lỗi không được chặn worker; thử lại sau một ngày
                 logger.warning("Không tạo được bộ LOD job=%s cause=%s", job_id, type(error).__name__)
                 self._mark(checksum, f"failed:{type(error).__name__}")
@@ -192,6 +226,28 @@ class LodBuilder:
                 shutil.rmtree(work, ignore_errors=True)
             return True
         return False
+
+
+#: Dấu "SOG đủ nhẹ, không cần LOD" trong kho file, để máy GPU khác (pod mới) không tải lại SOG chỉ để đếm điểm.
+SMALL_MARKER = "small"
+
+
+def small_marked(remote: object | None, job_id: str, checksum: str) -> bool:
+    head = getattr(remote, "head", None)
+    return head is not None and head(f"{lod_relative_dir(job_id, checksum)}/{SMALL_MARKER}") is not None
+
+
+def mark_small(remote: object | None, artifact_root: Path, job_id: str, checksum: str) -> None:
+    push = getattr(remote, "push", None)
+    if push is None:
+        return
+    path = artifact_root / lod_relative_dir(job_id, checksum) / SMALL_MARKER
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("small", encoding="utf-8")
+    try:
+        push(f"{lod_relative_dir(job_id, checksum)}/{SMALL_MARKER}", path)
+    except Exception as error:  # noqa: BLE001 - dấu chỉ để tiết kiệm; thiếu thì máy khác kiểm lại
+        logger.warning("Không ghi được dấu SOG nhỏ cause=%s", type(error).__name__)
 
 
 def lod_cli() -> Path | None:
@@ -208,7 +264,15 @@ def idle_lod_builder(registry: _LodRegistry, worker_root: Path) -> LodBuilder | 
     if cli is None:
         return None
     root = registry.runtime_resolver.artifact_root  # type: ignore[attr-defined]
-    return LodBuilder(registry, cli, worker_root / "lod", Path(root).parent / "cache" / "lod-skip")
+    persistence = getattr(registry, "persistence", None)
+    busy = None
+    if persistence is not None:
+        from src.services.orchestration.jobs.lease import has_lease
+
+        def busy(job_id: str) -> bool:
+            return has_lease(persistence.database, job_id)
+
+    return LodBuilder(registry, cli, worker_root / "lod", Path(root).parent / "cache" / "lod-skip", busy=busy)
 
 
 def build_job_view_lods(resolver: object, job_id: str, references: list, cli: Path, workspace: Path) -> int:

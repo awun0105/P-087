@@ -232,3 +232,47 @@ def test_each_build_publishes_into_its_own_folder_and_the_first_index_wins(tmp_p
     for name in names:
         assert lod.valid_bundle_path(name)
         assert f"{lod.lod_relative_dir('job-a', _CHECKSUM)}/{name}" in stored
+
+
+def test_idle_builder_skips_leased_jobs_and_reuses_its_candidate_list(tmp_path, fake_cli) -> None:  # noqa: ANN001
+    """Review fix: the job being finished (live lease) is the runner's; the candidate walk is not redone every tick."""
+    big = "sha256:" + "4" * 64
+    registry = _Registry(tmp_path / "artifacts", {big: _sog(tmp_path / "big.sog", 1_900_000)})
+    walks = []
+    original = registry.lod_candidates
+    registry.lod_candidates = lambda: walks.append(1) or original()
+    busy = {"job-a"}
+    builder = lod.LodBuilder(
+        registry,
+        tmp_path / "cli.mjs",
+        tmp_path / "work",
+        tmp_path / "skip",
+        busy=lambda job: job in busy,
+        now=lambda: 0.0,
+    )
+    assert builder.tick() is False
+    busy.clear()
+    assert builder.tick() is True
+    assert builder.tick() is False
+    assert len(walks) == 1
+
+
+def test_small_scene_marker_is_shared_through_the_object_store(tmp_path, fake_cli) -> None:  # noqa: ANN001
+    """Review fix: a fresh GPU pod must not re-download a small SOG another pod already checked."""
+    small = "sha256:" + "5" * 64
+    objects: dict[str, bytes] = {}
+
+    class Remote:
+        def push(self, relative, path):  # noqa: ANN001, ANN202
+            objects[relative] = path.read_bytes()
+
+        def head(self, relative):  # noqa: ANN001, ANN202
+            return object() if relative in objects else None
+
+    first = _Registry(tmp_path / "pod-a", {small: _sog(tmp_path / "small.sog", 100_000)})
+    first.runtime_resolver.remote = Remote()
+    assert lod.LodBuilder(first, tmp_path / "cli.mjs", tmp_path / "wa", tmp_path / "skip-a").tick() is True
+
+    second = _Registry(tmp_path / "pod-b", {small: tmp_path / "missing.sog"})
+    second.runtime_resolver.remote = first.runtime_resolver.remote
+    assert lod.LodBuilder(second, tmp_path / "cli.mjs", tmp_path / "wb", tmp_path / "skip-b").tick() is False
