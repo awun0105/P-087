@@ -895,7 +895,9 @@ def _target_counts_without_migration(database_url: str) -> dict[str, int]:
         except ImportError as error:
             raise PackagePublishError("PostgreSQL dry-run needs psycopg 3") from error
         try:
-            with psycopg.connect(database_url, autocommit=True, connect_timeout=10) as connection:
+            with psycopg.connect(
+                database_url, autocommit=True, connect_timeout=10, prepare_threshold=None
+            ) as connection:
                 counts: dict[str, int] = {}
                 for table in TARGET_EMPTY_TABLES:
                     exists = connection.execute("SELECT to_regclass(%s)", (table,)).fetchone()[0]

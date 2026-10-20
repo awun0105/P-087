@@ -63,3 +63,11 @@ def test_stale_idle_connection_is_not_reused(database, monkeypatch):
     first = _backend_pid(database)
     monkeypatch.setattr(runtime_database, "_IDLE_SECONDS", -1.0)
     assert _backend_pid(database) != first
+
+
+def test_repeated_statements_are_never_prepared_server_side(database):
+    """Transaction-mode poolers break on prepared statements; psycopg prepares after 5 runs by default."""
+    with database.transaction() as tx:
+        for _ in range(10):
+            tx.execute("SELECT ?::int", (1,)).fetchone()
+        assert tx.execute("SELECT count(*) FROM pg_prepared_statements").fetchone()[0] == 0

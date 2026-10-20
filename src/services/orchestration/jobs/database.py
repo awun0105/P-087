@@ -580,7 +580,12 @@ class RuntimeDatabase:
                 import psycopg
             except ImportError as error:
                 raise RuntimeError("PostgreSQL cần psycopg 3; cài dependency runtime trước khi khởi động") from error
-            return cast(SqlConnection, psycopg.connect(self._connection_url, autocommit=True, connect_timeout=10))
+            # prepare_threshold=None: no server-side prepared statements, so the URL may point at a
+            # transaction-mode pooler (Supabase :6543) where each transaction can land on another backend.
+            return cast(
+                SqlConnection,
+                psycopg.connect(self._connection_url, autocommit=True, connect_timeout=10, prepare_threshold=None),
+            )
         connection = sqlite3.connect(str(self._sqlite_path), timeout=30, isolation_level=None)
         connection.execute("PRAGMA foreign_keys=ON")
         return cast(SqlConnection, connection)
