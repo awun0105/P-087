@@ -11,14 +11,17 @@ from src.services.orchestration.jobs.lease import LEASE_TTL, acquire, has_lease
 from src.services.orchestration.jobs.worker_cli import intentionally_unleased, recover_unwatched_running_jobs
 from tests.test_orchestration.test_job_lease import _registry, _running_job
 
-_LATER = datetime.now(UTC) + LEASE_TTL + timedelta(minutes=1)
+
+def _later() -> datetime:
+    """One lease TTL after now, computed when the test runs (not at import)."""
+    return datetime.now(UTC) + LEASE_TTL + timedelta(minutes=1)
 
 
 def test_running_job_without_lease_older_than_ttl_is_failed_retryable(tmp_path: Path) -> None:
     registry = _registry(tmp_path)
     job = _running_job(registry)
 
-    assert recover_unwatched_running_jobs(registry, now=_LATER) == 1
+    assert recover_unwatched_running_jobs(registry, now=_later()) == 1
 
     failed = registry.get_job(job.job_id)
     error = registry.list_job_attempts(job.job_id)[-1].error
@@ -30,10 +33,10 @@ def test_running_job_without_lease_older_than_ttl_is_failed_retryable(tmp_path: 
 def test_running_job_with_lease_is_untouched(tmp_path: Path) -> None:
     registry = _registry(tmp_path)
     job = _running_job(registry)
-    assert acquire(registry.persistence.database, job.job_id, "worker-a", now=_LATER) is not None
+    assert acquire(registry.persistence.database, job.job_id, "worker-a", now=_later()) is not None
     assert has_lease(registry.persistence.database, job.job_id)
 
-    assert recover_unwatched_running_jobs(registry, now=_LATER) == 0
+    assert recover_unwatched_running_jobs(registry, now=_later()) == 0
     assert registry.get_job(job.job_id).status == JobStatus.RUNNING
 
 
@@ -56,5 +59,5 @@ def test_jobs_waiting_on_purpose_are_untouched(tmp_path: Path, monkeypatch: pyte
     job = _running_job(registry)
     monkeypatch.setattr(worker_cli, wait, lambda candidate: candidate.job_id == job.job_id)
 
-    assert recover_unwatched_running_jobs(registry, now=_LATER) == 0
+    assert recover_unwatched_running_jobs(registry, now=_later()) == 0
     assert registry.get_job(job.job_id).status == JobStatus.RUNNING
