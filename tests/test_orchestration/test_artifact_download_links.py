@@ -219,7 +219,9 @@ def test_upload_sets_immutable_cache_control(tmp_path: Path) -> None:
     uploads: list[dict] = []
     store = S3ObjectStore.__new__(S3ObjectStore)
     store.bucket = "b"
-    store.client = SimpleNamespace(upload_file=lambda path, bucket, key, **options: uploads.append(options["ExtraArgs"]))
+    store.client = SimpleNamespace(
+        upload_file=lambda path, bucket, key, **options: uploads.append(options["ExtraArgs"])
+    )
     file = tmp_path / "x.sog"
     file.write_bytes(b"x")
     store.put_file("jobs/a/x.sog", file, "sha256:" + "0" * 64)
