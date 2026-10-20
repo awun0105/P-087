@@ -4,6 +4,7 @@ import { useState } from "react";
 import { GuardedLink as Link, useNavigationGuard } from "@/features/shell/NavigationGuard";
 import { useAuth } from "@/features/studio/AuthProvider";
 import { GuestQuotaStatus } from "@/features/studio/auth/GuestQuotaStatus";
+import { isTrialGuest } from "@/features/studio/auth/trialGuest";
 import { PageHeader, ErrorFeedback, HelpDetails } from "@/components/studio/feedback";
 import { Badge, Button, Card, EmptyState, buttonVariants } from "@/components/studio/primitives";
 import { errorMessage } from "@/lib/ui-error";
@@ -27,7 +28,7 @@ export function AccountPage() {
         </dl>
       </Card>
       {me.user.role === "guest" && <GuestQuotaStatus quota={me.quota} />}
-      <HelpDetails title="Quyền của tài khoản">{me.user.role === "reviewer" ? "Reviewer có quyền của Editor và thêm quyền quản lý nhóm, quyết định duyệt trên đúng gói đã validation." : me.user.role === "guest" ? "Guest có thể tạo job và thao tác trên job mình tạo; không được chỉnh sửa hoặc xóa job của người khác. Mỗi ngày có tối đa 3 lượt tạo scene/job hoặc Retry thủ công." : "Editor tải dữ liệu, tạo job, xác nhận tỉ lệ và chỉnh scene. Quyết định phát hành thuộc Reviewer."}<p>Thay đổi vật thể tạo revision mới; gói và kết quả duyệt trước đó phải được đối chiếu lại.</p></HelpDetails>
+      <HelpDetails title="Quyền của tài khoản">{me.user.role === "reviewer" ? "Reviewer có quyền của Editor và thêm quyền quản lý nhóm, quyết định duyệt trên đúng gói đã validation." : me.user.role === "guest" ? `Guest xem được mọi scene trong hệ thống. Guest có thể tạo job và thao tác trên job mình tạo; không được chỉnh sửa hoặc xóa job của người khác. Mỗi ngày có tối đa 3 lượt tạo scene/job hoặc Retry thủ công.${isTrialGuest(me.user.email) ? " Đây là tài khoản dùng thử gắn với trình duyệt này: xóa dữ liệu trình duyệt hoặc dùng trình duyệt khác sẽ không vào lại được tài khoản này." : ""}` : "Editor tải dữ liệu, tạo job, xác nhận tỉ lệ và chỉnh scene. Quyết định phát hành thuộc Reviewer."}<p>Thay đổi vật thể tạo revision mới; gói và kết quả duyệt trước đó phải được đối chiếu lại.</p></HelpDetails>
       {error && <ErrorFeedback message={error} />}
       <Button variant="secondary" disabled={busy} onClick={() => void navigate(() => { void signOut(); }, undefined, true)}><LogOut aria-hidden />{busy ? "Đang đăng xuất…" : "Đăng xuất"}</Button>
     </>}

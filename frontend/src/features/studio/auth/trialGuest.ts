@@ -15,6 +15,11 @@ interface TrialCredentials {
   password: string;
 }
 
+/** Tài khoản do "Dùng thử ngay" tạo (email ngẫu nhiên trên miền riêng), để trang hồ sơ giải thích nó gắn với trình duyệt. */
+export function isTrialGuest(email: string): boolean {
+  return email.endsWith(`@${TRIAL_EMAIL_DOMAIN}`);
+}
+
 function randomToken(bytes: number): string {
   const values = crypto.getRandomValues(new Uint8Array(bytes));
   return Array.from(values, (value) => value.toString(16).padStart(2, "0")).join("");

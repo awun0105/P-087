@@ -323,10 +323,6 @@ export function LoginForm() {
           >
             Dùng thử ngay
           </button>
-          <p className="mt-2 text-center font-ui text-xs leading-5 text-muted-foreground">
-            Không cần đăng ký. Bạn nhận một tài khoản Khách riêng trên trình duyệt này: xem được các scene trong hệ
-            thống, chỉ sửa được scene của mình, và có hạn mức xử lý mỗi ngày.
-          </p>
         </div>
       )}
     </Shell>
