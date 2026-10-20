@@ -11,6 +11,9 @@ import { AnonymizationReviewPanel } from "@/features/studio/scene/AnonymizationR
 import { AttemptHistory } from "@/features/studio/scene/AttemptHistory";
 import { ProgressFrame } from "@/features/studio/scene/ProgressFrame";
 import { useObjectify } from "@/features/studio/scene/objectifyContext";
+import { timelineFromSteps } from "@/features/studio/scene/pipeline";
+import { usePipelineView } from "@/features/studio/scene/pipelineContext";
+import { stepActions } from "@/features/studio/scene/stepActions";
 import { geometryReviewStep, objectifyStageOverride, type GeometryStep } from "@/features/studio/scene/useObjectify";
 import { QueueStatus } from "@/features/studio/scene/QueueStatus";
 import { ResourceWaitDetail } from "@/features/studio/scene/ResourceWaitDetail";
@@ -42,6 +45,7 @@ export function ProgressTab({ jobId, progress, info, busy, canCancel, canAccept 
   retryHint?: string;
 }) {
   const reviewing = progress?.waiting_for === "anonymization_review";
+  const pipelineView = usePipelineView();
   const now = useNow((progress?.status === "RUNNING" || progress?.status === "QUEUED") && !progress?.waiting_for);
   const stale = isJobStale(progress, now);
   // Bước "Tách vật thể" luôn ghi thành công vì scene đã được tạo; nếu tách theo vật lỗi hết số lần thử thì hàng bước đó
@@ -111,6 +115,31 @@ export function ProgressTab({ jobId, progress, info, busy, canCancel, canAccept 
       onClick: () => document.getElementById(ANONYMIZATION_PANEL_ID)?.scrollIntoView({ behavior: "smooth", block: "start" }),
     });
   }
+  // T-061: trong trang scene, dòng tiến trình vẽ từ bước thật của backend và nút đến từ `next_action`.
+  const fromPipeline = pipelineView ? timelineFromSteps(pipelineView, now) : null;
+  const shownStages = fromPipeline?.stages ?? timelineViews;
+  const shownList = fromPipeline?.stageList ?? stageList;
+  const shownActions = pipelineView
+    ? stepActions(
+        pipelineView,
+        {
+          confirmMetric: onConfirmMetric,
+          openStudio: onOpenStudio,
+          showAnonymization: () => document.getElementById(ANONYMIZATION_PANEL_ID)?.scrollIntoView({ behavior: "smooth", block: "start" }),
+          retryJob: onRetry,
+          ...(canAccept
+            ? {
+                retryGeometry: () => void objectify.send("geometry", pipelineView.scene_revision ?? undefined),
+                cancelOperation: () => void objectify.cancel(),
+                rerunObjectify: () => void objectify.send("objectify"),
+                useBoxes: () => void objectify.send("boxes"),
+              }
+            : {}),
+        },
+        objectify.sending,
+        { retryDisabled, retryHint },
+      )
+    : stageActions;
   return <div className="mx-auto max-w-5xl space-y-4 px-4 py-6 sm:px-6">
     <ProgressFrame hint="Bấm tên bước đã xong để mở Xem giai đoạn; bước lỗi hoặc cần bạn thao tác có nút ngay tại bước đó.">
       {reviewing && <div id={ANONYMIZATION_PANEL_ID} className="scroll-mt-4"><AnonymizationReviewPanel key={jobId + ":" + progress.attempt} jobId={jobId} canAccept={canAccept} onAccepted={() => onChanged?.()} /></div>}
@@ -125,7 +154,7 @@ export function ProgressTab({ jobId, progress, info, busy, canCancel, canAccept 
       {objectify.error && objectOverride && <Notice tone="rust" className="mb-4">{objectify.error}</Notice>}
       {progress ? (
         <>
-          <PipelineTimeline stageActions={stageActions} stages={timelineViews} stageList={stageList} jobId={jobId} isStale={stale} timeNote={"Cập nhật lúc " + new Date(progress.updated_at).toLocaleTimeString("vi-VN") + (stale ? " · Tiến trình mất kết nối" : progress.status === "RUNNING" || progress.status === "QUEUED" ? " · Có thể đóng trang, job tiếp tục chạy trên máy chủ" : "")} />
+          <PipelineTimeline stageActions={shownActions} stages={shownStages} stageList={shownList} jobId={jobId} isStale={stale} timeNote={"Cập nhật lúc " + new Date(progress.updated_at).toLocaleTimeString("vi-VN") + (stale ? " · Tiến trình mất kết nối" : progress.status === "RUNNING" || progress.status === "QUEUED" ? " · Có thể đóng trang, job tiếp tục chạy trên máy chủ" : "")} />
         </>
       ) : <p role="status" className="text-sm text-ink-muted">Đang tải tiến trình…</p>}
       {canCancel && <div className="mt-4 flex justify-end gap-3">

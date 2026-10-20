@@ -28,17 +28,37 @@ vi.mock("@/lib/api/value", () => ({ postOperatorTime: vi.fn(async () => undefine
 
 const ref = (type: string, path: string, stage = "ST-VISUAL-RECON") => ({ artifact_type: type, schema_version: "1.0", job_id: "job-1", producer_stage: stage, artifact_uri: "artifact://jobs/job-1/attempts/a1/" + path, artifact_checksum: "sha256:" + "a".repeat(64), data_class: "derived" });
 
-/** T-060: trang scene đọc `/pipeline`; bọc tiến trình giả thành phản hồi pipeline. */
+/** T-060/T-061: trang scene đọc `/pipeline`; dựng phản hồi giống backend từ tiến trình giả (bước + việc tiếp theo). */
+const STUDIO_STEP_IDS = ["ST-INPUT-VALIDATE", "ST-PRIVACY-GATE", "ST-FRAME-EXTRACT", "ST-CAMERA-POSE", "ST-VISUAL-RECON", "ST-METRIC-CANONICALIZE", "ST-RGB-GEOMETRY", "ST-OBJECT-EXTRACT"];
 function pipelineOf(data: unknown) {
-  const progress = data as { job_id: string };
+  const progress = data as {
+    job_id: string; status: string; waiting_for?: string | null;
+    error?: { stage_id: string; retryable: boolean } | null;
+    stages?: { stage_id: string; state: string; started_at?: string | null; completed_at?: string | null; error?: unknown }[];
+  };
+  const known = new Map((progress.stages ?? []).map((stage) => [stage.stage_id, stage]));
+  const steps = STUDIO_STEP_IDS.map((id) => {
+    const stage = known.get(id);
+    const failed = progress.status === "FAILED" && progress.error?.stage_id === id;
+    return {
+      step_id: id, actor: id === "ST-METRIC-CANONICALIZE" ? "user" : "system",
+      state: failed ? "failed" : stage?.state ?? "pending", started_at: stage?.started_at ?? null, completed_at: stage?.completed_at ?? null,
+      timing_source: "inferred", phase: null, error: stage?.error ?? null, note: null,
+    };
+  });
+  const kind = progress.status === "FAILED" ? (progress.error?.retryable ? "retry_job" : "job_failed")
+    : progress.status === "CANCELLED" ? "job_cancelled"
+    : progress.waiting_for === "metric_confirmation" ? "confirm_metric"
+    : progress.waiting_for === "anonymization_review" ? "review_anonymization"
+    : progress.status === "SUCCEEDED" ? "scene_ready" : "wait_system";
   return {
     ok: true as const,
     data: {
       notModified: false as const,
       etag: null,
       view: {
-        job_id: progress.job_id, scene_revision: null, usable: false, steps: [], current_step: null, wait: null, version: "v",
-        next_action: { kind: "wait_system" as const, step_id: null, owner: "system" as const, pending_count: null },
+        job_id: progress.job_id, scene_revision: null, usable: false, steps, current_step: null, wait: null, version: "v",
+        next_action: { kind, step_id: null, owner: kind === "wait_system" ? "system" : "user", pending_count: null },
         progress: data, objectify: null, gpu: null,
       },
     },

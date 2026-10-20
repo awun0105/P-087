@@ -55,3 +55,22 @@ describe("getJobPipeline (T-060)", () => {
     expect(result.ok && !result.data.notModified && result.data.view.next_action.kind).toBe("wait_system");
   });
 });
+
+describe("timeline rows from backend steps (T-061)", () => {
+  it("keeps the backend order, adds no fake rows and shows durations for system steps only", async () => {
+    const { timelineFromSteps } = await import("@/features/studio/scene/pipeline");
+    const base = view("review_objects", "user");
+    const steps = [
+      { step_id: "ST-OBJECT-EXTRACT", actor: "system", state: "succeeded", started_at: "2026-10-20T08:00:00Z", completed_at: "2026-10-20T08:02:00Z", timing_source: "recorded", phase: null, error: null, note: null },
+      { step_id: "ST-OBJECT-CONFIRM", actor: "user", state: "waiting", started_at: "2026-10-20T08:02:00Z", completed_at: null, timing_source: "inferred", phase: null, error: null, note: null },
+      { step_id: "ST-SCENE-DECOMPOSE", actor: "system", state: "queued", started_at: null, completed_at: null, timing_source: "none", phase: null, error: null, note: null },
+    ] as PipelineView["steps"];
+    const { stages, stageList } = timelineFromSteps({ ...base, steps }, Date.parse("2026-10-20T08:12:00Z"));
+    expect(stageList.map((meta) => meta.id)).toEqual(["ST-OBJECT-EXTRACT", "ST-OBJECT-CONFIRM", "ST-SCENE-DECOMPOSE"]);
+    expect(stages[0].seconds).toBe(120);
+    expect(stages[1].seconds).toBeNull();
+    expect(stages[1].note).toContain("Chờ bạn 10 phút");
+    expect(stages[2].state).toBe("pending");
+    expect(stages[2].note).toContain("Đang chờ máy xử lý");
+  });
+});
