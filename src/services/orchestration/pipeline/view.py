@@ -167,7 +167,7 @@ def compose_steps(
 
     extract_index = next((index for index, step in enumerate(steps) if step.step_id == StageId.OBJECT_EXTRACT), None)
     if extract_index is None or objectify is None:
-        return steps
+        return _with_view_lod(steps, marks, progress.attempt)
     extract = steps[extract_index]
     if objectify.status in _ACTIVE and objectify.mode in {"objectify", "boxes"}:
         extract = extract.model_copy(
@@ -188,15 +188,48 @@ def compose_steps(
     steps[extract_index] = extract
     if geometry is not None and steps[extract_index].state == "succeeded":
         steps.extend(_geometry_steps(extract, objectify, geometry, marks))
-    return steps
+    return _with_view_lod(steps, marks, progress.attempt)
+
+
+def _with_view_lod(steps: list[PipelineStep], marks: Sequence[StepMark], attempt: int) -> list[PipelineStep]:
+    """T-070: bước tạo bộ LOD của lượt hiện tại, ngay sau Tách vật; lỗi hiện là bỏ qua (scene vẫn xem bằng SOG gốc)."""
+    mark = next(
+        (
+            item
+            for item in marks
+            if item.run_kind == "pipeline" and item.step_id == StageId.VIEW_LOD.value and item.run_id == str(attempt)
+        ),
+        None,
+    )
+    if mark is None or mark.started_at is None:
+        return steps
+    state: StepState = (
+        "running" if mark.completed_at is None else "succeeded" if mark.outcome == "succeeded" else "skipped"
+    )
+    step = PipelineStep(
+        step_id=StageId.VIEW_LOD,
+        actor="system",
+        state=state,
+        started_at=mark.started_at,
+        completed_at=mark.completed_at,
+        timing_source="recorded",
+        note="Không tạo được; scene mở bằng bản gốc." if state == "skipped" else None,
+    )
+    after = next((index for index, item in enumerate(steps) if item.step_id == StageId.OBJECT_EXTRACT), None)
+    index = len(steps) if after is None else after + 1
+    return [*steps[:index], step, *steps[index:]]
 
 
 def current_step(steps: Sequence[PipelineStep]) -> StageId | None:
-    """Bước đầu tiên đang cần chú ý (đang chạy, chờ máy, chờ người hoặc lỗi)."""
-    return next(
-        (step.step_id for step in steps if step.state in {"running", "queued", "waiting", "failed"}),
-        None,
-    )
+    """Bước đầu tiên đang cần chú ý (đang chạy, chờ máy, chờ người hoặc lỗi).
+
+    Bước tạo bộ LOD chạy sau khi scene đã xem được nên chỉ là bước hiện tại khi không còn bước nào khác cần chú ý.
+    """
+    attention = {"running", "queued", "waiting", "failed"}
+    found = next((step.step_id for step in steps if step.state in attention and step.step_id != StageId.VIEW_LOD), None)
+    if found is not None:
+        return found
+    return next((step.step_id for step in steps if step.state in attention), None)
 
 
 def is_usable(job_status: JobStatus, geometry: ObjectGeometryState | None, awaiting_choice: bool) -> bool:

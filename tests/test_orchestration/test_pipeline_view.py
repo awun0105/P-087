@@ -257,3 +257,53 @@ def test_lidar_odometry_stage_is_listed(job) -> None:  # noqa: ANN001
         completed_at=_T0,
     )
     assert StageId.LIDAR_ODOMETRY in studio_pipeline(job.model_copy(update={"stage_artifacts": [odometry]}))
+
+
+def _lod_mark(*, completed: bool, outcome: str | None, run: str = "1") -> StepMark:
+    return StepMark(
+        job_id="job-a",
+        run_kind="pipeline",
+        run_id=run,
+        step_id="ST-VIEW-LOD",
+        started_at=_T0,
+        completed_at=_T0 + timedelta(minutes=3) if completed else None,
+        outcome=outcome,
+    )
+
+
+def test_view_lod_step_follows_object_extract_and_yields_to_user_steps(job) -> None:  # noqa: ANN001
+    """T-070: the LOD step shows after object extraction while it runs, but the user's own step stays current."""
+    steps = compose_steps(
+        _progress(_done_until(StageId.OBJECT_EXTRACT), status=JobStatus.SUCCEEDED),
+        job,
+        [_lod_mark(completed=False, outcome=None)],
+        _objectify(object_geometry="awaiting_review"),
+        "awaiting_review",
+    )
+    ids = _ids(steps)
+    assert ids[ids.index("ST-OBJECT-EXTRACT") + 1] == "ST-VIEW-LOD"
+    lod_step = steps[ids.index("ST-VIEW-LOD")]
+    assert (lod_step.state, lod_step.actor, lod_step.timing_source) == ("running", "system", "recorded")
+    assert current_step(steps) == StageId.OBJECT_CONFIRM
+
+
+def test_view_lod_step_is_current_when_nothing_else_needs_attention(job) -> None:  # noqa: ANN001
+    steps = compose_steps(
+        _progress(_done_until(StageId.OBJECT_EXTRACT), status=JobStatus.SUCCEEDED),
+        job,
+        [_lod_mark(completed=False, outcome=None)],
+        None,
+        None,
+    )
+    assert current_step(steps) == StageId.VIEW_LOD
+
+
+def test_view_lod_failure_is_skipped_not_failed_and_absent_without_marks(job) -> None:  # noqa: ANN001
+    progress = _progress(_done_until(StageId.OBJECT_EXTRACT), status=JobStatus.SUCCEEDED)
+    failed = compose_steps(progress, job, [_lod_mark(completed=True, outcome="failed")], None, None)
+    assert next(step for step in failed if step.step_id == StageId.VIEW_LOD).state == "skipped"
+    assert "ST-VIEW-LOD" not in _ids(compose_steps(progress, job, [], None, None))
+    old_attempt = compose_steps(
+        progress.model_copy(update={"attempt": 2}), job, [_lod_mark(completed=True, outcome="succeeded")], None, None
+    )
+    assert "ST-VIEW-LOD" not in _ids(old_attempt)

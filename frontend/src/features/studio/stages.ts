@@ -151,6 +151,14 @@ export const SCENE_DECOMPOSE_STAGE: StageMeta = {
   description: "Dựng bề mặt, lưới va chạm từng vật và vá nền. Xong bước này mới đi bộ (Walk) và xuất gói được.",
 };
 
+/** Bước hệ thống tạo bộ LOD sau khi scene đã xem được (T-070): scene lớn mở nhanh rồi mịn dần, đủ chất lượng. */
+export const VIEW_LOD_STAGE: StageMeta = {
+  id: "ST-VIEW-LOD",
+  title: "Chuẩn bị xem 3D mượt",
+  short: "Chuẩn bị xem",
+  description: "Tạo các mức chi tiết cho bản 3D lớn để lần mở sau hiện ngay rồi mịn dần, xoay không giật. Scene đã xem được trong lúc này.",
+};
+
 const EXTRA_STAGES: readonly StageMeta[] = [
   LIDAR_STAGE,
   LIDAR_ODOMETRY_STAGE,
@@ -158,6 +166,7 @@ const EXTRA_STAGES: readonly StageMeta[] = [
   ANONYMIZATION_REVIEW_STAGE,
   OBJECT_CONFIRM_STAGE,
   SCENE_DECOMPOSE_STAGE,
+  VIEW_LOD_STAGE,
 ];
 
 export function stageMeta(id: StageId): StageMeta | undefined {

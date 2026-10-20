@@ -163,6 +163,8 @@ class StageId(StrEnum):
     ISAAC_VALIDATE = "ST-ISAAC-VALIDATE"
     REVIEW = "ST-REVIEW"
     RELEASE = "ST-RELEASE"
+    #: T-070: tạo bộ LOD để xem scene lớn mượt (sau khi job xong, trong cùng lượt chạy); không phải stage của manifest.
+    VIEW_LOD = "ST-VIEW-LOD"
 
 
 class JobStatus(StrEnum):

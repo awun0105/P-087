@@ -73,6 +73,7 @@ from src.services.orchestration.artifacts import (
     ArtifactResolver,
     ArtifactStoreError,
     FilesystemArtifactStore,
+    lod,
     sha256_bytes,
 )
 from src.services.orchestration.benchmark import build_benchmark, publish_benchmark
@@ -1787,6 +1788,38 @@ def _extract_scene_stage(
         return []
 
 
+def _build_view_lods(attempt: _Attempt) -> None:
+    """Bước T-070 (sau khi job xong): bộ LOD cho các SOG lớn của job; lỗi chỉ ghi mốc, không làm hỏng job."""
+    cli = lod.lod_cli()
+    persistence = attempt.registry.persistence
+    if cli is None or persistence is None:
+        return  # máy không có GPU / runtime: bộ dựng chạy ngầm trên worker GPU sẽ bù
+    job_id = attempt.job.job_id
+    try:
+        run_id = str(persistence.list_attempts(job_id)[-1].attempt)
+    except Exception as error:  # noqa: BLE001 - mốc bước là đo đạc, không được làm hỏng job đã xong
+        logger.warning("Không đọc được lượt chạy cho bước LOD cause=%s", type(error).__name__)
+        return
+    step = StageId.VIEW_LOD.value
+    record_marks(persistence.database, job_id, "pipeline", run_id, [MarkWrite("start", step, datetime.now(UTC))])
+    outcome = "succeeded"
+    try:
+        built = lod.build_job_view_lods(
+            attempt.registry.runtime_resolver,
+            job_id,
+            attempt.registry.viewable_sogs(job_id),
+            cli,
+            Path(attempt.settings.product_worker_root) / "lod",
+        )
+        logger.info("Bước LOD job=%s đã tạo %d bộ", job_id, built)
+    except Exception as error:  # noqa: BLE001 - scene vẫn xem bằng SOG gốc; bộ dựng ngầm thử lại sau
+        outcome = "failed"
+        logger.warning("Không tạo được bộ LOD job=%s cause=%s", job_id, type(error).__name__)
+    record_marks(
+        persistence.database, job_id, "pipeline", run_id, [MarkWrite("finish", step, datetime.now(UTC), outcome)]
+    )
+
+
 def run_finalize_job(job_id: str, *, expected_checksum: str | None = None) -> JobManifest:
     """Sau xác nhận tỉ lệ: REC-06 canonical → REC-05 geometry → REC-10 bundle; job kết thúc.
 
@@ -1871,6 +1904,8 @@ def run_finalize_job(job_id: str, *, expected_checksum: str | None = None) -> Jo
                 if result.error is None and extra:
                     _cleanup_attempt_workspace(attempt)
                 if completed.status == JobStatus.SUCCEEDED:
+                    # T-070: scene đã xem được; tạo bộ LOD trong cùng lượt (vẫn giữ lease nên máy GPU không bị tắt).
+                    _build_view_lods(attempt)
                     _cleanup_finished_job(attempt)
             return _requeue_if_exhausted(attempt) or completed
         except BaseException as error:

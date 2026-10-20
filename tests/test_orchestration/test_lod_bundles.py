@@ -174,3 +174,22 @@ def test_idle_builder_only_on_a_gpu_worker_with_the_runtime(tmp_path, monkeypatc
     assert isinstance(lod.idle_lod_builder(registry, tmp_path / "worker"), lod.LodBuilder)
     monkeypatch.delenv("R2S_VOXEL_CLI")
     assert lod.idle_lod_builder(registry, tmp_path / "worker") is None
+
+
+def test_job_view_lods_builds_each_large_sog_once(tmp_path, fake_cli) -> None:  # noqa: ANN001
+    """T-070 pipeline step: every large SOG of the finished job gets a bundle; small or ready ones are skipped."""
+    from types import SimpleNamespace
+
+    big, small = "sha256:" + "e" * 64, "sha256:" + "f" * 64
+    paths = {big: _sog(tmp_path / "big.sog", 1_900_000), small: _sog(tmp_path / "small.sog", 100_000)}
+    resolver = SimpleNamespace(
+        artifact_root=tmp_path / "artifacts", remote=None, require=lambda ref: paths[ref.artifact_checksum]
+    )
+    refs = [
+        SimpleNamespace(artifact_checksum=big),
+        SimpleNamespace(artifact_checksum=small),
+        SimpleNamespace(artifact_checksum=big),
+    ]
+    assert lod.build_job_view_lods(resolver, "job-a", refs, tmp_path / "cli.mjs", tmp_path / "work") == 1
+    assert lod.lod_ready(tmp_path / "artifacts", None, "job-a", big)
+    assert lod.build_job_view_lods(resolver, "job-a", refs, tmp_path / "cli.mjs", tmp_path / "work") == 0

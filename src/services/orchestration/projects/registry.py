@@ -2012,13 +2012,15 @@ class ProjectRegistry:
         for project in self.list_projects():
             for job in reversed(self.list_jobs(project.project_id)):
                 try:
-                    references = self._product_visible_references(job.job_id)
+                    found.extend((job.job_id, reference) for reference in self.viewable_sogs(job.job_id))
                 except (ArtifactStoreError, ValueError, JobNotFoundError):
                     continue
-                found.extend(
-                    (job.job_id, reference) for uri, reference in sorted(references.items()) if uri.endswith(".sog")
-                )
         return found
+
+    def viewable_sogs(self, job_id: str) -> list[ArtifactRef]:
+        """SOG trong allow-list của job: bản xem 3DGS các bước và môi trường của scene."""
+        references = self._product_visible_references(job_id)
+        return [reference for uri, reference in sorted(references.items()) if uri.endswith(".sog")]
 
     def authorized_sog_by_checksum(self, job_id: str, checksum: str) -> ArtifactRef:
         """SOG trong allow-list của job có đúng checksum (đường dẫn bộ LOD chỉ mang checksum)."""

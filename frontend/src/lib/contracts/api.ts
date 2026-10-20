@@ -36,6 +36,7 @@ export const STAGE_IDS = [
   "ST-ISAAC-VALIDATE",
   "ST-REVIEW",
   "ST-RELEASE",
+  "ST-VIEW-LOD",
 ] as const;
 export type StageId = (typeof STAGE_IDS)[number];
 

@@ -177,10 +177,38 @@ class LodBuilder:
         return False
 
 
-def idle_lod_builder(registry: _LodRegistry, worker_root: Path) -> LodBuilder | None:
-    """Bộ dựng LOD cho worker này; None khi máy không có GPU (`nvidia-smi`) hoặc runtime splat-transform."""
+def lod_cli() -> Path | None:
+    """CLI splat-transform khi máy này tạo được bộ LOD (có GPU — `nvidia-smi`); None nếu không."""
     value = runtime_env(os.environ, "R2S_VOXEL_CLI")
     if not value or not Path(value).is_file() or shutil.which("nvidia-smi") is None:
         return None
+    return Path(value)
+
+
+def idle_lod_builder(registry: _LodRegistry, worker_root: Path) -> LodBuilder | None:
+    """Bộ dựng LOD chạy lúc rảnh cho worker này (bù job cũ và SOG tạo sau khi job xong); None khi máy không tạo được."""
+    cli = lod_cli()
+    if cli is None:
+        return None
     root = registry.runtime_resolver.artifact_root  # type: ignore[attr-defined]
-    return LodBuilder(registry, Path(value), worker_root / "lod", Path(root).parent / "cache" / "lod-skip")
+    return LodBuilder(registry, cli, worker_root / "lod", Path(root).parent / "cache" / "lod-skip")
+
+
+def build_job_view_lods(resolver: object, job_id: str, references: list, cli: Path, workspace: Path) -> int:
+    """Bước pipeline T-070: tạo bộ LOD cho các SOG lớn của job vừa xong; trả số bộ đã tạo. Lỗi để bên gọi xử lý."""
+    root = resolver.artifact_root  # type: ignore[attr-defined]
+    remote = getattr(resolver, "remote", None)
+    built = 0
+    for checksum in dict.fromkeys(reference.artifact_checksum for reference in references):
+        if lod_ready(root, remote, job_id, checksum):
+            continue
+        reference = next(item for item in references if item.artifact_checksum == checksum)
+        work = workspace / checksum.removeprefix("sha256:")
+        try:
+            bundle = build_lod_bundle(cli, resolver.require(reference), work)  # type: ignore[attr-defined]
+            if bundle is not None:
+                publish_lod_bundle(root, remote, job_id, checksum, bundle)
+                built += 1
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+    return built

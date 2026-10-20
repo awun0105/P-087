@@ -73,4 +73,17 @@ describe("timeline rows from backend steps (T-061)", () => {
     expect(stages[2].state).toBe("pending");
     expect(stages[2].note).toContain("Đang chờ máy xử lý");
   });
+
+  it("names the LOD step and shows how long it has run (T-070)", async () => {
+    const { timelineFromSteps } = await import("@/features/studio/scene/pipeline");
+    const { STAGE_IDS } = await import("@/lib/contracts/api");
+    expect(STAGE_IDS).toContain("ST-VIEW-LOD");
+    const base = view("review_objects", "user");
+    const steps = [
+      { step_id: "ST-VIEW-LOD", actor: "system", state: "running", started_at: "2026-10-20T08:10:00Z", completed_at: null, timing_source: "recorded", phase: null, error: null, note: null },
+    ] as PipelineView["steps"];
+    const { stages, stageList } = timelineFromSteps({ ...base, steps }, Date.parse("2026-10-20T08:12:00Z"));
+    expect(stageList[0].title).toBe("Chuẩn bị xem 3D mượt");
+    expect(stages[0].seconds).toBe(120);
+  });
 });
