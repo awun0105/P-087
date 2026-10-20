@@ -23,6 +23,8 @@ class Control:
     idle_since: float | None = None
     created_at: float = 0
     attempts: int = 0
+    #: Lần liên tiếp RunPod hết máy hợp lệ: chỉ để giãn thời gian thử lại, không tính vào `attempts` và không dừng thuê.
+    inventory_misses: int = 0
     retry_at: float = 0
     drain: bool = False
     error: str = ""

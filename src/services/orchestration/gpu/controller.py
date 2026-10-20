@@ -1,19 +1,23 @@
 """One-Pod reconciler. Provider calls never run inside a database transaction."""
 
 import json
+import logging
 import math
 import secrets
 from collections.abc import Callable
 from dataclasses import replace
+from pathlib import Path
 from uuid import uuid4
 
 from dotenv import dotenv_values
 
-from src.services.orchestration.gpu.catalog import ReleaseCatalog, ReleaseProfile
+from src.services.orchestration.gpu.catalog import ReleaseCatalog, ReleaseProfile, load_catalog
 from src.services.orchestration.gpu.config import GpuSettings
 from src.services.orchestration.gpu.provider import Provider, ProviderError
 from src.services.orchestration.gpu.state import Control, StateStore
 from src.services.orchestration.gpu.workload import Workload
+
+logger = logging.getLogger(__name__)
 
 WORKER_KEYS = frozenset(
     {
@@ -53,6 +57,17 @@ WORKER_KEYS = frozenset(
 _RUNPOD_NEWEST_CUDA_FILTER = "13.0"
 
 
+#: Empty inventory is the provider's state, not a fault: retry after 5, 10, 20, then every 30 minutes, never drain.
+_INVENTORY_RETRY_FIRST_SECONDS = 300
+_INVENTORY_RETRY_MAX_SECONDS = 1800
+#: An ambiguous create with no Pod under its unique name after this long was never allocated; retire it automatically.
+_UNKNOWN_CREATE_GRACE_SECONDS = 300
+
+
+def _inventory_retry_seconds(misses: int) -> float:
+    return min(_INVENTORY_RETRY_MAX_SECONDS, _INVENTORY_RETRY_FIRST_SECONDS * 2 ** max(0, misses - 1))
+
+
 #: Upper bound for workers on one managed Pod; each worker re-checks VRAM/RAM before it claims, so the count only caps
 #: parallelism. `auto` is refused: the operator picks the number for the qualified GPU profile.
 _MAX_WORKERS_PER_POD = 4
@@ -82,9 +97,32 @@ class Controller:
         catalog: ReleaseCatalog,
         provider: Provider,
         workload: Callable[[], Workload],
+        catalog_path: Path | None = None,
     ) -> None:
         self.store, self.policy, self.catalog, self.provider, self.workload = store, policy, catalog, provider, workload
         self.owner = uuid4().hex
+        self.catalog_path = catalog_path
+        self._catalog_stamp = self._stamp()
+
+    def _stamp(self) -> tuple[int, int] | None:
+        try:
+            info = self.catalog_path.stat() if self.catalog_path is not None else None
+        except OSError:
+            return None
+        return (info.st_mtime_ns, info.st_size) if info is not None else None
+
+    def _reload_catalog(self) -> None:
+        """Pick up a newly installed release catalog without restarting the API; a bad file keeps the old one."""
+        stamp = self._stamp()
+        if self.catalog_path is None or stamp is None or stamp == self._catalog_stamp:
+            return
+        try:
+            self.catalog = load_catalog(self.catalog_path)
+        except (OSError, ValueError) as error:
+            logger.error("gpu_controller catalog reload rejected category=%s", type(error).__name__)
+            return
+        self._catalog_stamp = stamp
+        logger.info("gpu_controller catalog reloaded profiles=%s", [p.name for p in self.catalog.profiles])
 
     def _save(self, snapshot: Control) -> bool:
         with self.store.locked() as (tx, current, now):
@@ -172,9 +210,31 @@ class Controller:
             current.profile_payload, current.workers, current.idle_since = {}, {}, None
             current.phase_since, current.estimated_usd = stamp, 0
             current.error, current.retry_at = error.category, stamp + error.retry_after
-            if current.attempts >= self.policy.max_provision_attempts:
-                current.drain = True  # Same circuit breaker as an empty inventory: operator resumes.
+            if error.category == "inventory_unavailable":
+                # Capacity vanished between quote and create: wait it out like an empty quote, never drain.
+                current.attempts = max(0, current.attempts - 1)
+                current.inventory_misses += 1
+                current.retry_at = stamp + max(error.retry_after, _inventory_retry_seconds(current.inventory_misses))
+            elif current.attempts >= self.policy.max_provision_attempts:
+                current.drain = True  # A refusal that is not capacity needs an operator before spending more.
         return "create_refused"
+
+    def _retire_unallocated(self, c: Control, error: str, *, as_leader: bool = True) -> str:
+        """Retire an intent proven to own no Pod, keeping its history; the next tick may provision again.
+
+        The operator command (`as_leader=False`) does not take leadership from a running controller.
+        """
+        with self.store.locked() as (tx, current, stamp):
+            if as_leader and current.owner != self.owner:
+                return "follower"
+            if current.intent != c.intent or current.pod or current.state not in {"unknown", "provisioning"}:
+                return "changed"
+            retired = replace(current, state="terminated", phase_seconds=dict(current.phase_seconds))
+            self.store.history(tx, retired, stamp)
+            current.state, current.intent, current.boot_token = "absent", "", ""
+            current.profile_payload, current.workers, current.idle_since = {}, {}, None
+            current.phase_since, current.estimated_usd, current.error = stamp, 0, error
+        return "unknown_retired"
 
     def forget_unknown(self) -> str:
         """Operator recovery for an unresolved create: retire it only if the provider has no Pod with its name.
@@ -188,15 +248,8 @@ class Controller:
         name = f"r2s-{snapshot.deployment}-{snapshot.intent}"
         if any(pod.get("name") == name for pod in self.provider.list()):
             return "pod_exists"
-        with self.store.locked() as (tx, current, stamp):
-            if current.intent != snapshot.intent or current.pod or current.state not in {"unknown", "provisioning"}:
-                return "changed"
-            retired = replace(current, state="terminated", phase_seconds=dict(current.phase_seconds))
-            self.store.history(tx, retired, stamp)
-            current.state, current.intent, current.boot_token = "absent", "", ""
-            current.profile_payload, current.workers, current.idle_since = {}, {}, None
-            current.phase_since, current.estimated_usd, current.error = stamp, 0, "operator_forgot_unallocated_intent"
-        return "forgotten"
+        outcome = self._retire_unallocated(snapshot, "operator_forgot_unallocated_intent", as_leader=False)
+        return "forgotten" if outcome == "unknown_retired" else outcome
 
     def tick(self) -> str:
         with self.store.locked() as (_, current, now):
@@ -219,6 +272,7 @@ class Controller:
             return "blocked"
 
     def _tick(self, c: Control, now: float) -> str:
+        self._reload_catalog()
         work = self.workload()  # Any failure prevents both provisioning and idle termination.
         if not work.complete:
             c.error = "incomplete_workload_scan"
@@ -276,15 +330,11 @@ class Controller:
             ]
             spent = sum(h.get("estimated_usd", 0) for h in history)
             if not offers:
-                c.attempts += 1
+                # The price/VRAM limits are fixed by the operator, so an empty list means "nothing for sale now":
+                # keep waiting with a growing interval instead of tripping the circuit breaker.
+                c.inventory_misses += 1
                 c.error = "no_compatible_inventory_within_price"
-                c.retry_at = now + min(300, 15 * 2**c.attempts)
-                if c.attempts >= self.policy.max_provision_attempts:
-                    c.drain = True
-                # drain is an operator-owned field: persist explicit circuit breaker separately.
-                with self.store.locked() as (_, current, _):
-                    if current.owner == self.owner:
-                        current.drain |= c.drain
+                c.retry_at = now + _inventory_retry_seconds(c.inventory_misses)
                 self._save(c)
                 return "inventory_blocked"
             rate = offers[0].hourly + profile.storage_hourly_usd
@@ -320,7 +370,7 @@ class Controller:
                 c.retry_at = now + error.retry_after
                 self._save(c)
                 return "provider_error"
-            c.pod, c.state = str(pod["id"]), "starting"
+            c.pod, c.state, c.inventory_misses = str(pod["id"]), "starting", 0
             self._save(c)
             return "created"
         profile = (
@@ -344,6 +394,14 @@ class Controller:
                 pod = direct
         if pod is None:
             if c.state in {"provisioning", "unknown"} or not c.pod:
+                name = f"r2s-{c.deployment}-{c.intent}"
+                if (
+                    not c.pod
+                    and now - c.created_at >= _UNKNOWN_CREATE_GRACE_SECONDS
+                    and not any(listed.get("name") == name for listed in pods)
+                ):
+                    # The name is unique per intent and RunPod has nothing under it: the create never allocated.
+                    return self._retire_unallocated(c, "unallocated_create_retired")
                 c.state, c.error = "unknown", "create_response_unknown"
                 self._save(c)
                 return "reconcile_unknown"

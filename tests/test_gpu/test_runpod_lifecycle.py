@@ -228,16 +228,23 @@ def test_budget_disable_and_dry_run(world):
     assert not provider.creates
 
 
-def test_unavailable_inventory_is_bounded(world):
+def test_empty_inventory_waits_longer_each_time_and_never_drains(world):
+    """No A5000 within the price is the market, not a fault: retry 5, 10, 20, then every 30 minutes."""
     controller, store, provider, work = world
     provider.offers.clear()
-    for _ in range(3):
+    waits = []
+    for _ in range(5):
         assert controller.tick() == "inventory_blocked"
-        with store.locked() as (_, c, _):
+        with store.locked() as (_, c, now):
+            waits.append(round(c.retry_at - now))
             c.retry_at = 0
-    assert controller.tick() == "no_work"
-    assert store.read().drain
+    assert waits == [300, 600, 1200, 1800, 1800]
+    c = store.read()
+    assert not c.drain and c.attempts == 0 and c.inventory_misses == 5
     assert not provider.creates
+    provider.offers.append(Quote("qualified-gpu", 0.5, 24))
+    assert controller.tick() == "created"
+    assert store.read().inventory_misses == 0
 
 
 def test_ownership_mismatch_never_deletes(world):
@@ -830,14 +837,21 @@ def test_definite_create_refusal_retires_intent_and_retries_later(world):
     assert controller.tick() == "create_refused"
     c = store.read()
     assert (c.state, c.intent, c.pod, c.boot_token) == ("absent", "", "", "")
-    assert c.error == "inventory_unavailable" and c.attempts == 1 and not c.drain
+    # Capacity that vanished between quote and create is waited out like an empty quote: no attempt spent.
+    assert c.error == "inventory_unavailable" and c.attempts == 0 and c.inventory_misses == 1 and not c.drain
     with store.database.transaction() as tx:
         history = [json.loads(row[0]) for row in tx.execute("SELECT payload FROM r2s_gpu_history").fetchall()]
     assert history and history[-1]["state"] == "terminated"
-    assert controller.tick() == "backoff"  # waits retry_after instead of hammering the provider
+    assert controller.tick() == "backoff"  # waits instead of hammering the provider
     with store.locked() as (_, current, now):
+        assert current.retry_at - now >= 299
         current.retry_at = now - 1
     assert controller.tick() == "create_refused" and refusing.creates == 2
+    for _ in range(controller.policy.max_provision_attempts):
+        with store.locked() as (_, current, now):
+            current.retry_at = now - 1
+        controller.tick()
+    assert not store.read().drain
 
 
 def test_repeated_definite_refusals_trip_the_circuit_breaker(world):
@@ -923,6 +937,55 @@ def test_forget_unknown_only_when_no_pod_carries_the_intent_name(world):
         retired = [json.loads(r[0]) for r in tx.execute("SELECT payload FROM r2s_gpu_history").fetchall()]
     assert any(h["intent"] == intent and h["state"] == "terminated" for h in retired)
     assert controller.forget_unknown() == "nothing_to_forget"
+
+
+def test_unknown_create_with_no_pod_under_its_name_is_retired_after_grace_and_provisioning_resumes(world):
+    controller, store, provider, _ = world
+    provider.create_error = ProviderError("timeout", ambiguous=True)
+    assert controller.tick() == "provider_error"
+    intent = store.read().intent
+    provider.pods.clear()
+    provider.create_error = None
+    with store.locked() as (_, c, _):
+        c.retry_at = 0
+    assert controller.tick() == "reconcile_unknown"  # still inside the grace period
+    with store.locked() as (_, c, now):
+        c.created_at = now - 301
+    assert controller.tick() == "unknown_retired"
+    c = store.read()
+    assert (c.state, c.intent, c.error) == ("absent", "", "unallocated_create_retired") and not c.drain
+    with store.database.transaction() as tx:
+        retired = [json.loads(r[0]) for r in tx.execute("SELECT payload FROM r2s_gpu_history").fetchall()]
+    assert any(h["intent"] == intent and h["state"] == "terminated" for h in retired)
+    assert controller.tick() == "created" and provider.creates == 2
+
+
+def test_unknown_create_is_never_retired_while_a_pod_carries_its_name(world):
+    controller, store, provider, _ = world
+    provider.create_error = ProviderError("timeout", ambiguous=True)
+    controller.tick()
+    provider.pods[0]["env"] = {}  # present under the intent name, but ownership cannot be proven
+    with store.locked() as (_, c, now):
+        c.retry_at, c.created_at = 0, now - 3600
+    for _ in range(3):
+        assert controller.tick() == "reconcile_unknown"
+    assert store.read().intent and provider.creates == 1
+
+
+def test_new_release_catalog_is_used_without_restarting(world, profile, tmp_path):
+    controller, store, provider, work = world
+    path = tmp_path / "catalog.json"
+    path.write_text(json.dumps(seal({"profiles": [profile.model_dump(mode="json")]})))
+    reloading = Controller(store, controller.policy, controller.catalog, provider, lambda: work, catalog_path=path)
+    newer = profile.model_copy(update={"name": "native-v2", "image": "registry/worker@sha256:" + "4" * 64})
+    path.write_text(json.dumps(seal({"profiles": [newer.model_dump(mode="json")]})))
+    work.pending[0] = Demand("main", "pipeline", "job", ("native-v2",))
+    assert reloading.tick() == "created"
+    assert [p.name for p in reloading.catalog.profiles] == ["native-v2"]
+    assert provider.pods[-1]["imageName"] == newer.image
+    path.write_text("{broken")
+    reloading._reload_catalog()  # a bad install keeps serving the last good catalog
+    assert [p.name for p in reloading.catalog.profiles] == ["native-v2"]
 
 
 def test_rest_pod_shape_with_top_level_gpu_count_is_a_valid_allocation(world):

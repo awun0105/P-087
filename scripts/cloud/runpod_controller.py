@@ -74,7 +74,9 @@ def main(argv: list[str] | None = None) -> int:
         policy,
         catalog,
         RunPod(transport(policy.runpod_api_key.get_secret_value())),
-        lambda: inventory(settings, get_project_registry(), catalog),
+        # Read the controller's catalog at call time: it reloads the file when a new release is installed.
+        lambda: inventory(settings, get_project_registry(), controller.catalog),
+        catalog_path=policy.release_catalog,
     )
     logging.basicConfig(level=logging.INFO)
     if args.action == "forget-unknown":
