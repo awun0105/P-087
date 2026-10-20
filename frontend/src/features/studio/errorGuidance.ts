@@ -112,6 +112,12 @@ export function guidanceFor(error: ExecutionError | null | undefined): ErrorGuid
         fix: "Thử lại. Nếu lặp lại, báo quản trị viên kiểm tra máy xử lý và dữ liệu LiDAR.",
       };
 
+    case "INTERRUPTED_SHUTDOWN":
+      return {
+        cause: "Máy xử lý bị tắt hoặc khởi động lại khi bước này đang chạy, nên lượt chạy bị gián đoạn.",
+        fix: "Bấm Thử lại. Kết quả của các bước đã xong được giữ, job chạy tiếp từ bước bị gián đoạn.",
+      };
+
     case "EXPECTED_DURATION_EXCEEDED":
       return {
         cause: "Lượt chạy này lâu hơn hẳn thời gian thường thấy trên GPU này cho scene cỡ này, nên đã dừng.",
