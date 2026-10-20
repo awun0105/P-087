@@ -59,7 +59,7 @@ T-058 | Hàm thuần việc tiếp theo | implemented | summarizer
 T-059 | Endpoint tiến trình hợp nhất, nhẹ, có 304 | implemented | summarizer
 T-060 | Một vòng poll mỗi trang, không re-render khi không đổi | implemented | summarizer
 T-061 | Dòng tiến trình vẽ từ bước thật | implemented | summarizer
-T-062 | Một nguồn việc cần làm cho chuông, banner, đầu trang, danh sách | planned | engineer
+T-062 | Một nguồn việc cần làm cho chuông, banner, đầu trang, danh sách | implemented | summarizer
 T-063 | Một nguồn dữ liệu scene/gói/duyệt; dọn nhánh chết | planned | engineer
 T-064 | Viewer không dựng lại, không vẽ thừa, tab ẩn thì nghỉ | planned | engineer
 T-065 | Tải lười Walk, trang bước song song, chia nhỏ JS | planned | engineer
