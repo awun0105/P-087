@@ -58,10 +58,22 @@ def studio_pipeline(job: JobManifest) -> tuple[StageId, ...]:
     )
     if job.current_stage == StageId.LIDAR_INGEST:
         has_ingest = True
-    if not has_ingest and not has_qa:
+    # T-059: runner ghi LIDAR_ODOMETRY cho gói quét thô; trước đây timeline bỏ sót bước này.
+    has_odometry = job.current_stage == StageId.LIDAR_ODOMETRY or any(
+        stage.stage_id == StageId.LIDAR_ODOMETRY for stage in job.stage_artifacts
+    )
+    if not has_ingest and not has_qa and not has_odometry:
         return STUDIO_PIPELINE
     index = STUDIO_PIPELINE.index(StageId.FRAME_EXTRACT) + 1
-    lidar_stages = (StageId.LIDAR_INGEST, StageId.LIDAR_CALIBRATION_QA) if has_qa else (StageId.LIDAR_INGEST,)
+    lidar_stages = tuple(
+        stage
+        for stage, present in (
+            (StageId.LIDAR_INGEST, has_ingest or has_qa),
+            (StageId.LIDAR_CALIBRATION_QA, has_qa),
+            (StageId.LIDAR_ODOMETRY, has_odometry),
+        )
+        if present
+    )
     return (*STUDIO_PIPELINE[:index], *lidar_stages, *STUDIO_PIPELINE[index:])
 
 
