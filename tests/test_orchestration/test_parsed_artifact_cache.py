@@ -26,8 +26,8 @@ def test_lru_evicts_oldest() -> None:
     cache.get_or_load(("u", "2"), lambda: "2")
     cache.get_or_load(("u", "1"), lambda: "x")  # touch 1
     cache.get_or_load(("u", "3"), lambda: "3")
-    assert cache.get_or_load(("u", "2"), lambda: "reloaded") == "reloaded"
-    assert cache.get_or_load(("u", "1"), lambda: "never") == "1"
+    assert cache.get_or_load(("u", "1"), lambda: "never") == "1"  # recently used, kept
+    assert cache.get_or_load(("u", "2"), lambda: "reloaded") == "reloaded"  # oldest, evicted
 
 
 def test_concurrent_get_loads_once() -> None:
