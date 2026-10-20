@@ -50,7 +50,7 @@ T-049 | Chịu lỗi DB thoáng qua khi gia hạn và kiểm hủy | implemented
 T-050 | Chờ tài nguyên và hạn tự tính không lặp vô hạn | implemented | summarizer
 T-051 | File theo checksum: giữ vĩnh viễn, không băm lại, URL R2 ổn định | implemented | summarizer
 T-052 | Lưới va chạm Walk dựng một lần, trả 304 | implemented | summarizer
-T-053 | Đệm SceneIR / JobManifest đã parse; gzip; CORS | planned | engineer
+T-053 | Đệm SceneIR / JobManifest đã parse; gzip; CORS | implemented | summarizer
 T-054 | Danh sách scene và stage-views nhẹ | planned | engineer
 T-055 | Một hàm trạng thái hình học theo vật | planned | engineer
 T-056 | Bảng mốc bước, ghi từ pipeline job | planned | engineer
