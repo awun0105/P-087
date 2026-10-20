@@ -3,7 +3,8 @@
  * dùng XMLHttpRequest vì `fetch` chưa báo được tiến độ gửi body.
  */
 
-import { ApiError, apiFetch, apiUrl, fetchApi, type ApiResult } from "@/lib/api/client";
+import { ApiError, apiFetch, apiUrl, fetchApi, fetchConditional, type ApiResult } from "@/lib/api/client";
+import type { PipelineView } from "@/lib/contracts/pipeline";
 import { demoApiPath } from "@/lib/api/demo-session";
 import { clearDirectUploadResume, directUpload, xhrPutPart } from "@/lib/api/directUpload";
 import { verifyVideoPreparationChecksum } from "@/lib/contracts/videoPreparation";
@@ -183,6 +184,29 @@ export async function getJobProgress(jobId: string, signal?: AbortSignal): Promi
   } catch (cause) {
     return { ok: false, error: new ApiError(502, cause instanceof Error ? cause.message : "Tiến trình không hợp lệ") };
   }
+}
+
+export type PipelineFetch = { notModified: true } | { notModified: false; view: PipelineView; etag: string | null };
+
+/** Tiến trình hợp nhất của trang scene (T-060); gửi ETag để máy chủ trả 304 khi không có gì đổi. */
+export async function getJobPipeline(jobId: string, etag: string | null, signal?: AbortSignal): Promise<ApiResult<PipelineFetch>> {
+  const result = await fetchConditional<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/pipeline`, etag, signal);
+  if (!result.ok) return result;
+  if (result.data.notModified) return { ok: true, data: { notModified: true } };
+  try {
+    return { ok: true, data: { notModified: false, view: parsePipelineView(result.data.data), etag: result.data.etag } };
+  } catch (cause) {
+    return { ok: false, error: new ApiError(502, cause instanceof Error ? cause.message : "Tiến trình không hợp lệ") };
+  }
+}
+
+function parsePipelineView(value: unknown): PipelineView {
+  const record = value as Partial<PipelineView> | null;
+  if (!record || typeof record !== "object" || !Array.isArray(record.steps) || typeof record.version !== "string"
+      || !record.next_action || typeof record.next_action.kind !== "string") {
+    throw new Error("Tiến trình hợp nhất không hợp lệ");
+  }
+  return { ...(record as PipelineView), progress: parseJobProgress(record.progress) };
 }
 
 export function cancelJob(jobId: string): Promise<unknown> {
@@ -583,8 +607,57 @@ export function clearImportCamera(importId: string): Promise<ImportedScene> {
 // ── vật thể trong SceneIR (PRODUCT-07/07A, ADR 0006) ─────────────────────────
 
 /** SceneIR hiện tại của job; 404 khi bước tách vật thể chưa publish revision nào. */
-export function getJobScene(jobId: string, signal?: AbortSignal): Promise<ApiResult<SceneResponse>> {
-  return fetchApi<SceneResponse>(`${API}/jobs/${encodeURIComponent(jobId)}/scene`, { signal });
+/** T-063: bản scene đã tải gần nhất theo job (kèm ETag) và request đang bay, dùng chung cho mọi component của trang. */
+const sceneCache = new Map<string, { etag: string; data: SceneResponse }>();
+const sceneInFlight = new Map<string, Promise<ApiResult<SceneResponse>>>();
+
+/** Request đọc đang bay theo khoá (gói, trạng thái duyệt): các panel hỏi cùng lúc dùng chung; xong là quên, lần sau hỏi lại. */
+const sharedInFlight = new Map<string, Promise<unknown>>();
+
+/** Chỉ cho test: xoá bộ đệm scene giữa các ca. */
+export function clearSceneCache(): void {
+  sceneCache.clear();
+  sceneInFlight.clear();
+  sharedInFlight.clear();
+}
+
+/** `signal` chỉ để caller thôi chờ; request chung không bị hủy theo một caller. */
+async function shareInFlight<T>(key: string, signal: AbortSignal | undefined, load: () => Promise<T>): Promise<T> {
+  let pending = sharedInFlight.get(key) as Promise<T> | undefined;
+  if (!pending) {
+    pending = load().finally(() => sharedInFlight.delete(key));
+    sharedInFlight.set(key, pending);
+  }
+  const value = await pending;
+  if (signal?.aborted) throw new DOMException("đã hủy", "AbortError");
+  return value;
+}
+
+async function loadJobScene(jobId: string): Promise<ApiResult<SceneResponse>> {
+  const cached = sceneCache.get(jobId);
+  const result = await fetchConditional<SceneResponse>(`${API}/jobs/${encodeURIComponent(jobId)}/scene`, cached?.etag ?? null);
+  if (!result.ok) return result;
+  if (result.data.notModified) {
+    return cached ? { ok: true, data: cached.data } : { ok: false, error: new ApiError(502, "Máy chủ trả 304 khi chưa có scene") };
+  }
+  if (result.data.etag) sceneCache.set(jobId, { etag: result.data.etag, data: result.data.data });
+  return { ok: true, data: result.data.data };
+}
+
+/**
+ * SceneIR hiện tại (T-063): các component hỏi cùng lúc dùng chung một request; lần sau gửi ETag, máy chủ trả 304 thì dùng
+ * lại đúng đối tượng đã parse (không tải lại ~650 KB, không parse lại, React thấy cùng tham chiếu). `signal` chỉ để caller
+ * bỏ qua kết quả; request chung không bị hủy theo một caller.
+ */
+export async function getJobScene(jobId: string, signal?: AbortSignal): Promise<ApiResult<SceneResponse>> {
+  let pending = sceneInFlight.get(jobId);
+  if (!pending) {
+    pending = loadJobScene(jobId).finally(() => sceneInFlight.delete(jobId));
+    sceneInFlight.set(jobId, pending);
+  }
+  const result = await pending;
+  if (signal?.aborted) return { ok: false, error: new ApiError(0, "đã hủy") };
+  return result;
 }
 
 /** Choose one allow-listed LiDAR candidate; the server reruns eligibility and owns the revision CAS. */
@@ -819,7 +892,7 @@ export function restoreSceneRevision(
 export type ObjectifyMode = "objectify" | "boxes" | "membership" | "geometry" | "region";
 
 export type OperationResource = "vram" | "ram" | "disk";
-export type OperationWaitReason = "busy" | "external" | "exceeds_machine" | "unmeasured";
+export type OperationWaitReason = "busy" | "external" | "exceeds_machine" | "unmeasured" | "gate_error";
 
 export interface ObjectifyResourceWait {
   status: "waiting_resources" | "waiting_gpu_affinity" | "worker_busy" | "identity_conflict";
@@ -1017,8 +1090,8 @@ function parseSimulationPackage(value: unknown): SimulationPackageView | null {
 
 /** Gói của revision scene hiện tại; null khi chưa tạo hoặc scene đã sửa sau lần tạo. */
 export async function getSimulationPackage(jobId: string, signal?: AbortSignal): Promise<SimulationPackageView | null> {
-  return parseSimulationPackage(
-    await apiFetch<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/simulation-package`, { signal }),
+  return shareInFlight(`package:${jobId}`, signal, async () =>
+    parseSimulationPackage(await apiFetch<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/simulation-package`)),
   );
 }
 
@@ -1371,7 +1444,9 @@ function parseReviewState(value: unknown): ReviewStateView {
 }
 
 export async function getReviewState(jobId: string, signal?: AbortSignal): Promise<ReviewStateView> {
-  return parseReviewState(await apiFetch<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/review-state`, { signal }));
+  return shareInFlight(`review:${jobId}`, signal, async () =>
+    parseReviewState(await apiFetch<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/review-state`)),
+  );
 }
 
 /** Quyết định trên đúng gói + báo cáo đang hiển thị; backend lấy reviewer từ phiên đăng nhập. */
@@ -1411,7 +1486,7 @@ export interface TrashItem {
   detail: string;
 }
 
-/** Một mục thùng rác (STUDIO_UX_SPEC.md D-15). */
+/** Một mục thùng rác. */
 export interface TrashEntry {
   entry_id: string;
   title: string;
@@ -1499,7 +1574,7 @@ export function purgeTrash(entryIds: string[]): Promise<TrashActionResult> {
   return trashAction("purge", entryIds);
 }
 
-/** Một chỉ số của bảng đánh giá (STUDIO_UX_SPEC.md D-16). `value` null = chưa đo; `display` nêu lý do. */
+/** Một chỉ số của bảng đánh giá. `value` null = chưa đo; `display` nêu lý do. */
 export interface EvaluationMetric {
   key: string;
   label: string;

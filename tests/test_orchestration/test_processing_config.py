@@ -338,6 +338,18 @@ def test_capability_record_and_latest_ignore_stale_workers(tmp_path: Path) -> No
     assert current is not None and current.vram_total_gb == 48
 
 
+def test_on_demand_gpu_keeps_the_last_rented_pod_measurement(tmp_path: Path) -> None:
+    """No pod runs until a job exists, so the last pod's measurement is what the next pod will look like."""
+    database = RuntimeDatabase(f"sqlite:///{tmp_path / 'runtime.db'}")
+    record(database, _machine().model_copy(update={"worker_id": "older", "measured_at": NOW - timedelta(days=2)}))
+    record(
+        database, _machine(vram=24).model_copy(update={"worker_id": "last", "measured_at": NOW - timedelta(hours=3)})
+    )
+    assert latest(database, now=NOW) is None
+    last = latest(database, now=NOW, allow_stale=True)
+    assert last is not None and last.worker_id == "last" and last.vram_total_gb == 24
+
+
 def test_resource_model_calibrated_against_real_measurements() -> None:
     presets, _ = load_presets(PRESETS)
     model = presets.resource_model

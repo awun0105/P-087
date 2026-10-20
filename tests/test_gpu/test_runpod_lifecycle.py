@@ -228,16 +228,23 @@ def test_budget_disable_and_dry_run(world):
     assert not provider.creates
 
 
-def test_unavailable_inventory_is_bounded(world):
+def test_empty_inventory_waits_longer_each_time_and_never_drains(world):
+    """No A5000 within the price is the market, not a fault: retry 5, 10, 20, then every 30 minutes."""
     controller, store, provider, work = world
     provider.offers.clear()
-    for _ in range(3):
+    waits = []
+    for _ in range(5):
         assert controller.tick() == "inventory_blocked"
-        with store.locked() as (_, c, _):
+        with store.locked() as (_, c, now):
+            waits.append(round(c.retry_at - now))
             c.retry_at = 0
-    assert controller.tick() == "no_work"
-    assert store.read().drain
+    assert waits == [300, 600, 1200, 1800, 1800]
+    c = store.read()
+    assert not c.drain and c.attempts == 0 and c.inventory_misses == 5
     assert not provider.creates
+    provider.offers.append(Quote("qualified-gpu", 0.5, 24))
+    assert controller.tick() == "created"
+    assert store.read().inventory_misses == 0
 
 
 def test_ownership_mismatch_never_deletes(world):
@@ -799,3 +806,195 @@ def test_persisted_resource_wait_excludes_undersized_profile(tmp_path, profile, 
     assert result.pending[0].profiles == ("larger",)
     result = workload.scan_scope(db, SimpleNamespace(), ReleaseCatalog(profiles=(profile,), checksum="fixture"))
     assert not result.pending and result.blocked
+
+
+def test_max_pods_from_environment_is_accepted_as_documented(monkeypatch):
+    """The runbook sets GPU_MAX_PODS=1; env values arrive as strings and must not crash the API at boot."""
+    monkeypatch.setenv("GPU_MAX_PODS", "1")
+    assert GpuSettings().max_pods == 1
+    monkeypatch.setenv("GPU_MAX_PODS", "2")
+    with pytest.raises(ValueError):
+        GpuSettings()
+
+
+class RefusingRunPod(FakeRunPod):
+    """Provider that definitely refuses a create without allocating anything."""
+
+    def __init__(self, error):
+        super().__init__()
+        self.refusal = error
+
+    def create(self, body):
+        self.creates += 1
+        self.last_body = body
+        raise self.refusal
+
+
+def test_definite_create_refusal_retires_intent_and_retries_later(world):
+    controller, store, _, work = world
+    refusing = RefusingRunPod(ProviderError("inventory_unavailable", ambiguous=False, retry_after=60))
+    controller.provider = refusing
+    assert controller.tick() == "create_refused"
+    c = store.read()
+    assert (c.state, c.intent, c.pod, c.boot_token) == ("absent", "", "", "")
+    # Capacity that vanished between quote and create is waited out like an empty quote: no attempt spent.
+    assert c.error == "inventory_unavailable" and c.attempts == 0 and c.inventory_misses == 1 and not c.drain
+    with store.database.transaction() as tx:
+        history = [json.loads(row[0]) for row in tx.execute("SELECT payload FROM r2s_gpu_history").fetchall()]
+    assert history and history[-1]["state"] == "terminated"
+    assert controller.tick() == "backoff"  # waits instead of hammering the provider
+    with store.locked() as (_, current, now):
+        assert current.retry_at - now >= 299
+        current.retry_at = now - 1
+    assert controller.tick() == "create_refused" and refusing.creates == 2
+    for _ in range(controller.policy.max_provision_attempts):
+        with store.locked() as (_, current, now):
+            current.retry_at = now - 1
+        controller.tick()
+    assert not store.read().drain
+
+
+def test_repeated_definite_refusals_trip_the_circuit_breaker(world):
+    controller, store, _, _ = world
+    controller.provider = RefusingRunPod(ProviderError("provider_http", ambiguous=False, retry_after=1))
+    for _ in range(controller.policy.max_provision_attempts):
+        with store.locked() as (_, current, now):
+            current.retry_at = now - 1
+        assert controller.tick() == "create_refused"
+    assert store.read().drain
+
+
+def test_create_payload_matches_runpod_types(world, profile):
+    controller, *_ = world
+    payload = controller._payload(store_control(), profile.model_copy(update={"min_ram_gb": 31.5}), "qualified-gpu")
+    assert payload["minRAMPerGPU"] == 32 and isinstance(payload["minRAMPerGPU"], int)
+    assert payload["allowedCudaVersions"] == ["12.6"]
+    newest = profile.model_copy(update={"cuda_versions": ("12.6", "12.8", "13.0")})
+    assert "allowedCudaVersions" not in controller._payload(store_control(), newest, "qualified-gpu")
+
+
+@pytest.mark.parametrize(("configured", "expected"), [("3", "3"), (None, "1"), ("auto", "1"), ("0", "1"), ("9", "1")])
+def test_pod_runs_the_configured_worker_count_within_bounds(world, profile, tmp_path, configured, expected):
+    controller, *_ = world
+    env = Path(controller.policy.worker_env_file).read_text()
+    env = "\n".join(line for line in env.splitlines() if not line.startswith("STUDIO_WORKERS="))
+    worker_env = tmp_path / "worker.env"
+    worker_env.write_text(env + (f"\nSTUDIO_WORKERS={configured}\n" if configured is not None else "\n"))
+    controller.policy = controller.policy.model_copy(update={"worker_env_file": worker_env})
+    assert controller._payload(store_control(), profile, "qualified-gpu")["env"]["STUDIO_WORKERS"] == expected
+
+
+def store_control():
+    from src.services.orchestration.gpu.state import Control
+
+    return Control(deployment="test", intent="i", boot_token="t")
+
+
+def test_transport_marks_only_definite_create_refusals_unambiguous(monkeypatch):
+    import io
+    import urllib.request
+    from urllib.error import HTTPError
+
+    from src.services.orchestration.gpu.provider import transport
+
+    def respond(code, body):
+        def fail(*args, **kwargs):
+            raise HTTPError("https://fixture", code, "x", {}, io.BytesIO(body))
+
+        monkeypatch.setattr(urllib.request, "urlopen", fail)
+
+    call = transport("fixture")
+    cases = [
+        (400, b"cannot unmarshal number 32.0", False, "provider_http"),
+        (500, b'{"error":"create pod: There are no instances currently available"}', False, "inventory_unavailable"),
+        (500, b"internal error", True, "provider_http"),
+        (401, b"denied", True, "auth"),
+    ]
+    for code, body, ambiguous, category in cases:
+        respond(code, body)
+        with pytest.raises(ProviderError) as error:
+            call("POST", "/pods", {})
+        assert (error.value.ambiguous, str(error.value)) == (ambiguous, category)
+        assert b"instances" not in str(error.value).encode()
+    respond(500, b"There are no instances currently available")
+    with pytest.raises(ProviderError) as error:
+        call("GET", "/pods", None)
+    assert not error.value.ambiguous and str(error.value) == "provider_http"
+
+
+def test_forget_unknown_only_when_no_pod_carries_the_intent_name(world):
+    controller, store, provider, _ = world
+    provider.create_error = ProviderError("timeout", ambiguous=True)
+    assert controller.tick() == "provider_error"
+    intent = store.read().intent
+    # FakeRunPod allocated the Pod before failing: the name proves it exists, so nothing is forgotten.
+    assert controller.forget_unknown() == "pod_exists"
+    provider.pods.clear()
+    assert controller.forget_unknown() == "forgotten"
+    c = store.read()
+    assert (c.state, c.intent) == ("absent", "") and c.error == "operator_forgot_unallocated_intent"
+    with store.database.transaction() as tx:
+        retired = [json.loads(r[0]) for r in tx.execute("SELECT payload FROM r2s_gpu_history").fetchall()]
+    assert any(h["intent"] == intent and h["state"] == "terminated" for h in retired)
+    assert controller.forget_unknown() == "nothing_to_forget"
+
+
+def test_unknown_create_with_no_pod_under_its_name_is_retired_after_grace_and_provisioning_resumes(world):
+    controller, store, provider, _ = world
+    provider.create_error = ProviderError("timeout", ambiguous=True)
+    assert controller.tick() == "provider_error"
+    intent = store.read().intent
+    provider.pods.clear()
+    provider.create_error = None
+    with store.locked() as (_, c, _):
+        c.retry_at = 0
+    assert controller.tick() == "reconcile_unknown"  # still inside the grace period
+    with store.locked() as (_, c, now):
+        c.created_at = now - 301
+    assert controller.tick() == "unknown_retired"
+    c = store.read()
+    assert (c.state, c.intent, c.error) == ("absent", "", "unallocated_create_retired") and not c.drain
+    with store.database.transaction() as tx:
+        retired = [json.loads(r[0]) for r in tx.execute("SELECT payload FROM r2s_gpu_history").fetchall()]
+    assert any(h["intent"] == intent and h["state"] == "terminated" for h in retired)
+    assert controller.tick() == "created" and provider.creates == 2
+
+
+def test_unknown_create_is_never_retired_while_a_pod_carries_its_name(world):
+    controller, store, provider, _ = world
+    provider.create_error = ProviderError("timeout", ambiguous=True)
+    controller.tick()
+    provider.pods[0]["env"] = {}  # present under the intent name, but ownership cannot be proven
+    with store.locked() as (_, c, now):
+        c.retry_at, c.created_at = 0, now - 3600
+    for _ in range(3):
+        assert controller.tick() == "reconcile_unknown"
+    assert store.read().intent and provider.creates == 1
+
+
+def test_new_release_catalog_is_used_without_restarting(world, profile, tmp_path):
+    controller, store, provider, work = world
+    path = tmp_path / "catalog.json"
+    path.write_text(json.dumps(seal({"profiles": [profile.model_dump(mode="json")]})))
+    reloading = Controller(store, controller.policy, controller.catalog, provider, lambda: work, catalog_path=path)
+    newer = profile.model_copy(update={"name": "native-v2", "image": "registry/worker@sha256:" + "4" * 64})
+    path.write_text(json.dumps(seal({"profiles": [newer.model_dump(mode="json")]})))
+    work.pending[0] = Demand("main", "pipeline", "job", ("native-v2",))
+    assert reloading.tick() == "created"
+    assert [p.name for p in reloading.catalog.profiles] == ["native-v2"]
+    assert provider.pods[-1]["imageName"] == newer.image
+    path.write_text("{broken")
+    reloading._reload_catalog()  # a bad install keeps serving the last good catalog
+    assert [p.name for p in reloading.catalog.profiles] == ["native-v2"]
+
+
+def test_rest_pod_shape_with_top_level_gpu_count_is_a_valid_allocation(world):
+    """RunPod REST v1 returns gpuCount at the top level, "gpu": null and "image": null next to imageName."""
+    controller, store, provider, _ = world
+    assert controller.tick() == "created"
+    pod = provider.pods[0]
+    pod.pop("gpu")
+    pod.update({"gpu": None, "gpuCount": 1, "image": None, "machine": {"gpuTypeId": "qualified-gpu"}})
+    with store.locked() as (_, c, now):
+        c.workers["worker"] = {"ready": True, "busy": False, "heartbeat": now}
+    assert controller.tick() == "ready"

@@ -87,3 +87,22 @@ def test_expected_limit_falls_back_to_the_fixed_limit_without_measurements(tmp_p
 
     assert limit == 1800
     assert estimate is None
+
+
+def test_retry_after_expected_timeout_uses_fixed_limit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """T-050: a tool cut by its measured deadline is not cut again on retry by the same samples."""
+    from types import SimpleNamespace
+
+    attempt = _attempt(tmp_path)
+    assert attempt.registry.persistence is not None
+    monkeypatch.setattr(runner, "latest_capability", lambda database: SimpleNamespace(gpu_name="NVIDIA A40"))
+    monkeypatch.setattr(runner, "job_drivers", lambda *args: {"frames": 50.0})
+    monkeypatch.setattr(runner, "expected_seconds", lambda *args: _ESTIMATE)
+    timed_out = SimpleNamespace(job_id=attempt.job.job_id, tool="preview", outcome="timeout")
+    monkeypatch.setattr(runner, "load_usages", lambda database: [timed_out])
+
+    assert runner._expected_limit(attempt, "preview", 1800) == (1800, None)
+
+    monkeypatch.setattr(runner, "load_usages", lambda database: [])
+    limit, estimate = runner._expected_limit(attempt, "preview", 1800)
+    assert estimate == _ESTIMATE

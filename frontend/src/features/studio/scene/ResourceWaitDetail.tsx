@@ -8,6 +8,7 @@ const REASON: Record<ResourceWaitReason, string> = {
   external: "Máy xử lý đang rảnh với pipeline nhưng phần này bị chương trình khác chiếm. Job chạy khi phần đó được giải phóng; nếu không, huỷ và tạo lại với cấu hình thấp hơn.",
   exceeds_machine: "Cấu hình cần nhiều hơn tổng năng lực của máy xử lý này nên sẽ không tự chạy ở đây. Huỷ và tạo lại với cấu hình thấp hơn, hoặc dùng máy mạnh hơn.",
   unmeasured: "Máy xử lý chưa đo được phần này nên chưa dám chạy. Kiểm tra GPU và driver của máy xử lý.",
+  gate_error: "Bước kiểm tra tài nguyên bị lỗi trên máy xử lý nên chưa chạy. Nếu kéo dài quá 30 phút, việc sẽ dừng để bạn thử lại; báo quản trị viên kiểm tra máy xử lý.",
 };
 
 function gigabytes(value: number | null | undefined): string {

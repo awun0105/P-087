@@ -1,0 +1,46 @@
+name: Deploy Studio (Vercel)
+
+on:
+  push:
+    branches: [develop, master]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/deploy-studio.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-studio
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Test hỏng thì không phát hành.
+      - name: Test
+        run: npm test
+
+      - name: Deploy to Vercel (production)
+        run: |
+          npx vercel@latest deploy --prod --yes --token "${{ secrets.VERCEL_TOKEN }}" \
+            -m "githubCommitSha=${{ github.sha }}" -m "githubCommitRef=${{ github.ref_name }}"

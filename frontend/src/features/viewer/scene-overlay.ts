@@ -339,6 +339,9 @@ function material(hex: string, opacity: number, lit: boolean): StandardMaterial 
 }
 
 /** Một vật của scene theo vật (pipeline v2): Gaussian riêng trong hệ cục bộ + transform của vật. */
+/** Số tải hình vật đồng thời tối đa (T-067): 60 vật × vài MB cùng lúc làm nghẽn mạng và luồng chính. */
+const MAX_OBJECT_LOADS = 4;
+
 export interface OverlayObject {
   id: string;
   /** URL hình riêng của vật; null với vật không có hình riêng (vật cản hộp, asset chưa có bản xem trước). */
@@ -382,7 +385,11 @@ export class SceneOverlay {
   private outlines: Outline[] = [];
   private readonly shapes = new Map<string, ShapeRecord>();
   private readonly objectRoot: Entity;
-  private readonly objects = new Map<string, { entity: Entity; asset: Asset | null; url: string | null }>();
+  private readonly objects = new Map<string, { entity: Entity; asset: Asset | null; url: string | null; visible: boolean }>();
+  /** T-067: hàng đợi tải hình của vật — tối đa `MAX_OBJECT_LOADS` request cùng lúc; vật ưu tiên trước, vật ẩn sau cùng. */
+  private objectQueue: string[] = [];
+  private readonly objectLoading = new Set<Asset>();
+  private priorityObject: string | null = null;
   private pointsEntity: Entity | null = null;
   private pointsMesh: Mesh | null = null;
   private pointsMaterial: StandardMaterial | null = null;
@@ -757,7 +764,7 @@ export class SceneOverlay {
       if (!record) {
         const entity = new Entity(`r2s-object-${item.id}`, this.app);
         this.objectRoot.addChild(entity);
-        record = { entity, asset: null, url: item.url };
+        record = { entity, asset: null, url: item.url, visible: item.visible };
         this.objects.set(item.id, record);
         if (item.url) {
           const model = item.kind === "model";
@@ -766,20 +773,47 @@ export class SceneOverlay {
             : new Asset(`r2s-object-${item.id}`, "gsplat", { url: item.url, filename: "object.ply" });
           record.asset = asset;
           asset.once("load", () => {
+            this.finishObjectLoad(asset);
             if (this.destroyed || this.objects.get(item.id)?.asset !== asset) return;
             // GLB giữ màu đỉnh của asset; entity con bị huỷ cùng entity của vật khi gỡ.
             if (model) entity.addChild((asset.resource as ContainerResource).instantiateRenderEntity());
             else entity.addComponent("gsplat", { asset });
             this.redraw();
           });
-          this.app.assets.add(asset);
-          this.app.assets.load(asset);
+          asset.once("error", () => this.finishObjectLoad(asset));
+          this.objectQueue.push(item.id);
         }
       }
       this.setObjectPose(item.id, item.position, item.rotation_xyzw);
       record.entity.enabled = item.visible;
+      record.visible = item.visible;
     }
+    this.pumpObjectLoads();
     this.redraw();
+  }
+
+  /** Đưa vật lên đầu hàng đợi tải (vd. vật người dùng vừa chọn); vật đã tải hoặc đang tải thì không đổi gì. */
+  prioritizeObject(id: string | null): void {
+    this.priorityObject = id;
+  }
+
+  private pumpObjectLoads(): void {
+    while (this.alive && this.objectLoading.size < MAX_OBJECT_LOADS && this.objectQueue.length > 0) {
+      let index = this.priorityObject ? this.objectQueue.indexOf(this.priorityObject) : -1;
+      if (index < 0) index = this.objectQueue.findIndex((id) => this.objects.get(id)?.visible);
+      if (index < 0) index = 0;
+      const [id] = this.objectQueue.splice(index, 1);
+      const asset = this.objects.get(id)?.asset;
+      if (!asset) continue;
+      this.objectLoading.add(asset);
+      this.app.assets.add(asset);
+      this.app.assets.load(asset);
+    }
+  }
+
+  private finishObjectLoad(asset: Asset): void {
+    if (!this.objectLoading.delete(asset)) return;
+    this.pumpObjectLoads();
   }
 
   /** Đặt pose (hệ canonical, như SceneIR) cho một vật đang vẽ — dùng khi vật lý phía trình duyệt dời vật. */
@@ -902,7 +936,9 @@ export class SceneOverlay {
 
   private releaseObject(record: { entity: Entity; asset: Asset | null }): void {
     record.entity.destroy();
+    this.objectQueue = this.objectQueue.filter((id) => this.objects.get(id) !== record);
     if (record.asset) {
+      this.objectLoading.delete(record.asset);
       this.app.assets?.remove(record.asset);
       record.asset.unload();
     }

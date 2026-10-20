@@ -73,6 +73,26 @@ export async function fetchApi<T>(path: string, init?: RequestInit): Promise<Api
   }
 }
 
+/** Kết quả GET có ETag: 304 → `notModified`; 200 → dữ liệu kèm ETag mới (T-060). */
+export type ConditionalResult<T> = { notModified: true } | { notModified: false; data: T; etag: string | null };
+
+export async function fetchConditional<T>(
+  path: string,
+  etag: string | null,
+  signal?: AbortSignal,
+): Promise<ApiResult<ConditionalResult<T>>> {
+  try {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (etag) headers["If-None-Match"] = etag;
+    const response = await fetch(`${apiBase()}${demoApiPath(path)}`, { headers, cache: "no-store", signal });
+    if (response.status === 304) return { ok: true, data: { notModified: true } };
+    if (!response.ok) return { ok: false, error: await toApiError(response) };
+    return { ok: true, data: { notModified: false, data: (await response.json()) as T, etag: response.headers?.get?.("ETag") ?? null } };
+  } catch (cause) {
+    return { ok: false, error: new ApiError(0, `không gọi được backend: ${String(cause)}`) };
+  }
+}
+
 /** Biến thể ném lỗi, dùng trong event handler đã có `try`/`catch`. */
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const result = await fetchApi<T>(path, init);
@@ -80,6 +100,11 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
     throw result.error;
   }
   return result.data;
+}
+
+/** URL tuyệt đối của một đường dẫn API không có tham số (vd. file trong bộ LOD được đọc theo đường dẫn tương đối). */
+export function apiPathUrl(path: string): string {
+  return `${apiBase()}${demoApiPath(path)}`;
 }
 
 export function apiUrl(path: string, params: Record<string, string | readonly string[]>): string {

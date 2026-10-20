@@ -1,6 +1,7 @@
 """Chọn RGB theo input quality; SfM viability do REC-03 quyết định."""
 
 import hashlib
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -36,6 +37,16 @@ class RGBVideoRequest:
     size_bytes: int
     source_manifest_checksum: str
     profile: RGBQualityProfile
+
+
+@dataclass(frozen=True)
+class _VideoPasses:
+    """Bốn lượt decode toàn video đang chạy song song."""
+
+    info: "Future[tuple[int, int, int]]"
+    hashes: "Future[list[str]]"
+    blur: "Future[list[float]]"
+    motion: "Future[list[float | None]]"
 
 
 @dataclass(frozen=True)
@@ -105,19 +116,31 @@ class RGBQualityValidator:
         return self._report(request, _ReportParts(updated, diagnostics, version))
 
     def validate_video(self, video: RGBVideoRequest) -> RGBQualityReport:
-        """Probe video gốc; REC-02A sở hữu published frame extraction."""
+        """Probe video gốc; REC-02A sở hữu published frame extraction.
+
+        Bốn lượt decode toàn video (đếm frame, MD5, blur, motion) độc lập nhau và mỗi lượt chỉ dùng một luồng để
+        kết quả ổn định, nên chạy cùng lúc: video 5 phút mất thời gian của lượt chậm nhất thay vì tổng cả bốn.
+        Lỗi vẫn được báo theo đúng thứ tự cũ.
+        """
         self._verify_video(video)
-        blur = self._decode_video(video)
-        count = len(blur)
-        frames = tuple(RGBFrameAsset(i, video.path, video.checksum) for i in range(count))
-        request = RGBQualityRequest(frames, video.source_manifest_checksum, video.checksum, video.profile)
-        rows = self._quality_rows(request, blur)
-        effective = tuple(frame for frame, row in zip(frames, rows, strict=True) if row.quality == "accepted")
-        if len(effective) < 2:
-            raise RGBValidationError(
-                "RGB_TOO_FEW_USABLE_FRAMES", "Fewer than two RGB frames remain", "Provide more decodable RGB frames"
+        with ThreadPoolExecutor(max_workers=4, thread_name_prefix="rec02-video") as pool:
+            passes = _VideoPasses(
+                info=pool.submit(self.probe.video_info, video.path),
+                hashes=pool.submit(self.probe.video_frame_hashes, video.path),
+                blur=pool.submit(self.probe.video_blur_scores, video.path, video.profile),
+                motion=pool.submit(self.probe.video_motion_scores, video.path, video.profile),
             )
-        motion, motion_failed = self._video_motion(video, count)
+            blur = self._decode_video(passes)
+            count = len(blur)
+            frames = tuple(RGBFrameAsset(i, video.path, video.checksum) for i in range(count))
+            request = RGBQualityRequest(frames, video.source_manifest_checksum, video.checksum, video.profile)
+            rows = self._quality_rows(request, blur)
+            effective = tuple(frame for frame, row in zip(frames, rows, strict=True) if row.quality == "accepted")
+            if len(effective) < 2:
+                raise RGBValidationError(
+                    "RGB_TOO_FEW_USABLE_FRAMES", "Fewer than two RGB frames remain", "Provide more decodable RGB frames"
+                )
+            motion, motion_failed = self._video_motion(passes.motion, count)
         selected_motion = [motion[frame.frame_id] for frame in effective]
         updated = self._with_motion(rows, effective, selected_motion)
         diagnostics = self._diagnostics(effective, selected_motion, video.profile)
@@ -125,15 +148,19 @@ class RGBQualityValidator:
             diagnostics.warnings.append("MOTION_PROBE_FAILED")
         return self._report(request, _ReportParts(updated, diagnostics, self.probe.version()))
 
-    def _decode_video(self, video: RGBVideoRequest) -> list[float]:
+    @staticmethod
+    def _decode_video(passes: "_VideoPasses") -> list[float]:
         """Full decode, frame count và exact-static là structural gates."""
         try:
-            count, _, _ = self.probe.video_info(video.path)
-            if self.probe.video_has_identical_frames(video.path, count):
+            count, _, _ = passes.info.result()
+            hashes = passes.hashes.result()
+            if len(hashes) != count:
+                raise FFmpegProbeError("RGB video decoded-frame inventory is incomplete")
+            if len(set(hashes)) == 1:
                 raise RGBValidationError(
                     "RGB_STATIC_SEQUENCE", "All decoded RGB frames are identical", "Provide a moving-camera RGB video"
                 )
-            blur = self.probe.video_blur_scores(video.path, video.profile)
+            blur = passes.blur.result()
         except FFmpegProbeError as error:
             raise RGBValidationError(
                 "RGB_DECODE_FAILED", "RGB video cannot be fully decoded", "Provide a supported, complete mp4/mov video"
@@ -163,9 +190,10 @@ class RGBQualityValidator:
                 "Restore the immutable input or create a new InputManifest",
             )
 
-    def _video_motion(self, video: RGBVideoRequest, count: int) -> tuple[list[float | None], bool]:
+    @staticmethod
+    def _video_motion(pending: "Future[list[float | None]]", count: int) -> tuple[list[float | None], bool]:
         try:
-            scores = self.probe.video_motion_scores(video.path, video.profile)
+            scores = pending.result()
         except FFmpegProbeError:
             return [None] * count, True
         return (scores, False) if len(scores) == count else ([None] * count, True)

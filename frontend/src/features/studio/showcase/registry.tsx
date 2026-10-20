@@ -16,7 +16,7 @@ import type { DemoManifest, DemoStage, DemoStageAsset } from "@/lib/contracts/st
  * - `STAGE_PRESENTERS`: thẻ dựng sẵn theo bước, dùng file chung của bundle (video gốc, frame, 3DGS).
  * - `ASSET_RENDERERS`: thẻ theo loại asset mà bundle khai báo cho từng bước (`stage.assets`).
  *
- * Thêm cảnh demo mới: ghi asset vào bundle (xem docs/DEMO_SCENES.md). Thêm kiểu thẻ mới: thêm kind ở backend
+ * Thêm cảnh demo mới: ghi asset vào bundle (xem docs/OPERATIONS.md mục 9.4). Thêm kiểu thẻ mới: thêm kind ở backend
  * (`DemoStageAsset`) và `contracts/studio.ts`, rồi đăng ký một renderer ở đây.
  */
 export interface ShowcaseContext {

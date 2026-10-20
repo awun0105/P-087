@@ -11,7 +11,7 @@ import { SimulationPackagePanel } from "@/features/studio/SimulationPackagePanel
 import { ObjectifyContext, type ObjectifyHandle } from "@/features/studio/scene/objectifyContext";
 import { jobArtifactContentUrl } from "@/lib/api/endpoints";
 
-vi.mock("@/features/studio/StageViewer", () => ({
+vi.mock("@/features/studio/StageViewer3D", () => ({
   CollisionMeshCanvas: () => <div data-testid="mesh" />,
 }));
 vi.mock("@/features/studio/MetricSceneView", () => ({
@@ -538,7 +538,7 @@ describe("ObjectReviewView", () => {
 
     expect(await screen.findByText(/Scene đã đổi ở lượt khác/)).toBeInTheDocument();
     expect(screen.getByText(/Lệnh gắn với revision rev-001/)).toBeInTheDocument();
-    expect(calls("/scene").filter(([url]) => String(url).endsWith("/scene"))).toHaveLength(2);
+    await waitFor(() => expect(calls("/scene").filter(([url]) => String(url).endsWith("/scene"))).toHaveLength(2));
   });
 
   it("nói rõ khi scene cũ chưa có membership và khóa correction commands", async () => {
@@ -1283,13 +1283,15 @@ describe("ObjectReviewView", () => {
     expect(JSON.parse(canvas.dataset.physicsObjects!)).toMatchObject([{id: "candidate-001", position: [7,8,9], dynamic: false}]);
     const transformRequest = JSON.parse((calls("/scene/edits")[0][1] as RequestInit).body as string);
     expect(transformRequest).toMatchObject({ expected_scene_revision: "rev-001", edits: [{ object_id: "candidate-001", translation_xyz: [7, 8, 9], rotation_quaternion_xyzw: rotation }] });
-    const requests = vi.mocked(fetch).mock.calls.length;
+    // Ẩn/hiện chỉ đổi trạng thái hiển thị: không có lệnh ghi; lượt tải nền đến muộn không tính.
+    const writes = () => vi.mocked(fetch).mock.calls.filter(([, init]) => ((init as RequestInit | undefined)?.method ?? "GET") !== "GET");
+    const requests = writes().length;
     fireEvent.click(screen.getByRole("button", { name: "Ẩn trên màn hình" }));
     expect(objects()[0].visible).toBe(false);
     expect(boxes()).toHaveLength(0);
     fireEvent.click(screen.getByRole("button", { name: "Khôi phục Vật thể 1" }));
     expect(objects()[0]).toMatchObject({ id: "candidate-001", position: [7, 8, 9], rotation_xyzw: rotation, visible: true });
-    expect(vi.mocked(fetch).mock.calls).toHaveLength(requests);
+    expect(writes()).toHaveLength(requests);
     fireEvent.click(screen.getByRole("button", { name: "Xoá" }));
     await waitFor(() => expect(objects()[0].visible).toBe(false));
     expect(boxes()).toHaveLength(0);

@@ -336,3 +336,61 @@ def test_running_job_advances_updated_at_from_heartbeat(tmp_path: Path) -> None:
     hb_time = _T0 + timedelta(minutes=15)
     progress_with_hb = job_progress(job, attempts, preview_ready=False, heartbeat_at=hb_time)
     assert progress_with_hb.updated_at == hb_time
+
+
+def test_progress_upgrades_legacy_shutdown_failure(tmp_path: Path) -> None:
+    """A job stopped by a worker SIGTERM before T-047 shows Retry, matching POST /retry."""
+    error = ExecutionError(
+        error_code="PREVIEW_RUNNER_FAILED",
+        stage_id=StageId.CAMERA_POSE,
+        human_message="Worker dừng trước checkpoint hợp lệ",
+        retryable=False,
+        details={"exception_type": "KeyboardInterrupt"},
+    )
+    job = _job(
+        tmp_path,
+        status=JobStatus.FAILED,
+        current_stage=StageId.CAMERA_POSE,
+        completed_at=_T0 + timedelta(minutes=9),
+        stage_artifacts=[_succeeded(stage, 2) for stage in MVP_PIPELINE[:3]],
+    )
+    attempts = [
+        _event(1, JobStatus.QUEUED, StageId.INPUT_VALIDATE, 0),
+        _event(1, JobStatus.RUNNING, StageId.CAMERA_POSE, 3),
+        _event(1, JobStatus.FAILED, StageId.CAMERA_POSE, 9, error),
+    ]
+
+    failed = job_progress(job, attempts, preview_ready=False)
+
+    assert failed.error is not None and failed.error.retryable is True
+
+
+def test_stage_progress_poll_records_completion(tmp_path: Path) -> None:
+    """T-056: a worker's SUCCEEDED line closes that stage's mark right away, before the receipt is committed."""
+    from src.services.orchestration.jobs.step_marks import list_marks
+
+    registry = _registry(tmp_path)
+    job = registry.create_job(JobCreateInput(project_id="project-fixture-001"))
+    running = registry.transition_job(
+        job.job_id, TransitionRequest(target_status=JobStatus.RUNNING, current_stage=StageId.CAMERA_POSE)
+    )
+    attempt = _Attempt(registry, SimpleNamespace(), running, tmp_path)
+    progress_file = tmp_path / "preview.progress.jsonl"
+    reader = _StageProgress(attempt, progress_file)
+    done_at = datetime.now(UTC)
+    finished = StageArtifact(
+        stage_id=StageId.CAMERA_POSE,
+        status="SUCCEEDED",
+        artifact_type="CameraPoses",
+        artifact_uri="artifact://jobs/x/poses.json",
+        artifact_checksum="sha256:" + "c" * 64,
+        data_class="derived",
+        started_at=done_at,
+        completed_at=done_at,
+    )
+    progress_file.write_text(finished.model_dump_json() + "\n")
+    reader.poll()
+
+    marks = {mark.step_id: mark for mark in list_marks(registry.persistence.database, job.job_id)}
+    assert marks[StageId.CAMERA_POSE.value].completed_at == done_at
+    assert marks[StageId.CAMERA_POSE.value].outcome == "succeeded"

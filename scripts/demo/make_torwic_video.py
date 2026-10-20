@@ -9,7 +9,7 @@ luồng upload như video người dùng. Chỉ đọc `normalized/`, không đ�
         [--train-split data/torwic_slam/derived/aisle_cw/benchmark_split.json]
 
 `--train-split` chỉ giữ `train_frame_ids` của benchmark split: frame held-out là evaluation-only,
-không được vào runtime (DATASET_PLAYBOOK). Chỗ bỏ held-out thành bước nhảy ngắn trong video.
+không được vào runtime. Chỗ bỏ held-out thành bước nhảy ngắn trong video.
 """
 
 import argparse

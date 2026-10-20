@@ -185,7 +185,8 @@ class ArtifactResolver:
         if self.remote is None:
             return 0
         relative = self._namespace_dir(namespace)
-        return self.remote.pull_tree(relative, self.artifact_root / relative)
+        # `derived/` (bộ LOD để xem, T-070) không cần cho xử lý; API đọc thẳng từ kho file khi người dùng xem.
+        return self.remote.pull_tree(relative, self.artifact_root / relative, skip_top=frozenset({"derived"}))
 
     def sync_up(self, namespace: str) -> int:
         """Đẩy mọi artifact đã publish cục bộ của một namespace lên kho file."""

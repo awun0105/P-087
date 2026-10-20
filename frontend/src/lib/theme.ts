@@ -1,5 +1,5 @@
 /**
- * Giao diện của Studio (STUDIO_UX_SPEC.md D-14, D-17): hai lựa chọn độc lập — chế độ sáng/tối và bảng màu (mặc định
+ * Giao diện của Studio: hai lựa chọn độc lập — chế độ sáng/tối và bảng màu (mặc định
  * be + cam, hoặc Gruvbox). Đây là sở thích hiển thị của từng trình duyệt nên nằm ở localStorage, không phải state của
  * backend. Class trên <html> là nguồn duy nhất cho CSS (`dark`, `theme-gruvbox`); script `THEME_INIT_SCRIPT` gắn class
  * trước lần vẽ đầu để trang không nháy sang giao diện mặc định.

@@ -37,13 +37,14 @@ need() { command -v "$1" >/dev/null || { echo "[!] Thiếu lệnh: $1" >&2; exit
 need uv; need git; need curl
 command -v nvcc >/dev/null || [ -x /usr/local/cuda/bin/nvcc ] || {
   echo "[!] Không thấy nvcc: gsplat cần CUDA toolkit để biên dịch kernel." >&2; exit 1; }
-# Header có thể đến từ python3.12-dev hoặc từ CPATH (vd. header của một bản Python 3.12 khác trên máy).
-python3.12 -c "import sysconfig, os, sys; sys.exit(0 if os.path.isfile(os.path.join(sysconfig.get_paths()['include'], 'Python.h')) else 1)" \
-  || [ -f "${CPATH:-/nonexistent}/Python.h" ] || {
-  echo "[!] Thiếu header Python 3.12 (Python.h). Cài: sudo apt install python3.12-dev" >&2; exit 1; }
-
 [ -x "$RUNTIME/bin/python" ] || uv venv --python 3.12.14 "$RUNTIME"
 PY="$RUNTIME/bin/python"
+# gsplat biên dịch kernel với header của chính Python venv này (bản uv quản lý có sẵn Python.h). Đặt CPATH ở đây,
+# không nhận từ ngoài, để không lẫn header của Python khác (ObjectGS dùng 3.8).
+PY_INCLUDE="$("$PY" -c 'import sysconfig; print(sysconfig.get_paths()["include"])')"
+[ -f "$PY_INCLUDE/Python.h" ] || {
+  echo "[!] Thiếu header Python 3.12 (Python.h) tại $PY_INCLUDE. Cài: sudo apt install python3.12-dev" >&2; exit 1; }
+export CPATH="$PY_INCLUDE"
 uv pip install --python "$PY" --index-url https://download.pytorch.org/whl/cu126 \
   torch==2.7.1 torchvision==0.22.1
 uv pip install --python "$PY" \

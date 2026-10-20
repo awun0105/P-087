@@ -1975,6 +1975,39 @@ async def test_scene_list_response_carries_the_object_choice_flag(
     assert (await client.get("/api/v1/scenes")).json()["scenes"][0]["awaiting_object_choice"] is True
 
 
+@pytest.mark.asyncio
+async def test_scene_list_reads_preview_and_object_choice_once_per_scene(
+    client: AsyncClient, studio: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T-069: T-059 từng gọi `preview_ready` và `_awaiting_object_choice` hai lần cho mỗi scene."""
+    from src.api.studio import deps as studio_deps
+    from src.api.studio import scenes
+
+    studio.registry.seed_from_fixtures()
+    upload = await _upload(client)
+    await client.post(
+        "/api/v1/scenes/from-upload",
+        json={"upload_id": upload["upload_id"], "name": "Kho A", "attestation": _ATTESTATION},
+    )
+    calls = {"preview": 0, "choice": 0}
+    real_preview, real_choice = studio_deps.preview_ready, scenes._awaiting_object_choice
+
+    def preview(*args):
+        calls["preview"] += 1
+        return real_preview(*args)
+
+    def choice(*args):
+        calls["choice"] += 1
+        return real_choice(*args)
+
+    monkeypatch.setattr(studio_deps, "preview_ready", preview)
+    monkeypatch.setattr(scenes, "_awaiting_object_choice", choice)
+    body = (await client.get("/api/v1/scenes")).json()
+    with_job = [scene for scene in body["scenes"] if scene["latest_job"] is not None]
+    assert with_job
+    assert calls == {"preview": len(with_job), "choice": len(with_job)}
+
+
 def test_object_choice_is_cached_per_scene_revision_and_never_guessed(
     studio: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:

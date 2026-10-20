@@ -4,6 +4,7 @@ Route gọi hàm trong module này (không import thẳng `get_settings`) nên t
 `deps.get_settings` / `deps.get_project_registry` là đủ cho mọi route.
 """
 
+import os
 from typing import Literal
 
 from fastapi import HTTPException, status
@@ -105,8 +106,15 @@ def presets() -> tuple[ProcessingPresets, str]:
 
 
 def capability() -> MachineCapability | None:
-    """Lần đo máy worker gần nhất còn hạn (None nếu worker chưa báo)."""
-    return latest_capability(RuntimeDatabase(settings().database_url))
+    """Lần đo máy worker gần nhất còn hạn (None nếu worker chưa báo).
+
+    Deployment tự thuê GPU: chưa có pod nào chạy thì dùng lần đo gần nhất của pod đã thuê (xem `latest`).
+    """
+    database = RuntimeDatabase(settings().database_url)
+    fresh = latest_capability(database)
+    if fresh is None and os.environ.get("GPU_AUTOPROVISION_ENABLED", "").strip().lower() in {"1", "true", "yes"}:
+        return latest_capability(database, allow_stale=True)
+    return fresh
 
 
 def observed_resource_budget(

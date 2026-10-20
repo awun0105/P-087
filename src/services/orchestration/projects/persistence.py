@@ -22,6 +22,7 @@ from src.models.contracts.input_assembly import (
 )
 from src.models.contracts.manifests import InputFile, JobManifest, JobStatus
 from src.services.orchestration.artifacts import ArtifactChecksumError, ArtifactResolver
+from src.services.orchestration.artifacts.parsed_cache import ParsedArtifactCache
 from src.services.orchestration.auth.quota_ledger import (
     GuestQuotaIntent,
     GuestQuotaIntentResult,
@@ -76,11 +77,16 @@ def _require_runtime_rebind(current: JobManifest, manifest: JobManifest, event: 
 
 
 class ProjectPersistence:
-    """Read-through DB, không cache state process-local của project/job thật."""
+    """Read-through DB, không cache state process-local của project/job thật.
+
+    Con trỏ revision luôn đọc từ DB; chỉ nội dung manifest bất biến (khoá theo URI + checksum của con trỏ) được giữ
+    lại sau lần kiểm đầu tiên (T-053).
+    """
 
     def __init__(self, database: RuntimeDatabase, resolver: ArtifactResolver) -> None:
         self.database = database
         self.resolver = resolver
+        self._manifests: ParsedArtifactCache[JobManifest] = ParsedArtifactCache(256)
 
     def save_project(
         self, project: ProjectRecord, *, expected: ProjectRecord | None = None, seed: bool = False
@@ -379,6 +385,12 @@ class ProjectPersistence:
                 tx.execute(
                     "INSERT INTO r2s_job_events(job_id,version,payload) VALUES (?,?,?)",
                     (manifest.job_id, version, event.model_dump_json()),
+                )
+                # T-056: mốc bước của revision này, cùng transaction (không commit thì không có mốc).
+                from src.services.orchestration.jobs.step_marks import apply_marks, marks_for_revision
+
+                apply_marks(
+                    tx, manifest.job_id, "pipeline", str(event.attempt), marks_for_revision(expected, manifest, event)
                 )
                 if input_assembly_run is not None:
                     if verified_input_chain is None:
@@ -705,6 +717,11 @@ class ProjectPersistence:
             f"artifact://jobs/{reference.job_id}/manifests/"
         ):
             raise ArtifactChecksumError("Job pointer không trỏ tới JobManifest thuộc job")
+        return self._manifests.get_or_load(
+            (reference.artifact_uri, reference.artifact_checksum), lambda: self._load_job(reference)
+        )
+
+    def _load_job(self, reference: ArtifactRef) -> JobManifest:
         job = self.resolver.load_model(reference, JobManifest)
         if reference.job_id != job.job_id or job.job_manifest_checksum != canonical_content_checksum(
             job, "job_manifest_checksum"

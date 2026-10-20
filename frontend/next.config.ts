@@ -30,7 +30,7 @@ const nextConfig: NextConfig = {
   },
   /**
    * UI cũ (trang project/job/viewer P0) đã xoá ngày 02/10/2026 sau khi phần validation/duyệt/phát hành có trong Studio
-   * (STUDIO_UX_SPEC.md D-10). Vẫn chuyển hướng các URL cũ về trang chính của app để link đã lưu không rơi vào 404
+   * Vẫn chuyển hướng các URL cũ về trang chính của app để link đã lưu không rơi vào 404
    * (`/jobs` trống là trang Jobs của Studio, chỉ `/jobs/<id>/...` là URL cũ). Dùng `redirects` thay vì `proxy.ts` vì
    * proxy buộc Next buffer body (mặc định 10MB) → hỏng upload video.
    */

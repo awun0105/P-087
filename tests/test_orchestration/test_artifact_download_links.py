@@ -111,3 +111,118 @@ def test_without_object_store_api_serves_file(tmp_path: Path, monkeypatch: pytes
     reference = _published(registry, job_id, monkeypatch)
     assert registry.presigned_artifact_url(job_id, reference, 300) is None
     assert registry.resolve_artifact(job_id, reference).is_file()
+
+
+def test_allow_list_is_cached_per_manifest_and_scene_head(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """One Studio page requests hundreds of artifacts; the allow-list is rebuilt only when job or scene moves."""
+    from types import SimpleNamespace
+
+    registry, job_id = _world(tmp_path, None)
+    builds: list[str] = []
+    monkeypatch.setattr(registry, "_build_product_visible_references", lambda job: builds.append(job) or {})
+    state = {"head": None, "manifest": "sha256:" + "1" * 64}
+    monkeypatch.setattr(
+        registry.scene.head_repository,
+        "get",
+        lambda job: None if state["head"] is None else SimpleNamespace(head_checksum=state["head"]),
+    )
+    monkeypatch.setattr(registry, "get_job", lambda job: SimpleNamespace(job_manifest_checksum=state["manifest"]))
+
+    registry._product_visible_references(job_id)
+    registry._product_visible_references(job_id)
+    assert len(builds) == 2  # no committed scene head yet: never cached
+
+    state["head"] = "sha256:" + "a" * 64
+    registry._product_visible_references(job_id)
+    registry._product_visible_references(job_id)
+    assert len(builds) == 3
+
+    state["head"] = "sha256:" + "b" * 64  # scene edited
+    registry._product_visible_references(job_id)
+    assert len(builds) == 4
+
+    state["manifest"] = "sha256:" + "2" * 64  # job manifest advanced
+    registry._product_visible_references(job_id)
+    registry._product_visible_references(job_id)
+    assert len(builds) == 5
+
+
+# ── T-051: no rehash per download, stable presigned links ────────────────────
+
+
+def test_resolve_artifact_does_not_rehash_unchanged_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from src.services.orchestration.artifacts import store as store_module
+
+    registry, job_id = _world(tmp_path, None)
+    reference = _published(registry, job_id, monkeypatch)
+    hashed: list[Path] = []
+    real = store_module.verify_file_checksum
+    monkeypatch.setattr(
+        store_module, "verify_file_checksum", lambda path, checksum: hashed.append(path) or real(path, checksum)
+    )
+    registry.resolve_artifact(job_id, reference)
+    registry.resolve_artifact(job_id, reference)
+    assert len(hashed) == 1
+
+
+def test_changed_file_is_rechecked(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import os
+
+    from src.services.orchestration.artifacts import ArtifactChecksumError
+
+    registry, job_id = _world(tmp_path, None)
+    reference = _published(registry, job_id, monkeypatch)
+    path = registry.resolve_artifact(job_id, reference)
+    os.chmod(path, 0o644)
+    path.write_bytes(b"tampered")
+    with pytest.raises(ArtifactChecksumError):
+        registry.resolve_artifact(job_id, reference)
+
+
+def test_presigned_url_is_reused_within_half_lifetime(monkeypatch: pytest.MonkeyPatch) -> None:
+    from src.services.orchestration.artifacts import remote as remote_module
+
+    store = MemoryObjectStore()
+    signed: list[str] = []
+    real = store.presign_get
+    store.presign_get = lambda key, expires: signed.append(key) or real(key, expires)  # type: ignore[method-assign]
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(remote_module.time, "monotonic", lambda: clock["now"])
+    remote = ArtifactRemote(store)
+    first = remote.presign("jobs/a/x.sog", 600)
+    clock["now"] += 299
+    assert remote.presign("jobs/a/x.sog", 600) == first and len(signed) == 1
+    clock["now"] += 2  # past half of the lifetime
+    remote.presign("jobs/a/x.sog", 600)
+    assert len(signed) == 2
+
+
+def test_head_result_is_cached_when_found() -> None:
+    store = MemoryObjectStore()
+    calls: list[str] = []
+    real = store.head
+    store.head = lambda key: calls.append(key) or real(key)  # type: ignore[method-assign]
+    remote = ArtifactRemote(store)
+    assert remote.head("jobs/a/missing.sog") is None
+    assert remote.head("jobs/a/missing.sog") is None
+    store.objects["jobs/a/x.sog"] = (b"x", "sha256:" + "0" * 64)
+    assert remote.head("jobs/a/x.sog") is not None
+    assert remote.head("jobs/a/x.sog") is not None
+    assert calls == ["jobs/a/missing.sog", "jobs/a/missing.sog", "jobs/a/x.sog"]
+
+
+def test_upload_sets_immutable_cache_control(tmp_path: Path) -> None:
+    from types import SimpleNamespace
+
+    from src.services.orchestration.artifacts.remote import S3ObjectStore
+
+    uploads: list[dict] = []
+    store = S3ObjectStore.__new__(S3ObjectStore)
+    store.bucket = "b"
+    store.client = SimpleNamespace(
+        upload_file=lambda path, bucket, key, **options: uploads.append(options["ExtraArgs"])
+    )
+    file = tmp_path / "x.sog"
+    file.write_bytes(b"x")
+    store.put_file("jobs/a/x.sog", file, "sha256:" + "0" * 64)
+    assert uploads[0]["CacheControl"] == "private, max-age=31536000, immutable"

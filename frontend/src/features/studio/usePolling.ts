@@ -8,9 +8,14 @@ import { useEffect, useRef } from "react";
  */
 export function usePolling(task: (signal: AbortSignal) => Promise<void>, intervalMs: number, active: boolean, key?: unknown): void {
   const latest = useRef(task);
+  const interval = useRef(intervalMs);
   useEffect(() => {
     latest.current = task;
   }, [task]);
+  // Đổi nhịp không khởi động lại vòng poll (không hỏi thêm một lần ngay); nhịp mới áp từ lần hẹn kế tiếp.
+  useEffect(() => {
+    interval.current = intervalMs;
+  }, [intervalMs]);
 
   useEffect(() => {
     if (!active) return;
@@ -28,7 +33,7 @@ export function usePolling(task: (signal: AbortSignal) => Promise<void>, interva
           // Lỗi mạng được task tự hiển thị; vòng poll vẫn tiếp tục.
         }
       }
-      if (!stopped) timer = setTimeout(tick, intervalMs);
+      if (!stopped) timer = setTimeout(tick, interval.current);
     };
     // Quay lại tab: cập nhật ngay thay vì chờ hết chu kỳ (có thể 20 s) mới thấy trạng thái mới.
     const onVisible = () => {
@@ -45,5 +50,5 @@ export function usePolling(task: (signal: AbortSignal) => Promise<void>, interva
       controller?.abort();
       if (timer) clearTimeout(timer);
     };
-  }, [intervalMs, active, key]);
+  }, [active, key]);
 }

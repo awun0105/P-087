@@ -43,3 +43,28 @@ T-042 | GPU worker trên RunPod Serverless | planned | engineer
 T-044 | Trang tiến trình nói đúng, đủ cho scene thật và scene mẫu | accepted | —
 T-043 | Dừng công cụ theo tiến độ và khối lượng scene | accepted | —
 T-045 | Chạy 9 scene Deep Blending + Mip-NeRF 360 từ ảnh (chỉ vận hành, không sửa code) | in-progress | engineer
+T-046 | Vòng lặp worker không chết vì một lỗi | implemented | summarizer
+T-047 | Tắt worker giữa chừng thì cho chạy lại, kể cả job cũ | implemented | summarizer
+T-048 | Không còn job RUNNING mà không ai trông | implemented | summarizer
+T-049 | Chịu lỗi DB thoáng qua khi gia hạn và kiểm hủy | implemented | summarizer
+T-050 | Chờ tài nguyên và hạn tự tính không lặp vô hạn | implemented | summarizer
+T-051 | File theo checksum: giữ vĩnh viễn, không băm lại, URL R2 ổn định | implemented | summarizer
+T-052 | Lưới va chạm Walk dựng một lần, trả 304 | implemented | summarizer
+T-053 | Đệm SceneIR / JobManifest đã parse; gzip; CORS | implemented | summarizer
+T-054 | Danh sách scene và stage-views nhẹ | implemented | summarizer
+T-055 | Một hàm trạng thái hình học theo vật | implemented | summarizer
+T-056 | Bảng mốc bước, ghi từ pipeline job | implemented | summarizer
+T-057 | Pha có kiểu và mốc bước cho hàng đợi tách vật | implemented | summarizer
+T-058 | Hàm thuần việc tiếp theo | implemented | summarizer
+T-059 | Endpoint tiến trình hợp nhất, nhẹ, có 304 | implemented | summarizer
+T-060 | Một vòng poll mỗi trang, không re-render khi không đổi | implemented | summarizer
+T-061 | Dòng tiến trình vẽ từ bước thật | implemented | summarizer
+T-062 | Một nguồn việc cần làm cho chuông, banner, đầu trang, danh sách | implemented | summarizer
+T-063 | Một nguồn dữ liệu scene/gói/duyệt; dọn nhánh chết | implemented | architect
+T-064 | Viewer không dựng lại, không vẽ thừa, tab ẩn thì nghỉ | implemented | architect
+T-065 | Tải lười Walk, trang bước song song, chia nhỏ JS | implemented | architect
+T-066 | Ảnh frame thu nhỏ | implemented | architect
+T-067 | Vật nhẹ: SOG cho vật, tải giới hạn, vỏ không tải lại | implemented | architect
+T-068 | SOG xem nhanh: màu bậc 0 và LOD cho job mới | implemented | architect
+T-069 | Full regression, đo trước/sau, bàn giao | implemented | architect
+T-070 | Xem scene lớn bằng LOD, bỏ bản nhẹ | implemented | architect

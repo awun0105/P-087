@@ -14,6 +14,7 @@ from src.models.contracts.manifests import JobManifest, StageArtifact, StageId, 
 from src.models.contracts.preview import ReconstructionPreview
 from src.models.contracts.reconstruction import ReconstructionBundle
 from src.services.orchestration.artifacts import ArtifactStoreError
+from src.services.orchestration.artifacts.parsed_cache import ParsedArtifactCache
 from src.services.orchestration.projects.registry import ProjectRegistry
 from src.services.reconstruction import CameraMarker, camera_markers, frame_images
 from src.services.reconstruction.rgb.canonical.metric_math import compose_rotation
@@ -111,9 +112,22 @@ def job_frame_images(registry: ProjectRegistry, job: JobManifest) -> list[Produc
     return frame_images(reference, registry.runtime_resolver.require)
 
 
+#: T-054: danh sách lớp xem chỉ đổi khi manifest job đổi; giữ theo (job, checksum manifest).
+_VIEWS: ParsedArtifactCache[StageViewList] = ParsedArtifactCache(64)
+
+
 def stage_views(registry: ProjectRegistry, job_id: str) -> StageViewList:
     """Dựng danh sách lớp xem được; bước chưa có kết quả thì không có view."""
     job = registry.get_job(job_id)
+    checksum = getattr(job, "job_manifest_checksum", None)
+    if checksum is None:  # manifest không có identity (bản dựng tay trong test): không đệm
+        return _build_stage_views(registry, job, job_id)
+    return _VIEWS.get_or_load(
+        (f"stage-views:{id(registry)}:{job_id}", checksum), lambda: _build_stage_views(registry, job, job_id)
+    )
+
+
+def _build_stage_views(registry: ProjectRegistry, job: JobManifest, job_id: str) -> StageViewList:
     resolve = registry.runtime_resolver.require
     views: list[StageView] = []
     frames = job_frame_images(registry, job)

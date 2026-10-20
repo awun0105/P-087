@@ -1,15 +1,17 @@
 """SceneIR của job (PRODUCT-06/07, pipeline v2): revision, sửa transform, thao tác vật thể, danh mục asset, tách lại theo vật."""
 
 from pathlib import Path
+from typing import Annotated
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
 from fastapi.responses import FileResponse, JSONResponse
 
 from src.api import schemas
 from src.api.auth import enforce_gpu_quota, record_gpu_run, require_contributor
 from src.api.ownership import authorize_job_mutation
 from src.api.product import deps
+from src.api.product.http_cache import checksum_etag, not_modified
 from src.config import Settings
 from src.models.contracts.artifacts import Identifier
 from src.models.contracts.object_membership import (
@@ -69,16 +71,29 @@ router = APIRouter()
 
 
 @router.get("/jobs/{job_id}/scene", response_model=schemas.SceneResponse)
-def get_job_scene(job_id: str) -> schemas.SceneResponse:
+def get_job_scene(
+    job_id: str,
+    response: Response,
+    if_none_match: Annotated[str | None, Header()] = None,
+) -> schemas.SceneResponse | Response:
     """SceneIR hiện tại của job, kèm ref và trạng thái visual.
 
     `visual.brush_compatibility_proof` đi kèm payload vì fixture hiện chỉ có
     visual tổng hợp — thiếu cờ này thì viewer rất dễ bị đọc thành AC-11.
+    T-053: ETag theo checksum SceneIR; head chưa đổi thì 304 (vẫn phải hỏi lại vì head có thể đổi).
     """
     deps.job_or_404(job_id)
     editor = deps.registry().scene
     try:
-        return schemas.scene_response(editor.current(job_id), editor.visual_binding(job_id))
+        revision = editor.current(job_id)
+        etag = checksum_etag(revision.scene.scene_ir_checksum)
+        if not_modified(if_none_match, etag):
+            return Response(
+                status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag, "Cache-Control": "private, no-cache"}
+            )
+        response.headers["ETag"] = etag
+        response.headers["Cache-Control"] = "private, no-cache"
+        return schemas.scene_response(revision, editor.visual_binding(job_id))
     except SceneNotAvailableError as error:
         raise deps.scene_unavailable(error) from error
     except (ArtifactStoreError, SceneError) as error:

@@ -16,8 +16,11 @@ import io
 import logging
 import os
 import tempfile
+import time
+from collections import OrderedDict
 from collections.abc import Callable
 from pathlib import Path
+from threading import Lock
 from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict
@@ -33,6 +36,11 @@ logger = logging.getLogger(__name__)
 
 #: Metadata S3 (`x-amz-meta-sha256`) giữ checksum có prefix `sha256:`.
 CHECKSUM_METADATA_KEY = "sha256"
+
+
+#: Số key tối đa giữ trong bộ đệm head / link đã ký của một ArtifactRemote.
+_REMOTE_CACHE_MAX = 4096
+IMMUTABLE_CACHE_CONTROL = "private, max-age=31536000, immutable"
 
 
 class RemoteObject(BaseModel):
@@ -121,11 +129,25 @@ class ArtifactRemote:
         self.store = store
         self.prefix = f"{cleaned}/" if cleaned else ""
         self.fallback = fallback
+        # T-051: object theo key là bất biến, nên kết quả head tìm thấy và link đã ký được tái dùng trong tiến trình.
+        self._found: OrderedDict[str, RemoteObject] = OrderedDict()
+        self._signed: OrderedDict[str, tuple[str, float, float]] = OrderedDict()
+        self._cache_lock = Lock()
 
     def head(self, relative: str) -> RemoteObject | None:
         """Read session output first, then an immutable baseline when configured."""
+        with self._cache_lock:
+            cached = self._found.get(relative)
+        if cached is not None:
+            return cached
         found = self.store.head(self.key(relative))
-        return self.fallback.head(relative) if found is None and self.fallback is not None else found
+        found = self.fallback.head(relative) if found is None and self.fallback is not None else found
+        if found is not None:
+            with self._cache_lock:
+                self._found[relative] = found
+                while len(self._found) > _REMOTE_CACHE_MAX:
+                    self._found.popitem(last=False)
+        return found
 
     def key(self, relative: str) -> str:
         """Key object của một đường dẫn tương đối `jobs/<ns>/<path>`."""
@@ -195,13 +217,15 @@ class ArtifactRemote:
             pushed += 1
         return pushed
 
-    def pull_tree(self, relative_dir: str, local_dir: Path) -> int:
-        """Tải mọi object của một namespace còn thiếu trong cache. Trả số file vừa tải."""
+    def pull_tree(self, relative_dir: str, local_dir: Path, *, skip_top: frozenset[str] = frozenset()) -> int:
+        """Tải mọi object của một namespace còn thiếu trong cache, trừ thư mục con cấp đầu trong `skip_top`."""
         prefix = self.key(relative_dir.rstrip("/") + "/")
         pulled = 0
         for item in self.store.list_objects(prefix):
             relative_path = item.key.removeprefix(prefix)
             if not relative_path or any(part in {"", ".", ".."} for part in relative_path.split("/")):
+                continue
+            if relative_path.split("/", 1)[0] in skip_top:
                 continue
             destination = local_dir / relative_path
             if destination.is_file():
@@ -211,10 +235,23 @@ class ArtifactRemote:
         return pulled
 
     def presign(self, relative: str, expires_seconds: int) -> str:
-        """Link tải có hạn cho trình duyệt."""
+        """Link tải có hạn cho trình duyệt; cùng link được trả lại khi còn ít nhất nửa thời hạn (bộ đệm trình duyệt trúng)."""
+        now = time.monotonic()
+        with self._cache_lock:
+            cached = self._signed.get(relative)
+        if cached is not None:
+            url, signed_at, lifetime = cached
+            if lifetime == expires_seconds and now - signed_at < lifetime / 2:
+                return url
         if self.fallback is not None and self.store.head(self.key(relative)) is None:
-            return self.fallback.presign(relative, expires_seconds)
-        return self.store.presign_get(self.key(relative), expires_seconds)
+            url = self.fallback.presign(relative, expires_seconds)
+        else:
+            url = self.store.presign_get(self.key(relative), expires_seconds)
+        with self._cache_lock:
+            self._signed[relative] = (url, now, float(expires_seconds))
+            while len(self._signed) > _REMOTE_CACHE_MAX:
+                self._signed.popitem(last=False)
+        return url
 
     # --- upload thẳng từ trình duyệt (multipart) ---------------------------
 
@@ -306,7 +343,13 @@ class S3ObjectStore:
 
     def put_file(self, key: str, path: Path, checksum: str) -> None:
         """Managed upload (tự multipart với file lớn), checksum trong metadata."""
-        self.client.upload_file(str(path), self.bucket, key, ExtraArgs={"Metadata": {CHECKSUM_METADATA_KEY: checksum}})
+        self.client.upload_file(
+            str(path),
+            self.bucket,
+            key,
+            # Key mang checksum nên nội dung bất biến: trình duyệt được giữ vĩnh viễn (T-051).
+            ExtraArgs={"Metadata": {CHECKSUM_METADATA_KEY: checksum}, "CacheControl": IMMUTABLE_CACHE_CONTROL},
+        )
 
     def get_file(self, key: str, destination: Path) -> None:
         """Managed download vào file tạm do caller cấp."""

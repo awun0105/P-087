@@ -788,7 +788,11 @@ def validate_staged_package(root: Path) -> StagedPackage:
         path = _artifact_path(artifacts, uri)
         if not path.is_file():
             raise PackagePublishError(f"referenced artifact is missing: {uri}")
-        observed = verified.setdefault(path, sha256_file(path))
+        # Many references can point at one large file (e.g. every scene revision cites the same SOG):
+        # hash each file once. setdefault() would evaluate sha256_file on every reference.
+        observed = verified.get(path)
+        if observed is None:
+            observed = verified[path] = sha256_file(path)
         if observed != checksum:
             raise PackagePublishError(f"artifact checksum mismatch for {uri}: expected {checksum}, observed {observed}")
     # The manifest check above can be the only check for a small package.  All
@@ -891,7 +895,9 @@ def _target_counts_without_migration(database_url: str) -> dict[str, int]:
         except ImportError as error:
             raise PackagePublishError("PostgreSQL dry-run needs psycopg 3") from error
         try:
-            with psycopg.connect(database_url, autocommit=True, connect_timeout=10) as connection:
+            with psycopg.connect(
+                database_url, autocommit=True, connect_timeout=10, prepare_threshold=None
+            ) as connection:
                 counts: dict[str, int] = {}
                 for table in TARGET_EMPTY_TABLES:
                     exists = connection.execute("SELECT to_regclass(%s)", (table,)).fetchone()[0]

@@ -37,6 +37,8 @@ const SHELL_OPACITY: Record<ShellStyle, number> = { selected: 0.2, idle: 0.06 };
 const WIRE_OPACITY = 0.4;
 const PENDING_OPACITY = 0.06;
 const PULSE_PERIOD_MS = 2000;
+/** Khoảng cách tối thiểu giữa hai lần cập nhật nhịp (≈10 lần/giây). */
+const PULSE_FRAME_MS = 100;
 const PULSE_AMPLITUDE = 0.01;
 
 interface PointRecord {
@@ -55,6 +57,11 @@ interface ShellRecord {
   wire: StandardMaterial | null;
   asset: Asset;
   blobUrl: string | null;
+  /** URL GLB nguồn (null khi nạp từ bytes): cùng URL thì đổi kiểu tại chỗ, không nạp lại (T-067). */
+  url: string | null;
+  /** GLB đã nạp; cần để dựng viền khi vật được chọn sau đó. */
+  container: ContainerResource | null;
+  outline: Entity | null;
   /** Hoàn tất lời hứa của `setShell` khi vỏ bị thay hoặc gỡ trước khi nạp xong. */
   settle: () => void;
 }
@@ -124,10 +131,17 @@ export class ShellGlowLayer {
   constructor(private readonly host: SceneOverlay) {}
 
   /** Nhịp nhẹ của vỏ đang chọn: độ mờ 0,19–0,21; tắt khi bật giảm chuyển động. */
+  private lastPulseAt = -Infinity;
+
   private readonly onUpdate = (): void => {
     if (this.destroyed) return;
+    const now = performance.now();
     const reduce = prefersReducedMotion();
-    const wave = (1 - Math.cos((2 * Math.PI * performance.now()) / PULSE_PERIOD_MS)) / 2;
+    // T-064: mỗi lần nhịp là một lần vẽ lại cả cảnh splat; nhịp chậm (biên độ ±0,01) nên ~10 lần/giây là đủ mượt.
+    // Giảm chuyển động thì trả độ mờ gốc ngay, không chờ nhịp.
+    if (!reduce && now - this.lastPulseAt < PULSE_FRAME_MS) return;
+    if (!reduce) this.lastPulseAt = now;
+    const wave = (1 - Math.cos((2 * Math.PI * now) / PULSE_PERIOD_MS)) / 2;
     let animating = false;
     for (const record of this.shells.values()) {
       if (record.style !== "selected" || record.tone !== "normal") continue;
@@ -151,6 +165,11 @@ export class ShellGlowLayer {
   setShell(objectId: string, glb: ArrayBuffer | string, style: ShellStyle): Promise<void> {
     const parent = this.parentOf(objectId);
     if (!parent) return Promise.resolve();
+    const existing = this.shells.get(objectId);
+    if (typeof glb === "string" && existing?.url === glb && existing.root.parent === parent) {
+      this.restyle(objectId, existing, style);
+      return Promise.resolve();
+    }
     this.releaseShell(objectId);
     const app = this.host.application();
     const url = typeof glb === "string" ? glb : URL.createObjectURL(new Blob([glb], { type: "model/gltf-binary" }));
@@ -166,6 +185,9 @@ export class ShellGlowLayer {
         wire: style === "selected" ? shellMaterial(themeColor("--studio-sage", "#2dd4bf"), WIRE_OPACITY) : null,
         asset,
         blobUrl,
+        url: typeof glb === "string" ? glb : null,
+        container: null,
+        outline: null,
         settle: resolve,
       };
       record.root.enabled = style === "selected" || objectId === this.hovered;
@@ -176,14 +198,11 @@ export class ShellGlowLayer {
         this.revoke(record);
         if (this.shells.get(objectId) !== record) return resolve();
         const container = asset.resource as ContainerResource;
+        record.container = container;
         const solid = container.instantiateRenderEntity();
         paint(solid, record.fill, false);
         record.root.addChild(solid);
-        if (record.wire) {
-          const outline = container.instantiateRenderEntity();
-          paint(outline, record.wire, true);
-          record.root.addChild(outline);
-        }
+        if (record.wire) this.addOutline(record);
         resolve();
       });
       asset.once("error", () => {
@@ -241,6 +260,31 @@ export class ShellGlowLayer {
     record.tone = tone;
     this.applyTone(record);
     this.updateVisibility(objectId, record);
+  }
+
+  /** Đổi kiểu vỏ trên GLB đã có: chỉ vật liệu, độ mờ và viền; không nạp lại file (T-067). */
+  private restyle(objectId: string, record: ShellRecord, style: ShellStyle): void {
+    if (record.style === style) return;
+    record.style = style;
+    if (style === "selected" && !record.wire) {
+      record.wire = shellMaterial(themeColor("--studio-sage", "#2dd4bf"), WIRE_OPACITY);
+      if (record.container) this.addOutline(record);
+    } else if (style !== "selected" && record.wire) {
+      record.outline?.destroy();
+      record.outline = null;
+      record.wire.destroy();
+      record.wire = null;
+    }
+    this.applyTone(record);
+    this.updateVisibility(objectId, record);
+  }
+
+  private addOutline(record: ShellRecord): void {
+    if (!record.container || !record.wire || record.outline) return;
+    const outline = record.container.instantiateRenderEntity();
+    paint(outline, record.wire, true);
+    record.root.addChild(outline);
+    record.outline = outline;
   }
 
   /** Hover chỉ bật/tắt entity đã nạp; không tải lại GLB hoặc đổi lựa chọn của người dùng. */

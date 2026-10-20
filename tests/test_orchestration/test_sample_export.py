@@ -474,6 +474,7 @@ def test_sample_exports_recorded_metric_collision_objects_and_geometry(
             "status": request_status if request_status != "stale" else "done",
             "result_revision": "rev-001" if request_status == "stale" else "rev-002",
             "base_revision": "rev-002",
+            "requested_at": "2026-10-16T23:59:00Z",
             "started_at": "2026-10-17T00:00:00Z",
             "finished_at": "2026-10-17T00:00:12Z",
         }

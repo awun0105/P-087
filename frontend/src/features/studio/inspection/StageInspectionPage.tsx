@@ -50,6 +50,9 @@ export function StageInspectionPage({ jobId, stageId }: { jobId: string; stageId
   useEffect(() => {
     if (!meta) return;
     const controller = new AbortController();
+    // T-065: tải sẵn mã khung xem song song với request đầu, không chờ cổng "đã xong" mới bắt đầu tải chunk.
+    if (meta.id === LIDAR_STAGE.id || meta.id === "ST-FRAME-EXTRACT" || meta.id === "ST-CAMERA-POSE") void import("@/features/studio/StageViewer").catch(() => undefined);
+    else if (meta.id !== "ST-INPUT-VALIDATE" && meta.id !== "ST-PRIVACY-GATE") void import("@/features/studio/inspection/StageSceneWorkspace").catch(() => undefined);
     void (async () => {
       try {
         const progress = await getJobProgress(jobId, controller.signal);
@@ -61,14 +64,22 @@ export function StageInspectionPage({ jobId, stageId }: { jobId: string; stageId
         }
         const [job, artifacts] = await Promise.all([getJob(jobId), listJobArtifacts(jobId)]);
         if (controller.signal.aborted) return;
-        const project = job.ok ? await getProject(job.data.project_id) : null;
-        if (controller.signal.aborted) return;
         const uris = new Set(job.ok ? job.data.stage_artifacts.filter((stage) => stage.stage_id === meta.id).map((stage) => stage.artifact_uri) : []);
+        const warnings = [!job.ok && `Job: ${errorMessage(job.error)}`, !artifacts.ok && `Artifact: ${errorMessage(artifacts.error)}`].filter((value): value is string => Boolean(value));
         setSnapshot({
           progress: progress.data, job: job.ok ? job.data : null,
-          project: project?.ok ? project.data : null,
+          project: null,
           artifacts: artifacts.ok ? artifacts.data.artifacts.filter((ref) => ref.producer_stage === meta.id || uris.has(ref.artifact_uri)) : [],
-          warnings: [!job.ok && `Job: ${errorMessage(job.error)}`, project && !project.ok && `Project: ${errorMessage(project.error)}`, !artifacts.ok && `Artifact: ${errorMessage(artifacts.error)}`].filter((value): value is string => Boolean(value)),
+          warnings,
+        });
+        // T-065: tên dự án chỉ cho tiêu đề; về sau thì điền vào, không chặn viewer.
+        if (!job.ok) return;
+        const project = await getProject(job.data.project_id);
+        if (controller.signal.aborted) return;
+        setSnapshot((previous) => previous && {
+          ...previous,
+          project: project.ok ? project.data : null,
+          warnings: project.ok ? previous.warnings : [...previous.warnings, `Project: ${errorMessage(project.error)}`],
         });
       } catch (cause) {
         if (!controller.signal.aborted) setError(errorMessage(cause, "Không tải được giai đoạn"));

@@ -2,7 +2,7 @@ name: Deploy Landing Page
 
 on:
   push:
-    branches: [develop]
+    branches: [develop, master]
     paths:
       - "landing/**"
       - ".github/workflows/deploy-landing.yml"
@@ -33,8 +33,8 @@ jobs:
       - name: Build static export
         run: bun run build
         env:
-          NEXT_PUBLIC_STUDIO_LOGIN_URL: ${{ vars.NEXT_PUBLIC_STUDIO_LOGIN_URL || 'https://app.real2sim.vn/login' }}
-          NEXT_PUBLIC_STUDIO_URL: ${{ vars.NEXT_PUBLIC_STUDIO_URL || 'https://app.real2sim.vn' }}
+          NEXT_PUBLIC_STUDIO_LOGIN_URL: ${{ vars.NEXT_PUBLIC_STUDIO_LOGIN_URL || 'https://real2sim-studio.vercel.app/login?next=%2Foverview' }}
+          NEXT_PUBLIC_STUDIO_URL: ${{ vars.NEXT_PUBLIC_STUDIO_URL || 'https://real2sim-studio.vercel.app' }}
 
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3

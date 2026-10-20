@@ -21,7 +21,7 @@ from src.services.orchestration.projects.registry import get_project_registry
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["run", "once", "status", "drain", "resume", "watchdog"])
+    parser.add_argument("action", choices=["run", "once", "status", "drain", "resume", "watchdog", "forget-unknown"])
     args = parser.parse_args(argv)
     policy, settings = GpuSettings(), get_settings()
     if not policy.deployment_id:
@@ -74,9 +74,15 @@ def main(argv: list[str] | None = None) -> int:
         policy,
         catalog,
         RunPod(transport(policy.runpod_api_key.get_secret_value())),
-        lambda: inventory(settings, get_project_registry(), catalog),
+        # Read the controller's catalog at call time: it reloads the file when a new release is installed.
+        lambda: inventory(settings, get_project_registry(), controller.catalog),
+        catalog_path=policy.release_catalog,
     )
     logging.basicConfig(level=logging.INFO)
+    if args.action == "forget-unknown":
+        outcome = controller.forget_unknown()
+        print(outcome)
+        return 0 if outcome in {"forgotten", "nothing_to_forget"} else 1
     while True:
         try:
             outcome = controller.tick()

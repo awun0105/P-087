@@ -14,6 +14,7 @@ _RETRYABLE_ERROR_CODES = frozenset(
         "COLMAP_TIMEOUT",
         "EXPECTED_DURATION_EXCEEDED",
         "PROCESS_STALLED",
+        "RESOURCE_WAIT_EXCEEDED",
         "COLMAP_UNAVAILABLE",
         "COLMAP_VERSION_UNKNOWN",
         "FFMPEG_UNAVAILABLE",
@@ -54,8 +55,15 @@ _TRANSIENT_EXCEPTION_TYPES = frozenset(
         "TimeoutError",
         "TimeoutExpired",
         "OutOfMemoryError",
+        # Lỗi DB kéo dài (sqlite/psycopg) sau khi đã chịu hết khoảng cho phép: lần chạy mới có thể qua.
+        "OperationalError",
+        "InterfaceError",
     }
 )
+
+
+#: Exceptions raised in a runner when the worker process itself is being stopped.
+_SHUTDOWN_EXCEPTION_TYPES = frozenset({"KeyboardInterrupt", "SystemExit"})
 
 
 def classify_retryability(error_code: str, details: Mapping[str, object] | None = None) -> bool:
@@ -73,5 +81,16 @@ def classify_retryability(error_code: str, details: Mapping[str, object] | None 
 
 
 def is_execution_error_retryable(error: ExecutionError) -> bool:
-    """Honor the producer flag only when its error type is allowed by policy."""
+    """Honor the producer flag only when its error type is allowed by policy.
+
+    A runner stopped by a worker shutdown (SIGTERM/Ctrl-C, deploy) is an interruption, not a
+    failure of the job, so it is always retryable — including jobs recorded before that rule,
+    which carry ``retryable=False``.
+    """
+    if (
+        error.error_code == "PREVIEW_RUNNER_FAILED"
+        and error.details is not None
+        and error.details.get("exception_type") in _SHUTDOWN_EXCEPTION_TYPES
+    ):
+        return True
     return error.retryable and classify_retryability(error.error_code, error.details)

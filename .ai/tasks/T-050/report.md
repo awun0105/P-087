@@ -1,0 +1,11 @@
+# T-050 report
+- `admission.py`: lý do chờ mới `gate_error` khi cổng tài nguyên lỗi; `wait_exceeded(reasons, since, now, limit)` (không bao giờ hết hạn khi có lý do `busy`).
+- `config.py`: `product_resource_wait_max_seconds` (mặc định 1800).
+- Tách vật: `_Record.resource_wait_since`; quá hạn → `failed`, retryable, câu nêu lý do; khi lượt kết thúc xoá `resource_wait` và mốc chờ.
+- Kiểm định: quá hạn → `RESOURCE_WAIT_EXCEEDED` retryable (đã thêm vào `_RETRYABLE_ERROR_CODES`).
+- `_expected_limit`: có lượt `timeout` trước của cùng job/công cụ → dùng giới hạn cố định.
+- Frontend: parser + kiểu + nhãn cho `gate_error`; hướng dẫn cho `RESOURCE_WAIT_EXCEEDED`.
+- Lệch plan:
+  - Kiểm định đo thời gian chờ từ `run.requested_at` (lượt chưa bắt đầu) thay vì thêm `waiting_since` vào operation — bảng `r2s_validation_operations` lưu theo cột, thêm trường cần migration. Hệ quả: thời gian xếp hàng trước khi chờ tài nguyên cũng được tính.
+  - Không cập nhật file mẫu môi trường: không file mẫu nào liệt kê các biến cùng loại; giá trị mặc định nằm trong code.
+- Ghi chú: commit f443c7bb và e6729fb5 đã được phiên deploy đẩy lên production cùng đợt (backend + frontend cùng lúc).

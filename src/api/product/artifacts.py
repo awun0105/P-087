@@ -1,25 +1,37 @@
 """Artifact của job: danh sách được phép thấy, bytes theo allow-list, preview 3DGS, bản ghi Rerun."""
 
+import hashlib
+import logging
+import re
 from pathlib import Path
-from typing import Literal
+from threading import Thread
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, HTTPException, Query, Response, status
+from fastapi import APIRouter, Header, HTTPException, Query, Response, status
 from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import ValidationError
 
 from src.api import schemas
 from src.api.product import deps
+from src.api.product.http_cache import IMMUTABLE_PRIVATE, checksum_etag, not_modified
 from src.models.contracts.artifacts import ArtifactRef, Checksum
 from src.models.contracts.preview import ReconstructionPreview
-from src.services.orchestration.artifacts import ArtifactNotFoundError, ArtifactStoreError
+from src.services.orchestration.artifacts import (
+    ArtifactNotFoundError,
+    ArtifactStoreError,
+    lod,
+    thumbnails,
+)
 from src.services.orchestration.jobs.display_glb import display_space_glb
 from src.services.orchestration.jobs.stage_views import job_bundle
 from src.services.orchestration.projects import JobNotFoundError, ProjectRegistry
+from src.services.orchestration.scene.collision_cache import CollisionKey, CollisionPayload, WalkCollisionCache
 from src.services.orchestration.scene.errors import (
     ObjectGeometryNotReadyError,
     SceneError,
     SceneHeadNotReadyError,
     SceneNotAvailableError,
+    SceneRevisionConflictError,
 )
 from src.services.orchestration.scene.physics_collision import (
     effective_collision_bytes,
@@ -29,6 +41,7 @@ from src.services.scene.collision_ownership import SourceCollisionOwnershipError
 from src.services.scene.geometry_state import require_geometry_ready
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.get("/jobs/{job_id}/artifacts", response_model=schemas.ArtifactListResponse)
@@ -61,6 +74,7 @@ def get_artifact_content(
     job_id: str,
     artifact_uri: str = Query(..., min_length=1),
     artifact_checksum: Checksum = Query(...),
+    if_none_match: Annotated[str | None, Header()] = None,
 ) -> Response:
     """Trả bytes của một artifact **đã nằm trong allow-list của job**.
 
@@ -81,11 +95,24 @@ def get_artifact_content(
             job_id=job_id,
         )
         registry = deps.registry()
+        # T-051: kiểm quyền trước; trình duyệt đã có đúng bản (checksum trong URL) thì trả 304, không đọc file.
+        etag = checksum_etag(registry.authorized_artifact(job_id, reference).artifact_checksum)
+        if not_modified(if_none_match, etag):
+            return Response(
+                status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag, "Cache-Control": IMMUTABLE_PRIVATE}
+            )
         # Có kho file: trình duyệt tải thẳng từ R2 bằng link có hạn (ADR 0003), API không
         # cõng file lớn qua băng thông tính phí. Quyền đọc vẫn kiểm theo allow-list ở trên.
-        link = registry.presigned_artifact_url(job_id, reference, deps.settings().artifact_presign_seconds)
+        presign_seconds = deps.settings().artifact_presign_seconds
+        link = registry.presigned_artifact_url(job_id, reference, presign_seconds)
         if link is not None:
-            return RedirectResponse(link, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+            # Link được tái dùng khi còn ≥ nửa thời hạn (ArtifactRemote): trình duyệt giữ redirect trong khoảng đó.
+            keep = max(0, presign_seconds // 2 - 60)
+            return RedirectResponse(
+                link,
+                status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+                headers={"Cache-Control": f"private, max-age={keep}"},
+            )
         path = registry.resolve_artifact(job_id, reference)
     except ValidationError as error:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)) from error
@@ -96,9 +123,114 @@ def get_artifact_content(
         path,
         media_type="application/octet-stream",
         headers={
-            "Cache-Control": "private, no-cache",
+            "Cache-Control": IMMUTABLE_PRIVATE,
+            "ETag": etag,
             "X-Content-Type-Options": "nosniff",
         },
+    )
+
+
+@router.get("/jobs/{job_id}/frames/thumbnail")
+def get_frame_thumbnail(
+    job_id: str,
+    artifact_uri: str = Query(..., min_length=1),
+    artifact_checksum: Checksum = Query(...),
+    width: int = Query(320),
+    if_none_match: Annotated[str | None, Header()] = None,
+) -> Response:
+    """Ảnh frame thu nhỏ (JPEG) cho lưới bước Frame (T-066); cùng allow-list với route content."""
+    if width not in thumbnails.ALLOWED_WIDTHS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"width phải là một trong {sorted(thumbnails.ALLOWED_WIDTHS)}",
+        )
+    deps.job_or_404(job_id)
+    try:
+        reference = ArtifactRef(
+            artifact_type="ArtifactContent",
+            schema_version="1.0",
+            artifact_uri=artifact_uri,
+            artifact_checksum=artifact_checksum,
+            data_class="derived",
+            producer_stage="ST-EDIT",
+            job_id=job_id,
+        )
+        registry = deps.registry()
+        canonical = registry.authorized_artifact(job_id, reference)
+        etag = thumbnails.thumbnail_etag(canonical.artifact_checksum, width)
+        headers = {"ETag": etag, "Cache-Control": IMMUTABLE_PRIVATE}
+        if not_modified(if_none_match, etag):
+            return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=headers)
+        root = registry.runtime_resolver.artifact_root.parent / "cache" / "thumbnails"
+        body = thumbnails.get_thumbnail(
+            root, canonical.artifact_checksum, width, lambda: registry.resolve_artifact(job_id, reference)
+        )
+    except ValidationError as error:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)) from error
+    except ArtifactStoreError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+    except OSError as error:  # Pillow: không đọc được ảnh (không phải ảnh, hỏng).
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail="Frame không đọc được"
+        ) from error
+    return Response(body, media_type="image/jpeg", headers={**headers, "X-Content-Type-Options": "nosniff"})
+
+
+_LOD_MEDIA = {".json": "application/json", ".webp": "image/webp"}
+_NOT_FOUND_HEADERS = {"Cache-Control": "private, no-store"}
+
+
+@router.get("/jobs/{job_id}/lod/{checksum_hex}/{path:path}")
+def get_lod_file(
+    job_id: str,
+    checksum_hex: str,
+    path: str,
+    if_none_match: Annotated[str | None, Header()] = None,
+) -> Response:
+    """Một file của bộ LOD (T-070) của SOG có checksum `checksum_hex`; khung 3D đọc theo đường dẫn tương đối.
+
+    SOG nguồn phải thuộc allow-list của job; chỉ nhận đúng dạng tên file của bộ LOD. Bộ chưa có thì 404 (`no-store`,
+    vì worker GPU có thể tạo sau) và giao diện mở SOG gốc.
+    """
+    not_found = HTTPException(status_code=status.HTTP_404_NOT_FOUND, headers=_NOT_FOUND_HEADERS)
+    if not re.fullmatch(r"[0-9a-f]{64}", checksum_hex) or not lod.valid_bundle_path(path):
+        raise not_found
+    deps.job_or_404(job_id)
+    registry = deps.registry()
+    checksum = f"sha256:{checksum_hex}"
+    try:
+        registry.authorized_sog_by_checksum(job_id, checksum)
+    except ArtifactStoreError as error:
+        raise not_found from error
+    etag = f'"lod-{checksum_hex[:24]}-{hashlib.sha256(path.encode()).hexdigest()[:16]}"'
+    headers = {"ETag": etag, "Cache-Control": IMMUTABLE_PRIVATE}
+    if not_modified(if_none_match, etag):
+        return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=headers)
+    resolver = registry.runtime_resolver
+    relative = f"{lod.lod_relative_dir(job_id, checksum)}/{path}"
+    local = resolver.artifact_root / relative
+    remote = resolver.remote
+    if not local.is_file() and remote is not None:
+        if path.endswith(".webp"):
+            # Khối dữ liệu tải thẳng từ kho file; file mục lục/meta vẫn qua API để đường dẫn tương đối trỏ về đây.
+            if remote.head(relative) is None:
+                raise not_found
+            seconds = deps.settings().artifact_presign_seconds
+            return RedirectResponse(
+                remote.presign(relative, seconds),
+                status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+                headers={"Cache-Control": f"private, max-age={max(0, seconds // 2 - 60)}"},
+            )
+        try:
+            remote.fetch(relative, local)
+        except ArtifactStoreError as error:
+            raise not_found from error
+    if not local.is_file():
+        raise not_found
+    return FileResponse(
+        local,
+        media_type=_LOD_MEDIA[Path(path).suffix],
+        headers={**headers, "X-Content-Type-Options": "nosniff"},
     )
 
 
@@ -108,11 +240,12 @@ def get_named_artifact_content(
     filename: str,
     artifact_uri: str = Query(..., min_length=1),
     artifact_checksum: Checksum = Query(...),
+    if_none_match: Annotated[str | None, Header()] = None,
 ) -> Response:
     """Tên file dùng chọn parser; quyền đọc vẫn bind URI/checksum canonical."""
     if filename != artifact_uri.rsplit("/", 1)[-1]:
         raise HTTPException(status_code=404, detail="artifact filename does not match its reference")
-    return get_artifact_content(job_id, artifact_uri, artifact_checksum)
+    return get_artifact_content(job_id, artifact_uri, artifact_checksum, if_none_match)
 
 
 def _require_walk_allowed(registry: ProjectRegistry, job_id: str) -> None:
@@ -126,6 +259,20 @@ def _require_walk_allowed(registry: ProjectRegistry, job_id: str) -> None:
     require_geometry_ready(scene, "Walk")
 
 
+_WALK_CACHES: dict[Path, WalkCollisionCache] = {}
+
+
+def _walk_cache(registry: ProjectRegistry) -> WalkCollisionCache:
+    """Một đệm cho mỗi kho artifact; thư mục đĩa cạnh ARTIFACT_ROOT (không ghi được thì chỉ dùng bộ nhớ)."""
+    root = registry.runtime_resolver.artifact_root.parent / "cache" / "walk-collision"
+    cache = _WALK_CACHES.get(root)
+    if cache is None:
+        cache = _WALK_CACHES[root] = WalkCollisionCache(root)
+        # Dọn file đệm không dùng quá 7 ngày một lần mỗi tiến trình, ở luồng nền.
+        Thread(target=cache.prune, name="walk-collision-prune", daemon=True).start()
+    return cache
+
+
 @router.get("/jobs/{job_id}/walk-collision/{filename}")
 def get_walk_collision(
     job_id: str,
@@ -137,6 +284,7 @@ def get_walk_collision(
     frame: Literal["display", "canonical"] = Query(default="display"),
     preview: bool = Query(default=False),
     reconstruction: bool = False,
+    if_none_match: Annotated[str | None, Header()] = None,
 ) -> Response:
     """Shared effective environment for SceneIR consumers; raw preview only before scene review.
 
@@ -171,18 +319,46 @@ def get_walk_collision(
         shared = 0
         floor = 0
         repaired = 0
+        etag = '"' + identity.removeprefix("sha256:") + ":" + frame + '"'
+        cache_control = "private, no-cache"
         if scene_revision is not None:
-            scene, background = effective_collision_for_revision(
-                registry, job_id, scene_revision, preview_pending=preview is True
+            # T-052: revision phải là head hiện tại (như trước) rồi mới đọc đệm; dựng chỉ khi đệm chưa có.
+            if registry.scene.current(job_id).scene.scene_revision != scene_revision:
+                raise SceneRevisionConflictError("collision request does not match current SceneIR revision")
+            key = CollisionKey(
+                job_id=job_id,
+                scene_revision=scene_revision,
+                source_checksum=artifact_checksum,
+                preview=preview is True,
+                frame=frame,
+                config_checksum=registry.get_job(job_id).config_checksum,
+                source_uri=artifact_uri,
             )
-            selected = scene.environment.collision_source_ref or scene.environment.geometry_ref
-            if (artifact_uri, artifact_checksum) != (selected.artifact_uri, selected.artifact_checksum):
-                raise SourceCollisionOwnershipError("collision URL does not bind the selected SceneIR source")
-            payload = effective_collision_bytes(background, display=frame == "display")
-            identity = background.identity
-            shared = background.retained_shared_triangles
-            floor = background.protected_surface_triangles
-            repaired = background.repaired_triangles
+            if not_modified(if_none_match, key.etag):
+                return Response(
+                    status_code=status.HTTP_304_NOT_MODIFIED,
+                    headers={"ETag": key.etag, "Cache-Control": IMMUTABLE_PRIVATE},
+                )
+
+            def build() -> CollisionPayload:
+                scene, background = effective_collision_for_revision(
+                    registry, job_id, scene_revision, preview_pending=preview is True
+                )
+                selected = scene.environment.collision_source_ref or scene.environment.geometry_ref
+                if (artifact_uri, artifact_checksum) != (selected.artifact_uri, selected.artifact_checksum):
+                    raise SourceCollisionOwnershipError("collision URL does not bind the selected SceneIR source")
+                return CollisionPayload(
+                    body=effective_collision_bytes(background, display=frame == "display"),
+                    identity=background.identity,
+                    shared=background.retained_shared_triangles,
+                    floor=background.protected_surface_triangles,
+                    repaired=background.repaired_triangles,
+                )
+
+            composed = _walk_cache(registry).get_or_build(key, build)
+            payload, identity = composed.body, composed.identity
+            shared, floor, repaired = composed.shared, composed.floor, composed.repaired
+            etag, cache_control = key.etag, IMMUTABLE_PRIVATE
         else:
             if dynamic or preview is True:
                 raise SourceCollisionOwnershipError("object collision composition requires scene_revision")
@@ -204,7 +380,7 @@ def get_walk_collision(
         media_type="model/gltf-binary",
         # Nội dung gắn với checksum trong URL nên trình duyệt được giữ lại.
         headers={
-            "Cache-Control": "private, no-cache",
+            "Cache-Control": cache_control,
             "X-Content-Type-Options": "nosniff",
             "X-Scene-Revision": scene_revision or "source-preview",
             "X-Collision-Composition": identity,
@@ -218,7 +394,7 @@ def get_walk_collision(
             else "confirmed"
             if scene_revision
             else "source-preview",
-            "ETag": '"' + identity.removeprefix("sha256:") + ":" + frame + '"',
+            "ETag": etag,
         },
     )
 

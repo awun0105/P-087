@@ -6,14 +6,33 @@ export type ObjectGeometryState = "awaiting_review" | "ready";
 /** Lý do hiển thị (tooltip, banner) khi thao tác cần hình học bị khoá trong Draft. */
 export const GEOMETRY_NOT_READY_REASON = "Cần tạo mesh trước";
 
-/** Nhãn tiếng Việt của các phase tạo mesh (architecture.md §7.4). */
-const GEOMETRY_PHASE_LABELS: Record<string, string> = {
+/** Pha của hàng đợi tách vật; khớp `ObjectifyPhase` ở backend (T-057). */
+export const OBJECTIFY_PHASES = [
+  "queued",
+  "observations",
+  "collider_and_background",
+  "shell",
+  "objectgs",
+  "quality",
+  "collider",
+  "environment",
+  "publish",
+  "done",
+] as const;
+export type ObjectifyPhase = (typeof OBJECTIFY_PHASES)[number];
+
+/** Nhãn tiếng Việt của mọi pha. */
+const GEOMETRY_PHASE_LABELS: Record<ObjectifyPhase, string> = {
+  queued: "Đang xếp hàng",
+  observations: "Tách vật theo nhiều góc nhìn",
+  collider_and_background: "Dựng collider và vá nền",
   shell: "Dựng vỏ vật",
+  objectgs: "Chạy ObjectGS",
   quality: "Kiểm tra chất lượng",
   collider: "Tạo collider (CoACD)",
-  objectgs: "Chạy ObjectGS",
   environment: "Dựng nền và collision môi trường",
   publish: "Lưu revision",
+  done: "Đã xong",
 };
 
 export function objectGeometryState(scene: Pick<SceneIR, "provenance">): ObjectGeometryState {
@@ -25,5 +44,5 @@ export function objectGeometryState(scene: Pick<SceneIR, "provenance">): ObjectG
 /** Nhãn phase tiếng Việt; phase chưa biết giữ nguyên mã để không mất thông tin. */
 export function geometryPhaseLabel(phase: string | null | undefined): string | null {
   if (!phase) return null;
-  return GEOMETRY_PHASE_LABELS[phase] ?? phase;
+  return (GEOMETRY_PHASE_LABELS as Record<string, string>)[phase] ?? phase;
 }

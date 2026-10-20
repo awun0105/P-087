@@ -73,6 +73,7 @@ from src.services.orchestration.artifacts import (
     ArtifactResolver,
     ArtifactStoreError,
     FilesystemArtifactStore,
+    lod,
     sha256_bytes,
 )
 from src.services.orchestration.benchmark import build_benchmark, publish_benchmark
@@ -88,7 +89,8 @@ from src.services.orchestration.jobs.dispatch import (
     require_profile,
     resolve_job_processing,
 )
-from src.services.orchestration.jobs.lease import lease_lost
+from src.services.orchestration.jobs.heartbeat import HeartbeatTolerance
+from src.services.orchestration.jobs.lease import LEASE_TTL, lease_lost
 from src.services.orchestration.jobs.log_context import configure_worker_logging, job_log_context
 from src.services.orchestration.jobs.models import PreparedInputReceipt, TransitionRequest
 from src.services.orchestration.jobs.profile import machine_runtime_checksum
@@ -98,6 +100,7 @@ from src.services.orchestration.jobs.progress import (
     awaiting_reviewed_preview,
     metric_confirmation_stage,
 )
+from src.services.orchestration.jobs.step_marks import MarkWrite, record_marks
 from src.services.orchestration.jobs.workspace import attempt_lease, cleanup_attempt_workspace, cleanup_finished_job
 from src.services.orchestration.processing.capability import latest as latest_capability
 from src.services.orchestration.processing.capability import probe as probe_capability
@@ -186,6 +189,9 @@ class _AcceptedRecipeEvidence:
     recipe: InputRecipe
 
 
+_MARK_OUTCOMES = {StageStatus.SUCCEEDED: "succeeded", StageStatus.FAILED: "failed", StageStatus.CANCELLED: "cancelled"}
+
+
 class _StageProgress:
     """Đọc dần progress file của REC (JSON lines StageArtifact) và đẩy stage RUNNING vào job."""
 
@@ -193,6 +199,8 @@ class _StageProgress:
         self.attempt = attempt
         self.path = path
         self.offset = 0
+        #: Số lượt chạy hiện tại, dùng làm run_id của mốc bước (T-056); đọc lười ở lần ghi đầu.
+        self.run_id: str | None = None
 
     def poll(self) -> None:
         """Chỉ xử lý dòng hoàn chỉnh; dòng đang ghi dở đợi lượt sau."""
@@ -209,6 +217,27 @@ class _StageProgress:
                 self.attempt.job = self.attempt.registry.record_stage_progress(
                     self.attempt.job, stage.stage_id, started_at=stage.started_at
                 )
+            elif stage.completed_at is not None and stage.status in _MARK_OUTCOMES:
+                self._mark_finished(stage)
+
+    def _mark_finished(self, stage: StageArtifact) -> None:
+        """Ghi mốc kết thúc ngay khi worker báo xong (T-056); receipt cuối lượt vẫn ghi lại cùng mốc."""
+        persistence = self.attempt.registry.persistence
+        if persistence is None or stage.completed_at is None:
+            return
+        if self.run_id is None:
+            try:
+                self.run_id = str(persistence.list_attempts(self.attempt.job.job_id)[-1].attempt)
+            except Exception as error:  # noqa: BLE001 - mốc bước là đo đạc, không được làm hỏng lượt chạy
+                logger.warning("Không đọc được lượt chạy để ghi mốc bước cause=%s", type(error).__name__)
+                return
+        record_marks(
+            persistence.database,
+            self.attempt.job.job_id,
+            "pipeline",
+            self.run_id,
+            [MarkWrite("finish", stage.stage_id.value, stage.completed_at, _MARK_OUTCOMES[stage.status])],
+        )
 
 
 class ExpectedDurationError(TimeoutError):
@@ -227,13 +256,16 @@ def _expected_limit(attempt: _Attempt, name: str, fixed_timeout: float) -> tuple
         params = job_drivers(registry, attempt.settings, attempt.job)
         if capability is None or params is None:
             return fixed_timeout, None
-        estimate = expected_seconds(
-            name,
-            params,
-            capability.gpu_name,
-            attempt.job.runtime_manifest_checksum,
-            load_usages(registry.persistence.database),
-        )
+        usages = load_usages(registry.persistence.database)
+        if any(
+            usage.job_id == attempt.job.job_id and usage.tool == name and usage.outcome == "timeout" for usage in usages
+        ):
+            # T-050: lượt trước của chính công cụ này đã bị cắt vì quá hạn; dùng lại cùng số đo sẽ cắt lặp lại.
+            logger.info(
+                "Lượt trước của %s bị cắt vì quá hạn; lượt này dùng giới hạn cố định %.0f s", name, fixed_timeout
+            )
+            return fixed_timeout, None
+        estimate = expected_seconds(name, params, capability.gpu_name, attempt.job.runtime_manifest_checksum, usages)
     except Exception as error:  # noqa: BLE001 - ước lượng chỉ là phụ; lỗi đọc số đo không được làm hỏng lượt chạy
         logger.warning("Không tính được hạn theo số đo tool=%s cause=%s", name, type(error).__name__)
         return fixed_timeout, None
@@ -296,19 +328,26 @@ def _run_tool(
             )
             started = time.monotonic()
             deadline = started + deadline_limit
+            tolerance = HeartbeatTolerance(LEASE_TTL)
             last_heartbeat = 0.0
             pause = Event()
             try:
                 while process.poll() is None:
                     now_mono = time.monotonic()
-                    if now_mono - last_heartbeat >= 3.0:
-                        if attempt.registry.persistence is not None:
-                            touch_job_reservation(attempt.registry.persistence.database, attempt.job.job_id)
-                        last_heartbeat = now_mono
-                    if progress is not None:
-                        progress.poll()  # Tự cập nhật attempt.job trước khi so revision để phát hiện cancel.
-                    current = attempt.registry.get_job(attempt.job.job_id)
-                    if current.job_manifest_checksum != attempt.job.job_manifest_checksum:
+                    try:
+                        if now_mono - last_heartbeat >= 3.0:
+                            if attempt.registry.persistence is not None:
+                                touch_job_reservation(attempt.registry.persistence.database, attempt.job.job_id)
+                            last_heartbeat = now_mono
+                        if progress is not None:
+                            progress.poll()  # Tự cập nhật attempt.job trước khi so revision để phát hiện cancel.
+                        current = attempt.registry.get_job(attempt.job.job_id)
+                        tolerance.succeeded()
+                    except Exception as error:
+                        if not tolerance.tolerate(error):
+                            raise
+                        current = None  # DB chập chờn: bỏ qua kiểm hủy ở nhịp này (T-049)
+                    if current is not None and current.job_manifest_checksum != attempt.job.job_manifest_checksum:
                         raise PreviewCancelledError("Job revision đã thay đổi trong khi worker chạy")
                     if lease_lost(attempt.job.job_id):
                         raise PreviewCancelledError("Mất lease job; máy khác đã nhận việc, dừng tiến trình con")
@@ -466,6 +505,10 @@ def _record_runner_failure(attempt: _Attempt, error: BaseException) -> None:
     details = {"exception_type": type(error).__name__}
     if isinstance(error, ExpectedDurationError | GpuBudgetExceededError):
         code, message = error.code, str(error)
+    elif isinstance(error, KeyboardInterrupt | SystemExit):
+        # Worker bị tắt (SIGTERM/Ctrl-C, deploy): gián đoạn giống mất lease, không phải lỗi của job.
+        code = "INTERRUPTED_SHUTDOWN"
+        message = "Worker dừng giữa chừng (tắt hoặc khởi động lại máy xử lý). Bấm Thử lại để chạy tiếp."
     else:
         code, message = "PREVIEW_RUNNER_FAILED", "Worker dừng trước checkpoint hợp lệ; kiểm log attempt và runtime"
     try:
@@ -486,6 +529,16 @@ def _record_runner_failure(attempt: _Attempt, error: BaseException) -> None:
         _record_benchmark(attempt)
     except RuntimeStateConflictError:
         logger.info("Worker failure không ghi đè revision mới hơn")
+
+
+def _prepare_claimed_attempt(attempt: _Attempt) -> str:
+    """Chuẩn bị workspace + log id cho job vừa claim RUNNING; lỗi ở đây được ghi FAILED thay vì để job treo (T-048)."""
+    try:
+        attempt.workspace.mkdir(parents=True, exist_ok=False)
+        return _attempt_log_id(attempt.registry, attempt.job.job_id)
+    except BaseException as error:
+        _record_runner_failure(attempt, error)
+        raise
 
 
 def _start_attempt(
@@ -710,6 +763,10 @@ def _pull_input(resolver: ArtifactResolver, manifest_ref: ProductArtifactRef) ->
     manifest = InputManifest.model_validate_json(resolver.require(manifest_ref).read_bytes())
     for item in manifest.files:
         resolver.require_uri(item.artifact_uri, item.checksum)
+    if manifest.video_preparation is not None:
+        # prepare_cli runs in a subprocess with a local-only resolver: the browser-prepared video's frame map must
+        # be in the local cache too, or frame extraction fails with ArtifactNotFoundError on a remote worker.
+        resolver.require(manifest.video_preparation.frame_map_ref)
     return manifest
 
 
@@ -1667,9 +1724,9 @@ def run_reviewed_preview_job(job_id: str, *, expected_checksum: str | None = Non
         raise ValueError("Job đã chấp nhận bản đã che nhưng thiếu frame set")
     job = registry.record_stage_progress(job, _preview_start_stage(registry, job))
     workspace = settings.product_worker_root.expanduser().resolve() / job_id / f"attempt-{uuid4().hex}"
-    workspace.mkdir(parents=True, exist_ok=False)
     attempt = _Attempt(registry, settings, job, workspace)
-    with job_log_context(job_id, _attempt_log_id(registry, job_id)):
+    log_id = _prepare_claimed_attempt(attempt)
+    with job_log_context(job_id, log_id):
         try:
             with attempt_lease(workspace):
                 attempt.job = _execute_lidar_ingest(attempt, frames)
@@ -1735,6 +1792,46 @@ def _extract_scene_stage(
         return []
 
 
+def _build_view_lods(attempt: _Attempt) -> None:
+    """Bước T-070 (sau khi job xong): bộ LOD cho các SOG lớn của job; lỗi chỉ ghi mốc, không làm hỏng job."""
+    cli = lod.lod_cli()
+    persistence = attempt.registry.persistence
+    if cli is None or persistence is None:
+        return  # máy không có GPU / runtime: bộ dựng chạy ngầm trên worker GPU sẽ bù
+    job_id = attempt.job.job_id
+    try:
+        run_id = str(persistence.list_attempts(job_id)[-1].attempt)
+    except Exception as error:  # noqa: BLE001 - mốc bước là đo đạc, không được làm hỏng job đã xong
+        logger.warning("Không đọc được lượt chạy cho bước LOD cause=%s", type(error).__name__)
+        return
+    step = StageId.VIEW_LOD.value
+
+    def mark(write: MarkWrite) -> None:
+        try:
+            record_marks(persistence.database, job_id, "pipeline", run_id, [write])
+        except Exception as error:  # noqa: BLE001 - mốc bước là đo đạc; job đã xong không được bị đánh lỗi
+            logger.warning("Không ghi được mốc bước LOD cause=%s", type(error).__name__)
+
+    mark(MarkWrite("start", step, datetime.now(UTC)))
+    outcome = "cancelled"
+    try:
+        built = lod.build_job_view_lods(
+            attempt.registry.runtime_resolver,
+            job_id,
+            attempt.registry.viewable_sogs(job_id),
+            cli,
+            Path(attempt.settings.product_worker_root) / "lod",
+        )
+        outcome = "succeeded"
+        logger.info("Bước LOD job=%s đã tạo %d bộ", job_id, built)
+    except Exception as error:  # noqa: BLE001 - scene vẫn xem bằng SOG gốc; bộ dựng ngầm thử lại sau
+        outcome = "failed"
+        logger.warning("Không tạo được bộ LOD job=%s cause=%s", job_id, type(error).__name__)
+    finally:
+        # Worker bị dừng giữa chừng (KeyboardInterrupt/SystemExit) vẫn đóng mốc, rồi lỗi đi tiếp như cũ.
+        mark(MarkWrite("finish", step, datetime.now(UTC), outcome))
+
+
 def run_finalize_job(job_id: str, *, expected_checksum: str | None = None) -> JobManifest:
     """Sau xác nhận tỉ lệ: REC-06 canonical → REC-05 geometry → REC-10 bundle; job kết thúc.
 
@@ -1768,9 +1865,9 @@ def run_finalize_job(job_id: str, *, expected_checksum: str | None = None) -> Jo
         job = registry.record_stage_progress(job, StageId.RGB_GEOMETRY)
     attempt_id = f"finalize-{uuid4().hex}"
     workspace = settings.product_worker_root.expanduser().resolve() / job_id / attempt_id
-    workspace.mkdir(parents=True, exist_ok=False)
     attempt = _Attempt(registry, settings, job, workspace)
-    with job_log_context(job_id, _attempt_log_id(registry, job_id)):
+    log_id = _prepare_claimed_attempt(attempt)
+    with job_log_context(job_id, log_id):
         try:
             with attempt_lease(workspace):
                 request = {
@@ -1819,6 +1916,8 @@ def run_finalize_job(job_id: str, *, expected_checksum: str | None = None) -> Jo
                 if result.error is None and extra:
                     _cleanup_attempt_workspace(attempt)
                 if completed.status == JobStatus.SUCCEEDED:
+                    # T-070: scene đã xem được; tạo bộ LOD trong cùng lượt (vẫn giữ lease nên máy GPU không bị tắt).
+                    _build_view_lods(attempt)
                     _cleanup_finished_job(attempt)
             return _requeue_if_exhausted(attempt) or completed
         except BaseException as error:

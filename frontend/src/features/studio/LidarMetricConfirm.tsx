@@ -28,7 +28,7 @@ export function lidarMetricInput(proposal: MetricProposal): MetricInput | null {
 const centimetres = (metres: number) => `${(metres * 100).toFixed(0)} cm`;
 
 /**
- * Xác nhận tỉ lệ mét cho job có gói LiDAR (ADR 0009, STUDIO_UX_SPEC D-20): **không chọn điểm**. Tỉ lệ và mặt sàn đã
+ * Xác nhận tỉ lệ mét cho job có gói LiDAR (ADR 0009): **không chọn điểm**. Tỉ lệ và mặt sàn đã
  * được tính từ quỹ đạo LiDAR; người dùng xem scene bám quỹ đạo tới đâu (số frame khớp, độ lệch pose) rồi bấm một nút.
  * Quyết định vẫn là của người dùng: độ lệch lớn nghĩa là quỹ đạo, calibration hoặc video không khớp nhau.
  */

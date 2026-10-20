@@ -228,7 +228,8 @@ def test_studio_walk_usd_share_geometry_revision_and_identity(tmp_path: Path, mo
         == compose(scene).identity
     )
     assert studio.headers["x-scene-revision"] == scene.scene_revision
-    assert "no-cache" in studio.headers["cache-control"]
+    # T-052: URL gắn revision bất biến nên trình duyệt được giữ (revision cũ vẫn bị từ chối 409 khi hỏi lại server).
+    assert "immutable" in studio.headers["cache-control"]
     canonical = trimesh.load(io.BytesIO(studio.body), file_type="glb", force="mesh", process=False)
     display = trimesh.load(io.BytesIO(walk.body), file_type="glb", force="mesh", process=False)
     np.testing.assert_allclose(canonical.vertices[canonical.faces], usd.vertices[usd.faces])

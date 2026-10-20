@@ -1,4 +1,4 @@
-"""HTTP tests cho thùng rác scene: gỡ, liệt kê, khôi phục, xoá hẳn và phân quyền (STUDIO_UX_SPEC D-15)."""
+"""HTTP tests cho thùng rác scene: gỡ, liệt kê, khôi phục, xoá hẳn và phân quyền."""
 
 import hashlib
 import json

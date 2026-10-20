@@ -1,8 +1,8 @@
 """Chuẩn bị offline: căn chỉnh SfM của một job Aisle_CW sang `world` (mét) qua quỹ đạo camera.
 
 REC-09, ADR 0004 §5 (demo hướng anchor người dùng lấy số đo từ LiDAR). Dataset
-preparation, không phải runtime: đọc `traj_gt.txt` nên kết quả là **GT-assisted**
-(DATASET_PLAYBOOK §Phân loại tài nguyên). Chỉ dùng cho demo/integration, không claim
+preparation, không phải runtime: đọc `traj_gt.txt` nên kết quả là **GT-assisted**.
+Chỉ dùng cho demo/integration, không claim
 độ chính xác RGB-only độc lập.
 
 Các bước:
@@ -145,7 +145,7 @@ def align(args: argparse.Namespace) -> dict:
         "target_frame": "world",
         "source_frame": "sfm_world",
         "ground_truth_assisted": True,
-        "assistance": "traj_gt.txt dùng cho dataset preparation (DATASET_PLAYBOOK); không phải độ chính xác RGB-only",
+        "assistance": "traj_gt.txt dùng cho dataset preparation; không phải độ chính xác RGB-only",
         "fit": fit.model_dump(mode="json"),
         "frame_matches": [
             {"frame_id": fid, "dataset_index": matches[fid], "residual_m": res}

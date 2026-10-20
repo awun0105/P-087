@@ -49,3 +49,27 @@ async def test_lidar_overlay_is_404_for_a_scene_without_aligned_lidar(
     response = await client.get(f"/api/v1/jobs/{job.job_id}/lidar-overlay")
     assert response.status_code == 404 and "LiDAR" in response.json()["detail"]
     assert (await client.get("/api/v1/jobs/no-such-job/lidar-overlay")).status_code == 404
+
+
+# ── T-054: stage views are built once per job revision ───────────────────────
+
+
+@pytest.mark.asyncio
+async def test_stage_views_cached_per_manifest(client: AsyncClient, registry: ProjectRegistry, monkeypatch) -> None:  # noqa: ANN001
+    from src.services.orchestration.jobs import stage_views as module
+
+    job = registry.create_job(JobCreateInput(project_id="project-fixture-001"))
+    builds: list[str] = []
+    real = module.job_frame_images
+    monkeypatch.setattr(module, "job_frame_images", lambda reg, j: builds.append(j.job_id) or real(reg, j))
+    await client.get(f"/api/v1/jobs/{job.job_id}/stage-views")
+    await client.get(f"/api/v1/jobs/{job.job_id}/stage-views")
+    assert len(builds) == 1
+
+
+@pytest.mark.asyncio
+async def test_stage_views_etag_304(client: AsyncClient, registry: ProjectRegistry) -> None:
+    job = registry.create_job(JobCreateInput(project_id="project-fixture-001"))
+    first = await client.get(f"/api/v1/jobs/{job.job_id}/stage-views")
+    again = await client.get(f"/api/v1/jobs/{job.job_id}/stage-views", headers={"If-None-Match": first.headers["etag"]})
+    assert again.status_code == 304

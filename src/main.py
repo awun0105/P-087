@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.middleware.gzip import DEFAULT_EXCLUDED_CONTENT_TYPES, GZipMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
@@ -71,6 +72,23 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # T-053: trình duyệt giữ kết quả preflight một ngày thay vì hỏi lại mỗi 10 phút.
+    max_age=86400,
+)
+# T-053: nén JSON (SceneIR ~650 KB) và GLB; bỏ qua file đã nén sẵn (SOG, ảnh, video) để không tốn CPU.
+app.add_middleware(
+    GZipMiddleware,
+    minimum_size=1024,
+    compresslevel=5,
+    exclude_content_types=(
+        *DEFAULT_EXCLUDED_CONTENT_TYPES,
+        "application/octet-stream",
+        "image/png",
+        "image/jpeg",
+        "image/webp",
+        "video/mp4",
+        "application/zip",
+    ),
 )
 
 app.include_router(router, prefix="/api/v1")

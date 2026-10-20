@@ -20,7 +20,7 @@ const PALETTES: { value: Palette; label: string; note: string; swatch: [string, 
 ];
 
 /**
- * Chọn bảng màu (STUDIO_UX_SPEC.md D-17): mặc định hoặc Gruvbox. Chế độ sáng/tối do nút `ThemeToggle` bên cạnh đảm
+ * Chọn bảng màu: mặc định hoặc Gruvbox. Chế độ sáng/tối do nút `ThemeToggle` bên cạnh đảm
  * nhiệm (owner 02/10/2026: không lặp lại trong menu này). Trạng thái đọc từ class trên <html> nên mọi menu luôn khớp. Ô màu mẫu là màu cố định của từng bảng, để người dùng
  * thấy bảng kia trông thế nào trước khi chọn.
  */

@@ -890,3 +890,39 @@ def test_restarted_worker_with_same_identity_discards_its_leftover_operation_res
     assert not restarted.discard_leftover_reservation()
     assert set(_reservations(crashed)) == {other.worker_id}
     assert restarted.admit_operation(retry).status == "admitted"
+
+
+def test_admission_error_reports_gate_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """T-050: a broken gate is distinguishable from a busy or unmeasured machine."""
+    _, _, gate = _queued(tmp_path)
+    _machine(monkeypatch)
+
+    def broken() -> None:
+        raise RuntimeError("nvml exploded")
+
+    monkeypatch.setattr(gate, "_resource_snapshot", broken)
+    result = gate.admit_operation(_operation_request())
+    assert result.status == "waiting_resources"
+    assert result.reasons and set(result.reasons.values()) == {"gate_error"}
+
+
+def test_wait_exceeded_after_limit() -> None:
+    since = datetime(2026, 10, 20, 8, 0, tzinfo=UTC)
+    reasons = {"vram": "gate_error"}
+    assert admission.wait_exceeded(reasons, since, since + timedelta(seconds=1801), 1800) is True
+    assert admission.wait_exceeded(reasons, since, since + timedelta(seconds=1799), 1800) is False
+
+
+def test_wait_exceeded_ignores_busy() -> None:
+    since = datetime(2026, 10, 20, 8, 0, tzinfo=UTC)
+    reasons = {"vram": "busy", "ram": "unmeasured"}
+    assert admission.wait_exceeded(reasons, since, since + timedelta(days=1), 1800) is False
+
+
+def test_wait_exceeded_needs_a_known_non_busy_reason() -> None:
+    """Review fix: no reason (worker busy / GPU affinity) or `unmeasured` (wrong worker) never times out."""
+    since = datetime(2026, 10, 20, 8, 0, tzinfo=UTC)
+    later = since + timedelta(days=1)
+    assert admission.wait_exceeded({}, since, later, 1800) is False
+    assert admission.wait_exceeded({"vram": "unmeasured"}, since, later, 1800) is False
+    assert admission.wait_exceeded({"vram": "external"}, since, later, 1800) is True

@@ -10,7 +10,10 @@ import { useCallback, useEffect, useState } from "react";
 
 import { Badge, Button, Card, EmptyState, Notice, buttonVariants } from "@/components/studio/primitives";
 import { useAuth } from "@/features/studio/AuthProvider";
-import { createInvite, isReviewer, listUsers, updateUser, type InviteRole, type PublicUser, type Role } from "@/lib/api/auth";
+import { createInvite, isReviewer, listUsers, updateUser, type GuestQuotaSummary, type InviteRole, type PublicUser, type Role } from "@/lib/api/auth";
+
+/** Hạn mức Guest do máy chủ cố định (`guest_calendar_day_v1`), không chỉnh theo từng người. */
+const GUEST_DAILY_LIMIT: GuestQuotaSummary["limit"] = 3;
 
 /** Quản lý nhóm cho Reviewer: mời Editor/Reviewer, đổi ba role, khóa tài khoản, chỉnh hạn mức Editor. */
 export function TeamPage() {
@@ -78,8 +81,8 @@ export function TeamPage() {
     <main className="mx-auto max-w-4xl px-4 pt-10 pb-20 sm:px-6">
       <h1 className="text-3xl font-extrabold tracking-tight">Nhóm</h1>
       <p className="mt-2 text-[15px] text-ink-muted">
-        Reviewer có nhiều quyền nhất; Editor dựng và chỉnh scene với hạn mức do Reviewer chỉnh. Guest có ít quyền hơn và
-        hiện chưa được mở xử lý job.
+        Reviewer có nhiều quyền nhất; Editor dựng và chỉnh scene với hạn mức do Reviewer chỉnh. Guest chỉ thao tác trên
+        scene của chính mình, với hạn mức cố định mỗi ngày. Khóa tài khoản thì người đó không đăng nhập được nữa.
       </p>
       <InviteCard />
       {error && (
@@ -125,7 +128,7 @@ export function TeamPage() {
                     {user.role === "reviewer" ? (
                       <span className="text-ink-muted">Không giới hạn</span>
                     ) : user.role === "guest" ? (
-                      <span className="text-ink-muted">Hạn mức Guest (chưa mở xử lý)</span>
+                      <span className="text-ink-muted">{GUEST_DAILY_LIMIT} lượt/ngày (cố định, giờ Việt Nam)</span>
                     ) : (
                     <input
                       aria-label={`Hạn mức lượt xử lý GPU mỗi 24 giờ của ${user.display_name}`}
@@ -145,7 +148,13 @@ export function TeamPage() {
                     {isSelf ? (
                       <Badge tone="sage">Đang hoạt động</Badge>
                     ) : (
-                      <Button variant="ghost" size="sm" disabled={pendingUsers.includes(user.user_id)} onClick={() => void change(user, { active: !user.active })}>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        title={user.active ? "Khóa tài khoản: người này không đăng nhập được nữa" : "Mở khóa: cho đăng nhập lại"}
+                        disabled={pendingUsers.includes(user.user_id)}
+                        onClick={() => void change(user, { active: !user.active })}
+                      >
                         {user.active ? "Khóa" : "Mở khóa"}
                       </Button>
                     )}

@@ -379,3 +379,28 @@ async def test_unknown_target_status_422(client) -> None:
         json={"target_status": "NOT_A_STATUS"},
     )
     assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_retry_accepts_legacy_shutdown_failure(client) -> None:
+    """Jobs stopped by a worker SIGTERM before T-047 were stored with retryable=False; retry must accept them."""
+    created = await client.post("/api/v1/projects/project-fixture-001/jobs", json={})
+    job_id = created.json()["job_id"]
+    await client.post(f"/api/v1/jobs/{job_id}/transitions", json={"target_status": "RUNNING"})
+    failed = await client.post(
+        f"/api/v1/jobs/{job_id}/transitions",
+        json={
+            "target_status": "FAILED",
+            "error": {
+                "stage_id": "ST-CAMERA-POSE",
+                "error_code": "PREVIEW_RUNNER_FAILED",
+                "human_message": "Worker dừng trước checkpoint hợp lệ",
+                "retryable": False,
+                "details": {"exception_type": "KeyboardInterrupt"},
+            },
+        },
+    )
+    assert failed.status_code == 200
+    retried = await client.post(f"/api/v1/jobs/{job_id}/retry")
+    assert retried.status_code == 200
+    assert retried.json()["status"] == "QUEUED"

@@ -5,12 +5,14 @@ reclaim RUNNING theo timeout vì trainer có thể vẫn còn sống trên host 
 """
 
 import argparse
+import json
 import logging
 import os
 import signal
 import time
 from collections.abc import Callable
-from datetime import datetime
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from threading import Event, Thread
 from typing import Protocol
@@ -18,12 +20,13 @@ from typing import Protocol
 from src.config import Settings, get_settings
 from src.models.contracts.manifests import ExecutionError, JobManifest, JobStatus, StageId
 from src.models.contracts.retryability import classify_retryability
+from src.services.orchestration.artifacts.lod import idle_lod_builder
 from src.services.orchestration.gpu.state import supports
 from src.services.orchestration.gpu.worker import ManagedWorker
 from src.services.orchestration.jobs.admission import ResourceAdmission
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
 from src.services.orchestration.jobs.dispatch import load_prepared_profile, prepared_frame_reference, require_profile
-from src.services.orchestration.jobs.lease import expired_job_ids, leased, release_expired
+from src.services.orchestration.jobs.lease import LEASE_TTL, expired_job_ids, has_lease, leased, release_expired
 from src.services.orchestration.jobs.log_context import configure_worker_logging, job_log_context
 from src.services.orchestration.jobs.models import TransitionRequest
 from src.services.orchestration.jobs.profile import ExecutionProfile
@@ -56,6 +59,53 @@ from src.services.orchestration.storage import runtime_resolver
 from src.services.orchestration.uploads.scene_imports import ImportService
 
 logger = logging.getLogger(__name__)
+
+#: Thời gian nghỉ tối đa (giây) khi một hàng đợi lỗi liên tiếp.
+_MAX_BACKOFF_SECONDS = 60
+
+
+@dataclass
+class QueueGuard:
+    """Đếm lỗi liên tiếp theo hàng đợi; một hàng đợi lỗi không được làm thoát vòng lặp worker."""
+
+    failures: dict[str, int] = field(default_factory=dict)
+
+    def run(self, name: str, step: Callable[[], bool]) -> bool:
+        """Chạy một lượt của hàng đợi; lỗi thường được ghi log và coi như không có việc."""
+        try:
+            handled = step()
+        except Exception:
+            count = self.failures.get(name, 0) + 1
+            self.failures[name] = count
+            logger.exception("Hàng đợi %s lỗi lần %d liên tiếp", name, count)
+            return False
+        self.failures.pop(name, None)
+        return handled
+
+    def backoff_seconds(self) -> float:
+        """0 khi không hàng đợi nào đang lỗi; ngược lại 1, 2, 4… giây, tối đa 60."""
+        if not self.failures:
+            return 0
+        return min(2 ** (max(self.failures.values()) - 1), _MAX_BACKOFF_SECONDS)
+
+
+class Periodic:
+    """`due(now)` đúng ở lần đầu và sau mỗi `interval` giây (đồng hồ đơn điệu); dùng cho việc quét đắt trong vòng poll."""
+
+    def __init__(self, interval: float) -> None:
+        self.interval = interval
+        self._next: float | None = None
+
+    def due(self, now: float) -> bool:
+        if self._next is not None and now < self._next:
+            return False
+        self._next = now + self.interval
+        return True
+
+
+def poll_queues(guard: QueueGuard, steps: list[tuple[str, Callable[[], bool]]]) -> bool:
+    """Chạy lần lượt các hàng đợi tới khi một hàng có việc; hàng lỗi không chặn các hàng sau."""
+    return any(guard.run(name, step) for name, step in steps)
 
 
 class PreparedRunner(Protocol):
@@ -129,6 +179,28 @@ def _record_dispatch_failure(registry: ProjectRegistry, job: JobManifest, cause:
         logger.info("Không ghi đè job hoặc privacy revision mới hơn khi ghi dispatch failure")
 
 
+def latest_running_job_ids(tx) -> list[str]:
+    """Job whose newest event is RUNNING, on SQLite and PostgreSQL alike.
+
+    The status is read in Python: `json_extract` is SQLite-only and made every worker exit at startup on the
+    production PostgreSQL database. The scan reads one payload per job (newest event only).
+    """
+    rows = tx.execute(
+        "SELECT e.job_id, e.payload FROM r2s_job_events e JOIN "
+        "(SELECT job_id, MAX(version) AS version FROM r2s_job_events GROUP BY job_id) latest "
+        "ON e.job_id=latest.job_id AND e.version=latest.version"
+    ).fetchall()
+    running = []
+    for job_id, payload in rows:
+        try:
+            status = json.loads(payload).get("status") if isinstance(payload, str) else (payload or {}).get("status")
+        except ValueError:
+            continue
+        if status == "RUNNING":
+            running.append(str(job_id))
+    return running
+
+
 def recover_interrupted_jobs(registry: ProjectRegistry, settings: Settings) -> int:
     """Lúc worker khởi động: đánh dấu FAILED (retryable=True) các job RUNNING bị mồ côi trên host này.
 
@@ -141,12 +213,7 @@ def recover_interrupted_jobs(registry: ProjectRegistry, settings: Settings) -> i
         return 0
     database = registry.persistence.database
     with database.transaction() as tx:
-        rows = tx.execute(
-            "SELECT e.job_id, e.payload FROM r2s_job_events e JOIN "
-            "(SELECT job_id, MAX(version) AS version FROM r2s_job_events GROUP BY job_id) latest "
-            "ON e.job_id=latest.job_id AND e.version=latest.version "
-            "WHERE json_extract(e.payload, '$.status') = 'RUNNING'"
-        ).fetchall()
+        rows = [(job_id, None) for job_id in latest_running_job_ids(tx)]
 
     recovered = 0
     worker_root = settings.product_worker_root
@@ -339,6 +406,58 @@ def _leased_call(registry: ProjectRegistry, job_id: str, call: Callable[[], obje
     return True
 
 
+def intentionally_unleased(job: JobManifest) -> bool:
+    """Job RUNNING mà không worker nào giữ lease **có chủ ý**: chờ người hoặc chờ worker nhận bước kế."""
+    if awaiting_anonymization_review(job) or awaiting_reviewed_preview(job) or awaiting_finalize(job):
+        return True
+    return job.current_stage == StageId.METRIC_CANONICALIZE and not any(
+        stage.stage_id == StageId.METRIC_CANONICALIZE for stage in job.stage_artifacts
+    )
+
+
+def recover_unwatched_running_jobs(registry: ProjectRegistry, *, now: datetime | None = None) -> int:
+    """T-048: job RUNNING không lease, không chờ có chủ ý, quá một TTL lease → FAILED cho chạy lại.
+
+    Mọi lượt chạy runner giữ lease trước khi ghi RUNNING, nên trường hợp này chỉ xảy ra khi runner chết
+    trong khe không ghi được lỗi (hoặc job chạy trước khi có lease). Máy nào cũng xử lý được.
+    """
+    if registry.persistence is None:
+        return 0
+    database = registry.persistence.database
+    current = now or datetime.now(UTC)
+    with database.transaction() as tx:
+        rows = [(job_id,) for job_id in latest_running_job_ids(tx)]
+    recovered = 0
+    for (job_id,) in rows:
+        try:
+            job = registry.get_job(job_id)
+            if job.status != JobStatus.RUNNING or intentionally_unleased(job) or has_lease(database, job_id):
+                continue
+            attempts = registry.list_job_attempts(job_id)
+            if not attempts or current - attempts[-1].recorded_at < LEASE_TTL:
+                continue
+            details = {"job_id": job_id, "stage": job.current_stage, "reason": "no_lease"}
+            error = ExecutionError(
+                stage_id=job.current_stage,
+                error_code="INTERRUPTED_SHUTDOWN",
+                human_message="Không còn máy xử lý nào chạy bước này. Bấm Thử lại để chạy tiếp.",
+                retryable=classify_retryability("INTERRUPTED_SHUTDOWN", details),
+                details=details,
+            )
+            registry.transition_job(
+                job_id,
+                TransitionRequest(target_status=JobStatus.FAILED, error=error),
+                expected_checksum=job.job_manifest_checksum,
+            )
+            recovered += 1
+            logger.info("Job %s RUNNING không có lease, đưa về FAILED (retryable=True)", job_id)
+        except RuntimeStateConflictError:
+            continue  # Máy khác đã xử lý trước (CAS).
+        except Exception as error:  # noqa: BLE001 - một job lỗi không được chặn các job khác
+            logger.warning("Không xử lý được job không lease %s: %s", job_id, type(error).__name__)
+    return recovered
+
+
 def recover_expired_leases(registry: ProjectRegistry, *, now: datetime | None = None) -> int:
     """T-040 Q2: job RUNNING mà worker giữ lease đã mất → FAILED retryable. Máy nào cũng làm được, không cần workspace."""
     if registry.persistence is None:
@@ -506,36 +625,65 @@ def main(argv: list[str] | None = None) -> int:
                 return 130
         recover_interrupted_jobs(registry, settings)
         recover_expired_leases(registry)
+        recover_unwatched_running_jobs(registry)
         recover_interrupted(settings)
         import_service.recover_legacy_packaging()
+        guard = QueueGuard()
+        # Quét job RUNNING không lease đọc cả nhật ký sự kiện; trường hợp này cần ≥ một TTL lease mới xuất hiện,
+        # nên quét mỗi nửa TTL là đủ (lần khởi động đã quét ở trên).
+        lod_builder = idle_lod_builder(registry, settings.product_worker_root)
+        lod_sweep = Periodic(60.0)
+        unwatched_sweep = Periodic(LEASE_TTL.total_seconds() / 2)
+        unwatched_sweep.due(time.monotonic())
         while True:
-            recover_expired_leases(registry)
+            guard.run("recover_leases", lambda: bool(recover_expired_leases(registry)))
+            if unwatched_sweep.due(time.monotonic()):
+                guard.run("recover_unwatched", lambda: bool(recover_unwatched_running_jobs(registry)))
             # Job trong hàng đợi đi trước; rảnh mới nhận yêu cầu chạy lại tách theo vật (cùng dùng GPU).
+            # Mỗi hàng đợi đi qua `guard`: một hàng lỗi (DB chập chờn, bản ghi hỏng) không làm worker thoát.
             handled = False
             with managed.operation() as allowed:
                 if allowed:
                     if args.demo_operation:
-                        handled = {
-                            "pipeline": lambda: dispatch_next(registry, admission=admission),
-                            "registration": registration_worker.process_next,
-                            "validation": validation_worker.process_next,
-                            "scene": lambda: process_next(registry, settings),
-                        }[args.demo_operation]()
-                    else:
-                        handled = (
-                            (supports("pipeline") and dispatch_next(registry, admission=admission))
-                            or (supports("registration") and registration_worker.process_next())
-                            or (supports("validation") and validation_worker.process_next())
-                            or (supports("scene") and process_next(registry, settings))
-                            or (supports("import") and import_service.process_next(admission=admission))
-                            or process_demo_session(settings, registry, admission)
+                        handled = guard.run(
+                            args.demo_operation,
+                            {
+                                "pipeline": lambda: dispatch_next(registry, admission=admission),
+                                "registration": registration_worker.process_next,
+                                "validation": validation_worker.process_next,
+                                "scene": lambda: process_next(registry, settings),
+                            }[args.demo_operation],
                         )
+                    else:
+                        handled = poll_queues(
+                            guard,
+                            [
+                                (
+                                    "pipeline",
+                                    lambda: supports("pipeline") and dispatch_next(registry, admission=admission),
+                                ),
+                                (
+                                    "registration",
+                                    lambda: supports("registration") and registration_worker.process_next(),
+                                ),
+                                ("validation", lambda: supports("validation") and validation_worker.process_next()),
+                                ("scene", lambda: supports("scene") and process_next(registry, settings)),
+                                (
+                                    "import",
+                                    lambda: supports("import") and import_service.process_next(admission=admission),
+                                ),
+                                ("demo", lambda: process_demo_session(settings, registry, admission)),
+                            ],
+                        )
+                        # T-070: rảnh thì tạo bộ LOD cho một SOG lớn còn thiếu (chỉ worker có GPU).
+                        if not handled and lod_builder is not None and lod_sweep.due(time.monotonic()):
+                            handled = guard.run("lod", lod_builder.tick)
             if not handled:
                 admission.release()
             if args.once:
                 return 0
             if not handled:
-                pause.wait(settings.product_queue_poll_seconds)
+                pause.wait(max(settings.product_queue_poll_seconds, guard.backoff_seconds()))
     except KeyboardInterrupt:
         return 130
     finally:

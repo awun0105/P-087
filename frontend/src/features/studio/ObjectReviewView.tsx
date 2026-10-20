@@ -20,7 +20,7 @@ import {
   Undo2,
   X,
 } from "lucide-react";
-import { Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode, useSyncExternalStore } from "react";
+import { Fragment, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode, useSyncExternalStore } from "react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/shadcn/alert-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/shadcn/tabs";
 import { subscribeTheme, themeColor, themeKey } from "@/lib/theme";
@@ -70,7 +70,7 @@ import type { StageView } from "@/lib/contracts/studio";
 import { GEOMETRY_NOT_READY_REASON, objectGeometryState } from "@/lib/scene/geometry-state";
 
 // Chỉ dùng khi scene không có 3DGS: tải three.js theo nhu cầu, không kéo vào mọi lần mở Studio.
-const CollisionMeshCanvas = dynamic(() => import("@/features/studio/StageViewer").then((m) => m.CollisionMeshCanvas), { ssr: false });
+const CollisionMeshCanvas = dynamic(() => import("@/features/studio/StageViewer3D").then((m) => m.CollisionMeshCanvas), { ssr: false });
 
 /** Hình riêng của một vật trong viewer: Gaussian của vật tách từ scene, hoặc GLB của asset thư viện. */
 function objectVisual(jobId: string, object: SceneObject, previews: ReadonlySet<string>): Pick<OverlayObject, "url" | "kind"> {
@@ -195,6 +195,9 @@ function parseColliderForm(object: SceneObject, values: ColliderFormValues): { p
 
 type ROIForm = { minX: string; minY: string; minZ: string; maxX: string; maxY: string; maxZ: string };
 
+/** Mảng rỗng dùng chung: `?? []` tạo mảng mới mỗi render làm viewer dựng lại dấu bề mặt và vẽ lại (T-064). */
+const EMPTY_PLANES: readonly CollisionSurfacePlane[] = [];
+const NO_CAMERAS: StageView["cameras"] = [];
 const EMPTY_ROI: ROIForm = { minX: "", minY: "", minZ: "", maxX: "", maxY: "", maxZ: "" };
 const ROI_FIELDS: { key: keyof ROIForm; label: string }[] = [
   { key: "minX", label: "X nhỏ nhất (m)" },
@@ -240,7 +243,7 @@ function parseROI(form: ROIForm): { min_xyz_m: [number, number, number]; max_xyz
   return { min_xyz_m: [minX, minY, minZ], max_xyz_m: [maxX, maxY, maxZ] };
 }
 
-/** Trạng thái lưu SceneObject cho header scene (STUDIO_UX_SPEC.md Q5: mỗi thao tác là một revision). */
+/** Trạng thái lưu SceneObject cho header scene (mỗi thao tác là một revision). */
 export type SaveState =
   | { status: "saved"; revision: string }
   | { status: "saving"; revision: string }
@@ -273,7 +276,7 @@ const FILTERS: { value: Filter; label: string; match: (object: SceneObject, hidd
 ];
 
 /**
- * Studio vật thể (ADR 0006, PRODUCT-07/07A, STUDIO_UX_SPEC.md P5): danh sách · viewport 3DGS hệ mét ·
+ * Studio vật thể (ADR 0006, PRODUCT-07/07A): danh sách · viewport 3DGS hệ mét ·
  * inspector. Người dùng xác nhận/loại ứng viên, ẩn/đổi tên vật đã xác nhận hoặc thêm vật cản hộp.
  * Mỗi thao tác là một revision SceneIR mới ở backend; màn hình chỉ giữ revision vừa nhận, không tự
  * sửa scene ở client.
@@ -369,7 +372,10 @@ export function ObjectReviewView({
   const [colliderFormReset, setColliderFormReset] = useState(0);
   const keepErrorAfterReload = useRef(false);
   const [filter, setFilter] = useState<Filter>("all");
-  const [cameras, setCameras] = useState<StageView["cameras"]>([]);
+  // `camerasFor` = job đã có kết quả camera (kể cả lỗi). Viewer chỉ dựng sau đó: đổi camera sẽ dựng lại viewer và tải lại SOG (T-064).
+  const [cameraState, setCameraState] = useState<{ jobId: string; cameras: StageView["cameras"] } | null>(null);
+  const cameras = cameraState?.jobId === jobId ? cameraState.cameras : NO_CAMERAS;
+  const camerasSettled = cameraState?.jobId === jobId;
   const [focus, setFocus] = useState<{ id: string; nonce: number } | undefined>();
   const [reload, setReload] = useState(0);
   const [tool, setTool] = useState<GizmoMode | "none">("none");
@@ -464,8 +470,12 @@ export function ObjectReviewView({
     // Camera quay hệ mét để mở scene tại góc camera đầu tiên; thiếu thì dùng camera mặc định.
     // Tách khỏi lần tải scene: camera không đổi khi sửa vật, tải lại sẽ tạo lại viewer 3D.
     getStageViews(jobId, controller.signal).then(
-      (views) => setCameras(views.find((view) => view.kind === "gaussian" && view.unit === "meter")?.cameras ?? []),
-      () => undefined,
+      (views) => {
+        if (!controller.signal.aborted) setCameraState({ jobId, cameras: views.find((view) => view.kind === "gaussian" && view.unit === "meter")?.cameras ?? NO_CAMERAS });
+      },
+      () => {
+        if (!controller.signal.aborted) setCameraState({ jobId, cameras: NO_CAMERAS });
+      },
     );
     return () => controller.abort();
   }, [jobId]);
@@ -724,6 +734,38 @@ export function ObjectReviewView({
     setError(null);
   }
 
+  // T-064: prop của viewer giữ nguyên tham chiếu khi dữ liệu 3D không đổi; prop mới làm viewer dựng lại lớp phủ và vẽ lại.
+  const runRef = useRef(run);
+  useLayoutEffect(() => {
+    runRef.current = run;
+  });
+  const surfaceSourceChecksum = scene ? (scene.environment.collision_source_ref ?? scene.environment.geometry_ref).artifact_checksum : null;
+  const surfacePlanes = (scene?.provenance.collision_surface_planes as CollisionSurfacePlane[] | undefined) ?? EMPTY_PLANES;
+  const viewerInspection = useMemo(() => ({ onReady: setInspectionController, onState: setInspectionState }), []);
+  const collisionSourceLabel: "Object-aware" | "Legacy" = scene?.environment.object_aware_collision_ref ? "Object-aware" : "Legacy";
+  const backgroundChecksum = scene ? (scene.environment.collider_ref ?? scene.environment.collision_source_ref ?? scene.environment.geometry_ref).artifact_checksum : "";
+  const selectedParts = (() => {
+    const parts = scene?.objects.find((object) => object.id === selected)?.collider?.parameters.parts;
+    return typeof parts === "number" ? parts : null;
+  })();
+  const collisionDiagnostics = useMemo(
+    () => ({ source: collisionSourceLabel, backgroundChecksum, selectedParts }),
+    [collisionSourceLabel, backgroundChecksum, selectedParts],
+  );
+  const onMarkSurface = useCallback((kind: CollisionSurfacePlane["kind"], points: CollisionSurfacePlane["points"]) => runRef.current(revision => editCollisionSurface(jobId, {
+    expected_scene_revision: revision, source_checksum: surfaceSourceChecksum ?? "", action: "mark", kind, points,
+  })), [jobId, surfaceSourceChecksum]);
+  const onFillSurface = useCallback((plane_id: string) => runRef.current(revision => editCollisionSurface(jobId, {
+    expected_scene_revision: revision, source_checksum: surfaceSourceChecksum ?? "", action: "fill", plane_id,
+  })), [jobId, surfaceSourceChecksum]);
+  const onRemoveSurface = useCallback((plane_id: string) => runRef.current(revision => editCollisionSurface(jobId, {
+    expected_scene_revision: revision, source_checksum: surfaceSourceChecksum ?? "", action: "remove", plane_id,
+  })), [jobId, surfaceSourceChecksum]);
+  const onTransform = useCallback(
+    (id: string, position: [number, number, number], rotation: [number, number, number, number]) => runRef.current((revision) => setObjectTransform(jobId, revision, id, position, rotation)),
+    [jobId],
+  );
+
   if (missing) {
     return <Notice className="m-4">Chưa có vật thể: bước tách vật thể chạy sau khi dựng collision xong.</Notice>;
   }
@@ -820,7 +862,9 @@ export function ObjectReviewView({
             />
           </div>
         )}
-        {scene.environment.visual_ref ? (
+        {scene.environment.visual_ref && !camerasSettled ? (
+          <div className="flex h-full items-center justify-center text-sm text-on-dark/70">Đang mở khung 3D…</div>
+        ) : scene.environment.visual_ref ? (
           <MetricSceneView
             jobId={jobId}
             visual={scene.environment.visual_ref}
@@ -828,27 +872,14 @@ export function ObjectReviewView({
             sceneRevision={scene.scene_revision}
             lockedReason={geometryLockReason}
             collisionPreview
-            inspection={{ onReady: setInspectionController, onState: setInspectionState }}
-            collisionDiagnostics={{
-              source: scene.environment.object_aware_collision_ref ? "Object-aware" : "Legacy",
-              backgroundChecksum: (scene.environment.collider_ref ?? scene.environment.collision_source_ref ?? scene.environment.geometry_ref).artifact_checksum,
-              selectedParts: typeof current?.collider?.parameters.parts === "number" ? current.collider.parameters.parts : null,
-            }}
+            inspection={viewerInspection}
+            collisionDiagnostics={collisionDiagnostics}
             surfaceToolsTarget={surfaceToolsTarget}
             surfaceToolsActive={panelTab === "surfaces" && !leftCollapsed}
-            surfacePlanes={(scene.provenance.collision_surface_planes ?? []) as CollisionSurfacePlane[]}
-            onMarkSurface={(kind, points) => run(revision => editCollisionSurface(jobId, {
-              expected_scene_revision: revision, source_checksum: (scene.environment.collision_source_ref ?? scene.environment.geometry_ref).artifact_checksum,
-              action: "mark", kind, points,
-            }))}
-            onFillSurface={plane_id => run(revision => editCollisionSurface(jobId, {
-              expected_scene_revision: revision, source_checksum: (scene.environment.collision_source_ref ?? scene.environment.geometry_ref).artifact_checksum,
-              action: "fill", plane_id,
-            }))}
-            onRemoveSurface={plane_id => run(revision => editCollisionSurface(jobId, {
-              expected_scene_revision: revision, source_checksum: (scene.environment.collision_source_ref ?? scene.environment.geometry_ref).artifact_checksum,
-              action: "remove", plane_id,
-            }))}
+            surfacePlanes={surfacePlanes}
+            onMarkSurface={onMarkSurface}
+            onFillSurface={onFillSurface}
+            onRemoveSurface={onRemoveSurface}
             cameras={cameras}
             boxes={boxes}
             objects={splats}
@@ -867,7 +898,7 @@ export function ObjectReviewView({
             } : null}
             regionApi={regionApi}
             gizmo={!(regionPanelOpen && regionOpen) && !geometryLockReason && tool !== "none" && current && isPlaced(current) && !hiddenIds.has(current.id) ? { id: current.id, mode: tool } : null}
-            onTransform={(id, position, rotation) => run((revision) => setObjectTransform(jobId, revision, id, position, rotation))}
+            onTransform={onTransform}
             focus={focus}
             onPickBox={selectFromScene}
             physicsObjects={physicsObjects}

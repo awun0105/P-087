@@ -4,6 +4,7 @@ import { Boxes, Loader2, RefreshCw } from "lucide-react";
 
 import { Button, Notice } from "@/components/studio/primitives";
 import { useObjectify } from "@/features/studio/scene/objectifyContext";
+import { operationLabel } from "@/features/studio/nextAction";
 import type { ObjectifyMode } from "@/lib/api/studio";
 import { geometryPhaseLabel } from "@/lib/scene/geometry-state";
 
@@ -28,11 +29,9 @@ export function ObjectifyNotice({ jobId, revision, onRevision }: { jobId: string
         {state.cancellation_requested
           ? "Đang dừng tiến trình và giải phóng tài nguyên…"
           : state.mode === "geometry"
-            ? `Đang tạo mesh · ${phase}. Scene duyệt được giữ đến khi hoàn tất.`
-          : state.mode === "region"
-            ? `Đang áp vùng · ${phase}. Scene hiện tại được giữ đến khi hoàn tất.`
-          : state.mode === "membership"
-            ? `Đang tái tạo sau hiệu chỉnh Gaussian · ${state.phase ?? state.status}. Scene hiện tại được giữ đến khi hoàn tất.`
+            ? `${operationLabel("geometry")} · ${phase}. Scene duyệt được giữ đến khi hoàn tất.`
+          : state.mode === "region" || state.mode === "membership"
+            ? `${operationLabel(state.mode)} · ${phase}. Scene hiện tại được giữ đến khi hoàn tất.`
           : state.mode === "boxes"
             ? "Đang dựng hộp ứng viên…"
             : "Đang chạy lại tách theo vật (tự thử lại tối đa 3 lần, mỗi lần vài phút)…"}

@@ -126,11 +126,13 @@ class Settings(BaseSettings):
     product_rerun_recording_dir: Path = Path("./data/rerun_recordings")
     #: Thư mục giữ file của scene đã vào thùng rác; None → `trash/` cạnh ARTIFACT_ROOT (cùng filesystem, dời là rename).
     product_trash_root: Path | None = None
-    #: Mục nằm trong thùng rác quá số ngày này thì tự bị xoá hẳn (owner chốt 7 ngày, STUDIO_UX_SPEC D-15); 0 = tắt.
+    #: Mục nằm trong thùng rác quá số ngày này thì tự bị xoá hẳn (owner chốt 7 ngày); 0 = tắt.
     product_trash_retention_days: int = Field(default=7, ge=0, le=365)
     #: Số lần thử tách theo vật trước khi dừng và để người dùng chọn (chạy lại / dùng hộp).
     product_objectify_attempts: int = Field(default=3, ge=1, le=10)
     product_queue_poll_seconds: float = Field(default=3, ge=0.1, le=60, allow_inf_nan=False)
+    #: Chờ tài nguyên không phải vì máy bận quá mức này (giây) thì việc tách vật / kiểm định dừng, cho chạy lại (T-050).
+    product_resource_wait_max_seconds: float = Field(default=1800, ge=60, le=86400, allow_inf_nan=False)
     # MVP 2026-09-29: `self_attested` cho phép video upload chạy với lời tự khai
     # không có khuôn mặt/biển số; mặc định giữ cổng QA `VERIFIED_ANONYMIZED`.
     product_privacy_mode: Literal["qa_verified", "self_attested"] = "qa_verified"

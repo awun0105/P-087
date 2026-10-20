@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ApiError } from "@/lib/api/client";
 import {
@@ -28,6 +28,8 @@ export function useObjectifyState({
   revision,
   enabled = true,
   onRevision,
+  external,
+  onRefresh,
 }: {
   jobId: string;
   /** Revision đang hiển thị; bỏ trống thì dùng revision hiện tại mà máy chủ báo trong trạng thái. */
@@ -35,7 +37,12 @@ export function useObjectifyState({
   enabled?: boolean;
   /** Có revision mới do yêu cầu dựng lại tạo ra (kể cả khi chính hook này vừa theo dõi yêu cầu chạy xong). */
   onRevision?: (revision: string) => void;
+  /** T-060: trạng thái lấy từ `/pipeline` của trang; khi có thì hook không tự đọc / tự poll. */
+  external?: ObjectifyState | null;
+  /** Đọc lại ngay qua nguồn chung (pipeline) thay vì tự gọi API. */
+  onRefresh?: () => void;
 }) {
+  const shared = external !== undefined;
   const [state, setState] = useState<ObjectifyState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
@@ -46,25 +53,34 @@ export function useObjectifyState({
   // hiển thị" được nữa, phải báo theo việc chuyển trạng thái.
   const sawPending = useRef(false);
 
+  const observe = useCallback((next: ObjectifyState) => {
+    setState(next);
+    const shown = revision ?? next.scene_revision;
+    if (next.status === "queued" || next.status === "running") sawPending.current = true;
+    const fresh = next.result_revision !== shown || sawPending.current;
+    if (next.status === "done" && next.result_revision && fresh && announced.current !== next.result_revision) {
+      announced.current = next.result_revision;
+      sawPending.current = false;
+      onRevision?.(next.result_revision);
+    }
+  }, [revision]); // eslint-disable-line react-hooks/exhaustive-deps -- onRevision chỉ là kênh báo lên
+
+  // Nguồn chung (pipeline): chỉ áp khi trang có trạng thái mới, không tự gọi API.
   useEffect(() => {
-    if (!enabled) return;
+    if (!shared || !external) return;
+    const timer = setTimeout(() => observe(external), 0);
+    return () => clearTimeout(timer);
+  }, [shared, external, observe]);
+
+  useEffect(() => {
+    if (!enabled || shared) return;
     const controller = new AbortController();
     getObjectifyState(jobId, controller.signal).then(
-      (next) => {
-        setState(next);
-        const shown = revision ?? next.scene_revision;
-        if (next.status === "queued" || next.status === "running") sawPending.current = true;
-        const fresh = next.result_revision !== shown || sawPending.current;
-        if (next.status === "done" && next.result_revision && fresh && announced.current !== next.result_revision) {
-          announced.current = next.result_revision;
-          sawPending.current = false;
-          onRevision?.(next.result_revision);
-        }
-      },
+      observe,
       () => undefined, // route chưa có (API cũ) hoặc scene chưa sẵn sàng: không hiện gì
     );
     return () => controller.abort();
-  }, [jobId, revision, enabled, tick]); // eslint-disable-line react-hooks/exhaustive-deps -- onRevision chỉ là kênh báo lên
+  }, [jobId, enabled, shared, tick, observe]);
 
   const pending = state?.status === "queued" || state?.status === "running";
   // Trạng thái chờ có thể đến từ phản hồi của chính lệnh gửi (không qua lần đọc), nên ghi nhận ở đây.
@@ -72,10 +88,10 @@ export function useObjectifyState({
     if (pending) sawPending.current = true;
   }, [pending]);
   useEffect(() => {
-    if (!enabled || !pending) return;
+    if (!enabled || !pending || shared) return;
     const timer = window.setInterval(() => setTick((value) => value + 1), POLL_MS);
     return () => window.clearInterval(timer);
-  }, [enabled, pending]);
+  }, [enabled, pending, shared]);
 
   const send = useCallback(async (mode: ObjectifyMode, expectedRevision?: string) => {
     const expected = expectedRevision ?? revision ?? state?.scene_revision;
@@ -88,14 +104,18 @@ export function useObjectifyState({
     try {
       // Tạo mesh đi qua route riêng; các chế độ tách còn lại đi qua hàng đợi objectify.
       setState(await (mode === "geometry" ? buildObjectGeometry(jobId, expected) : requestObjectify(jobId, expected, mode)));
+      onRefresh?.();
     } catch (cause) {
       setError(cause instanceof ApiError ? cause.detail : "Không gửi được yêu cầu.");
       // 409: scene đã đổi (revision cũ) hoặc đã có yêu cầu khác; đọc lại trạng thái để màn hình khớp máy chủ.
-      if (cause instanceof ApiError && cause.status === 409) setTick((value) => value + 1);
+      if (cause instanceof ApiError && cause.status === 409) {
+        if (onRefresh) onRefresh();
+        else setTick((value) => value + 1);
+      }
     } finally {
       setSending(false);
     }
-  }, [jobId, revision, state?.scene_revision]);
+  }, [jobId, revision, state?.scene_revision, onRefresh]);
 
   // Huỷ đúng yêu cầu đang hiển thị (operation_id); không có thì huỷ theo job như trước.
   const operationId = state?.operation_id;
@@ -104,17 +124,25 @@ export function useObjectifyState({
     setError(null);
     try {
       setState(await (operationId ? cancelObjectify(jobId, operationId) : cancelObjectify(jobId)));
+      onRefresh?.();
     } catch (cause) {
       setError(cause instanceof ApiError ? cause.detail : "Không hủy được yêu cầu.");
     } finally {
       setSending(false);
     }
-  }, [jobId, operationId]);
+  }, [jobId, operationId, onRefresh]);
 
   // Đọc lại trạng thái ngay, cho thao tác không đi qua `send` (ví dụ áp vùng nhận 202).
-  const refresh = useCallback(() => setTick((value) => value + 1), []);
+  const refresh = useCallback(() => {
+    if (onRefresh) onRefresh();
+    else setTick((value) => value + 1);
+  }, [onRefresh]);
 
-  return { state, error, sending, pending, send, cancel, refresh };
+  // Giá trị ổn định: consumer của context chỉ render lại khi trạng thái thật sự đổi (T-060).
+  return useMemo(
+    () => ({ state, error, sending, pending, send, cancel, refresh }),
+    [state, error, sending, pending, send, cancel, refresh],
+  );
 }
 
 /** Các chế độ là việc dựng hình học, hiện ở hàng "Duyệt vật & Tạo mesh" (T-021). */

@@ -199,3 +199,95 @@ def test_retryable_runtime_failure_stays_failed_and_retains_attempt_scratch(tmp_
     assert view.error_code == "ISAAC_RUNTIME_TIMEOUT"
     assert view.retryable is True
     assert list((settings.product_worker_root / "isaac_validation").glob(f"{submitted.run_id}-*"))
+
+
+def _run_heartbeat(monkeypatch, heartbeat, seconds: float):  # noqa: ANN001, ANN202
+    import time as _time
+    from datetime import timedelta
+
+    monkeypatch.setattr(worker_module, "_HEARTBEAT_SECONDS", 0.05)
+    queue = SimpleNamespace(heartbeat=heartbeat, lease_ttl=timedelta(seconds=1.2))
+    admission = SimpleNamespace(touch_operation=lambda request: True)
+    claim = SimpleNamespace(run=SimpleNamespace(run_id="run-" + "a" * 12))
+    beat = worker_module._ValidationHeartbeat(queue, admission, claim, SimpleNamespace())
+    beat.start()
+    deadline = _time.monotonic() + seconds
+    while _time.monotonic() < deadline and not beat.cancel_event.is_set():
+        _time.sleep(0.05)
+    beat.stop()
+    return beat
+
+
+def test_validation_heartbeat_survives_one_locked_database_error(monkeypatch) -> None:  # noqa: ANN001
+    """T-049: one database blip must not kill an Isaac validation run."""
+    import sqlite3
+
+    calls = {"n": 0}
+
+    def heartbeat(claim):  # noqa: ANN001, ANN202
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise sqlite3.OperationalError("database is locked")
+        return False
+
+    beat = _run_heartbeat(monkeypatch, heartbeat, 0.5)
+    assert calls["n"] >= 2 and beat.reason is None and not beat.cancel_event.is_set()
+
+
+def test_validation_heartbeat_aborts_on_persistent_errors(monkeypatch) -> None:  # noqa: ANN001
+    import sqlite3
+
+    def heartbeat(claim):  # noqa: ANN001, ANN202
+        raise sqlite3.OperationalError("database is locked")
+
+    beat = _run_heartbeat(monkeypatch, heartbeat, 3)
+    assert beat.reason == "heartbeat_failed" and beat.cancel_event.is_set()
+
+
+def test_validation_wait_fails_after_limit(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001
+    """T-050: a non-busy resource wait longer than the limit fails the run as retryable."""
+    from datetime import timedelta
+
+    registry, submitted, worker, admission, _ = _world(tmp_path)
+    admission.admit_operation = lambda request: SimpleNamespace(
+        status="waiting_resources", reasons={"vram": "gate_error"}
+    )
+    later = submitted.requested_at + timedelta(seconds=1801)
+    monkeypatch.setattr(worker_module, "_now", lambda: later)
+
+    assert worker.process_next() is True
+
+    view = ValidationQueue(registry.persistence.database, registry.runtime_resolver).get(
+        submitted.job_id, submitted.run_id
+    )
+    assert view.status.value == "FAILED"
+    assert view.error_code == "RESOURCE_WAIT_EXCEEDED" and view.retryable is True
+
+
+def test_validation_worker_busy_is_not_a_resource_timeout(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001
+    """Review fix: a run waiting for a free worker (no resource reasons) is not failed by the 30-minute limit."""
+    from datetime import timedelta
+
+    registry, submitted, worker, admission, _ = _world(tmp_path)
+    admission.admit_operation = lambda request: SimpleNamespace(status="worker_busy", reasons={})
+    monkeypatch.setattr(worker_module, "_now", lambda: submitted.requested_at + timedelta(days=1))
+
+    worker.process_next()
+    view = ValidationQueue(registry.persistence.database, registry.runtime_resolver).get(
+        submitted.job_id, submitted.run_id
+    )
+    assert view.status.value != "FAILED"
+
+
+def test_validation_busy_wait_keeps_waiting(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001
+    from datetime import timedelta
+
+    registry, submitted, worker, admission, _ = _world(tmp_path)
+    admission.admit_operation = lambda request: SimpleNamespace(status="waiting_resources", reasons={"vram": "busy"})
+    monkeypatch.setattr(worker_module, "_now", lambda: submitted.requested_at + timedelta(days=1))
+
+    assert worker.process_next() is False
+    view = ValidationQueue(registry.persistence.database, registry.runtime_resolver).get(
+        submitted.job_id, submitted.run_id
+    )
+    assert view.status.value == "WAITING_RESOURCES"

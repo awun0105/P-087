@@ -2,29 +2,25 @@
 
 import { errorMessage } from "@/lib/ui-error";
 
-import { Canvas } from "@react-three/fiber";
-import { Grid, OrbitControls } from "@react-three/drei";
-import { Loader2, Maximize, RotateCcw } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import * as THREE from "three";
-import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { Loader2 } from "lucide-react";
+import dynamic from "next/dynamic";
+import { useEffect, useState } from "react";
 
 import { Notice } from "@/components/studio/primitives";
-import { requireEmbeddedGlb } from "@/features/viewer/GlbArtifact";
-import { MetricSceneView } from "@/features/studio/MetricSceneView";
-import {
-  INITIAL_RUNTIME,
-  PlayCanvasScene,
-  playCanvasErrorMessage,
-  usePlayCanvasCapability,
-  type ViewerControls,
-} from "@/features/viewer/PlayCanvasScene";
-import { recordingCameraPose, type SourceFrame } from "@/features/viewer/source-frame";
-import { themeColor } from "@/lib/theme";
-import { jobArtifactContentUrl } from "@/lib/api/endpoints";
+import { jobArtifactContentUrl, jobFrameThumbnailUrl } from "@/lib/api/endpoints";
 import { getStageViews } from "@/lib/api/studio";
 import { cn } from "@/lib/cn";
 import type { StageView } from "@/lib/contracts/studio";
+
+/** T-065: three/r3f/PlayCanvas chỉ tải khi lớp đang xem cần 3D; Frames và Cameras không kéo chúng. */
+const Stage3DLayer = dynamic(() => import("@/features/studio/StageViewer3D").then((m) => m.Stage3DLayer), {
+  ssr: false,
+  loading: () => (
+    <p className="flex items-center gap-2 p-6 text-sm text-ink-muted" role="status">
+      <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden /> Đang tải khung xem 3D…
+    </p>
+  ),
+});
 
 /**
  * Kết quả từng bước của pipeline (ADR 0005): frame, camera, 3DGS, collision mesh.
@@ -95,45 +91,41 @@ export function StageViewer({ jobId, stageId, fallbackStageId }: { jobId: string
 function StageLayer({ jobId, view, views }: { jobId: string; view: StageView; views: StageView[] }) {
   if (view.kind === "frames") return <FramesLayer jobId={jobId} view={view} />;
   if (view.kind === "cameras") return <CamerasLayer view={view} />;
-  // Lớp hệ mét dùng chung scene: 3DGS màu + collision mesh phủ lên, cùng hệ Z-up.
-  const metric = views.find((item) => item.kind === "gaussian" && item.unit === "meter");
-  const mesh = views.find((item) => item.kind === "mesh");
-  if (metric?.refs[0] && (view === metric || view === mesh)) {
-    return (
-      <><p className="absolute bottom-3 left-3 z-20 rounded-md bg-viewport-deep/90 px-3 py-1 text-xs text-on-dark">
-        Kết quả tái dựng trước khi chỉnh sửa vật thể
-      </p><MetricSceneView
-        jobId={jobId}
-        visual={metric.refs[0]}
-        collision={mesh?.refs[0]}
-        reconstruction
-        cameras={metric.cameras}
-        defaultLayers={{ splat: true, collision: view === mesh, boxes: false }}
-        lidarOverlay={metric.lidar_overlay ?? null}
-      /></>
-    );
-  }
-  if (view.kind === "gaussian") {
-    // 3DGS Brush ở hệ SfM của COLMAP: cùng hệ với quỹ đạo camera của bước ước lượng camera.
-    const sfm = views.find((item) => item.kind === "cameras")?.cameras ?? [];
-    return <GaussianLayer jobId={jobId} view={view} cameras={view.cameras.length ? view.cameras : sfm} />;
-  }
-  return <MeshLayer jobId={jobId} view={view} />;
+  return <Stage3DLayer jobId={jobId} view={view} views={views} />;
 }
 
 function FramesLayer({ jobId, view }: { jobId: string; view: StageView }) {
+  // T-066: lưới dùng ảnh thu nhỏ (vài chục KB); ảnh gốc (tới 8 MB) chỉ tải khi bấm vào một ảnh.
+  const [open, setOpen] = useState<StageView["refs"][number] | null>(null);
+  const name = (ref: StageView["refs"][number]) => ref.artifact_uri.split("/").pop() ?? "frame";
   return (
-    <div className="grid size-full auto-rows-min grid-cols-2 gap-2 overflow-y-auto bg-paper p-3 sm:grid-cols-4 lg:grid-cols-6">
-      {view.refs.map((ref) => (
-        // eslint-disable-next-line @next/next/no-img-element -- ảnh artifact có checksum, không qua next/image optimizer
-        <img
-          key={ref.artifact_uri}
-          src={jobArtifactContentUrl(jobId, ref)}
-          alt={ref.artifact_uri.split("/").pop() ?? "frame"}
-          loading="lazy"
-          className="aspect-video w-full rounded-md border border-line object-cover"
-        />
-      ))}
+    <div className="relative size-full">
+      <div className="grid size-full auto-rows-min grid-cols-2 gap-2 overflow-y-auto bg-paper p-3 sm:grid-cols-4 lg:grid-cols-6">
+        {view.refs.map((ref) => (
+          <button key={ref.artifact_uri} type="button" aria-label={`Xem ảnh gốc ${name(ref)}`} onClick={() => setOpen(ref)} className="block rounded-md focus-visible:outline-2 focus-visible:outline-ember">
+            {/* eslint-disable-next-line @next/next/no-img-element -- ảnh artifact có checksum, không qua next/image optimizer */}
+            <img
+              src={jobFrameThumbnailUrl(jobId, ref, 320)}
+              srcSet={`${jobFrameThumbnailUrl(jobId, ref, 160)} 160w, ${jobFrameThumbnailUrl(jobId, ref, 320)} 320w, ${jobFrameThumbnailUrl(jobId, ref, 640)} 640w`}
+              sizes="(min-width: 1024px) 16vw, (min-width: 640px) 25vw, 50vw"
+              alt={name(ref)}
+              loading="lazy"
+              decoding="async"
+              className="aspect-video w-full rounded-md border border-line object-cover"
+            />
+          </button>
+        ))}
+      </div>
+      {open && (
+        <div role="dialog" aria-label={`Ảnh gốc ${name(open)}`} className="absolute inset-0 z-30 flex flex-col bg-viewport-deep/95 p-3">
+          <div className="mb-2 flex items-center justify-between text-sm text-on-dark">
+            <span className="truncate">{name(open)}</span>
+            <button type="button" onClick={() => setOpen(null)} className="rounded px-2 py-1 hover:bg-on-dark/10">Đóng ảnh gốc</button>
+          </div>
+          {/* eslint-disable-next-line @next/next/no-img-element -- ảnh gốc có checksum */}
+          <img src={jobArtifactContentUrl(jobId, open)} alt={`Ảnh gốc ${name(open)}`} className="min-h-0 flex-1 object-contain" />
+        </div>
+      )}
     </div>
   );
 }
@@ -171,171 +163,5 @@ function CamerasLayer({ view }: { view: StageView }) {
         {view.cameras.length} camera · chấm cam là frame đầu{view.unit === "meter" ? " · khung ngang theo mét" : ""}
       </p>
     </div>
-  );
-}
-
-function GaussianLayer({ jobId, view, cameras }: { jobId: string; view: StageView; cameras: StageView["cameras"] }) {
-  const [capability, setCapability] = usePlayCanvasCapability();
-  const [runtime, setRuntime] = useState(INITIAL_RUNTIME);
-  const [viewerControls, setViewerControls] = useState<ViewerControls | null>(null);
-  const sourceFrame: SourceFrame = view.unit === "meter" ? "z_up" : "colmap";
-  const [wheelFactor, setWheelFactor] = useState(2);
-  const fail = useCallback(() => setCapability("failed"), [setCapability]);
-  const handleApp = useCallback((_app: unknown, controls?: ViewerControls) => {
-    setViewerControls(controls ?? null);
-  }, []);
-  const displayRotation = view.unit === "arbitrary" ? view.display_rotation_xyzw ?? undefined : undefined;
-  const initialCamera = useMemo(() => recordingCameraPose(sourceFrame, cameras, 60, displayRotation), [sourceFrame, cameras, displayRotation]);
-  const ref = view.refs[0];
-  if (!ref) return <Notice>Bước này chưa có file 3DGS.</Notice>;
-  if (capability === "failed" || capability === "unavailable") {
-    return <p className="grid size-full place-items-center text-sm text-on-dark/80">{playCanvasErrorMessage(capability)}</p>;
-  }
-  return (
-    <PlayCanvasScene
-      contentUrl={jobArtifactContentUrl(jobId, ref)}
-      contentFilename={ref.artifact_uri.split("/").pop() ?? "scene.sog"}
-      renderer="webgl"
-      showControls
-      mode="VISUAL"
-      capability={capability}
-      onFailed={fail}
-      onRuntime={setRuntime}
-      sourceFrame={sourceFrame}
-      displayRotation={displayRotation}
-      cameras={cameras}
-      wheelFactor={wheelFactor}
-      initialCamera={initialCamera}
-      initialCameraMode="fly"
-      onApp={handleApp}
-      extraControls={
-        <div
-          className="sse-buttonGroup flex items-center shrink-0 border border-line-dark"
-          onPointerDown={(e) => e.stopPropagation()}
-        >
-          <button
-            type="button"
-            className="sse-controlButton flex items-center justify-center text-on-dark/80 hover:text-on-dark transition-colors disabled:opacity-40"
-            onClick={() => viewerControls?.frameScene()}
-            disabled={!runtime.loaded}
-            title="Toàn cảnh (F)"
-            aria-label="Toàn cảnh"
-          >
-            <Maximize className="size-4" aria-hidden />
-          </button>
-          <button
-            type="button"
-            className="sse-controlButton flex items-center justify-center text-on-dark/80 hover:text-on-dark transition-colors disabled:opacity-40"
-            onClick={() => viewerControls?.resetCamera()}
-            disabled={!runtime.loaded}
-            title="Về vị trí ban đầu (R)"
-            aria-label="Về vị trí ban đầu"
-          >
-            <RotateCcw className="size-4" aria-hidden />
-          </button>
-          <div className="flex items-center gap-0.5 border-l border-line-dark px-1.5 text-xs text-on-dark/80">
-            <span className="text-[11px] text-on-dark/60 select-none mr-0.5">Zoom:</span>
-            {[1, 2, 4].map((factor) => (
-              <button
-                key={factor}
-                type="button"
-                onClick={() => setWheelFactor(factor)}
-                className={cn(
-                  "rounded px-1.5 py-0.5 text-xs transition-colors",
-                  wheelFactor === factor
-                    ? "bg-ember-soft text-ember-strong font-medium"
-                    : "text-on-dark/70 hover:text-on-dark hover:bg-on-dark/10",
-                )}
-                title={`Tốc độ zoom ${factor === 1 ? "chuẩn (×1)" : `nhanh (×${factor})`}`}
-              >
-                {factor}×
-              </button>
-            ))}
-          </div>
-        </div>
-      }
-    />
-  );
-}
-
-function disposeTree(root: THREE.Object3D): void {
-  root.traverse((object) => {
-    if (object instanceof THREE.Mesh) {
-      object.geometry.dispose();
-      for (const material of Array.isArray(object.material) ? object.material : [object.material]) material.dispose();
-    }
-  });
-}
-
-function MeshLayer({ jobId, view }: { jobId: string; view: StageView }) {
-  const ref = view.refs[0];
-  if (!ref) return <Notice>Bước này chưa có collision mesh.</Notice>;
-  return <CollisionMeshCanvas url={jobArtifactContentUrl(jobId, ref)} />;
-}
-
-/**
- * Collision mesh canonical (mét, Z-up, sàn z = 0) trong three.js. `children` vẽ trong cùng
- * khung Z-up (vd hộp vật thể ứng viên); mesh và material được giải phóng khi unmount/đổi URL.
- */
-export function CollisionMeshCanvas({ url, children }: { url: string; children?: ReactNode }) {
-  const [state, setState] = useState<{ root?: THREE.Group; error?: string; triangles?: number } | null>(null);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    let root: THREE.Group | undefined;
-    fetch(url, { signal: controller.signal })
-      .then(async (response) => {
-        if (!response.ok) throw new Error(`Artifact HTTP ${response.status}`);
-        const bytes = await response.arrayBuffer();
-        requireEmbeddedGlb(bytes);
-        return new GLTFLoader().parseAsync(bytes, "");
-      })
-      .then((asset) => {
-        root = asset.scene;
-        if (controller.signal.aborted) return disposeTree(root);
-        let triangles = 0;
-        root.traverse((object) => {
-          if (!(object instanceof THREE.Mesh)) return;
-          object.material = new THREE.MeshStandardMaterial({ color: themeColor("--studio-geometry", "#2f7ea8"), flatShading: true, side: THREE.DoubleSide });
-          const index = object.geometry.getIndex();
-          triangles += (index ? index.count : object.geometry.getAttribute("position").count) / 3;
-        });
-        setState({ root, triangles });
-      })
-      .catch((cause: unknown) => {
-        if (!controller.signal.aborted) setState({ error: errorMessage(cause, "Không tải được lớp xem. Hãy thử lại.") });
-      });
-    return () => {
-      controller.abort();
-      if (root) disposeTree(root);
-    };
-  }, [url]);
-
-  // Mesh canonical Z-up; three.js Y-up → xoay -90° quanh X một lần ở group cha.
-  const rotation = useMemo(() => [-Math.PI / 2, 0, 0] as [number, number, number], []);
-  if (state?.error) return <Notice tone="rust">Không đọc được collision mesh: {state.error}</Notice>;
-  if (!state?.root) {
-    return (
-      <p className="flex h-full items-center justify-center gap-2 text-sm text-on-dark/80" role="status">
-        <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden /> Đang tải collision mesh…
-      </p>
-    );
-  }
-  return (
-    <>
-      <Canvas camera={{ position: [8, 10, 12], fov: 50 }} gl={{ antialias: true }}>
-        <ambientLight intensity={0.6} />
-        <directionalLight position={[10, 20, 10]} intensity={0.9} />
-        <group rotation={rotation}>
-          <primitive object={state.root} dispose={null} />
-          {children}
-        </group>
-        <Grid args={[40, 40]} cellSize={1} sectionSize={5} infiniteGrid fadeDistance={60} />
-        <OrbitControls makeDefault />
-      </Canvas>
-      <p className="absolute bottom-3 left-3 rounded-md border border-line-dark bg-viewport-deep/85 px-2 py-1 text-xs text-on-dark/80">
-        {state.triangles?.toLocaleString("vi-VN")} tam giác · lưới 1 m, sàn z = 0
-      </p>
-    </>
   );
 }

@@ -84,9 +84,48 @@ Xong 2026-10-16: T-027 → T-035 accepted. Full backend 3.688 pass / 0 fail / 28
 | T-043 | Dừng công cụ theo tiến độ và khối lượng | Canh treo theo tiến độ cho mọi công cụ; hạn tự tính theo số đo trên đúng GPU; trần giờ GPU mỗi scene | – | M |
 | T-045 | 9 scene dataset chạy hết pipeline | Đầu vào là ảnh (1/2), COLMAP của pipeline, video ghép chỉ để xem; agent tự chạy và sửa lỗi | – | L |
 
+## Sprint 8: Ổn định pipeline, một mô hình tiến trình, xem scene nhanh
+
+Kế hoạch tổng (đọc trước mọi task): `.ai/plans/2026-10-20-pipeline-stability-and-progress.md`. Có phiên khác cùng sửa cây
+`develop`: tuân mục "Làm song song" trong kế hoạch tổng.
+
+| ID | Tiêu đề | Mục tiêu | Cần | Cỡ |
+| --- | --- | --- | --- | --- |
+| T-046 | Vòng lặp worker không chết vì một lỗi | `QueueGuard` cho mọi hàng đợi, nghỉ tăng dần | – | S |
+| T-047 | Tắt worker thì cho chạy lại, kể cả job cũ | SIGTERM → `INTERRUPTED_SHUTDOWN`; chiếu cờ chạy lại hai chiều | – | S |
+| T-048 | Không còn job RUNNING không ai trông | Đóng khe trước khi tạo attempt; sweeper job không lease | T-047 | M |
+| T-049 | Chịu lỗi DB thoáng qua | `HeartbeatTolerance` cho ba hàng đợi và `_run_tool` | T-046 | M |
+| T-050 | Chờ tài nguyên có giới hạn | Lý do `gate_error`; hết hạn chờ không phải vì bận; hạn tự tính không lặp | T-049 | M |
+| T-051 | File theo checksum giữ vĩnh viễn | immutable + 304, không băm lại, URL R2 ổn định | – | L |
+| T-052 | Lưới va chạm Walk dựng một lần | Đệm bộ nhớ + đĩa theo revision, 304, gzip | T-051 | M |
+| T-053 | Đệm SceneIR / JobManifest; gzip; CORS | Parse một lần mỗi checksum; nén JSON | – | M |
+| T-054 | `/scenes` và stage-views nhẹ | Job mới nhất một truy vấn; usage bằng SQL; đệm stage-views | T-053 | M |
+| T-055 | Một hàm trạng thái hình học | `object_geometry_view`; bỏ mã hoá trùng | – | S |
+| T-056 | Bảng mốc bước | `r2s_step_marks` (migration v26), ghi trong `save_job` và từ runner | T-048 | L |
+| T-057 | Pha có kiểu + mốc cho hàng đợi tách vật | `ObjectifyPhase`; xoá pha cũ khi lỗi; mốc theo lượt | T-050, T-056 | M |
+| T-058 | Hàm thuần việc tiếp theo | `next_action()` 16 loại | T-055 | M |
+| T-059 | Endpoint `/jobs/{id}/pipeline` | Bước thật tới khi scene dùng được, `next_action`, 304 | T-053, T-056, T-057, T-058 | L |
+| T-060 | Một vòng poll mỗi trang | `usePipeline`, không re-render khi không đổi | T-059 | M |
+| T-061 | Dòng tiến trình từ bước thật | Bỏ hàng giả; `stepActions` | T-060 | M |
+| T-062 | Một nguồn việc cần làm | `nextActionView`; chuông không tải SceneIR | T-061 | L |
+| T-063 | Một nguồn dữ liệu scene; dọn nhánh chết | `SceneRecordProvider` | T-062 | M |
+| T-064 | Viewer không dựng lại, không vẽ thừa | Prop ổn định, mount sau camera, throttle, tab ẩn nghỉ | T-060 | M |
+| T-065 | Tải lười | Ammo/va chạm khi Walk; bước 8 chỉ lưới; request song song; chia JS | T-064 | M |
+| T-066 | Ảnh frame thu nhỏ | JPEG 160/320/640 có đệm | T-051 | S |
+| T-067 | Vật nhẹ | SOG cho vật (job mới), tối đa 4 tải cùng lúc, vỏ không tải lại | T-064 | L |
+| T-068 | SOG xem nhanh | Bản màu bậc 0 (+ LOD nếu công cụ hỗ trợ) cho job mới | T-051 | L |
+| T-069 | Regression + đo + bàn giao | Full suite, bảng trước/sau, HANDOFF | tất cả | M |
+
 ### Backlog (chưa lập plan)
 - Worker công bố registry năng lực input vào DB (bỏ chép tay `PRODUCT_INPUT_RUNTIME_REGISTRY`), cùng mẫu T-040.
 - Nút "Chạy lại từ đầu" cho job đã có stage mà runtime không còn worker (T-040 Q1).
 - Lệnh `reset-password` trong `auth.cli`.
 - ObjectGS **chưa từng chạy đầu-cuối** qua worker trên một scene thật (HANDOFF PR-05 dòng 67, 79: "Full Studio worker job is unverified", "E2E NOT RUN"). Bằng chứng "mesh hở" hiện chỉ từ cube tổng hợp 96 px (1000/8000 vòng) và chạy lại trên dữ liệu Room đã tạo bằng `objectify_v1` — không đủ để kết luận chất lượng. Cần một lượt chạy đầu-cuối với `scene.geometry_method=objectgs` trên scene thật trước khi quyết mặc định.
 - Scene Room `job-a14981f78f85` rev-100 (60 vật, tạo bằng `objectify_v1` SAM2+CoACD, **không** dùng ObjectGS) không mở được lưới va chạm/Walk từ khi có kiểm `require_closed_cuts` (commit `ee6b69f0`, 15/10): API trả 409 `UNREPAIRED_COLLISION_CUT: 954 new boundary edges remain` vì lỗ khoét vùng vật không nằm trên mặt phẳng nên không vá được. Cần quyết: xem trước/Walk hiện lưới kèm cảnh báo thay vì từ chối (giữ chặt cho xuất USD), và frontend không gọi lại khi 409.
+### Kết quả Sprint 8 (2026-10-20)
+
+T-046…T-069 đã cài (trạng thái `implemented`, chờ review). Bàn giao, số đo và lưu ý deploy:
+`docs/plans/active/2026-10-20-pipeline-stability/HANDOFF.md`. Migration mới: v26. Lệch kế hoạch đáng chú ý (chi tiết trong
+ledger và report): T-067 dùng PLY nén tạo lười trên API thay cho SOG trong pipeline; T-068 tạo bản xem nhanh nền trên API thay
+cho artifact pipeline; T-065 hoãn Web Worker; T-063 gom request ở tầng API thay cho Provider.
+

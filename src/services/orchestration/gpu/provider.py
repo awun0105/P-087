@@ -18,6 +18,8 @@ class ProviderError(RuntimeError):
 
 
 Transport = Callable[[str, str, dict | None], object]
+#: RunPod REST body when no machine matches the request; the create definitely did not allocate.
+_NO_CAPACITY = b"no instances currently available"
 
 
 def transport(api_key: str) -> Transport:
@@ -46,7 +48,18 @@ def transport(api_key: str) -> Transport:
                 delay = min(300.0, max(1.0, float(error.headers.get("Retry-After", "30"))))
             except ValueError:
                 delay = 30
-            raise ProviderError(category, ambiguous=creating, retry_after=delay) from None
+            # A create is only ambiguous when the provider might have accepted it. A schema rejection (400/422) and
+            # "no instances currently available" are definite refusals; auth, rate limits and other errors stay
+            # ambiguous as before. The body is only matched, never logged or put in the error.
+            definite = error.code in {400, 422}
+            if creating and not definite:
+                try:
+                    definite = _NO_CAPACITY in error.read(4096).lower()
+                except OSError:
+                    definite = False
+                if definite:
+                    category, delay = "inventory_unavailable", max(delay, 60)
+            raise ProviderError(category, ambiguous=creating and not definite, retry_after=delay) from None
         except (urllib.error.URLError, TimeoutError, OSError, ValueError):
             raise ProviderError("transport", ambiguous=creating) from None
 

@@ -798,8 +798,8 @@ def test_membership_queue_reuses_admission_revision_fence_and_cancellation(world
     ):
         calls.append(command)
         assert actor_id == "fixture-user"
-        progress("surface_quality")
-        assert scene_objectify_queue.state(registry, settings, job_id).phase == "surface_quality"
+        progress("quality")
+        assert scene_objectify_queue.state(registry, settings, job_id).phase == "quality"
         if finish == "quality_failure":
             raise ValueError("surface quality gate failed")
         if finish == "running_cancel":
@@ -1409,3 +1409,267 @@ def test_rejected_request_records_no_scene_request(world, monkeypatch, tmp_path)
         scene_objectify_queue.request(registry, settings, job.job_id, base.scene_revision, "geometry")
 
     assert len(_scene_requests(settings, job.job_id)) == 1
+
+
+def _beat_until(abort_reason: list, cancel_event, seconds: float) -> None:  # noqa: ANN001
+    import time as _time
+
+    deadline = _time.monotonic() + seconds
+    while _time.monotonic() < deadline and not cancel_event.is_set():
+        _time.sleep(0.05)
+
+
+def test_objectify_heartbeat_survives_one_locked_database_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """T-049: one locked-database blip must not cancel a long geometry build."""
+    import sqlite3
+    from threading import Event
+    from types import SimpleNamespace
+
+    from src.services.orchestration.scene import objectify_queue as queue
+
+    calls = {"n": 0}
+
+    def cancel_reason(*args: object) -> None:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(queue, "_cancel_reason", cancel_reason)
+    cancel_event, abort_reason = Event(), [None]
+    record = SimpleNamespace(lease_token="t", lease_generation=1)
+    stop, thread = queue._start_heartbeat(
+        SimpleNamespace(), "job-x", record, SimpleNamespace(), [None], cancel_event, abort_reason
+    )
+    _beat_until(abort_reason, cancel_event, 1.5)
+    stop.set()
+    thread.join(timeout=2)
+    assert calls["n"] >= 2
+    assert abort_reason[0] is None and not cancel_event.is_set()
+
+
+def test_objectify_heartbeat_aborts_on_persistent_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    import sqlite3
+    from datetime import timedelta
+    from threading import Event
+    from types import SimpleNamespace
+
+    from src.services.orchestration.scene import objectify_queue as queue
+
+    def cancel_reason(*args: object) -> None:
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(queue, "_cancel_reason", cancel_reason)
+    monkeypatch.setattr(queue, "_LEASE_TTL", timedelta(seconds=1.2))
+    cancel_event, abort_reason = Event(), [None]
+    record = SimpleNamespace(lease_token="t", lease_generation=1)
+    stop, thread = queue._start_heartbeat(
+        SimpleNamespace(), "job-x", record, SimpleNamespace(), [None], cancel_event, abort_reason
+    )
+    _beat_until(abort_reason, cancel_event, 4)
+    stop.set()
+    thread.join(timeout=2)
+    assert abort_reason[0] == "lease_lost" and cancel_event.is_set()
+
+
+def _waiting(reason: str):  # noqa: ANN202
+    from src.services.orchestration.jobs.admission import OperationAdmissionResult
+
+    def admit(_self, request):  # noqa: ANN001, ANN202
+        return OperationAdmissionResult(
+            request=request,
+            status="waiting_resources",
+            required_gb={"vram": 1.0, "ram": None, "disk": None},
+            available_gb={"vram": None, "ram": None, "disk": None},
+            capacity_gb={"vram": None, "ram": None, "disk": None},
+            waiting_on=["vram"],
+            reasons={"vram": reason},
+        )
+
+    return admit
+
+
+def _queued_boxes(world, monkeypatch, tmp_path, reason: str):  # noqa: ANN001, ANN202
+    registry, job, bundle, settings = world
+    monkeypatch.setattr(scene_extraction, "objectify_with_retry", _always_fail)
+    extract_scene(registry, job, bundle, settings, tmp_path / "work")
+    scene_objectify_queue.request(registry, settings, job.job_id, "rev-001", "boxes")
+    monkeypatch.setattr(scene_objectify_queue, "use_boxes", lambda *args, **kwargs: None)
+    monkeypatch.setattr(scene_objectify_queue.ResourceAdmission, "admit_operation", _waiting(reason))
+    return registry, job, settings
+
+
+def _age_wait(settings, job_id: str, minutes: int) -> None:  # noqa: ANN001
+    from datetime import UTC, datetime, timedelta
+
+    with scene_objectify_queue._database(settings).transaction(write=True) as tx:
+        record = scene_objectify_queue._read(tx, job_id, lock=True)
+        since = datetime.now(UTC) - timedelta(minutes=minutes)
+        scene_objectify_queue._write(tx, job_id, record.model_copy(update={"resource_wait_since": since}))
+
+
+def test_objectify_wait_fails_after_limit(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    """T-050: a wait that is not caused by a busy machine ends as a retryable failure after 30 minutes."""
+    registry, job, settings = _queued_boxes(world, monkeypatch, tmp_path, "gate_error")
+    assert scene_objectify_queue.process_next(registry, settings) is False
+    _age_wait(settings, job.job_id, 31)
+    scene_objectify_queue.process_next(registry, settings)
+    with scene_objectify_queue._database(settings).transaction() as tx:
+        record = scene_objectify_queue._read(tx, job.job_id)
+    assert record.status == "failed" and record.retryable is True
+    assert "cổng tài nguyên lỗi" in (record.error or "")
+
+
+def test_objectify_worker_busy_never_times_out(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    """Review fix: waiting for a free worker / the right GPU is not a resource shortage; 31 minutes must not fail it."""
+    from src.services.orchestration.jobs.admission import OperationAdmissionResult
+
+    registry, job, settings = _queued_boxes(world, monkeypatch, tmp_path, "busy")
+
+    def busy_worker(_self, request):  # noqa: ANN001, ANN202
+        return OperationAdmissionResult(
+            request=request,
+            status="worker_busy",
+            required_gb={"vram": 1.0, "ram": None, "disk": None},
+            available_gb={"vram": None, "ram": None, "disk": None},
+            capacity_gb={"vram": None, "ram": None, "disk": None},
+            waiting_on=[],
+            reasons={},
+        )
+
+    monkeypatch.setattr(scene_objectify_queue.ResourceAdmission, "admit_operation", busy_worker)
+    scene_objectify_queue.process_next(registry, settings)
+    _age_wait(settings, job.job_id, 31)
+    scene_objectify_queue.process_next(registry, settings)
+    with scene_objectify_queue._database(settings).transaction() as tx:
+        record = scene_objectify_queue._read(tx, job.job_id)
+    assert record.status == "queued"
+
+
+def test_objectify_busy_wait_never_fails(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    registry, job, settings = _queued_boxes(world, monkeypatch, tmp_path, "busy")
+    scene_objectify_queue.process_next(registry, settings)
+    _age_wait(settings, job.job_id, 600)
+    scene_objectify_queue.process_next(registry, settings)
+    with scene_objectify_queue._database(settings).transaction() as tx:
+        record = scene_objectify_queue._read(tx, job.job_id)
+    assert record.status == "queued"
+
+
+def test_first_wait_records_since_and_keeps_it(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    registry, job, settings = _queued_boxes(world, monkeypatch, tmp_path, "unmeasured")
+    scene_objectify_queue.process_next(registry, settings)
+    with scene_objectify_queue._database(settings).transaction() as tx:
+        first = scene_objectify_queue._read(tx, job.job_id).resource_wait_since
+    scene_objectify_queue.process_next(registry, settings)
+    with scene_objectify_queue._database(settings).transaction() as tx:
+        second = scene_objectify_queue._read(tx, job.job_id).resource_wait_since
+    assert first is not None and first == second
+
+
+def test_old_record_without_wait_since_reads() -> None:
+    legacy = (
+        '{"status":"queued","mode":"geometry","base_revision":"rev-002",'
+        '"requested_at":"2026-10-18T08:00:00+00:00","phase":null}'
+    )
+    record = scene_objectify_queue._Record.model_validate_json(legacy)
+    assert record.resource_wait_since is None
+
+
+def test_review_state_rule_is_shared() -> None:
+    """T-055: one rule for 'Duyệt vật & Tạo mesh' used by the scene list and the stage results."""
+    from datetime import UTC, datetime
+
+    def record(status: str, mode: str = "geometry", base: str = "rev-002"):  # noqa: ANN202
+        return scene_objectify_queue._Record(
+            status=status, mode=mode, base_revision=base, requested_at=datetime(2026, 10, 20, tzinfo=UTC)
+        )
+
+    review = scene_objectify_queue.review_state
+    assert review(None, None, "rev-002") is None
+    assert review(None, "awaiting_review", "rev-002") == "waiting"
+    assert review(record("running"), "awaiting_review", "rev-002") == "running"
+    assert review(record("running", mode="region"), "ready", "rev-003") == "running"
+    assert review(record("failed"), "awaiting_review", "rev-002") == "failed"
+    assert review(record("failed", base="rev-001"), "awaiting_review", "rev-002") == "waiting"
+    assert review(record("failed"), "ready", "rev-002") is None
+
+
+# ── T-057: typed phases and recorded phase marks ─────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "queued",
+        "observations",
+        "collider_and_background",
+        "shell",
+        "objectgs",
+        "quality",
+        "collider",
+        "environment",
+        "publish",
+        "done",
+    ],
+)
+def test_legacy_phase_values_read(value: str) -> None:
+    raw = f'{{"status":"running","mode":"geometry","base_revision":"rev-002","requested_at":"2026-10-18T08:00:00+00:00","phase":"{value}"}}'
+    assert scene_objectify_queue._Record.model_validate_json(raw).phase == value
+
+
+def test_unknown_phase_reads_as_none() -> None:
+    raw = '{"status":"running","mode":"geometry","base_revision":"rev-002","requested_at":"2026-10-18T08:00:00+00:00","phase":"something_else"}'
+    assert scene_objectify_queue._Record.model_validate_json(raw).phase is None
+
+
+def _geometry_run(world, monkeypatch, tmp_path, *, fail: bool = False):  # noqa: ANN001, ANN202
+    registry, job, _, settings = world
+    base = _geometry_draft(world, monkeypatch, tmp_path)
+    monkeypatch.setattr(scene_objectify_queue, "box_candidates_require_gpu", lambda _: False)
+
+    def operation(
+        registry_arg, settings_arg, job_id, *, expected_revision, workspace, commit_guard, cancel_event, progress
+    ):  # noqa: ANN001, ANN202
+        progress("shell")
+        progress("collider")
+        if fail:
+            raise ValueError("collider failed")
+        progress("publish")
+        ready = base.model_copy(update={"provenance": {**base.provenance, "object_geometry": "ready"}})
+        return registry.scene.publish_next(
+            job_id, expected_revision, ready, "geometry", commit_guard=commit_guard
+        ).revision.scene.scene_revision
+
+    monkeypatch.setattr(scene_objectify_queue, "build_object_geometry", operation, raising=False)
+    accepted = scene_objectify_queue.request(
+        registry, settings, job.job_id, base.scene_revision, "geometry", actor_id="u"
+    )
+    scene_objectify_queue.process_next(registry, settings)
+    return registry, job, settings, accepted
+
+
+def _marks(settings, job_id: str) -> dict:  # noqa: ANN001
+    from src.services.orchestration.jobs.database import RuntimeDatabase
+    from src.services.orchestration.jobs.step_marks import list_marks
+
+    return {
+        mark.step_id: mark
+        for mark in list_marks(RuntimeDatabase(settings.database_url), job_id)
+        if mark.run_kind == "scene_operation"
+    }
+
+
+def test_geometry_operation_records_phase_marks(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    _, job, settings, accepted = _geometry_run(world, monkeypatch, tmp_path)
+    marks = _marks(settings, job.job_id)
+    assert {"queue", "operation", "shell", "collider", "publish"} <= set(marks)
+    assert all(mark.run_id == f"geometry:{accepted.operation_id}" for mark in marks.values())
+    assert marks["operation"].outcome == "succeeded"
+    assert marks["shell"].completed_at is not None and marks["shell"].outcome == "succeeded"
+
+
+def test_failed_operation_closes_marks_and_clears_phase(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    registry, job, settings, _ = _geometry_run(world, monkeypatch, tmp_path, fail=True)
+    marks = _marks(settings, job.job_id)
+    assert marks["operation"].outcome == "failed" and marks["collider"].outcome == "failed"
+    assert scene_objectify_queue.state(registry, settings, job.job_id).phase is None

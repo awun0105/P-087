@@ -112,6 +112,30 @@ export function guidanceFor(error: ExecutionError | null | undefined): ErrorGuid
         fix: "Thử lại. Nếu lặp lại, báo quản trị viên kiểm tra máy xử lý và dữ liệu LiDAR.",
       };
 
+    case "OBJECTIFY_AWAITING_CHOICE":
+      return {
+        cause: "Tách cảnh thành từng vật chưa thành công sau các lần thử.",
+        fix: "Chạy lại tách theo vật, hoặc dùng hộp ứng viên để tiếp tục với các vật ước lượng bằng hộp.",
+      };
+
+    case "OBJECT_GEOMETRY_BUILD_FAILED":
+      return {
+        cause: "Bước dựng bề mặt và lưới va chạm từng vật chưa xong; scene đang duyệt vẫn được giữ.",
+        fix: "Mở Studio để sửa vùng vật nếu cần, rồi bấm Thử lại Tạo mesh.",
+      };
+
+    case "RESOURCE_WAIT_EXCEEDED":
+      return {
+        cause: "Việc này chờ tài nguyên quá lâu mà không phải vì máy đang bận việc khác (máy xử lý chưa đo được hoặc kiểm tra tài nguyên bị lỗi), nên đã dừng.",
+        fix: "Báo quản trị viên kiểm tra GPU và driver của máy xử lý, rồi bấm Thử lại.",
+      };
+
+    case "INTERRUPTED_SHUTDOWN":
+      return {
+        cause: "Máy xử lý bị tắt hoặc khởi động lại khi bước này đang chạy, nên lượt chạy bị gián đoạn.",
+        fix: "Bấm Thử lại. Kết quả của các bước đã xong được giữ, job chạy tiếp từ bước bị gián đoạn.",
+      };
+
     case "EXPECTED_DURATION_EXCEEDED":
       return {
         cause: "Lượt chạy này lâu hơn hẳn thời gian thường thấy trên GPU này cho scene cỡ này, nên đã dừng.",

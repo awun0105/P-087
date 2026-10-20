@@ -10,6 +10,7 @@ import { type SourceFrame } from "@/features/viewer/source-frame";
 import { useNavigationGuard } from "@/features/shell/NavigationGuard";
 import { queryEditorDirty } from "@/features/studio/editor-dirty";
 import { HelpDetails } from "@/components/studio/feedback";
+import { viewerRenderer } from "@/features/viewer/renderer-setting";
 
 /**
  * Entry của SuperSplat editor đã build (`npm run build:editor` → public/editor).
@@ -221,7 +222,7 @@ function WebGlViewer({
           <PlayCanvasScene
             contentUrl={contentUrl}
             contentFilename={filename}
-            renderer="webgl"
+            renderer={viewerRenderer()}
             showControls
             mode="VISUAL"
             capability={capability}

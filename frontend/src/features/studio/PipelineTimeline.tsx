@@ -1,7 +1,7 @@
 "use client";
 
 import { AlertTriangle, Check, ChevronDown, Circle, CircleSlash, Hand, Loader2 } from "lucide-react";
-import { useState } from "react";
+import { memo, useState } from "react";
 import { GuardedLink as Link } from "@/features/shell/NavigationGuard";
 
 import { ProgressBar } from "@/components/studio/primitives";
@@ -59,7 +59,7 @@ const ICONS: Record<StageState, typeof Check> = {
  * Danh sách stage dọc. Tổng tiến trình tính theo số stage đã xong (quan sát được),
  * không quy đổi thời gian thành phần trăm.
  */
-export function PipelineTimeline({
+export const PipelineTimeline = memo(function PipelineTimeline({
   stages,
   timeNote,
   stageList = MVP_STAGES,
@@ -275,7 +275,7 @@ export function PipelineTimeline({
       </ol>
     </div>
   );
-}
+});
 
 const STAGE_BUTTON = "inline-flex shrink-0 items-center rounded-lg bg-ember-soft px-2.5 py-1 text-xs font-medium text-ember-strong focus-visible:outline-2 focus-visible:outline-ember";
 

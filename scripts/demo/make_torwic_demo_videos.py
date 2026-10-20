@@ -7,8 +7,8 @@ Với mỗi traversal tìm thấy dưới `--dataset-root` (thư mục có `imag
 - `<tên>__left_right.mp4` camera trái rồi tới camera phải trong cùng một video (cùng đoạn đường, hai góc quay).
 
 FPS lấy từ `frame_times.txt` (không chèn/rớt frame). Video đi qua luồng upload như video người dùng; bộ này là
-**dữ liệu demo**, không phải benchmark: nó dùng mọi frame, kể cả frame mà benchmark split giữ lại để đánh giá
-(DATASET_PLAYBOOK), nên không dùng kết quả từ các video này làm số liệu đánh giá. Video ghép hai camera vẫn được
+**dữ liệu demo**, không phải benchmark: nó dùng mọi frame, kể cả frame mà benchmark split giữ lại để đánh giá,
+nên không dùng kết quả từ các video này làm số liệu đánh giá. Video ghép hai camera vẫn được
 pipeline xử lý như một camera (`single_camera`): chỉ để xem scene, không kỳ vọng chất lượng dựng hình.
 
     python -m scripts.demo.make_torwic_demo_videos --dataset-root "/media/usb/AI20K/TorWIC SLAM Dataset" \\

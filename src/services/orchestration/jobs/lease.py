@@ -108,6 +108,12 @@ def release(database: RuntimeDatabase, held: HeldLease) -> None:
         tx.execute("DELETE FROM r2s_job_leases WHERE job_id=? AND lease_token=?", (held.job_id, held.token))
 
 
+def has_lease(database: RuntimeDatabase, job_id: str) -> bool:
+    """Job có dòng lease (còn hạn hay đã hết hạn nhưng chưa được xử lý)."""
+    with database.transaction() as tx:
+        return tx.execute("SELECT 1 FROM r2s_job_leases WHERE job_id=?", (job_id,)).fetchone() is not None
+
+
 def expired_job_ids(database: RuntimeDatabase, *, now: datetime | None = None) -> list[str]:
     current = _stamp(now or datetime.now(UTC))
     with database.transaction() as tx:

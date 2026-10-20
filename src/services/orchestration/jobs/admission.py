@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from math import isfinite
@@ -61,7 +62,8 @@ Resource = Literal["vram", "ram", "disk"]
 #: - external: thứ khác trên máy đang dùng, pipeline không tự giải phóng được;
 #: - exceeds_machine: cấu hình vượt tổng năng lực của máy worker này;
 #: - unmeasured: không đo được trên máy worker này.
-WaitReason = Literal["busy", "external", "exceeds_machine", "unmeasured"]
+#: - gate_error: chính cổng tài nguyên lỗi khi kiểm (đọc GPU/RAM/DB hỏng), không phải máy thiếu.
+WaitReason = Literal["busy", "external", "exceeds_machine", "unmeasured", "gate_error"]
 RESOURCES: tuple[Resource, ...] = ("vram", "ram", "disk")
 OperationKind = Literal["reobjectify", "import_package", "isaac_validate", "rgb_lidar_register", "demo_session"]
 OperationParentKind = Literal["job", "import"]
@@ -70,6 +72,17 @@ STALE_AFTER = timedelta(minutes=15)
 #: Khoảng nghỉ giữa hai lần dọn scratch khi thiếu đĩa; dọn là quét thư mục, không cần mỗi lượt poll.
 RECLAIM_INTERVAL_SECONDS = 300.0
 _LOCK_KEY = "real2sim.runtime.resource-reservations"
+
+
+def wait_exceeded(reasons: Mapping[str, str], waiting_since: datetime, now: datetime, limit_seconds: float) -> bool:
+    """Chờ tài nguyên đã quá hạn: chỉ khi có lý do và không lý do nào là `busy` hay `unmeasured`.
+
+    Không lý do (đợi worker rảnh / đúng GPU) hoặc `unmeasured` (worker này không đo được, máy khác sẽ nhận) là chờ đúng
+    máy, không phải thiếu tài nguyên, nên không bao giờ hết hạn.
+    """
+    if not reasons or any(reason in {"busy", "unmeasured"} for reason in reasons.values()):
+        return False
+    return (now - waiting_since).total_seconds() >= limit_seconds
 
 
 class ResourceWait(BaseModel):
@@ -946,7 +959,7 @@ class ResourceAdmission:
                 available_gb={name: None for name in RESOURCES},
                 capacity_gb={name: None for name in RESOURCES},
                 waiting_on=waiting,
-                reasons={name: "unmeasured" for name in waiting},
+                reasons={name: "gate_error" for name in waiting},
                 needs_exclusive_gpu=request.resources.gpu_required and not request.resources.measured,
             )
 

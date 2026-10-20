@@ -11,11 +11,12 @@
 
 // ── Enums, mirror StrEnum của backend ────────────────────────────────────────
 
-/** src/models/contracts/manifests.py StageId — 20 stage, không thêm bớt. */
+/** src/models/contracts/manifests.py StageId — cùng thứ tự với backend, không thêm bớt. */
 export const STAGE_IDS = [
   "ST-INPUT-VALIDATE",
   "ST-PRIVACY-GATE",
   "ST-FRAME-EXTRACT",
+  "ST-ANONYMIZATION-REVIEW",
   "ST-CAMERA-POSE",
   "ST-VISUAL-RECON",
   "ST-RGB-GEOMETRY",
@@ -35,6 +36,7 @@ export const STAGE_IDS = [
   "ST-ISAAC-VALIDATE",
   "ST-REVIEW",
   "ST-RELEASE",
+  "ST-VIEW-LOD",
 ] as const;
 export type StageId = (typeof STAGE_IDS)[number];
 

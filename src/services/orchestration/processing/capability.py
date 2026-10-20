@@ -252,13 +252,21 @@ def record(database: RuntimeDatabase, capability: MachineCapability) -> None:
         )
 
 
-def latest(database: RuntimeDatabase, now: datetime | None = None) -> MachineCapability | None:
-    """Số đo mới nhất còn hạn; None khi chưa có worker nào đang chạy."""
+def latest(
+    database: RuntimeDatabase, now: datetime | None = None, *, allow_stale: bool = False
+) -> MachineCapability | None:
+    """Số đo mới nhất còn hạn; None khi chưa có worker nào đang chạy.
+
+    `allow_stale=True`: GPU thuê theo nhu cầu chỉ chạy khi có job, nên lúc người dùng chọn thông số thường chưa có
+    máy nào. Mọi pod đều dựng từ cùng một profile đã chứng nhận, nên lần đo gần nhất (dù cũ) vẫn mô tả đúng máy sẽ
+    nhận job; không có nó thì mọi mức xử lý đều rơi về mức tối thiểu.
+    """
     with database.transaction() as tx:
         rows = tx.execute("SELECT payload FROM r2s_workers").fetchall()
+    measured = [MachineCapability.model_validate_json(row[0]) for row in rows]
     fresh = [
         capability
-        for capability in (MachineCapability.model_validate_json(row[0]) for row in rows)
-        if (now or datetime.now(UTC)) - capability.measured_at <= CAPABILITY_TTL
+        for capability in measured
+        if allow_stale or (now or datetime.now(UTC)) - capability.measured_at <= CAPABILITY_TTL
     ]
     return max(fresh, key=lambda item: item.measured_at, default=None)

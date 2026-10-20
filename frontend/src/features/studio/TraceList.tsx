@@ -10,7 +10,7 @@ export interface TraceRow {
 }
 
 /**
- * "Nguồn kết quả" (STUDIO_UX_SPEC.md S10–S12): các định danh và checksum để đối chiếu gói, báo cáo, quyết định duyệt và
+ * "Nguồn kết quả": các định danh và checksum để đối chiếu gói, báo cáo, quyết định duyệt và
  * bản phát hành thuộc cùng một revision. Giá trị hiện đầy đủ (không cắt) vì người dùng cần so từng ký tự hoặc chép đi.
  */
 export function TraceList({ rows }: { rows: TraceRow[] }) {

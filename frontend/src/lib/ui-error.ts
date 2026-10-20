@@ -31,7 +31,7 @@ function userFacingDetail(error: ApiError): string | null {
  * Backend dùng 403/409/429 (và 400/422) cho quy tắc nghiệp vụ và viết lý do cho người dùng trong `detail`; lý do
  * đó được ưu tiên khi an toàn để hiện, vì câu chung theo mã HTTP không nói được phải sửa gì (409 không chỉ là
  * "dữ liệu đã đổi": còn là điểm đo chưa hợp lệ, scene chưa ở đúng bước, đang có yêu cầu khác…). Riêng 401 và 404
- * giữ hướng phục hồi chung của STUDIO_UX_SPEC.md "Trạng thái chung" (đăng nhập lại / quay về Scenes); thao tác tài khoản
+ * giữ hướng phục hồi chung (đăng nhập lại / quay về Scenes); thao tác tài khoản
  * dùng `authErrorMessage` vì ở đó 401 là bị từ chối có lý do, không phải hết phiên.
  */
 export function errorMessage(cause: unknown, fallback = FALLBACK): string {

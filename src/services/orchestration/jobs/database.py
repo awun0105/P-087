@@ -4,8 +4,11 @@ SQL chỉ chứa hằng số nội bộ; mọi giá trị đi qua bind parameter
 chia sẻ giữa các thread của FastAPI. Không mở database khi import module.
 """
 
+import os
 import re
 import sqlite3
+import time
+from collections import deque
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -16,6 +19,25 @@ from urllib.parse import urlsplit, urlunsplit
 
 class RuntimeStateConflictError(RuntimeError):
     """State đã đổi ở process khác; caller phải đọc lại trước khi retry command."""
+
+
+_TRANSIENT_SQLITE_MESSAGES = ("locked", "busy")
+
+
+def is_transient_database_error(error: BaseException) -> bool:
+    """Lỗi DB thoáng qua (khoá, mất kết nối, hết giờ) mà lần thử sau có thể qua; không gồm xung đột trạng thái."""
+    if isinstance(error, RuntimeStateConflictError):
+        return False
+    if isinstance(error, ConnectionError | TimeoutError):
+        return True
+    if isinstance(error, sqlite3.OperationalError):
+        message = str(error).lower()
+        return any(word in message for word in _TRANSIENT_SQLITE_MESSAGES)
+    try:
+        import psycopg
+    except ImportError:
+        return False
+    return isinstance(error, psycopg.OperationalError | psycopg.InterfaceError)
 
 
 class SqlCursor(Protocol):
@@ -467,6 +489,24 @@ MIGRATIONS += (
         ),
     ),
 )
+MIGRATIONS += (
+    (
+        26,
+        (
+            # T-056: mốc bắt đầu / kết thúc từng bước (pipeline job và hàng đợi tách vật), ghi lúc xảy ra.
+            """CREATE TABLE r2s_step_marks (
+                job_id TEXT NOT NULL,
+                run_kind TEXT NOT NULL,
+                run_id TEXT NOT NULL,
+                step_id TEXT NOT NULL,
+                started_at TEXT,
+                completed_at TEXT,
+                outcome TEXT,
+                PRIMARY KEY (job_id, run_kind, run_id, step_id)
+            )""",
+        ),
+    ),
+)
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
 
@@ -484,6 +524,62 @@ def demo_database_url(url: str, session_id: str) -> str:
 #: chỉ lần đầu mới cần transaction bootstrap (tránh khóa ghi + vòng mạng mỗi request).
 _READY: set[str] = set()
 _READY_LOCK = Lock()
+
+#: Kết nối PostgreSQL rảnh để dùng lại: mở mới mỗi transaction tốn một lượt TLS + xác thực (hàng trăm ms
+#: tới Supabase). Mỗi transaction vẫn mượn riêng một kết nối, không chia sẻ giữa các thread; chỉ trả về
+#: khi đã COMMIT/ROLLBACK sạch. Code chỉ dùng SET LOCAL / khóa theo transaction nên không có state phiên rò.
+_IDLE: dict[str, deque] = {}
+_IDLE_LOCK = Lock()
+_IDLE_PID = os.getpid()
+_IDLE_MAX = 8
+_IDLE_SECONDS = 60.0
+
+
+def _borrow(url: str) -> object | None:
+    """Lấy một kết nối rảnh còn hạn; tiến trình con sau fork không dùng socket của cha."""
+    global _IDLE_PID
+    stale = []
+    found = None
+    now = time.monotonic()
+    with _IDLE_LOCK:
+        if _IDLE_PID != os.getpid():
+            _IDLE.clear()
+            _IDLE_PID = os.getpid()
+        pool = _IDLE.get(url)
+        while pool and found is None:
+            stamp, connection = pool.pop()
+            if now - stamp <= _IDLE_SECONDS and not connection.closed:
+                found = connection
+            else:
+                stale.append(connection)
+    for connection in stale:
+        _close_quietly(connection)
+    return found
+
+
+def _give_back(url: str, connection) -> None:
+    """Trả kết nối sạch về pool; kết nối hỏng hoặc còn dở transaction thì đóng."""
+    try:
+        from psycopg.pq import TransactionStatus
+
+        clean = not connection.closed and connection.info.transaction_status == TransactionStatus.IDLE
+    except Exception:
+        clean = False
+    if clean:
+        with _IDLE_LOCK:
+            if _IDLE_PID == os.getpid():
+                pool = _IDLE.setdefault(url, deque())
+                if len(pool) < _IDLE_MAX:
+                    pool.append((time.monotonic(), connection))
+                    return
+    _close_quietly(connection)
+
+
+def _close_quietly(connection) -> None:
+    try:
+        connection.close()
+    except Exception:
+        pass
 
 
 class RuntimeDatabase:
@@ -521,17 +617,40 @@ class RuntimeDatabase:
                 import psycopg
             except ImportError as error:
                 raise RuntimeError("PostgreSQL cần psycopg 3; cài dependency runtime trước khi khởi động") from error
-            return cast(SqlConnection, psycopg.connect(self._connection_url, autocommit=True, connect_timeout=10))
+            # prepare_threshold=None: no server-side prepared statements, so the URL may point at a
+            # transaction-mode pooler (Supabase :6543) where each transaction can land on another backend.
+            return cast(
+                SqlConnection,
+                psycopg.connect(self._connection_url, autocommit=True, connect_timeout=10, prepare_threshold=None),
+            )
         connection = sqlite3.connect(str(self._sqlite_path), timeout=30, isolation_level=None)
         connection.execute("PRAGMA foreign_keys=ON")
         return cast(SqlConnection, connection)
 
-    @contextmanager
-    def transaction(self, *, write: bool = False) -> Iterator[RuntimeTransaction]:
-        """Rollback mọi lỗi tại DB process boundary rồi giữ nguyên exception cause."""
+    def _begin(self, write: bool) -> SqlConnection:
+        """Mở transaction trên kết nối dùng lại được; kết nối rảnh đã bị server cắt thì thay bằng kết nối mới."""
+        if self.postgres:
+            reused = _borrow(self._connection_url)
+            if reused is not None:
+                connection = cast(SqlConnection, reused)
+                try:
+                    connection.execute("BEGIN")
+                    return connection
+                except Exception:
+                    _close_quietly(connection)
         connection = self._connect()
         try:
             connection.execute("BEGIN IMMEDIATE" if write and not self.postgres else "BEGIN")
+        except BaseException:
+            connection.close()
+            raise
+        return connection
+
+    @contextmanager
+    def transaction(self, *, write: bool = False) -> Iterator[RuntimeTransaction]:
+        """Rollback mọi lỗi tại DB process boundary rồi giữ nguyên exception cause."""
+        connection = self._begin(write)
+        try:
             try:
                 if self.scope is not None:
                     # Scope is server-generated and regex-validated. Never fall back to public.
@@ -547,7 +666,10 @@ class RuntimeDatabase:
             else:
                 connection.execute("COMMIT")
         finally:
-            connection.close()
+            if self.postgres:
+                _give_back(self._connection_url, connection)
+            else:
+                connection.close()
 
     def _initialize(self) -> None:
         """Tạo bảng version rồi chạy các migration còn thiếu trong một transaction có khóa."""

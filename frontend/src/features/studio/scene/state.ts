@@ -49,11 +49,12 @@ export function stageSeconds(started: string | null, completed: string | null, n
 }
 
 /** Đồng hồ 1 giây cho thời gian đã chạy; tắt khi job không còn chạy. */
+/** Đồng hồ cho thời gian "đang chạy x phút" và phát hiện mất tín hiệu; 5 s một nhịp là đủ (T-060). */
 export function useNow(active: boolean): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!active) return;
-    const timer = setInterval(() => setNow(Date.now()), 1000);
+    const timer = setInterval(() => setNow(Date.now()), 5000);
     return () => clearInterval(timer);
   }, [active]);
   return now;

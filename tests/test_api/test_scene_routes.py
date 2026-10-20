@@ -506,3 +506,169 @@ async def test_collision_surface_mark_fill_remove_and_stale_revision(client) -> 
     )
     assert removed.status_code == 201, removed.text
     assert removed.json()["scene"]["provenance"]["collision_surface_planes"] == []
+
+
+# ── T-051: checksum-addressed artifacts are cached by the browser ────────────
+
+
+async def _geometry_params(client) -> dict:
+    reference = (await _scene(client))["scene"]["environment"]["geometry_ref"]
+    return {"artifact_uri": reference["artifact_uri"], "artifact_checksum": reference["artifact_checksum"]}
+
+
+@pytest.mark.asyncio
+async def test_artifact_content_is_immutable_and_has_etag(client) -> None:
+    params = await _geometry_params(client)
+    r = await client.get(f"{_JOB}/artifacts/content", params=params)
+    assert r.status_code == 200
+    assert "immutable" in r.headers["cache-control"] and "private" in r.headers["cache-control"]
+    assert r.headers["etag"] == '"' + params["artifact_checksum"].removeprefix("sha256:") + '"'
+
+
+@pytest.mark.asyncio
+async def test_matching_if_none_match_returns_304_without_reading_file(client, monkeypatch) -> None:
+    from src.api.product import deps as product_deps
+
+    params = await _geometry_params(client)
+    registry = product_deps.registry()
+
+    def never(*args: object) -> None:
+        raise AssertionError("file must not be resolved for a 304")
+
+    monkeypatch.setattr(registry, "resolve_artifact", never)
+    etag = '"' + params["artifact_checksum"].removeprefix("sha256:") + '"'
+    r = await client.get(f"{_JOB}/artifacts/content", params=params, headers={"If-None-Match": etag})
+    assert r.status_code == 304
+
+
+@pytest.mark.asyncio
+async def test_if_none_match_still_checks_permission(client) -> None:
+    checksum = "0" * 64
+    r = await client.get(
+        f"{_JOB}/artifacts/content",
+        params={
+            "artifact_uri": "artifact://jobs/job-fixture-001/evaluation_only/groundtruth_map.mock",
+            "artifact_checksum": "sha256:" + checksum,
+        },
+        headers={"If-None-Match": f'"{checksum}"'},
+    )
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_artifact_range_request_still_works(client) -> None:
+    params = await _geometry_params(client)
+    r = await client.get(f"{_JOB}/artifacts/content", params=params, headers={"Range": "bytes=0-2"})
+    assert r.status_code == 206 and r.content == b"ply"
+
+
+# ── T-052: walk collision is composed once per revision ──────────────────────
+
+
+def _fake_composition(monkeypatch, tmp_path):  # noqa: ANN001, ANN202
+    from types import SimpleNamespace
+
+    from src.api.product import artifacts as artifacts_route
+    from src.services.orchestration.projects.registry import ProjectRegistry
+
+    params = {
+        "artifact_uri": "artifact://jobs/job-fixture-001/rec05/abc/collision.glb",
+        "artifact_checksum": "sha256:" + "1" * 64,
+    }
+    source = tmp_path / "collision.glb"
+    source.write_bytes(b"glb")
+    monkeypatch.setattr(ProjectRegistry, "resolve_artifact", lambda self, job_id, reference: source)
+    calls: list[str] = []
+
+    def compose(registry, job_id, revision, *, preview_pending=False):  # noqa: ANN001, ANN202
+        calls.append(revision)
+        ref = SimpleNamespace(**params)
+        scene = SimpleNamespace(environment=SimpleNamespace(collision_source_ref=None, geometry_ref=ref))
+        background = SimpleNamespace(
+            identity="identity-1", retained_shared_triangles=1, protected_surface_triangles=2, repaired_triangles=3
+        )
+        return scene, background
+
+    monkeypatch.setattr(artifacts_route, "effective_collision_for_revision", compose)
+    monkeypatch.setattr(artifacts_route, "effective_collision_bytes", lambda background, *, display: b"x" * 4096)
+    return {**params, "scene_revision": "rev-001"}, calls
+
+
+@pytest.mark.asyncio
+async def test_walk_collision_second_request_skips_composition(client, monkeypatch, tmp_path) -> None:
+    params, calls = _fake_composition(monkeypatch, tmp_path)
+    first = await client.get(f"{_JOB}/walk-collision/collision.glb", params=params)
+    second = await client.get(f"{_JOB}/walk-collision/collision.glb", params=params)
+    assert first.status_code == second.status_code == 200
+    assert second.content == first.content and len(calls) == 1
+    assert "immutable" in first.headers["cache-control"]
+    assert first.headers["x-collision-composition"] == "identity-1"
+
+
+@pytest.mark.asyncio
+async def test_walk_collision_if_none_match_returns_304(client, monkeypatch, tmp_path) -> None:
+    params, calls = _fake_composition(monkeypatch, tmp_path)
+    first = await client.get(f"{_JOB}/walk-collision/collision.glb", params=params)
+    again = await client.get(
+        f"{_JOB}/walk-collision/collision.glb", params=params, headers={"If-None-Match": first.headers["etag"]}
+    )
+    assert again.status_code == 304 and len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_walk_collision_stale_revision_still_409(client, monkeypatch, tmp_path) -> None:
+    params, _ = _fake_composition(monkeypatch, tmp_path)
+    await client.get(f"{_JOB}/walk-collision/collision.glb", params=params)
+    stale = await client.get(f"{_JOB}/walk-collision/collision.glb", params={**params, "scene_revision": "rev-999"})
+    assert stale.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_walk_collision_304_requires_permission(client, monkeypatch, tmp_path) -> None:
+    params, _ = _fake_composition(monkeypatch, tmp_path)
+    first = await client.get(f"{_JOB}/walk-collision/collision.glb", params=params)
+    foreign = {**params, "artifact_uri": "artifact://jobs/job-fixture-001/evaluation_only/secret.glb"}
+    r = await client.get(
+        f"{_JOB}/walk-collision/secret.glb", params=foreign, headers={"If-None-Match": first.headers["etag"]}
+    )
+    assert r.status_code in {404, 409} and r.status_code != 304
+
+
+# ── T-053: 304 for an unchanged scene, gzip for JSON, cached CORS preflight ──
+
+
+@pytest.mark.asyncio
+async def test_scene_etag_304(client) -> None:
+    first = await client.get(f"{_JOB}/scene")
+    assert first.status_code == 200 and first.headers["etag"]
+    again = await client.get(f"{_JOB}/scene", headers={"If-None-Match": first.headers["etag"]})
+    assert again.status_code == 304
+
+
+@pytest.mark.asyncio
+async def test_json_response_is_gzipped(client) -> None:
+    r = await client.get(f"{_JOB}/scene", headers={"Accept-Encoding": "gzip"})
+    assert r.headers.get("content-encoding") == "gzip"
+
+
+@pytest.mark.asyncio
+async def test_binary_artifact_is_not_gzipped(client) -> None:
+    params = await _geometry_params(client)
+    r = await client.get(f"{_JOB}/artifacts/content", params=params, headers={"Accept-Encoding": "gzip"})
+    assert r.status_code == 200 and "content-encoding" not in r.headers
+
+
+@pytest.mark.asyncio
+async def test_cors_preflight_has_max_age(client) -> None:
+    from src.config import get_settings
+
+    origin = get_settings().cors_origins[0]
+    r = await client.options(
+        f"{_JOB}/scene",
+        headers={
+            "Origin": origin,
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "content-type",
+        },
+    )
+    assert r.headers.get("access-control-max-age") == "86400"

@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { OPERATOR_SURFACE, ScenePage } from "@/features/studio/ScenePage";
 import { PageTitleProvider } from "@/features/shell/Breadcrumbs";
 import { getJob, getPreview, listJobAttempts } from "@/lib/api/endpoints";
-import { getJobProgress, getJobScene, getSimulationPackage, getReviewState, retryJob } from "@/lib/api/studio";
+import { getJobPipeline, getJobScene, getSimulationPackage, getReviewState, retryJob } from "@/lib/api/studio";
 import { postOperatorTime } from "@/lib/api/value";
 import { ApiError } from "@/lib/api/client";
 import type { Me } from "@/lib/api/auth";
@@ -23,10 +23,49 @@ vi.mock("@/features/studio/scene/ReviewTab", () => ({ ReviewTab: () => <p>Review
 vi.mock("@/features/studio/scene/ResultsTab", () => ({ ResultsTab: () => <p>Results stub</p> }));
 vi.mock("@/features/studio/scene/StudioTab", () => ({ StudioTab: () => <section aria-label="Canvas stub"><p>Studio stub</p></section> }));
 vi.mock("@/lib/api/endpoints", async (original) => ({ ...(await original<typeof import("@/lib/api/endpoints")>()), getJob: vi.fn(), getPreview: vi.fn(), listJobAttempts: vi.fn() }));
-vi.mock("@/lib/api/studio", async (original) => ({ ...(await original<typeof import("@/lib/api/studio")>()), getJobProgress: vi.fn(), getJobScene: vi.fn(), getSimulationPackage: vi.fn(), getReviewState: vi.fn(), retryJob: vi.fn() }));
+vi.mock("@/lib/api/studio", async (original) => ({ ...(await original<typeof import("@/lib/api/studio")>()), getJobPipeline: vi.fn(), getJobScene: vi.fn(), getSimulationPackage: vi.fn(), getReviewState: vi.fn(), retryJob: vi.fn() }));
 vi.mock("@/lib/api/value", () => ({ postOperatorTime: vi.fn(async () => undefined), postWalkSession: vi.fn(async () => undefined) }));
 
 const ref = (type: string, path: string, stage = "ST-VISUAL-RECON") => ({ artifact_type: type, schema_version: "1.0", job_id: "job-1", producer_stage: stage, artifact_uri: "artifact://jobs/job-1/attempts/a1/" + path, artifact_checksum: "sha256:" + "a".repeat(64), data_class: "derived" });
+
+/** T-060/T-061: trang scene đọc `/pipeline`; dựng phản hồi giống backend từ tiến trình giả (bước + việc tiếp theo). */
+const STUDIO_STEP_IDS = ["ST-INPUT-VALIDATE", "ST-PRIVACY-GATE", "ST-FRAME-EXTRACT", "ST-CAMERA-POSE", "ST-VISUAL-RECON", "ST-METRIC-CANONICALIZE", "ST-RGB-GEOMETRY", "ST-OBJECT-EXTRACT"];
+function pipelineOf(data: unknown) {
+  const progress = data as {
+    job_id: string; status: string; waiting_for?: string | null;
+    error?: { stage_id: string; retryable: boolean } | null;
+    stages?: { stage_id: string; state: string; started_at?: string | null; completed_at?: string | null; error?: unknown }[];
+  };
+  const known = new Map((progress.stages ?? []).map((stage) => [stage.stage_id, stage]));
+  const steps = STUDIO_STEP_IDS.map((id) => {
+    const stage = known.get(id);
+    const failed = progress.status === "FAILED" && progress.error?.stage_id === id;
+    return {
+      step_id: id, actor: id === "ST-METRIC-CANONICALIZE" ? "user" : "system",
+      state: failed ? "failed" : stage?.state ?? "pending", started_at: stage?.started_at ?? null, completed_at: stage?.completed_at ?? null,
+      timing_source: "inferred", phase: null, error: stage?.error ?? null, note: null,
+    };
+  });
+  const kind = progress.status === "FAILED" ? (progress.error?.retryable ? "retry_job" : "job_failed")
+    : progress.status === "CANCELLED" ? "job_cancelled"
+    : progress.waiting_for === "metric_confirmation" ? "confirm_metric"
+    : progress.waiting_for === "anonymization_review" ? "review_anonymization"
+    : progress.status === "SUCCEEDED" ? "scene_ready" : "wait_system";
+  return {
+    ok: true as const,
+    data: {
+      notModified: false as const,
+      etag: null,
+      view: {
+        job_id: progress.job_id, scene_revision: null, usable: false, steps, current_step: null, version: "v",
+        wait: progress.status === "QUEUED" ? { kind: "queue", step_id: null, since: null } : null,
+        next_action: { kind, step_id: null, owner: kind === "wait_system" ? "system" : "user", pending_count: null },
+        progress: data, objectify: null, gpu: null,
+      },
+    },
+  } as unknown as Awaited<ReturnType<typeof getJobPipeline>>;
+}
+
 const progress: JobProgress = { job_id: "job-1", status: "SUCCEEDED", current_stage: "ST-METRIC-CANONICALIZE", attempt: 1, started_at: "2026-10-01T00:00:00Z", updated_at: "2026-10-01T00:00:00Z", completed_at: "2026-10-01T01:00:00Z", stages: [], preview_ready: true, waiting_for: null, error: null, capabilities: { can_mutate: true, can_cancel: false, can_retry: false } };
 
 function postedSurfaces(): string[] {
@@ -42,7 +81,7 @@ beforeEach(() => {
   authState.me = { auth_required: false, user: null };
   authState.refresh.mockResolvedValue(undefined);
   vi.mocked(getJob).mockResolvedValue({ ok: false, error: new ApiError(404, "fixture metadata unavailable") });
-  vi.mocked(getJobProgress).mockResolvedValue({ ok: true, data: progress });
+  vi.mocked(getJobPipeline).mockResolvedValue(pipelineOf(progress));
   vi.mocked(retryJob).mockResolvedValue({ job_id: "job-1", status: "QUEUED", job_manifest_checksum: "sha256:" + "c".repeat(64) });
   vi.mocked(listJobAttempts).mockResolvedValue({ ok: true, data: { job_id: "job-1", attempts: [] } });
   vi.mocked(getPreview).mockResolvedValue({ ok: true, data: parsePreview({ schema_version: "1.0", artifact_type: "ReconstructionPreview", job_id: "job-1", attempt_id: "a1", source_input_checksum: "sha256:" + "b".repeat(64), format: "gaussian_sog", producer: "brush", producer_version: "fixture", metric_status: "UNCONFIRMED", coordinate_frame: "sfm_world", unit: "arbitrary", delivery_ref: ref("GaussianSOG", "scene.sog"), source_visual_ref: ref("BrushVisualArtifact", "visual.json"), camera_pose_ref: ref("CameraPoseArtifact", "poses.json", "ST-CAMERA-POSE") }, "job-1") });
@@ -67,7 +106,7 @@ describe("operator time on the scene page", () => {
   });
 
   it("sends nothing for a viewer who cannot mutate the job", async () => {
-    vi.mocked(getJobProgress).mockResolvedValue({ ok: true, data: { ...progress, capabilities: { can_mutate: false, can_cancel: false, can_retry: false } } });
+    vi.mocked(getJobPipeline).mockResolvedValue(pipelineOf({ ...progress, capabilities: { can_mutate: false, can_cancel: false, can_retry: false } }));
     render(<PageTitleProvider><ScenePage jobId="job-1" /></PageTitleProvider>);
     await screen.findByRole("heading", { name: "Tiến trình xử lý" });
 
