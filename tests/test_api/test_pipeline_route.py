@@ -73,3 +73,39 @@ async def test_failed_retryable_job_asks_for_retry(client: AsyncClient, registry
     registry.transition_job(job.job_id, TransitionRequest(target_status=JobStatus.FAILED, error=error))
     view = (await client.get(f"/api/v1/jobs/{job.job_id}/pipeline")).json()
     assert view["next_action"]["kind"] == "retry_job"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_includes_gpu_capacity_only_while_waiting_for_a_worker(
+    client: AsyncClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from datetime import UTC, datetime
+
+    from src.api.studio import deps, scenes
+    from src.services.orchestration.gpu.status import GpuCapacity
+    from tests.test_orchestration.test_job_lease import _registry as db_registry
+
+    registry = db_registry(tmp_path / "db")
+    monkeypatch.setattr(deps, "get_project_registry", lambda: registry)
+    elapsed = {"value": 10}
+
+    def capacity(database, deployment):  # noqa: ANN001, ANN202
+        return GpuCapacity(
+            state="starting",
+            since=datetime(2026, 10, 20, 8, 0, tzinfo=UTC),
+            elapsed_seconds=elapsed["value"],
+            expected_startup_seconds=900,
+            remaining_seconds=900 - elapsed["value"],
+        )
+
+    monkeypatch.setattr(scenes, "gpu_capacity", capacity)
+    job = registry.create_job(JobCreateInput(project_id="project-fixture-001"))
+    first = await client.get(f"/api/v1/jobs/{job.job_id}/pipeline")
+    assert first.json()["gpu"]["state"] == "starting"
+    elapsed["value"] = 200
+    again = await client.get(f"/api/v1/jobs/{job.job_id}/pipeline", headers={"If-None-Match": first.headers["etag"]})
+    assert again.status_code == 304  # elapsed time alone never changes the version
+
+    registry.transition_job(job.job_id, TransitionRequest(target_status=JobStatus.RUNNING))
+    running = (await client.get(f"/api/v1/jobs/{job.job_id}/pipeline")).json()
+    assert running["gpu"] is None

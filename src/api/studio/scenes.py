@@ -24,6 +24,7 @@ from src.api.studio import deps
 from src.api.studio.error_view import filter_job_progress_errors, filter_manifest_errors
 from src.api.studio.gpu import deployment_id
 from src.models.contracts.manifests import JobManifest, JobStatus, StageId, StageStatus
+from src.models.contracts.retryability import is_execution_error_retryable
 from src.models.contracts.scene import SceneIR
 from src.models.contracts.validation import RuleResult
 from src.services.orchestration.artifacts import ArtifactStoreError, sha256_file
@@ -37,6 +38,7 @@ from src.services.orchestration.jobs.progress import (
     JobProgress,
     awaiting_anonymization_review,
     awaiting_finalize,
+    awaiting_metric_confirmation,
     job_progress,
 )
 from src.services.orchestration.jobs.queue import job_requester_actors, job_requesters, queue_position
@@ -48,6 +50,7 @@ from src.services.orchestration.jobs.worker_runtimes import has_live_runtime
 from src.services.orchestration.pipeline.models import PipelineView, PipelineWait
 from src.services.orchestration.pipeline.next_action import (
     NextActionFacts,
+    NextActionKind,
     PackageFacts,
     SceneOperationFacts,
     next_action,
@@ -129,6 +132,8 @@ class SceneSummary(BaseModel):
     #: Bước "Duyệt vật & Tạo mesh" của scene theo vật: chờ duyệt, đang dựng, hoặc Tạo mesh lỗi. None = không còn việc
     #: (scene Ready) hoặc scene cũ không có bước này. Cùng quy tắc với hàng tiến trình trong Studio (T-021).
     geometry_review: objectify_queue.GeometryReview | None = None
+    #: Việc tiếp theo, cùng hàm với trang scene (T-059); API cũ không gửi trường này.
+    next_action: NextActionKind | None = None
     #: Thời gian máy đã xử lý của job mới nhất (tổng các bước đã chạy xong); không gồm lúc xếp hàng và lúc chờ người
     #: dùng. None = job chưa có bước nào được đo.
     processing_seconds: float | None = None
@@ -354,26 +359,77 @@ def _geometry_review(registry: ProjectRegistry, job: JobManifest) -> objectify_q
     )
     if job.status != JobStatus.SUCCEEDED or not done:
         return None
+    found = _scene_geometry(registry, job)
+    if found is None or found[0] is None:
+        return None  # scene cũ không có bước này (hoặc chưa đọc được): không đọc hàng đợi
+    # Trạng thái hàng đợi đổi nhanh nên không cache.
+    return _geometry_queue_state(job.job_id, found[0], found[1])
+
+
+def _scene_geometry(
+    registry: ProjectRegistry, job: JobManifest
+) -> tuple[objectify_queue.ObjectGeometry | None, str] | None:
+    """Trạng thái hình học + revision của scene hiện tại, đệm theo revision head; None khi scene chưa đọc được."""
     try:
         head = registry.scene.head_repository.get(job.job_id) if registry.scene.head_repository is not None else None
         key = (job.job_id, head.scene_revision) if head is not None else None
         if key is not None and key in _GEOMETRY_CACHE:
-            geometry = _GEOMETRY_CACHE[key]
-            revision = head.scene_revision
-        else:
-            scene = registry.scene.current(job.job_id).scene
-            geometry = object_geometry_view(scene)
-            revision = head.scene_revision if head is not None else scene.scene_revision
-            if key is not None:
-                if len(_GEOMETRY_CACHE) >= _GEOMETRY_CACHE_MAX:
-                    _GEOMETRY_CACHE.clear()
-                _GEOMETRY_CACHE[key] = geometry
-        if geometry is None:
-            return None  # scene cũ không có bước này: không đọc hàng đợi
-        # Trạng thái hàng đợi đổi nhanh nên không cache.
-        return _geometry_queue_state(job.job_id, geometry, revision)
+            return _GEOMETRY_CACHE[key], head.scene_revision
+        scene = registry.scene.current(job.job_id).scene
+        geometry = object_geometry_view(scene)
+        revision = head.scene_revision if head is not None else scene.scene_revision
+        if key is not None:
+            if len(_GEOMETRY_CACHE) >= _GEOMETRY_CACHE_MAX:
+                _GEOMETRY_CACHE.clear()
+            _GEOMETRY_CACHE[key] = geometry
+        return geometry, revision
     except (SceneError, ArtifactStoreError, ValueError, OSError):
         return None  # scene chưa đọc được: danh sách không đoán, màn scene sẽ nói rõ
+
+
+def _list_next_action(
+    registry: ProjectRegistry, job: JobManifest, preview_ready: bool, awaiting_review: bool, awaiting_choice: bool
+) -> NextActionKind:
+    """Cùng hàm `next_action` với trang scene; danh sách không đọc gói / vật chờ nên scene xong là `scene_ready`."""
+    waiting = (
+        "anonymization_review"
+        if awaiting_review
+        else "metric_confirmation"
+        if awaiting_metric_confirmation(job, preview_ready)
+        else None
+    )
+    retryable: bool | None = None
+    if job.status == JobStatus.FAILED:
+        attempts = registry.list_job_attempts(job.job_id)
+        failure = next((event.error for event in reversed(attempts) if event.error is not None), None)
+        retryable = failure is not None and is_execution_error_retryable(failure)
+    geometry = None
+    operation = None
+    if job.status == JobStatus.SUCCEEDED:
+        found = _scene_geometry(registry, job)
+        geometry = found[0] if found is not None else None
+        record = (
+            objectify_queue.latest_request(registry.persistence.database, job.job_id)
+            if registry.persistence is not None and found is not None
+            else None
+        )
+        if record is not None and found is not None:
+            operation = SceneOperationFacts(
+                status=record.status, mode=record.mode, on_current_revision=record.base_revision == found[1]
+            )
+    return next_action(
+        NextActionFacts(
+            job_status=job.status,
+            waiting_for=waiting,
+            failure_retryable=retryable,
+            awaiting_object_choice=awaiting_choice,
+            object_geometry=geometry,
+            scene_operation=operation,
+            pending_candidates=None,
+            package=None,
+            review_status=None,
+        )
+    ).kind
 
 
 def _geometry_queue_state(
@@ -437,6 +493,15 @@ def list_scenes(user: UserRecord | None = Depends(require_contributor)) -> Scene
                 awaiting_anonymization_review=latest is not None and awaiting_anonymization_review(latest),
                 awaiting_object_choice=latest is not None and _awaiting_object_choice(registry, latest),
                 geometry_review=None if latest is None else _geometry_review(registry, latest),
+                next_action=None
+                if latest is None
+                else _list_next_action(
+                    registry,
+                    latest,
+                    deps.preview_ready(registry, latest.job_id),
+                    awaiting_anonymization_review(latest),
+                    _awaiting_object_choice(registry, latest),
+                ),
                 processing_seconds=None if latest is None else measured.get(latest.job_id),
                 requested_by=None if latest is None else with_current_role(requester_actors.get(latest.job_id), actors),
                 capabilities=SceneCapabilities(can_delete_project=can_delete_project),
