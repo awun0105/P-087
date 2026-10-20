@@ -27,6 +27,7 @@ objectgs_probe() {
   write_runtime_env "$tmp/runtime.env" objectgs
   (
     load_runtime_env "$tmp/runtime.env"
+    unset CPATH C_INCLUDE_PATH  # header của Python khác sẽ làm kernel gsplat 3.8 biên dịch sai
     cd "$REPO" && "$(py_bin)" -c 'import sys; from scripts.kaggle.preflight import objectgs_extension_loads; ok, detail = objectgs_extension_loads(); print(detail); sys.exit(0 if ok else 1)'
   ) || status=$?
   rm -f "$tmp/runtime.env" "$tmp/runtime.env.tmp"

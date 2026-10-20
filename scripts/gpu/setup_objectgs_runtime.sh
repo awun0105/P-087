@@ -157,6 +157,8 @@ else
   # Không đặt TORCH_CUDA_ARCH_LIST: lúc chạy thật torch tự dò kiến trúc GPU, đặt khác sẽ làm cache không dùng được.
   mkdir -p "$DEST/torch_extensions"
   echo "[biên dịch] gsplat-object (lần đầu mất vài phút)…"
+  # Bỏ CPATH/C_INCLUDE_PATH kế thừa: header Python khác (vd. 3.12) đứng trước sẽ làm extension lỗi symbol khi nạp.
+  env -u CPATH -u C_INCLUDE_PATH \
   PYTHONPATH="$DEST/gsplat-object" \
   TORCH_EXTENSIONS_DIR="$DEST/torch_extensions" \
   CUDA_HOME="$DEST/cuda" \
