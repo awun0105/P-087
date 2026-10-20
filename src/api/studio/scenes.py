@@ -53,6 +53,7 @@ from src.services.orchestration.scene import objectify_queue
 from src.services.orchestration.scene.errors import SceneError
 from src.services.orchestration.scene.objectify import AWAITING_CHOICE
 from src.services.orchestration.uploads import UploadNotFoundError
+from src.services.scene.geometry_state import object_geometry_view
 
 router = APIRouter()
 
@@ -344,7 +345,7 @@ def _geometry_review(registry: ProjectRegistry, job: JobManifest) -> objectify_q
             revision = head.scene_revision
         else:
             scene = registry.scene.current(job.job_id).scene
-            geometry = objectify_queue.object_geometry_status(scene.provenance)
+            geometry = object_geometry_view(scene)
             revision = head.scene_revision if head is not None else scene.scene_revision
             if key is not None:
                 if len(_GEOMETRY_CACHE) >= _GEOMETRY_CACHE_MAX:

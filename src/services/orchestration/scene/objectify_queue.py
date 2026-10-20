@@ -54,7 +54,7 @@ from src.services.orchestration.scene.object_region import rebuild_region_ready,
 from src.services.orchestration.scene.objectify import AWAITING_CHOICE, METHOD, ObjectifyError, reobjectify
 from src.services.orchestration.value.events import record_event
 from src.services.process_control import ProcessCancelledError
-from src.services.scene.geometry_state import object_geometry_state
+from src.services.scene.geometry_state import ObjectGeometryState, object_geometry_state, object_geometry_view
 
 logger = logging.getLogger(__name__)
 
@@ -134,14 +134,8 @@ class ObjectifyState(BaseModel):
     geometry_note: str | None = None
 
 
-ObjectGeometry = Literal["awaiting_review", "ready"]
-
-
-def object_geometry_status(provenance: JsonObject) -> ObjectGeometry | None:
-    """Khoá thiếu → None; giá trị lạ → "awaiting_review", khớp quy tắc khoá lại của Studio."""
-    if "object_geometry" not in provenance or provenance["object_geometry"] is None:
-        return None
-    return "ready" if provenance["object_geometry"] == "ready" else "awaiting_review"
+#: Cùng kiểu với `geometry_state.ObjectGeometryState` (T-055: một nguồn duy nhất).
+ObjectGeometry = ObjectGeometryState
 
 
 GeometryReview = Literal["waiting", "running", "failed"]
@@ -328,7 +322,7 @@ def state(registry: ProjectRegistry, settings: Settings, job_id: str) -> Objecti
         scene_revision=scene.scene_revision,
         object_centric=provenance.get("object_extraction") == METHOD or provenance.get("geometry_method") == "objectgs",
         awaiting_choice=provenance.get("object_extraction") == AWAITING_CHOICE,
-        object_geometry=object_geometry_status(provenance),
+        object_geometry=object_geometry_view(scene),
         geometry_note=geometry_surface_note(scene.objects),
         available=runtime_available(settings) or settings.product_objectify_remote_worker,
         note=str(note) if note else None,
