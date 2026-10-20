@@ -34,6 +34,7 @@ import { useUrlState } from "@/features/studio/useUrlState";
 import { useNavigationGuard } from "@/features/shell/NavigationGuard";
 import { useAuth } from "@/features/studio/AuthProvider";
 import { NextAction } from "@/features/studio/scene/NextAction";
+import { ViewerActiveContext } from "@/features/viewer/viewerActive";
 import { ErrorFeedback, notifySuccess } from "@/components/studio/feedback";
 import type { MetricDraft } from "@/features/studio/MetricConfirmView";
 import type { OperatorTimeSurface } from "@/lib/api/value";
@@ -436,6 +437,8 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
             className={cn("absolute inset-0", current !== "studio" && "pointer-events-none invisible")}
             aria-hidden={current !== "studio"}
           >
+          {/* T-064: Studio vẫn mount khi đổi tab; viewer bên trong nghỉ và thoát Walk khi tab không hiện. */}
+          <ViewerActiveContext.Provider value={current === "studio"}>
           <StudioTab
             key={metricScope}
             jobId={jobId}
@@ -455,6 +458,7 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
               void poll(new AbortController().signal);
             }}
           />
+          </ViewerActiveContext.Provider>
           </div>
         )}
         {current === "review" && <ReviewTab jobId={jobId} canMutateJob={canMutateJob} onSaveState={setSave} />}

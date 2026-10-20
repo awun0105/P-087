@@ -38,6 +38,7 @@ import {
 import type { SplatInspection } from "./splat-inspection";
 import { EMPTY_INSPECTION, type InspectionState } from "./inspection-history";
 import { createRuntimePublisher } from "./runtime-publisher";
+import { useViewerActive } from "./viewerActive";
 
 import "@playcanvas/supersplat-viewer/viewer.css";
 
@@ -254,6 +255,23 @@ export function PlayCanvasScene({
   extraControls,
 }: PlayCanvasSceneProps) {
   const [collisionViewer, setCollisionViewer] = useState<ViewerHandleLike | null>(null);
+  const viewerActive = useViewerActive();
+  // Viewer hiện tại để đổi trạng thái thư viện (không phải state React); cập nhật cùng lúc với `collisionViewer`.
+  const liveViewer = useRef<ViewerHandleLike | null>(null);
+  // T-064: Studio ẩn thì viewer nghỉ (không cập nhật, không vẽ); rời tab Studio thì thoát Walk. Hiện lại thì vẽ một khung.
+  useEffect(() => {
+    const viewer = collisionViewer ? liveViewer.current : null;
+    const app = viewer?.app as unknown as { timeScale?: number; renderNextFrame?: boolean } | undefined;
+    if (!viewer || !app) return;
+    if (!viewerActive.inTab && viewer.state.cameraMode === "walk") viewer.state.cameraMode = "fly";
+    if (!viewerActive.visible) {
+      app.timeScale = 0;
+      app.renderNextFrame = false;
+      return;
+    }
+    app.timeScale = 1;
+    app.renderNextFrame = true;
+  }, [collisionViewer, viewerActive.inTab, viewerActive.visible]);
   const collisionError = useRef(onCollisionError);
   useEffect(() => { collisionError.current = onCollisionError; }, [onCollisionError]);
   useEffect(() => {
@@ -361,6 +379,7 @@ export function PlayCanvasScene({
           return;
         }
         handle = viewer;
+        liveViewer.current = viewer;
         setCollisionViewer(viewer);
         if (showControls) {
           const buttonsEl = host.querySelector(".sse-buttonsContainer");
@@ -557,6 +576,7 @@ export function PlayCanvasScene({
       publishRuntime.dispose();
       subscriptions.forEach((subscription) => subscription.off());
       if (orient && handle?.app) (handle.app as unknown as ViewerAppLike).off("update", orient);
+      liveViewer.current = null;
       setCollisionViewer(null);
       onAppRef.current?.(null);
       onInspectionReady?.(null);
