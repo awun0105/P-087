@@ -68,6 +68,19 @@ export function jobArtifactContentUrl(
   });
 }
 
+/** Ảnh frame thu nhỏ (JPEG, T-066); cùng allow-list với `jobArtifactContentUrl`. `width` ∈ 160/320/640. */
+export function jobFrameThumbnailUrl(
+  jobId: string,
+  ref: { artifact_uri: string; artifact_checksum: string },
+  width: 160 | 320 | 640 = 320,
+): string {
+  return apiUrl(`/api/v1/jobs/${encodeURIComponent(jobId)}/frames/thumbnail`, {
+    artifact_uri: ref.artifact_uri,
+    artifact_checksum: ref.artifact_checksum,
+    width: String(width),
+  });
+}
+
 /** Lớp LiDAR đã căn chỉnh của scene (float32 xyz, mét, Z-up); `key` đổi theo bản căn chỉnh để cache đúng bản. */
 export function jobLidarOverlayUrl(jobId: string, key: string): string {
   return apiUrl(`/api/v1/jobs/${encodeURIComponent(jobId)}/lidar-overlay`, { v: key });

@@ -7,7 +7,7 @@ import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 
 import { Notice } from "@/components/studio/primitives";
-import { jobArtifactContentUrl } from "@/lib/api/endpoints";
+import { jobArtifactContentUrl, jobFrameThumbnailUrl } from "@/lib/api/endpoints";
 import { getStageViews } from "@/lib/api/studio";
 import { cn } from "@/lib/cn";
 import type { StageView } from "@/lib/contracts/studio";
@@ -95,18 +95,37 @@ function StageLayer({ jobId, view, views }: { jobId: string; view: StageView; vi
 }
 
 function FramesLayer({ jobId, view }: { jobId: string; view: StageView }) {
+  // T-066: lưới dùng ảnh thu nhỏ (vài chục KB); ảnh gốc (tới 8 MB) chỉ tải khi bấm vào một ảnh.
+  const [open, setOpen] = useState<StageView["refs"][number] | null>(null);
+  const name = (ref: StageView["refs"][number]) => ref.artifact_uri.split("/").pop() ?? "frame";
   return (
-    <div className="grid size-full auto-rows-min grid-cols-2 gap-2 overflow-y-auto bg-paper p-3 sm:grid-cols-4 lg:grid-cols-6">
-      {view.refs.map((ref) => (
-        // eslint-disable-next-line @next/next/no-img-element -- ảnh artifact có checksum, không qua next/image optimizer
-        <img
-          key={ref.artifact_uri}
-          src={jobArtifactContentUrl(jobId, ref)}
-          alt={ref.artifact_uri.split("/").pop() ?? "frame"}
-          loading="lazy"
-          className="aspect-video w-full rounded-md border border-line object-cover"
-        />
-      ))}
+    <div className="relative size-full">
+      <div className="grid size-full auto-rows-min grid-cols-2 gap-2 overflow-y-auto bg-paper p-3 sm:grid-cols-4 lg:grid-cols-6">
+        {view.refs.map((ref) => (
+          <button key={ref.artifact_uri} type="button" aria-label={`Xem ảnh gốc ${name(ref)}`} onClick={() => setOpen(ref)} className="block rounded-md focus-visible:outline-2 focus-visible:outline-ember">
+            {/* eslint-disable-next-line @next/next/no-img-element -- ảnh artifact có checksum, không qua next/image optimizer */}
+            <img
+              src={jobFrameThumbnailUrl(jobId, ref, 320)}
+              srcSet={`${jobFrameThumbnailUrl(jobId, ref, 160)} 160w, ${jobFrameThumbnailUrl(jobId, ref, 320)} 320w, ${jobFrameThumbnailUrl(jobId, ref, 640)} 640w`}
+              sizes="(min-width: 1024px) 16vw, (min-width: 640px) 25vw, 50vw"
+              alt={name(ref)}
+              loading="lazy"
+              decoding="async"
+              className="aspect-video w-full rounded-md border border-line object-cover"
+            />
+          </button>
+        ))}
+      </div>
+      {open && (
+        <div role="dialog" aria-label={`Ảnh gốc ${name(open)}`} className="absolute inset-0 z-30 flex flex-col bg-viewport-deep/95 p-3">
+          <div className="mb-2 flex items-center justify-between text-sm text-on-dark">
+            <span className="truncate">{name(open)}</span>
+            <button type="button" onClick={() => setOpen(null)} className="rounded px-2 py-1 hover:bg-on-dark/10">Đóng ảnh gốc</button>
+          </div>
+          {/* eslint-disable-next-line @next/next/no-img-element -- ảnh gốc có checksum */}
+          <img src={jobArtifactContentUrl(jobId, open)} alt={`Ảnh gốc ${name(open)}`} className="min-h-0 flex-1 object-contain" />
+        </div>
+      )}
     </div>
   );
 }

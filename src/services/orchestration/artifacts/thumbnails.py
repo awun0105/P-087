@@ -40,7 +40,7 @@ def _render_jpeg(source: Path, width: int) -> bytes:
         image.draft("RGB", (width, width))  # JPEG gốc: giải mã thẳng ở cỡ nhỏ, đỡ RAM/CPU.
         rgb = image.convert("RGB")
         height = max(1, round(rgb.height * width / rgb.width))
-        small = rgb.resize((width, height), Image.Resampling.LANCZOS) if rgb.width > width else rgb
+        small = rgb.resize((width, height), Image.Resampling.LANCZOS, reducing_gap=2.0) if rgb.width > width else rgb
         buffer = io.BytesIO()
         small.save(buffer, format="JPEG", quality=_JPEG_QUALITY, optimize=True)
         return buffer.getvalue()
