@@ -1519,6 +1519,32 @@ def test_objectify_wait_fails_after_limit(world, monkeypatch, tmp_path) -> None:
     assert "cổng tài nguyên lỗi" in (record.error or "")
 
 
+def test_objectify_worker_busy_never_times_out(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    """Review fix: waiting for a free worker / the right GPU is not a resource shortage; 31 minutes must not fail it."""
+    from src.services.orchestration.jobs.admission import OperationAdmissionResult
+
+    registry, job, settings = _queued_boxes(world, monkeypatch, tmp_path, "busy")
+
+    def busy_worker(_self, request):  # noqa: ANN001, ANN202
+        return OperationAdmissionResult(
+            request=request,
+            status="worker_busy",
+            required_gb={"vram": 1.0, "ram": None, "disk": None},
+            available_gb={"vram": None, "ram": None, "disk": None},
+            capacity_gb={"vram": None, "ram": None, "disk": None},
+            waiting_on=[],
+            reasons={},
+        )
+
+    monkeypatch.setattr(scene_objectify_queue.ResourceAdmission, "admit_operation", busy_worker)
+    scene_objectify_queue.process_next(registry, settings)
+    _age_wait(settings, job.job_id, 31)
+    scene_objectify_queue.process_next(registry, settings)
+    with scene_objectify_queue._database(settings).transaction() as tx:
+        record = scene_objectify_queue._read(tx, job.job_id)
+    assert record.status == "queued"
+
+
 def test_objectify_busy_wait_never_fails(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
     registry, job, settings = _queued_boxes(world, monkeypatch, tmp_path, "busy")
     scene_objectify_queue.process_next(registry, settings)

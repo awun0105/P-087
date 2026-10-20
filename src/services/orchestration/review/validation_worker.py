@@ -219,7 +219,11 @@ class IsaacValidationWorker:
             # (lượt chưa bắt đầu chạy), không cần thêm cột vào bản ghi operation.
             limit = getattr(self.settings, "product_resource_wait_max_seconds", 1800)
             reasons = getattr(admitted, "reasons", None) or {}
-            if claim.run.started_at is None and wait_exceeded(reasons, claim.run.requested_at, _now(), limit):
+            if (
+                admitted.status == "waiting_resources"
+                and claim.run.started_at is None
+                and wait_exceeded(reasons, claim.run.requested_at, _now(), limit)
+            ):
                 self.queue.fail(claim, error_code="RESOURCE_WAIT_EXCEEDED", retryable=True)
                 logger.warning("Isaac validation resource wait exceeded run=%s", claim.run.run_id)
                 return True

@@ -264,6 +264,21 @@ def test_validation_wait_fails_after_limit(tmp_path: Path, monkeypatch) -> None:
     assert view.error_code == "RESOURCE_WAIT_EXCEEDED" and view.retryable is True
 
 
+def test_validation_worker_busy_is_not_a_resource_timeout(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001
+    """Review fix: a run waiting for a free worker (no resource reasons) is not failed by the 30-minute limit."""
+    from datetime import timedelta
+
+    registry, submitted, worker, admission, _ = _world(tmp_path)
+    admission.admit_operation = lambda request: SimpleNamespace(status="worker_busy", reasons={})
+    monkeypatch.setattr(worker_module, "_now", lambda: submitted.requested_at + timedelta(days=1))
+
+    worker.process_next()
+    view = ValidationQueue(registry.persistence.database, registry.runtime_resolver).get(
+        submitted.job_id, submitted.run_id
+    )
+    assert view.status.value != "FAILED"
+
+
 def test_validation_busy_wait_keeps_waiting(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001
     from datetime import timedelta
 

@@ -75,8 +75,12 @@ _LOCK_KEY = "real2sim.runtime.resource-reservations"
 
 
 def wait_exceeded(reasons: Mapping[str, str], waiting_since: datetime, now: datetime, limit_seconds: float) -> bool:
-    """Chờ tài nguyên đã quá hạn: chỉ khi không lý do nào là `busy` (máy khác đang chạy thì chờ là đúng)."""
-    if any(reason == "busy" for reason in reasons.values()):
+    """Chờ tài nguyên đã quá hạn: chỉ khi có lý do và không lý do nào là `busy` hay `unmeasured`.
+
+    Không lý do (đợi worker rảnh / đúng GPU) hoặc `unmeasured` (worker này không đo được, máy khác sẽ nhận) là chờ đúng
+    máy, không phải thiếu tài nguyên, nên không bao giờ hết hạn.
+    """
+    if not reasons or any(reason in {"busy", "unmeasured"} for reason in reasons.values()):
         return False
     return (now - waiting_since).total_seconds() >= limit_seconds
 

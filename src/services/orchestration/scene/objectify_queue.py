@@ -943,7 +943,11 @@ def process_next(registry: ProjectRegistry, settings: Settings) -> bool:
                 raise ObjectifyError("operation identity trùng với input/config khác; yêu cầu bị chặn")
             limit = getattr(settings, "product_resource_wait_max_seconds", 1800)
             since = running.resource_wait_since
-            if since is not None and wait_exceeded(admitted.reasons, since, datetime.now(UTC), limit):
+            if (
+                admitted.status == "waiting_resources"
+                and since is not None
+                and wait_exceeded(admitted.reasons, since, datetime.now(UTC), limit)
+            ):
                 raise ObjectifyError(_wait_exceeded_message(admitted.reasons, limit), retryable=True)
             _requeue_wait(settings, job_id, running, admitted)
             return False

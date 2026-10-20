@@ -917,3 +917,12 @@ def test_wait_exceeded_ignores_busy() -> None:
     since = datetime(2026, 10, 20, 8, 0, tzinfo=UTC)
     reasons = {"vram": "busy", "ram": "unmeasured"}
     assert admission.wait_exceeded(reasons, since, since + timedelta(days=1), 1800) is False
+
+
+def test_wait_exceeded_needs_a_known_non_busy_reason() -> None:
+    """Review fix: no reason (worker busy / GPU affinity) or `unmeasured` (wrong worker) never times out."""
+    since = datetime(2026, 10, 20, 8, 0, tzinfo=UTC)
+    later = since + timedelta(days=1)
+    assert admission.wait_exceeded({}, since, later, 1800) is False
+    assert admission.wait_exceeded({"vram": "unmeasured"}, since, later, 1800) is False
+    assert admission.wait_exceeded({"vram": "external"}, since, later, 1800) is True
