@@ -57,6 +57,11 @@ interface ShellRecord {
   wire: StandardMaterial | null;
   asset: Asset;
   blobUrl: string | null;
+  /** URL GLB nguồn (null khi nạp từ bytes): cùng URL thì đổi kiểu tại chỗ, không nạp lại (T-067). */
+  url: string | null;
+  /** GLB đã nạp; cần để dựng viền khi vật được chọn sau đó. */
+  container: ContainerResource | null;
+  outline: Entity | null;
   /** Hoàn tất lời hứa của `setShell` khi vỏ bị thay hoặc gỡ trước khi nạp xong. */
   settle: () => void;
 }
@@ -160,6 +165,11 @@ export class ShellGlowLayer {
   setShell(objectId: string, glb: ArrayBuffer | string, style: ShellStyle): Promise<void> {
     const parent = this.parentOf(objectId);
     if (!parent) return Promise.resolve();
+    const existing = this.shells.get(objectId);
+    if (typeof glb === "string" && existing?.url === glb && existing.root.parent === parent) {
+      this.restyle(objectId, existing, style);
+      return Promise.resolve();
+    }
     this.releaseShell(objectId);
     const app = this.host.application();
     const url = typeof glb === "string" ? glb : URL.createObjectURL(new Blob([glb], { type: "model/gltf-binary" }));
@@ -175,6 +185,9 @@ export class ShellGlowLayer {
         wire: style === "selected" ? shellMaterial(themeColor("--studio-sage", "#2dd4bf"), WIRE_OPACITY) : null,
         asset,
         blobUrl,
+        url: typeof glb === "string" ? glb : null,
+        container: null,
+        outline: null,
         settle: resolve,
       };
       record.root.enabled = style === "selected" || objectId === this.hovered;
@@ -185,14 +198,11 @@ export class ShellGlowLayer {
         this.revoke(record);
         if (this.shells.get(objectId) !== record) return resolve();
         const container = asset.resource as ContainerResource;
+        record.container = container;
         const solid = container.instantiateRenderEntity();
         paint(solid, record.fill, false);
         record.root.addChild(solid);
-        if (record.wire) {
-          const outline = container.instantiateRenderEntity();
-          paint(outline, record.wire, true);
-          record.root.addChild(outline);
-        }
+        if (record.wire) this.addOutline(record);
         resolve();
       });
       asset.once("error", () => {
@@ -250,6 +260,31 @@ export class ShellGlowLayer {
     record.tone = tone;
     this.applyTone(record);
     this.updateVisibility(objectId, record);
+  }
+
+  /** Đổi kiểu vỏ trên GLB đã có: chỉ vật liệu, độ mờ và viền; không nạp lại file (T-067). */
+  private restyle(objectId: string, record: ShellRecord, style: ShellStyle): void {
+    if (record.style === style) return;
+    record.style = style;
+    if (style === "selected" && !record.wire) {
+      record.wire = shellMaterial(themeColor("--studio-sage", "#2dd4bf"), WIRE_OPACITY);
+      if (record.container) this.addOutline(record);
+    } else if (style !== "selected" && record.wire) {
+      record.outline?.destroy();
+      record.outline = null;
+      record.wire.destroy();
+      record.wire = null;
+    }
+    this.applyTone(record);
+    this.updateVisibility(objectId, record);
+  }
+
+  private addOutline(record: ShellRecord): void {
+    if (!record.container || !record.wire || record.outline) return;
+    const outline = record.container.instantiateRenderEntity();
+    paint(outline, record.wire, true);
+    record.root.addChild(outline);
+    record.outline = outline;
   }
 
   /** Hover chỉ bật/tắt entity đã nạp; không tải lại GLB hoặc đổi lựa chọn của người dùng. */

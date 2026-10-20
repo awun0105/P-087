@@ -102,6 +102,44 @@ const renderOf = (entity: Entity) => (entity as unknown as { c: { render: { mesh
 
 const GLB_URL = "https://example.test/shell.glb";
 
+describe("đổi chọn không tải lại vỏ (T-067)", () => {
+  let app: AppBase;
+  let object: Entity;
+  let layer: ShellGlowLayer;
+
+  beforeEach(() => {
+    app = fakeApp();
+    autoLoad(app);
+    object = new Entity("object-A", app);
+    layer = new ShellGlowLayer(hostWith(app, new Map([["A", object]])));
+    vi.spyOn(Asset.prototype, "unload").mockImplementation(() => undefined);
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it("chọn rồi bỏ chọn năm lần chỉ nạp GLB một lần, viền và độ mờ vẫn đúng kiểu", async () => {
+    await layer.setShell("A", GLB_URL, "idle");
+    for (let index = 0; index < 5; index += 1) {
+      await layer.setShell("A", GLB_URL, "selected");
+      await layer.setShell("A", GLB_URL, "idle");
+    }
+    expect(app.assets.load).toHaveBeenCalledTimes(1);
+    await layer.setShell("A", GLB_URL, "selected");
+    const shell = shellOf(object, "A")!;
+    expect(shell.children).toHaveLength(2);
+    const fill = renderOf(shell.children[0] as Entity).meshInstances[0].material as StandardMaterial;
+    expect(fill.opacity).toBeCloseTo(0.2);
+    await layer.setShell("A", GLB_URL, "idle");
+    expect(shellOf(object, "A")!.children).toHaveLength(1);
+    expect(fill.opacity).toBeCloseTo(0.06);
+  });
+
+  it("URL khác thì vẫn nạp vỏ mới", async () => {
+    await layer.setShell("A", GLB_URL, "idle");
+    await layer.setShell("A", "https://example.test/other.glb", "selected");
+    expect(app.assets.load).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe("ShellGlowLayer: vỏ của vật", () => {
   let app: AppBase;
   let object: Entity;
