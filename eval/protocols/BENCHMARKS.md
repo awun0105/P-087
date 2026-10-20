@@ -28,7 +28,7 @@ không điền ước đoán như kết quả.
 | `object_coverage` | SM-05: độ phủ candidate object | recall theo danh sách gán nhãn | EX-SCENE | `eval/object/` | Chưa |
 
 Dữ liệu evaluation-only (GT, split giữ lại) chỉ dùng trong evaluator, không bao giờ vào runtime
-(`docs/DATASET_PLAYBOOK.md`).
+([`docs/EVALUATION.md`](../../docs/EVALUATION.md)).
 
 ## Chỉ số tự kiểm trong Studio (không phải benchmark)
 

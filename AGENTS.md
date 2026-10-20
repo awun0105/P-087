@@ -38,11 +38,14 @@ Technical decisions follow specific authorities:
 | Decision | Authoritative Source |
 | --- | --- |
 | Product scope, priority, user behavior, acceptance | `docs/PRD.md` |
-| Dataset preparation, split, evaluation protocol | `docs/DATASET_PLAYBOOK.md` |
-| Shared contracts, schemas, runtime rules | `docs/execution/TEAM_EXECUTION_CONTRACT.md` |
+| Dataset, leakage rules, metrics, evaluation protocol | `docs/EVALUATION.md` |
+| Shared contracts, schemas, runtime rules | `docs/CONTRACTS.md` + models in `src/models/contracts/` |
 | Canonical repository placement & architecture | `ARCHITECTURE.md` |
-| Studio Web UX / Viewer interaction | `docs/STUDIO_UX_SPEC.md` |
-| Integration strategy & reusable baseline | `docs/execution/INTEGRATION_PLAYBOOK.md` |
+| Processing stages, branches, wait points | `docs/PIPELINE.md` |
+| Studio Web UX / Viewer interaction | `docs/UX.md` |
+| Install, run, deploy, restore | `docs/OPERATIONS.md` |
+| What is verified vs only implemented | `docs/STATUS.md` |
+| Integration strategy & reusable baseline | `docs/execution/INTEGRATION_PLAYBOOK.md` (historical execution record) |
 | Task-local scope, I/O, DoD | assigned `tasks/<TASK-ID>.md` |
 | Current executable behavior | Code + Tests + Runtime Evidence |
 

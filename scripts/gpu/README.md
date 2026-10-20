@@ -162,7 +162,7 @@ tar -C /opt/real2sim/state/demo/library -czf aisle_cw_demo.tgz aisle-cw
 ```
 
 Nếu máy Studio chạy job cũng là máy phục vụ thư viện mẫu (cùng `PRODUCT_DEMO_DIR`), Reviewer có thể bỏ bước nén và
-bấm **Đặt làm bản demo** trên scene để xuất thẳng vào thư viện. `--stage-assets assets.json` ghép thêm ảnh/số đo theo bước (xem `docs/DEMO_SCENES.md`).
+bấm **Đặt làm bản demo** trên scene để xuất thẳng vào thư viện. `--stage-assets assets.json` ghép thêm ảnh/số đo theo bước (xem `docs/OPERATIONS.md` mục 9.4).
 
 Mang `aisle_cw_demo.tgz` về máy demo, giải nén vào thư mục thư viện
 (`PRODUCT_DEMO_DIR`, mặc định `data/demo/library`). Mỗi thư mục con là một video
