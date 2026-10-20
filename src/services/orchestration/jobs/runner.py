@@ -735,6 +735,10 @@ def _pull_input(resolver: ArtifactResolver, manifest_ref: ProductArtifactRef) ->
     manifest = InputManifest.model_validate_json(resolver.require(manifest_ref).read_bytes())
     for item in manifest.files:
         resolver.require_uri(item.artifact_uri, item.checksum)
+    if manifest.video_preparation is not None:
+        # prepare_cli runs in a subprocess with a local-only resolver: the browser-prepared video's frame map must
+        # be in the local cache too, or frame extraction fails with ArtifactNotFoundError on a remote worker.
+        resolver.require(manifest.video_preparation.frame_map_ref)
     return manifest
 
 
