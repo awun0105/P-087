@@ -98,6 +98,8 @@ function StageLayer({ jobId, view, views }: { jobId: string; view: StageView; vi
   // Lớp hệ mét dùng chung scene: 3DGS màu + collision mesh phủ lên, cùng hệ Z-up.
   const metric = views.find((item) => item.kind === "gaussian" && item.unit === "meter");
   const mesh = views.find((item) => item.kind === "mesh");
+  // T-065: bước Collision mesh chỉ tải lưới (0,1–1 MB); SOG hệ mét (hàng chục MB) chỉ tải khi người dùng muốn xem kèm.
+  if (metric?.refs[0] && view === mesh) return <MeshStepLayer jobId={jobId} mesh={mesh} metric={metric} />;
   if (metric?.refs[0] && (view === metric || view === mesh)) {
     return (
       <><p className="absolute bottom-3 left-3 z-20 rounded-md bg-viewport-deep/90 px-3 py-1 text-xs text-on-dark">
@@ -265,6 +267,35 @@ function disposeTree(root: THREE.Object3D): void {
       for (const material of Array.isArray(object.material) ? object.material : [object.material]) material.dispose();
     }
   });
+}
+
+function MeshStepLayer({ jobId, mesh, metric }: { jobId: string; mesh: StageView; metric: StageView }) {
+  const [withSplat, setWithSplat] = useState(false);
+  if (withSplat && metric.refs[0]) {
+    return (
+      <MetricSceneView
+        jobId={jobId}
+        visual={metric.refs[0]}
+        collision={mesh.refs[0]}
+        reconstruction
+        cameras={metric.cameras}
+        defaultLayers={{ splat: true, collision: true, boxes: false }}
+        lidarOverlay={metric.lidar_overlay ?? null}
+      />
+    );
+  }
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setWithSplat(true)}
+        className="absolute top-3 right-3 z-20 rounded-md bg-viewport-deep/90 px-3 py-1.5 text-xs text-on-dark hover:bg-viewport-deep"
+      >
+        Hiện kèm 3DGS
+      </button>
+      <MeshLayer jobId={jobId} view={mesh} />
+    </>
+  );
 }
 
 function MeshLayer({ jobId, view }: { jobId: string; view: StageView }) {
