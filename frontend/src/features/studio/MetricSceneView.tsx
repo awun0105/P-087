@@ -444,6 +444,11 @@ export function MetricSceneView({
     };
   }, [overlay, lidarWanted, lidarUrl]);
 
+  // T-067: vật đang chọn được tải hình trước các vật còn trong hàng đợi.
+  const selectedObjectId = selectedObject?.id ?? null;
+  useEffect(() => {
+    overlay?.prioritizeObject(selectedObjectId);
+  }, [overlay, selectedObjectId]);
   useEffect(() => {
     if (!overlay) return;
     // Tắt lớp 3DGS thì ẩn cả Gaussian của vật (cùng một lớp hình).

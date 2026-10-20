@@ -19,7 +19,7 @@ const setCollision = vi.hoisted(() => vi.fn());
 const loadCollision = vi.hoisted(() => vi.fn<(url: string, opacity: number) => Promise<number>>(async () => 0));
 const pickCollisionTriangle = vi.hoisted(() => vi.fn());
 const pick = vi.hoisted(() => vi.fn<() => string | null>(() => "A"));
-vi.mock("@/features/viewer/scene-overlay", () => ({ SceneOverlay: class {
+vi.mock("@/features/viewer/scene-overlay", () => ({ SceneOverlay: class { prioritizeObject = vi.fn();
   objectEntity = () => ({}); attachGizmo = gizmo;
   destroy = vi.fn(); detachGizmo = vi.fn(); setObjects = vi.fn(); setBoxes = setBoxes; setColliders = setColliders; setSurfaceMarkers = vi.fn();
   setSplatVisible = vi.fn(); setCollision = setCollision; collisionPositions = () => null; bindViewerGotoPose = vi.fn();

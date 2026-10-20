@@ -8,7 +8,7 @@ import type { PhysicsObjectInput } from "@/features/viewer/usePhysicsPlay";
 const renderViewer = vi.hoisted(() => vi.fn());
 const loadAmmo = vi.hoisted(() => vi.fn(() => new Promise(() => undefined)));
 vi.mock("@/features/viewer/shell-glow", () => ({ ShellGlowLayer: class { destroy = vi.fn(); setShell = vi.fn(); clear = vi.fn(); setHovered = vi.fn(); } }));
-vi.mock("@/features/viewer/scene-overlay", () => ({ SceneOverlay: class {
+vi.mock("@/features/viewer/scene-overlay", () => ({ SceneOverlay: class { prioritizeObject = vi.fn();
   objectEntity = () => ({}); attachGizmo = vi.fn(); destroy = vi.fn(); detachGizmo = vi.fn(); setObjects = vi.fn(); setBoxes = vi.fn();
   setColliders = vi.fn(); setSurfaceMarkers = vi.fn(); setSplatVisible = vi.fn(); setCollision = vi.fn(); collisionPositions = () => null;
   bindViewerGotoPose = vi.fn(); loadCollision = vi.fn(async () => 0); pickCollisionTriangle = vi.fn(); pick = vi.fn(() => null);

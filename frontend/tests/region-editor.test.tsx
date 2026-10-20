@@ -688,6 +688,7 @@ const viewer = vi.hoisted(() => ({
 vi.mock("@/features/viewer/scene-overlay", () => ({
   SceneOverlay: class {
     attachGizmo = vi.fn();
+    prioritizeObject = vi.fn();
     bindViewerGotoPose = vi.fn();
     destroy = vi.fn();
     detachGizmo = vi.fn();
