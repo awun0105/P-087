@@ -632,3 +632,43 @@ async def test_walk_collision_304_requires_permission(client, monkeypatch, tmp_p
         f"{_JOB}/walk-collision/secret.glb", params=foreign, headers={"If-None-Match": first.headers["etag"]}
     )
     assert r.status_code in {404, 409} and r.status_code != 304
+
+
+# ── T-053: 304 for an unchanged scene, gzip for JSON, cached CORS preflight ──
+
+
+@pytest.mark.asyncio
+async def test_scene_etag_304(client) -> None:
+    first = await client.get(f"{_JOB}/scene")
+    assert first.status_code == 200 and first.headers["etag"]
+    again = await client.get(f"{_JOB}/scene", headers={"If-None-Match": first.headers["etag"]})
+    assert again.status_code == 304
+
+
+@pytest.mark.asyncio
+async def test_json_response_is_gzipped(client) -> None:
+    r = await client.get(f"{_JOB}/scene", headers={"Accept-Encoding": "gzip"})
+    assert r.headers.get("content-encoding") == "gzip"
+
+
+@pytest.mark.asyncio
+async def test_binary_artifact_is_not_gzipped(client) -> None:
+    params = await _geometry_params(client)
+    r = await client.get(f"{_JOB}/artifacts/content", params=params, headers={"Accept-Encoding": "gzip"})
+    assert r.status_code == 200 and "content-encoding" not in r.headers
+
+
+@pytest.mark.asyncio
+async def test_cors_preflight_has_max_age(client) -> None:
+    from src.config import get_settings
+
+    origin = get_settings().cors_origins[0]
+    r = await client.options(
+        f"{_JOB}/scene",
+        headers={
+            "Origin": origin,
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "content-type",
+        },
+    )
+    assert r.headers.get("access-control-max-age") == "86400"
