@@ -228,13 +228,16 @@ def _expected_limit(attempt: _Attempt, name: str, fixed_timeout: float) -> tuple
         params = job_drivers(registry, attempt.settings, attempt.job)
         if capability is None or params is None:
             return fixed_timeout, None
-        estimate = expected_seconds(
-            name,
-            params,
-            capability.gpu_name,
-            attempt.job.runtime_manifest_checksum,
-            load_usages(registry.persistence.database),
-        )
+        usages = load_usages(registry.persistence.database)
+        if any(
+            usage.job_id == attempt.job.job_id and usage.tool == name and usage.outcome == "timeout" for usage in usages
+        ):
+            # T-050: lượt trước của chính công cụ này đã bị cắt vì quá hạn; dùng lại cùng số đo sẽ cắt lặp lại.
+            logger.info(
+                "Lượt trước của %s bị cắt vì quá hạn; lượt này dùng giới hạn cố định %.0f s", name, fixed_timeout
+            )
+            return fixed_timeout, None
+        estimate = expected_seconds(name, params, capability.gpu_name, attempt.job.runtime_manifest_checksum, usages)
     except Exception as error:  # noqa: BLE001 - ước lượng chỉ là phụ; lỗi đọc số đo không được làm hỏng lượt chạy
         logger.warning("Không tính được hạn theo số đo tool=%s cause=%s", name, type(error).__name__)
         return fixed_timeout, None
