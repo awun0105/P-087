@@ -63,7 +63,7 @@ export function GpuStartupNotice({ capacity, now, className }: { capacity: GpuCa
           aria-valuemin={0}
           aria-valuemax={100}
           aria-valuenow={Math.round(ratio * 100)}
-          className="mt-2 block h-1.5 w-full overflow-hidden rounded-full bg-black/10"
+          className="mt-2 block h-1.5 w-full overflow-hidden rounded-full bg-line-strong"
         >
           <span className="block h-full rounded-full bg-current transition-[width] duration-700" style={{ width: `${Math.round(ratio * 100)}%` }} />
         </span>
