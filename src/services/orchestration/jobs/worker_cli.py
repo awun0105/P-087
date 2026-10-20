@@ -20,6 +20,7 @@ from typing import Protocol
 from src.config import Settings, get_settings
 from src.models.contracts.manifests import ExecutionError, JobManifest, JobStatus, StageId
 from src.models.contracts.retryability import classify_retryability
+from src.services.orchestration.artifacts.lod import idle_lod_builder
 from src.services.orchestration.gpu.state import supports
 from src.services.orchestration.gpu.worker import ManagedWorker
 from src.services.orchestration.jobs.admission import ResourceAdmission
@@ -630,6 +631,8 @@ def main(argv: list[str] | None = None) -> int:
         guard = QueueGuard()
         # Quét job RUNNING không lease đọc cả nhật ký sự kiện; trường hợp này cần ≥ một TTL lease mới xuất hiện,
         # nên quét mỗi nửa TTL là đủ (lần khởi động đã quét ở trên).
+        lod_builder = idle_lod_builder(registry, settings.product_worker_root)
+        lod_sweep = Periodic(60.0)
         unwatched_sweep = Periodic(LEASE_TTL.total_seconds() / 2)
         unwatched_sweep.due(time.monotonic())
         while True:
@@ -672,6 +675,9 @@ def main(argv: list[str] | None = None) -> int:
                                 ("demo", lambda: process_demo_session(settings, registry, admission)),
                             ],
                         )
+                        # T-070: rảnh thì tạo bộ LOD cho một SOG lớn còn thiếu (chỉ worker có GPU).
+                        if not handled and lod_builder is not None and lod_sweep.due(time.monotonic()):
+                            handled = guard.run("lod", lod_builder.tick)
             if not handled:
                 admission.release()
             if args.once:

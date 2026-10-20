@@ -1,11 +1,11 @@
 """Artifact của job: danh sách được phép thấy, bytes theo allow-list, preview 3DGS, bản ghi Rerun."""
 
-import json
+import hashlib
 import logging
+import re
 from pathlib import Path
 from threading import Thread
 from typing import Annotated, Literal
-from urllib.parse import quote, urlencode
 
 from fastapi import APIRouter, Header, HTTPException, Query, Response, status
 from fastapi.responses import FileResponse, RedirectResponse
@@ -19,8 +19,7 @@ from src.models.contracts.preview import ReconstructionPreview
 from src.services.orchestration.artifacts import (
     ArtifactNotFoundError,
     ArtifactStoreError,
-    compact_gaussians,
-    quick_sog,
+    lod,
     thumbnails,
 )
 from src.services.orchestration.jobs.display_glb import display_space_glb
@@ -177,134 +176,61 @@ def get_frame_thumbnail(
     return Response(body, media_type="image/jpeg", headers={**headers, "X-Content-Type-Options": "nosniff"})
 
 
-@router.get("/jobs/{job_id}/objects/compact")
-def get_compact_object_gaussians(
+_LOD_MEDIA = {".json": "application/json", ".webp": "image/webp"}
+_NOT_FOUND_HEADERS = {"Cache-Control": "private, no-store"}
+
+
+@router.get("/jobs/{job_id}/lod/{checksum_hex}/{path:path}")
+def get_lod_file(
     job_id: str,
-    artifact_uri: str = Query(..., min_length=1),
-    artifact_checksum: Checksum = Query(...),
+    checksum_hex: str,
+    path: str,
     if_none_match: Annotated[str | None, Header()] = None,
 ) -> Response:
-    """Gaussian của một vật dạng PLY nén (T-067); cùng allow-list với route content, chỉ cho `ObjectGaussians`.
+    """Một file của bộ LOD (T-070) của SOG có checksum `checksum_hex`; khung 3D đọc theo đường dẫn tương đối.
 
-    Thiếu runtime splat-transform hoặc chuyển lỗi thì chuyển hướng về PLY gốc để viewer vẫn mở được.
+    SOG nguồn phải thuộc allow-list của job; chỉ nhận đúng dạng tên file của bộ LOD. Bộ chưa có thì 404 (`no-store`,
+    vì worker GPU có thể tạo sau) và giao diện mở SOG gốc.
     """
+    not_found = HTTPException(status_code=status.HTTP_404_NOT_FOUND, headers=_NOT_FOUND_HEADERS)
+    if not re.fullmatch(r"[0-9a-f]{64}", checksum_hex) or not lod.valid_bundle_path(path):
+        raise not_found
     deps.job_or_404(job_id)
+    registry = deps.registry()
+    checksum = f"sha256:{checksum_hex}"
     try:
-        reference = ArtifactRef(
-            artifact_type="ArtifactContent",
-            schema_version="1.0",
-            artifact_uri=artifact_uri,
-            artifact_checksum=artifact_checksum,
-            data_class="derived",
-            producer_stage="ST-EDIT",
-            job_id=job_id,
-        )
-        registry = deps.registry()
-        canonical = registry.authorized_artifact(job_id, reference)
-        if canonical.artifact_type != "ObjectGaussians":
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chỉ hỗ trợ Gaussian của vật")
-        etag = compact_gaussians.compact_etag(canonical.artifact_checksum)
-        headers = {"ETag": etag, "Cache-Control": IMMUTABLE_PRIVATE}
-        if not_modified(if_none_match, etag):
-            return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=headers)
-        cli = compact_gaussians.compact_cli()
-        root = registry.runtime_resolver.artifact_root.parent / "cache" / "compact-objects"
-        path = (
-            compact_gaussians.get_compact(
-                root, canonical.artifact_checksum, lambda: registry.resolve_artifact(job_id, reference), cli
-            )
-            if cli is not None
-            else None
-        )
-    except ValidationError as error:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)) from error
+        registry.authorized_sog_by_checksum(job_id, checksum)
     except ArtifactStoreError as error:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
-    except compact_gaussians.CompactConversionError as error:
-        logger.warning("Không nén được Gaussian của vật job=%s cause=%s", job_id, error)
-        path = None
-    if path is None:
-        original = f"/api/v1/jobs/{quote(job_id, safe='')}/artifacts/content?" + urlencode(
-            {"artifact_uri": artifact_uri, "artifact_checksum": artifact_checksum}
-        )
-        return RedirectResponse(
-            original, status_code=status.HTTP_307_TEMPORARY_REDIRECT, headers={"Cache-Control": "private, no-store"}
-        )
-    return FileResponse(
-        path, media_type="application/octet-stream", headers={**headers, "X-Content-Type-Options": "nosniff"}
-    )
-
-
-def _quick_source(
-    job_id: str, artifact_uri: str, artifact_checksum: str
-) -> tuple[ProjectRegistry, ArtifactRef, ArtifactRef]:
-    """Ref SOG trong allow-list của job cho bản xem nhanh (T-068); không phải SOG thì 404."""
-    deps.job_or_404(job_id)
-    try:
-        reference = ArtifactRef(
-            artifact_type="ArtifactContent",
-            schema_version="1.0",
-            artifact_uri=artifact_uri,
-            artifact_checksum=artifact_checksum,
-            data_class="derived",
-            producer_stage="ST-EDIT",
-            job_id=job_id,
-        )
-        registry = deps.registry()
-        canonical = registry.authorized_artifact(job_id, reference)
-    except ValidationError as error:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)) from error
-    except ArtifactStoreError as error:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
-    if not canonical.artifact_uri.endswith(".sog"):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bản xem nhanh chỉ có cho SOG")
-    return registry, reference, canonical
-
-
-def _quick_root(registry: ProjectRegistry) -> Path:
-    return registry.runtime_resolver.artifact_root.parent / "cache" / "quick-sog"
-
-
-@router.get("/jobs/{job_id}/artifacts/quick/status")
-def get_quick_view_status(
-    job_id: str,
-    artifact_uri: str = Query(..., min_length=1),
-    artifact_checksum: Checksum = Query(...),
-) -> Response:
-    """`ready` / `building` / `unavailable`; chưa có thì bắt đầu tạo nền. Không đệm: trạng thái đổi khi tạo xong."""
-    registry, reference, canonical = _quick_source(job_id, artifact_uri, artifact_checksum)
-
-    def source() -> Path:
-        return registry.resolve_artifact(job_id, reference)
-
-    state = quick_sog.ensure(
-        _quick_root(registry), canonical.artifact_checksum, source, compact_gaussians.compact_cli()
-    )
-    return Response(
-        json.dumps({"state": state}),
-        media_type="application/json",
-        headers={"Cache-Control": "private, no-store"},
-    )
-
-
-@router.get("/jobs/{job_id}/artifacts/quick")
-def get_quick_view(
-    job_id: str,
-    artifact_uri: str = Query(..., min_length=1),
-    artifact_checksum: Checksum = Query(...),
-    if_none_match: Annotated[str | None, Header()] = None,
-) -> Response:
-    """Bản xem nhanh đã tạo của một SOG (T-068); chưa có thì 404 (giao diện dùng bản đầy đủ)."""
-    registry, _, canonical = _quick_source(job_id, artifact_uri, artifact_checksum)
-    etag = quick_sog.quick_etag(canonical.artifact_checksum)
+        raise not_found from error
+    etag = f'"lod-{checksum_hex[:24]}-{hashlib.sha256(path.encode()).hexdigest()[:16]}"'
     headers = {"ETag": etag, "Cache-Control": IMMUTABLE_PRIVATE}
     if not_modified(if_none_match, etag):
         return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=headers)
-    path = quick_sog.ready_path(_quick_root(registry), canonical.artifact_checksum)
-    if path is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bản xem nhanh chưa có")
+    resolver = registry.runtime_resolver
+    relative = f"{lod.lod_relative_dir(job_id, checksum)}/{path}"
+    local = resolver.artifact_root / relative
+    remote = resolver.remote
+    if not local.is_file() and remote is not None:
+        if path.endswith(".webp"):
+            # Khối dữ liệu tải thẳng từ kho file; file mục lục/meta vẫn qua API để đường dẫn tương đối trỏ về đây.
+            if remote.head(relative) is None:
+                raise not_found
+            seconds = deps.settings().artifact_presign_seconds
+            return RedirectResponse(
+                remote.presign(relative, seconds),
+                status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+                headers={"Cache-Control": f"private, max-age={max(0, seconds // 2 - 60)}"},
+            )
+        try:
+            remote.fetch(relative, local)
+        except ArtifactStoreError as error:
+            raise not_found from error
+    if not local.is_file():
+        raise not_found
     return FileResponse(
-        path, media_type="application/octet-stream", headers={**headers, "X-Content-Type-Options": "nosniff"}
+        local,
+        media_type=_LOD_MEDIA[Path(path).suffix],
+        headers={**headers, "X-Content-Type-Options": "nosniff"},
     )
 
 

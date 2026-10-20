@@ -2006,6 +2006,27 @@ class ProjectRegistry:
             raise ArtifactChecksumError("Artifact checksum không khớp reference đã publish")
         return canonical
 
+    def lod_candidates(self) -> list[tuple[str, ArtifactRef]]:
+        """SOG người dùng xem được của mọi job, job mới trước (T-070: worker GPU tạo bộ LOD cho chúng lúc rảnh)."""
+        found: list[tuple[str, ArtifactRef]] = []
+        for project in self.list_projects():
+            for job in reversed(self.list_jobs(project.project_id)):
+                try:
+                    references = self._product_visible_references(job.job_id)
+                except (ArtifactStoreError, ValueError, JobNotFoundError):
+                    continue
+                found.extend(
+                    (job.job_id, reference) for uri, reference in sorted(references.items()) if uri.endswith(".sog")
+                )
+        return found
+
+    def authorized_sog_by_checksum(self, job_id: str, checksum: str) -> ArtifactRef:
+        """SOG trong allow-list của job có đúng checksum (đường dẫn bộ LOD chỉ mang checksum)."""
+        for uri, reference in self._product_visible_references(job_id).items():
+            if uri.endswith(".sog") and reference.artifact_checksum == checksum:
+                return reference
+        raise ArtifactNotFoundError("SOG không thuộc allow-list của job")
+
     def presigned_artifact_url(self, job_id: str, reference: ArtifactRef, expires_seconds: int) -> str | None:
         """Link tải thẳng từ kho file cho artifact đã kiểm quyền; None khi không có kho file
         hoặc object chưa lên kho (dữ liệu cũ) — khi đó API tự phục vụ file."""
