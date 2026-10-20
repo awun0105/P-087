@@ -53,7 +53,7 @@ T-052 | Lưới va chạm Walk dựng một lần, trả 304 | implemented | sum
 T-053 | Đệm SceneIR / JobManifest đã parse; gzip; CORS | implemented | summarizer
 T-054 | Danh sách scene và stage-views nhẹ | implemented | summarizer
 T-055 | Một hàm trạng thái hình học theo vật | implemented | summarizer
-T-056 | Bảng mốc bước, ghi từ pipeline job | planned | engineer
+T-056 | Bảng mốc bước, ghi từ pipeline job | implemented | summarizer
 T-057 | Pha có kiểu và mốc bước cho hàng đợi tách vật | planned | engineer
 T-058 | Hàm thuần việc tiếp theo | planned | engineer
 T-059 | Endpoint tiến trình hợp nhất, nhẹ, có 304 | planned | engineer
