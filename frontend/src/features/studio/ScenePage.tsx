@@ -27,6 +27,8 @@ import type { ApiResult } from "@/lib/api/client";
 import type { PipelineView } from "@/lib/contracts/pipeline";
 import { pipelinePollInterval } from "@/features/studio/scene/pipeline";
 import { PipelineContext } from "@/features/studio/scene/pipelineContext";
+import { nextActionView } from "@/features/studio/nextAction";
+import { stageMeta } from "@/features/studio/stages";
 import { cn } from "@/lib/cn";
 import { useUrlState } from "@/features/studio/useUrlState";
 import { useNavigationGuard } from "@/features/shell/NavigationGuard";
@@ -298,8 +300,20 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
     external: pipeline ? pipeline.objectify : undefined,
     onRefresh: refreshPipeline,
   });
+  // T-062: nhãn đầu trang dùng cùng bảng câu chữ với chuông và danh sách scene.
   const status = progress
-    ? progressSceneStatus(progress, objectify.state?.awaiting_choice === true && !objectify.pending, geometryReviewStep(objectify.state))
+    ? pipeline
+      ? nextActionView(pipeline.next_action, {
+          wait: pipeline.wait,
+          waitingFor: progress.waiting_for ?? null,
+          objectifyMode: pipeline.objectify?.mode ?? null,
+          phase: pipeline.objectify?.phase ?? null,
+          currentStepShort: progress.current_stage ? stageMeta(progress.current_stage)?.short ?? null : null,
+          isReviewer: false,
+          gpu: pipeline.gpu,
+          now: Date.parse(progress.updated_at),
+        }).status
+      : progressSceneStatus(progress, objectify.state?.awaiting_choice === true && !objectify.pending, geometryReviewStep(objectify.state))
     : null;
   const studioMode: StudioMode = mode === "metric" && !waitingMetric ? "scene" : mode;
 
