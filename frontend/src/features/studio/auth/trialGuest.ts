@@ -3,8 +3,8 @@ import { ApiError } from "@/lib/api/client";
 
 /**
  * "Dùng thử ngay": mỗi trình duyệt một tài khoản Guest riêng, tạo ngầm bằng email và mật khẩu ngẫu nhiên.
- * Guest chỉ thao tác trên scene của chính mình và có hạn mức ngày do máy chủ giữ, nên không ai đụng được scene
- * của nhóm. Thông tin đăng nhập nằm trong localStorage của trình duyệt để lần sau quay lại vẫn là tài khoản đó;
+ * Guest xem được mọi scene nhưng chỉ sửa được scene của chính mình và có hạn mức ngày do máy chủ giữ, nên không
+ * ai đụng được scene của nhóm. Thông tin đăng nhập nằm trong localStorage của trình duyệt để lần sau quay lại vẫn là tài khoản đó;
  * mất localStorage thì chỉ là tạo tài khoản mới.
  */
 export const TRIAL_GUEST_KEY = "r2s-trial-guest";
