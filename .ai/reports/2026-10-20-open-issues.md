@@ -2,9 +2,10 @@
 
 **[GPU]** = cần build và chứng nhận lại image GPU · **[API]** = máy chủ API · **[Web]** = web Studio · **[Hạ tầng]** = cấu hình/máy.
 
-## 1. Máy chủ API hết bộ nhớ khi mở cảnh lớn — [Hạ tầng] [API]
-Máy 4 GB sập khi "Chỉnh vùng" trên drjohnson: mỗi lần nạp cả file 3D 472 MB, tốn khoảng 1,5 GB.
-**Giải quyết:** nâng `real2sim-api-seoul` lên e2-standard-2 (8 GB), đã được duyệt. Chỉ nạp toạ độ thay vì cả file; giới hạn số lần nạp cảnh lớn chạy cùng lúc.
+## 1. Máy chủ API hết bộ nhớ khi mở cảnh lớn — [API]
+Máy 4 GB sập khi "Chỉnh vùng" trên drjohnson: mỗi lần nạp cả file 3D 472 MB, tốn khoảng 1,5 GB. Đã nâng
+`real2sim-api-seoul` lên e2-standard-2 (8 GB) lúc 16:35 UTC; vài lần nạp cùng lúc hoặc cảnh lớn hơn vẫn có thể vượt.
+**Giải quyết:** chỉ nạp toạ độ thay vì cả file; giới hạn số lần nạp cảnh lớn chạy cùng lúc.
 
 ## 2. Job đang chạy tốt bị dừng vì "quá lâu" — [GPU] [Web]
 Hạn thời gian của bước xem trước chỉ ước theo số vòng học Brush, bỏ qua số khung và kiểu ghép ảnh của COLMAP. Quá 3 lần ước lượng là dừng (apartment: dừng ở phút 94 khi Brush đang chạy bình thường).
@@ -46,11 +47,7 @@ Lượt đo độ nét chạy 1 luồng chiếm phần lớn: khoảng 4–5 ph�
 
 **Giải quyết:** tự thử lại sau một khoảng chờ tăng dần. Tự gỡ trạng thái kẹt khi RunPod không có máy nào mang tên của lần thuê đó. Đọc lại danh mục khi file thay đổi. Cân nhắc thêm loại GPU dự phòng đã chứng nhận.
 
-## 10. Web không tự triển khai — [Hạ tầng]
-Mã `VERCEL_TOKEN` trên awun0105/P-087 hết hạn.
-**Giải quyết:** tạo mã mới ở vercel.com/account/tokens, rồi chạy `gh secret set VERCEL_TOKEN -R awun0105/P-087`.
-
-## 11. Đầu vào ảnh và chất lượng quay chụp — [GPU] [API] [Web]
+## 10. Đầu vào ảnh và chất lượng quay chụp — [GPU] [API] [Web]
 - Chưa nhận ảnh rời (JPG/PNG/HEIC).
 - Trình duyệt nén mạnh video có ít khung/giây.
 - Phần hướng dẫn quay chụp thiếu các điểm quyết định chất lượng.
