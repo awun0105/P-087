@@ -808,3 +808,107 @@ def test_max_pods_from_environment_is_accepted_as_documented(monkeypatch):
     monkeypatch.setenv("GPU_MAX_PODS", "2")
     with pytest.raises(ValueError):
         GpuSettings()
+
+
+class RefusingRunPod(FakeRunPod):
+    """Provider that definitely refuses a create without allocating anything."""
+
+    def __init__(self, error):
+        super().__init__()
+        self.refusal = error
+
+    def create(self, body):
+        self.creates += 1
+        self.last_body = body
+        raise self.refusal
+
+
+def test_definite_create_refusal_retires_intent_and_retries_later(world):
+    controller, store, _, work = world
+    refusing = RefusingRunPod(ProviderError("inventory_unavailable", ambiguous=False, retry_after=60))
+    controller.provider = refusing
+    assert controller.tick() == "create_refused"
+    c = store.read()
+    assert (c.state, c.intent, c.pod, c.boot_token) == ("absent", "", "", "")
+    assert c.error == "inventory_unavailable" and c.attempts == 1 and not c.drain
+    with store.database.transaction() as tx:
+        history = [json.loads(row[0]) for row in tx.execute("SELECT payload FROM r2s_gpu_history").fetchall()]
+    assert history and history[-1]["state"] == "terminated"
+    assert controller.tick() == "backoff"  # waits retry_after instead of hammering the provider
+    with store.locked() as (_, current, now):
+        current.retry_at = now - 1
+    assert controller.tick() == "create_refused" and refusing.creates == 2
+
+
+def test_repeated_definite_refusals_trip_the_circuit_breaker(world):
+    controller, store, _, _ = world
+    controller.provider = RefusingRunPod(ProviderError("provider_http", ambiguous=False, retry_after=1))
+    for _ in range(controller.policy.max_provision_attempts):
+        with store.locked() as (_, current, now):
+            current.retry_at = now - 1
+        assert controller.tick() == "create_refused"
+    assert store.read().drain
+
+
+def test_create_payload_matches_runpod_types(world, profile):
+    controller, *_ = world
+    payload = controller._payload(store_control(), profile.model_copy(update={"min_ram_gb": 31.5}), "qualified-gpu")
+    assert payload["minRAMPerGPU"] == 32 and isinstance(payload["minRAMPerGPU"], int)
+    assert payload["allowedCudaVersions"] == ["12.6"]
+    newest = profile.model_copy(update={"cuda_versions": ("12.6", "12.8", "13.0")})
+    assert "allowedCudaVersions" not in controller._payload(store_control(), newest, "qualified-gpu")
+
+
+def store_control():
+    from src.services.orchestration.gpu.state import Control
+
+    return Control(deployment="test", intent="i", boot_token="t")
+
+
+def test_transport_marks_only_definite_create_refusals_unambiguous(monkeypatch):
+    import io
+    import urllib.request
+    from urllib.error import HTTPError
+
+    from src.services.orchestration.gpu.provider import transport
+
+    def respond(code, body):
+        def fail(*args, **kwargs):
+            raise HTTPError("https://fixture", code, "x", {}, io.BytesIO(body))
+
+        monkeypatch.setattr(urllib.request, "urlopen", fail)
+
+    call = transport("fixture")
+    cases = [
+        (400, b"cannot unmarshal number 32.0", False, "provider_http"),
+        (500, b'{"error":"create pod: There are no instances currently available"}', False, "inventory_unavailable"),
+        (500, b"internal error", True, "provider_http"),
+        (401, b"denied", True, "auth"),
+    ]
+    for code, body, ambiguous, category in cases:
+        respond(code, body)
+        with pytest.raises(ProviderError) as error:
+            call("POST", "/pods", {})
+        assert (error.value.ambiguous, str(error.value)) == (ambiguous, category)
+        assert b"instances" not in str(error.value).encode()
+    respond(500, b"There are no instances currently available")
+    with pytest.raises(ProviderError) as error:
+        call("GET", "/pods", None)
+    assert not error.value.ambiguous and str(error.value) == "provider_http"
+
+
+def test_forget_unknown_only_when_no_pod_carries_the_intent_name(world):
+    controller, store, provider, _ = world
+    provider.create_error = ProviderError("timeout", ambiguous=True)
+    assert controller.tick() == "provider_error"
+    intent = store.read().intent
+    # FakeRunPod allocated the Pod before failing: the name proves it exists, so nothing is forgotten.
+    assert controller.forget_unknown() == "pod_exists"
+    provider.pods.clear()
+    assert controller.forget_unknown() == "forgotten"
+    c = store.read()
+    assert (c.state, c.intent) == ("absent", "") and c.error == "operator_forgot_unallocated_intent"
+    with store.database.transaction() as tx:
+        retired = [json.loads(r[0]) for r in tx.execute("SELECT payload FROM r2s_gpu_history").fetchall()]
+    assert any(h["intent"] == intent and h["state"] == "terminated" for h in retired)
+    assert controller.forget_unknown() == "nothing_to_forget"

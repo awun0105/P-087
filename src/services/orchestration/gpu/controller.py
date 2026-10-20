@@ -1,6 +1,7 @@
 """One-Pod reconciler. Provider calls never run inside a database transaction."""
 
 import json
+import math
 import secrets
 from collections.abc import Callable
 from dataclasses import replace
@@ -45,6 +46,18 @@ WORKER_KEYS = frozenset(
         "PRODUCT_INPUT_RUNTIME_REGISTRY",
     }
 )
+
+
+#: Newest version RunPod's allowedCudaVersions enum accepts. Hosts with newer drivers report newer CUDA versions
+#: that the filter cannot name, so listing this version means "this or newer" and the filter is omitted.
+_RUNPOD_NEWEST_CUDA_FILTER = "13.0"
+
+
+def _cuda_filter(versions: tuple[str, ...]) -> dict:
+    """allowedCudaVersions for the create payload; omitted when the profile accepts the newest filterable CUDA."""
+    if _RUNPOD_NEWEST_CUDA_FILTER in versions:
+        return {}
+    return {"allowedCudaVersions": list(versions)}
 
 
 class Controller:
@@ -114,12 +127,13 @@ class Controller:
             "cloudType": self.policy.cloud_type,
             "gpuCount": 1,
             "gpuTypeIds": [gpu_type],
-            "allowedCudaVersions": list(profile.cuda_versions),
+            **_cuda_filter(profile.cuda_versions),
             "gpuTypePriority": "custom",
             "interruptible": False,
             "containerDiskInGb": max(profile.scratch_gb, self.policy.container_disk_gb),
             "volumeInGb": 0,
-            "minRAMPerGPU": profile.min_ram_gb,
+            # RunPod's PodCreateInput.minRAMPerGPU is an int32; a float such as 32.0 is rejected with HTTP 400.
+            "minRAMPerGPU": math.ceil(profile.min_ram_gb),
             "minVCPUPerGPU": profile.min_cpus,
             "dockerStartCmd": ["worker"],
             "env": env,
@@ -129,6 +143,45 @@ class Controller:
         if self.policy.registry_auth_id:
             result["containerRegistryAuthId"] = self.policy.registry_auth_id
         return result
+
+    def _abandon_create(self, c: Control, error: ProviderError) -> str:
+        """Retire a create the provider definitely refused, keeping its history and the attempt count."""
+        with self.store.locked() as (tx, current, stamp):
+            if current.owner != self.owner or current.intent != c.intent:
+                return "follower"
+            retired = replace(
+                current, state="terminated", error=error.category, phase_seconds=dict(current.phase_seconds)
+            )
+            self.store.history(tx, retired, stamp)
+            current.state, current.intent, current.pod, current.boot_token = "absent", "", "", ""
+            current.profile_payload, current.workers, current.idle_since = {}, {}, None
+            current.phase_since, current.estimated_usd = stamp, 0
+            current.error, current.retry_at = error.category, stamp + error.retry_after
+            if current.attempts >= self.policy.max_provision_attempts:
+                current.drain = True  # Same circuit breaker as an empty inventory: operator resumes.
+        return "create_refused"
+
+    def forget_unknown(self) -> str:
+        """Operator recovery for an unresolved create: retire it only if the provider has no Pod with its name.
+
+        The name `r2s-<deployment>-<intent>` is unique per intent, so an empty match proves nothing was allocated
+        under this intent. Anything else (a recorded Pod id, a matching Pod) is left for normal reconciliation.
+        """
+        snapshot = self.store.read()
+        if snapshot.state not in {"unknown", "provisioning"} or not snapshot.intent or snapshot.pod:
+            return "nothing_to_forget"
+        name = f"r2s-{snapshot.deployment}-{snapshot.intent}"
+        if any(pod.get("name") == name for pod in self.provider.list()):
+            return "pod_exists"
+        with self.store.locked() as (tx, current, stamp):
+            if current.intent != snapshot.intent or current.pod or current.state not in {"unknown", "provisioning"}:
+                return "changed"
+            retired = replace(current, state="terminated", phase_seconds=dict(current.phase_seconds))
+            self.store.history(tx, retired, stamp)
+            current.state, current.intent, current.boot_token = "absent", "", ""
+            current.profile_payload, current.workers, current.idle_since = {}, {}, None
+            current.phase_since, current.estimated_usd, current.error = stamp, 0, "operator_forgot_unallocated_intent"
+        return "forgotten"
 
     def tick(self) -> str:
         with self.store.locked() as (_, current, now):
@@ -245,6 +298,9 @@ class Controller:
             try:
                 pod = self.provider.create(payload)
             except ProviderError as error:
+                if not error.ambiguous:
+                    # Definitely not allocated (rejected request or no capacity): retire the intent and retry later.
+                    return self._abandon_create(c, error)
                 c.state, c.error = "unknown", error.category
                 c.retry_at = now + error.retry_after
                 self._save(c)
