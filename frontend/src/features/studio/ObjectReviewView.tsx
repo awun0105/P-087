@@ -20,7 +20,7 @@ import {
   Undo2,
   X,
 } from "lucide-react";
-import { Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode, useSyncExternalStore } from "react";
+import { Fragment, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode, useSyncExternalStore } from "react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/shadcn/alert-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/shadcn/tabs";
 import { subscribeTheme, themeColor, themeKey } from "@/lib/theme";
@@ -195,6 +195,8 @@ function parseColliderForm(object: SceneObject, values: ColliderFormValues): { p
 
 type ROIForm = { minX: string; minY: string; minZ: string; maxX: string; maxY: string; maxZ: string };
 
+/** Mảng rỗng dùng chung: `?? []` tạo mảng mới mỗi render làm viewer dựng lại dấu bề mặt và vẽ lại (T-064). */
+const EMPTY_PLANES: readonly CollisionSurfacePlane[] = [];
 const EMPTY_ROI: ROIForm = { minX: "", minY: "", minZ: "", maxX: "", maxY: "", maxZ: "" };
 const ROI_FIELDS: { key: keyof ROIForm; label: string }[] = [
   { key: "minX", label: "X nhỏ nhất (m)" },
@@ -724,6 +726,38 @@ export function ObjectReviewView({
     setError(null);
   }
 
+  // T-064: prop của viewer giữ nguyên tham chiếu khi dữ liệu 3D không đổi; prop mới làm viewer dựng lại lớp phủ và vẽ lại.
+  const runRef = useRef(run);
+  useLayoutEffect(() => {
+    runRef.current = run;
+  });
+  const surfaceSourceChecksum = scene ? (scene.environment.collision_source_ref ?? scene.environment.geometry_ref).artifact_checksum : null;
+  const surfacePlanes = (scene?.provenance.collision_surface_planes as CollisionSurfacePlane[] | undefined) ?? EMPTY_PLANES;
+  const viewerInspection = useMemo(() => ({ onReady: setInspectionController, onState: setInspectionState }), []);
+  const collisionSourceLabel: "Object-aware" | "Legacy" = scene?.environment.object_aware_collision_ref ? "Object-aware" : "Legacy";
+  const backgroundChecksum = scene ? (scene.environment.collider_ref ?? scene.environment.collision_source_ref ?? scene.environment.geometry_ref).artifact_checksum : "";
+  const selectedParts = (() => {
+    const parts = scene?.objects.find((object) => object.id === selected)?.collider?.parameters.parts;
+    return typeof parts === "number" ? parts : null;
+  })();
+  const collisionDiagnostics = useMemo(
+    () => ({ source: collisionSourceLabel, backgroundChecksum, selectedParts }),
+    [collisionSourceLabel, backgroundChecksum, selectedParts],
+  );
+  const onMarkSurface = useCallback((kind: CollisionSurfacePlane["kind"], points: CollisionSurfacePlane["points"]) => runRef.current(revision => editCollisionSurface(jobId, {
+    expected_scene_revision: revision, source_checksum: surfaceSourceChecksum ?? "", action: "mark", kind, points,
+  })), [jobId, surfaceSourceChecksum]);
+  const onFillSurface = useCallback((plane_id: string) => runRef.current(revision => editCollisionSurface(jobId, {
+    expected_scene_revision: revision, source_checksum: surfaceSourceChecksum ?? "", action: "fill", plane_id,
+  })), [jobId, surfaceSourceChecksum]);
+  const onRemoveSurface = useCallback((plane_id: string) => runRef.current(revision => editCollisionSurface(jobId, {
+    expected_scene_revision: revision, source_checksum: surfaceSourceChecksum ?? "", action: "remove", plane_id,
+  })), [jobId, surfaceSourceChecksum]);
+  const onTransform = useCallback(
+    (id: string, position: [number, number, number], rotation: [number, number, number, number]) => runRef.current((revision) => setObjectTransform(jobId, revision, id, position, rotation)),
+    [jobId],
+  );
+
   if (missing) {
     return <Notice className="m-4">Chưa có vật thể: bước tách vật thể chạy sau khi dựng collision xong.</Notice>;
   }
@@ -828,27 +862,14 @@ export function ObjectReviewView({
             sceneRevision={scene.scene_revision}
             lockedReason={geometryLockReason}
             collisionPreview
-            inspection={{ onReady: setInspectionController, onState: setInspectionState }}
-            collisionDiagnostics={{
-              source: scene.environment.object_aware_collision_ref ? "Object-aware" : "Legacy",
-              backgroundChecksum: (scene.environment.collider_ref ?? scene.environment.collision_source_ref ?? scene.environment.geometry_ref).artifact_checksum,
-              selectedParts: typeof current?.collider?.parameters.parts === "number" ? current.collider.parameters.parts : null,
-            }}
+            inspection={viewerInspection}
+            collisionDiagnostics={collisionDiagnostics}
             surfaceToolsTarget={surfaceToolsTarget}
             surfaceToolsActive={panelTab === "surfaces" && !leftCollapsed}
-            surfacePlanes={(scene.provenance.collision_surface_planes ?? []) as CollisionSurfacePlane[]}
-            onMarkSurface={(kind, points) => run(revision => editCollisionSurface(jobId, {
-              expected_scene_revision: revision, source_checksum: (scene.environment.collision_source_ref ?? scene.environment.geometry_ref).artifact_checksum,
-              action: "mark", kind, points,
-            }))}
-            onFillSurface={plane_id => run(revision => editCollisionSurface(jobId, {
-              expected_scene_revision: revision, source_checksum: (scene.environment.collision_source_ref ?? scene.environment.geometry_ref).artifact_checksum,
-              action: "fill", plane_id,
-            }))}
-            onRemoveSurface={plane_id => run(revision => editCollisionSurface(jobId, {
-              expected_scene_revision: revision, source_checksum: (scene.environment.collision_source_ref ?? scene.environment.geometry_ref).artifact_checksum,
-              action: "remove", plane_id,
-            }))}
+            surfacePlanes={surfacePlanes}
+            onMarkSurface={onMarkSurface}
+            onFillSurface={onFillSurface}
+            onRemoveSurface={onRemoveSurface}
             cameras={cameras}
             boxes={boxes}
             objects={splats}
@@ -867,7 +888,7 @@ export function ObjectReviewView({
             } : null}
             regionApi={regionApi}
             gizmo={!(regionPanelOpen && regionOpen) && !geometryLockReason && tool !== "none" && current && isPlaced(current) && !hiddenIds.has(current.id) ? { id: current.id, mode: tool } : null}
-            onTransform={(id, position, rotation) => run((revision) => setObjectTransform(jobId, revision, id, position, rotation))}
+            onTransform={onTransform}
             focus={focus}
             onPickBox={selectFromScene}
             physicsObjects={physicsObjects}
