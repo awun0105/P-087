@@ -217,13 +217,15 @@ class ArtifactRemote:
             pushed += 1
         return pushed
 
-    def pull_tree(self, relative_dir: str, local_dir: Path) -> int:
-        """Tải mọi object của một namespace còn thiếu trong cache. Trả số file vừa tải."""
+    def pull_tree(self, relative_dir: str, local_dir: Path, *, skip_top: frozenset[str] = frozenset()) -> int:
+        """Tải mọi object của một namespace còn thiếu trong cache, trừ thư mục con cấp đầu trong `skip_top`."""
         prefix = self.key(relative_dir.rstrip("/") + "/")
         pulled = 0
         for item in self.store.list_objects(prefix):
             relative_path = item.key.removeprefix(prefix)
             if not relative_path or any(part in {"", ".", ".."} for part in relative_path.split("/")):
+                continue
+            if relative_path.split("/", 1)[0] in skip_top:
                 continue
             destination = local_dir / relative_path
             if destination.is_file():

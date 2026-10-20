@@ -173,3 +173,18 @@ def test_locate_finds_artifact_published_by_another_machine(tmp_path) -> None:  
     found = reader.locate(uri, fresh=True)
     assert found is not None and found.read_text() == "scene" and found.is_relative_to(tmp_path / "api")
     assert ArtifactResolver(tmp_path / "local-only").locate(uri) is None
+
+
+def test_sync_down_skips_derived_view_caches(tmp_path: Path, store: MemoryObjectStore) -> None:
+    """T-070: LOD bundles (tens of MB) live under jobs/<job>/derived/; a GPU worker re-running a job must not pull them."""
+    gpu = _machine(tmp_path / "gpu", store)
+    job_dir = tmp_path / "gpu/jobs/job-a"
+    (job_dir / "derived/lod/abc/0_0").mkdir(parents=True)
+    (job_dir / "derived/lod/abc/0_0/means_l.webp").write_bytes(b"webp")
+    (job_dir / "result.json").write_bytes(b"{}")
+    assert gpu.sync_up("job-a") == 2
+
+    fresh = _machine(tmp_path / "fresh", store)
+    assert fresh.sync_down("job-a") == 1
+    assert (tmp_path / "fresh/jobs/job-a/result.json").is_file()
+    assert not (tmp_path / "fresh/jobs/job-a/derived").exists()
