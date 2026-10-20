@@ -128,9 +128,15 @@ def test_finish_keeps_first_completion(tmp_path: Path) -> None:
 
     database = _db(tmp_path)
     first = _T0 + timedelta(minutes=5)
-    record_marks(database, "job-a", "pipeline", "1", [MarkWrite("finish", "ST-METRIC-CANONICALIZE", first, "succeeded")])
     record_marks(
-        database, "job-a", "pipeline", "1", [MarkWrite("finish", "ST-METRIC-CANONICALIZE", first + timedelta(hours=1), "failed")]
+        database, "job-a", "pipeline", "1", [MarkWrite("finish", "ST-METRIC-CANONICALIZE", first, "succeeded")]
+    )
+    record_marks(
+        database,
+        "job-a",
+        "pipeline",
+        "1",
+        [MarkWrite("finish", "ST-METRIC-CANONICALIZE", first + timedelta(hours=1), "failed")],
     )
     (mark,) = list_marks(database, "job-a")
     assert (mark.completed_at, mark.outcome) == (first, "succeeded")
@@ -167,3 +173,29 @@ def test_record_marks_logs_and_swallows_database_errors(tmp_path: Path, caplog: 
 
     record_marks(Broken(), "job-a", "pipeline", "1", [MarkWrite("start", "x", _T0)])  # type: ignore[arg-type]
     assert "job-a" in caplog.text
+
+
+# ── wiring: every committed job revision records its marks ───────────────────
+
+
+def test_job_lifecycle_records_marks(tmp_path: Path) -> None:
+    from src.models.contracts.manifests import ExecutionError
+    from src.services.orchestration.jobs.models import TransitionRequest
+    from src.services.orchestration.jobs.step_marks import list_marks
+    from tests.test_orchestration.test_job_lease import _registry as db_registry
+    from tests.test_orchestration.test_job_lease import _running_job
+
+    registry = db_registry(tmp_path)
+    job = _running_job(registry)
+    job = registry.record_stage_progress(job, StageId.CAMERA_POSE)
+    error = ExecutionError(error_code="COLMAP_TIMEOUT", stage_id=StageId.CAMERA_POSE, human_message="x", retryable=True)
+    registry.transition_job(
+        job.job_id,
+        TransitionRequest(target_status=JobStatus.FAILED, error=error),
+        expected_checksum=job.job_manifest_checksum,
+    )
+
+    marks = {mark.step_id: mark for mark in list_marks(registry.persistence.database, job.job_id)}
+    assert marks[StageId.CAMERA_POSE.value].started_at is not None
+    assert marks[StageId.CAMERA_POSE.value].outcome == "failed"
+    assert all(mark.run_kind == "pipeline" and mark.run_id == "1" for mark in marks.values())

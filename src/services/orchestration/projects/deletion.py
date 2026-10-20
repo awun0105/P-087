@@ -68,6 +68,7 @@ _TABLE_COLUMNS: dict[str, tuple[str, ...]] = {
         "payload",
     ),
     "r2s_job_events": ("job_id", "version", "payload"),
+    "r2s_step_marks": ("job_id", "run_kind", "run_id", "step_id", "started_at", "completed_at", "outcome"),
     "r2s_scene_requests": ("job_id", "status", "payload"),
     "r2s_scene_heads": ("job_id", "generation", "allocation_sequence", "head_checksum", "payload"),
     "r2s_scene_head_repairs": ("job_id", "status", "generation", "repair_checksum", "payload"),
@@ -93,7 +94,7 @@ _TABLE_COLUMNS: dict[str, tuple[str, ...]] = {
         "payload",
     ),
 }
-_KEY_WIDTH = {"r2s_input_runs": 2, "r2s_job_events": 2, "r2s_scene_head_backfill_items": 2}
+_KEY_WIDTH = {"r2s_input_runs": 2, "r2s_job_events": 2, "r2s_scene_head_backfill_items": 2, "r2s_step_marks": 4}
 #: Con trước cha, theo khoá ngoại của schema runtime.
 _DELETE_ORDER = (
     "r2s_scene_requests",
@@ -101,6 +102,7 @@ _DELETE_ORDER = (
     "r2s_scene_head_backfill_items",
     "r2s_scene_head_repairs",
     "r2s_scene_heads",
+    "r2s_step_marks",
     "r2s_job_events",
     "r2s_input_runs",
     "r2s_jobs",
@@ -381,6 +383,7 @@ class _Collector:
             + backfill_items
             + publications
             + self._select("r2s_job_events", "job_id=? ORDER BY version", (job_id,))
+            + self._select("r2s_step_marks", "job_id=?", (job_id,))
             + self._select("r2s_input_runs", "job_id=?", (job_id,))
         )
         for kind in ("artifact", "worker", "rerun"):

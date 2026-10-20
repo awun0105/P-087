@@ -386,6 +386,12 @@ class ProjectPersistence:
                     "INSERT INTO r2s_job_events(job_id,version,payload) VALUES (?,?,?)",
                     (manifest.job_id, version, event.model_dump_json()),
                 )
+                # T-056: mốc bước của revision này, cùng transaction (không commit thì không có mốc).
+                from src.services.orchestration.jobs.step_marks import apply_marks, marks_for_revision
+
+                apply_marks(
+                    tx, manifest.job_id, "pipeline", str(event.attempt), marks_for_revision(expected, manifest, event)
+                )
                 if input_assembly_run is not None:
                     if verified_input_chain is None:
                         raise AssertionError("validated input chain missing")
