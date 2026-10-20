@@ -49,6 +49,8 @@ import { useWalkSession } from "@/features/studio/value/useWalkSession";
 import { themeColor } from "@/lib/theme";
 import { cn } from "@/lib/cn";
 import { viewerRenderer } from "@/features/viewer/renderer-setting";
+import { QuickViewButton } from "@/features/viewer/QuickViewButton";
+import { useQuickView } from "@/features/viewer/useQuickView";
 
 const EMPTY_OBJECTS: readonly OverlayObject[] = [];
 const NO_PHYSICS: readonly PhysicsObjectInput[] = [];
@@ -203,7 +205,9 @@ export function MetricSceneView({
   const lidarUrl = lidarOverlay ? jobLidarOverlayUrl(jobId, lidarOverlay) : null;
   const [collisionState, setCollisionState] = useState<{ triangles?: number; error?: string } | null>(null);
   const initialCamera = useMemo(() => recordingCameraPose("z_up", cameras), [cameras]);
-  const contentUrl = jobArtifactContentUrl(jobId, visual);
+  // T-068: bản xem nhanh khi máy chủ đã có (scene lớn), không thì bản gốc.
+  const quickView = useQuickView(jobId, visual);
+  const contentUrl = quickView.url;
   // Draft: lưới va chạm theo vật chưa có, máy chủ sẽ từ chối; không gọi để khỏi báo lỗi thừa.
   const collisionUrl = collision && !lockedReason ? (sceneRevision ? jobWalkCollisionUrl(jobId, collision, [], sceneRevision, "canonical", collisionPreview) : jobArtifactContentUrl(jobId, collision)) : null;
   const walkCollisionUrl = collision && !lockedReason ? jobWalkCollisionUrl(jobId, collision, [], sceneRevision, "display", collisionPreview, reconstruction) : null;
@@ -702,6 +706,9 @@ export function MetricSceneView({
           </button>
         </div>
       )}
+      {!quickView.settled ? (
+        <p role="status" className="absolute top-3 left-3 z-10 rounded border border-line-dark bg-viewport-deep/85 p-2 text-sm text-on-dark">Đang tải bản xem 3DGS…</p>
+      ) : (
       <PlayCanvasScene
         contentUrl={contentUrl}
         contentFilename={visual.artifact_uri.split("/").pop() ?? "scene.sog"}
@@ -729,6 +736,7 @@ export function MetricSceneView({
             className="sse-buttonGroup flex items-center shrink-0 border border-line-dark"
             onPointerDown={(e) => e.stopPropagation()}
           >
+            <QuickViewButton view={quickView} />
             <button
               type="button"
               className="sse-controlButton flex items-center justify-center text-on-dark/80 hover:text-on-dark transition-colors disabled:opacity-40"
@@ -844,6 +852,7 @@ export function MetricSceneView({
           </div>
         }
       />
+      )}
       {selectedObject && (
         <div
           role="toolbar"

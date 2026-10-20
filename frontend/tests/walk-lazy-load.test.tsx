@@ -7,6 +7,11 @@ import type { PhysicsObjectInput } from "@/features/viewer/usePhysicsPlay";
 
 const renderViewer = vi.hoisted(() => vi.fn());
 const loadAmmo = vi.hoisted(() => vi.fn(() => new Promise(() => undefined)));
+// T-068: viewer dùng bản gốc ngay (không hỏi trạng thái bản xem nhanh) trong test này.
+vi.mock("@/features/viewer/useQuickView", async () => {
+  const { jobArtifactContentUrl } = await import("@/lib/api/endpoints");
+  return { useQuickView: (jobId: string, ref: { artifact_uri: string; artifact_checksum: string }) => ({ url: jobArtifactContentUrl(jobId, ref), quick: false, settled: true, showFull: () => undefined }) };
+});
 vi.mock("@/features/viewer/shell-glow", () => ({ ShellGlowLayer: class { destroy = vi.fn(); setShell = vi.fn(); clear = vi.fn(); setHovered = vi.fn(); } }));
 vi.mock("@/features/viewer/scene-overlay", () => ({ SceneOverlay: class { prioritizeObject = vi.fn();
   objectEntity = () => ({}); attachGizmo = vi.fn(); destroy = vi.fn(); detachGizmo = vi.fn(); setObjects = vi.fn(); setBoxes = vi.fn();

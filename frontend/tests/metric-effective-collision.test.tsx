@@ -8,6 +8,11 @@ import type { CollisionSurfacePlane } from "@/lib/api/studio";
 const setShell = vi.hoisted(() => vi.fn(async () => undefined));
 const clearShell = vi.hoisted(() => vi.fn());
 const setHovered = vi.hoisted(() => vi.fn());
+// T-068: viewer dùng bản gốc ngay (không hỏi trạng thái bản xem nhanh) trong test này.
+vi.mock("@/features/viewer/useQuickView", async () => {
+  const { jobArtifactContentUrl } = await import("@/lib/api/endpoints");
+  return { useQuickView: (jobId: string, ref: { artifact_uri: string; artifact_checksum: string }) => ({ url: jobArtifactContentUrl(jobId, ref), quick: false, settled: true, showFull: () => undefined }) };
+});
 vi.mock("@/features/viewer/shell-glow", () => ({ ShellGlowLayer: class {
   destroy = vi.fn(); setShell = setShell; clear = clearShell; setHovered = setHovered;
 } }));

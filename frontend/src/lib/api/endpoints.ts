@@ -89,6 +89,29 @@ export function jobCompactGaussiansUrl(jobId: string, ref: { artifact_uri: strin
   });
 }
 
+/** Bản xem nhanh của một SOG (T-068): ≤500 nghìn splat, màu bậc 0; chỉ có sau khi máy chủ tạo xong. */
+export function jobQuickViewUrl(jobId: string, ref: { artifact_uri: string; artifact_checksum: string }): string {
+  return apiUrl(`/api/v1/jobs/${encodeURIComponent(jobId)}/artifacts/quick`, {
+    artifact_uri: ref.artifact_uri,
+    artifact_checksum: ref.artifact_checksum,
+  });
+}
+
+/** Trạng thái bản xem nhanh; gọi lần đầu thì máy chủ bắt đầu tạo nền. */
+export function getQuickViewStatus(
+  jobId: string,
+  ref: { artifact_uri: string; artifact_checksum: string },
+  signal?: AbortSignal,
+): Promise<ApiResult<{ state: "ready" | "building" | "unavailable" }>> {
+  return fetchApi(
+    apiUrl(`/api/v1/jobs/${encodeURIComponent(jobId)}/artifacts/quick/status`, {
+      artifact_uri: ref.artifact_uri,
+      artifact_checksum: ref.artifact_checksum,
+    }),
+    { signal },
+  );
+}
+
 /** Lớp LiDAR đã căn chỉnh của scene (float32 xyz, mét, Z-up); `key` đổi theo bản căn chỉnh để cache đúng bản. */
 export function jobLidarOverlayUrl(jobId: string, key: string): string {
   return apiUrl(`/api/v1/jobs/${encodeURIComponent(jobId)}/lidar-overlay`, { v: key });
