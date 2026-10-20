@@ -36,10 +36,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Bộ test frontend hiện còn một số ca lỗi sẵn trên develop (xem CI);
-      # chạy để có log nhưng không chặn phát hành, giống deploy tay trước đây.
-      - name: Test (non-blocking)
-        continue-on-error: true
+      # Test hỏng thì không phát hành.
+      - name: Test
         run: npm test
 
       - name: Deploy to Vercel (production)
