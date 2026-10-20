@@ -388,6 +388,14 @@ describe("Inspect theo giai đoạn", () => {
     expect(screen.queryByText("Collision eligibility: không")).toBeNull();
   });
 
+  it("tên dự án về chậm không chặn viewer (T-065)", async () => {
+    vi.mocked(getProject).mockReturnValue(new Promise(() => undefined));
+    show("ST-VISUAL-RECON");
+    expect(await screen.findByText("Scene: ST-VISUAL-RECON")).toBeInTheDocument();
+    expect(getJob).toHaveBeenCalledOnce();
+    expect(listJobArtifacts).toHaveBeenCalledOnce();
+  });
+
   it("link trực tiếp tới bước chưa xong không tải output hoặc mount viewer", async () => {
     vi.mocked(getJobProgress).mockResolvedValue({ ok: true, data: { ...progress, stages: progress.stages.map((stage) => ({ ...stage, state: "pending" })) } });
     show("ST-VISUAL-RECON");
