@@ -18,6 +18,12 @@ Hạn thời gian của bước xem trước chỉ ước theo số vòng học 
 Job báo thành công, bước Tách vật thể nằm ở trạng thái chờ mãi; lý do chỉ có trong nhật ký máy GPU (cup, chinsu: "mặt sàn nhiễu 5,18 cm vượt ngưỡng 3 cm").
 **Giải quyết:** ghi bước là THẤT BẠI kèm lý do và cách sửa (chụp thêm, đo tỉ lệ tay, chọn mặt phẳng). Xem lại ngưỡng sàn cho cảnh vật đặt trên bàn.
 
+## 4b. Thông báo lỗi bảo người dùng làm việc không có chỗ làm — [GPU] [Web]
+Bước tạo hình học thất bại với "Không tìm được chỗ trống cho robot quanh camera đầu; cần chọn điểm robot đứng"
+(apartment), nhưng web và API không có chỗ nào để chọn điểm robot đứng; lỗi lại đánh dấu không thử lại được.
+**Giải quyết:** thêm bước chọn điểm robot đứng trên bản xem 3D (hoặc tự thử các vị trí camera khác trước khi báo lỗi);
+rà mọi thông báo lỗi để mỗi hướng dẫn đều có nút hay màn hình tương ứng.
+
 ## 5. 3 worker trên một máy GPU gần như không chạy song song — [GPU]
 - Cấu hình chưa từng đo bị bắt chạy một mình trên GPU; chỉnh bất kỳ thông số nào cũng thành cấu hình mới.
 - Job giữ chỗ GPU suốt cả lượt, kể cả các bước chỉ dùng CPU.
