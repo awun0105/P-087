@@ -127,9 +127,39 @@ export function stagesFor(stageIds: readonly StageId[]): readonly StageMeta[] {
   return [...STUDIO_STAGES.slice(0, index), ...lidarStages, ...STUDIO_STAGES.slice(index)];
 }
 
+/** Bước người dùng xem bản đã che (T-061); có khi job chọn che khuôn mặt / biển số. */
+export const ANONYMIZATION_REVIEW_STAGE: StageMeta = {
+  id: "ST-ANONYMIZATION-REVIEW",
+  title: "Xem bản đã che",
+  short: "Xem bản che",
+  description: "Khuôn mặt và biển số phát hiện được đã bị che. Bạn xem lại rồi xác nhận để hệ thống dựng 3D từ bản đã che.",
+};
+
+/** Bước người dùng duyệt vật trước khi Tạo mesh (T-061). */
+export const OBJECT_CONFIRM_STAGE: StageMeta = {
+  id: "ST-OBJECT-CONFIRM",
+  title: "Duyệt vật",
+  short: "Duyệt vật",
+  description: "Bạn xác nhận hoặc bỏ qua từng vật, sửa vùng bằng box nếu cần, rồi bấm Tạo mesh.",
+};
+
+/** Bước hệ thống Tạo mesh và lưới va chạm từng vật (T-061). */
+export const SCENE_DECOMPOSE_STAGE: StageMeta = {
+  id: "ST-SCENE-DECOMPOSE",
+  title: "Tạo mesh và lưới va chạm từng vật",
+  short: "Tạo mesh",
+  description: "Dựng bề mặt, lưới va chạm từng vật và vá nền. Xong bước này mới đi bộ (Walk) và xuất gói được.",
+};
+
+const EXTRA_STAGES: readonly StageMeta[] = [
+  LIDAR_STAGE,
+  LIDAR_ODOMETRY_STAGE,
+  LIDAR_CALIBRATION_QA_STAGE,
+  ANONYMIZATION_REVIEW_STAGE,
+  OBJECT_CONFIRM_STAGE,
+  SCENE_DECOMPOSE_STAGE,
+];
+
 export function stageMeta(id: StageId): StageMeta | undefined {
-  if (id === LIDAR_STAGE.id) return LIDAR_STAGE;
-  if (id === LIDAR_ODOMETRY_STAGE.id) return LIDAR_ODOMETRY_STAGE;
-  if (id === LIDAR_CALIBRATION_QA_STAGE.id) return LIDAR_CALIBRATION_QA_STAGE;
-  return STUDIO_STAGES.find((stage) => stage.id === id);
+  return EXTRA_STAGES.find((stage) => stage.id === id) ?? STUDIO_STAGES.find((stage) => stage.id === id);
 }
