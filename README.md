@@ -59,7 +59,7 @@ Test chạy trên dữ liệu giả; chúng không thay cho việc chạy job GP
 | --- | --- |
 | Vì sao làm sản phẩm này, cho ai | [BRAINSTORM](docs/BRAINSTORM.md), [MASTER_PITCH](docs/MASTER_PITCH.md) |
 | Sản phẩm phải làm gì, nghiệm thu thế nào | [PRD](docs/PRD.md) |
-| Hệ thống gồm những phần nào | [ARCHITECTURE](ARCHITECTURE.md) |
+| Hệ thống gồm những phần nào | [ARCHITECTURE](docs/ARCHITECTURE.md) |
 | Dữ liệu đi qua những bước xử lý nào | [PIPELINE](docs/PIPELINE.md) |
 | Quy tắc dữ liệu giữa các phần | [CONTRACTS](docs/CONTRACTS.md) |
 | Dùng Studio thế nào | [UX](docs/UX.md) |

@@ -18,7 +18,7 @@
 
 Các lệnh dưới đây chạy từ **root checkout** trong Bash, trừ khi có ghi khác. Đường dẫn `/duong/dan/...` phải thay bằng vị trí thật. Cài dependency, build image, `up`, restore, publish và điều khiển worker đều có tác động; chọn đúng mục theo môi trường đang vận hành.
 
-[PRD](PRD.md) giữ phạm vi sản phẩm; [ARCHITECTURE](../ARCHITECTURE.md) giải thích process/storage; [PIPELINE](PIPELINE.md) giải thích chặng xử lý; [CONTRACTS](CONTRACTS.md) giữ quy tắc artifact/state; [UX](UX.md) hướng dẫn thao tác trong Studio. Tài liệu này tập trung vào công việc của người cài và vận hành.
+[PRD](PRD.md) giữ phạm vi sản phẩm; [ARCHITECTURE](ARCHITECTURE.md) giải thích process/storage; [PIPELINE](PIPELINE.md) giải thích chặng xử lý; [CONTRACTS](CONTRACTS.md) giữ quy tắc artifact/state; [UX](UX.md) hướng dẫn thao tác trong Studio. Tài liệu này tập trung vào công việc của người cài và vận hành.
 
 ## 1. Chuẩn bị cấu hình và dữ liệu
 

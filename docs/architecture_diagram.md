@@ -1,6 +1,6 @@
 # Sơ đồ kiến trúc
 
-Bản tóm tắt bằng hình cho hồ sơ nộp bài. Giải thích đầy đủ từng thành phần, ranh giới và cách lưu dữ liệu nằm ở [ARCHITECTURE](../ARCHITECTURE.md); luồng xử lý từng bước nằm ở [PIPELINE](PIPELINE.md).
+Bản tóm tắt bằng hình cho hồ sơ nộp bài. Giải thích đầy đủ từng thành phần, ranh giới và cách lưu dữ liệu nằm ở [ARCHITECTURE](ARCHITECTURE.md); luồng xử lý từng bước nằm ở [PIPELINE](PIPELINE.md).
 
 ## Hệ thống đang chạy
 

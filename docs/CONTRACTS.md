@@ -13,7 +13,7 @@ Hợp đồng dữ liệu quy định cấu trúc và ý nghĩa dữ liệu mà 
 | Tài liệu | Nội dung thuộc tài liệu đó |
 | --- | --- |
 | [PRD](PRD.md) | Phạm vi sản phẩm, quyền người dùng và tiêu chí nghiệm thu |
-| [ARCHITECTURE](../ARCHITECTURE.md) | Module, nơi đặt code, lưu trữ và mô hình triển khai |
+| [ARCHITECTURE](ARCHITECTURE.md) | Module, nơi đặt code, lưu trữ và mô hình triển khai |
 | [PIPELINE](PIPELINE.md) | Thứ tự chạy, nhánh xử lý, điểm chờ và cách tiếp tục |
 | CONTRACTS | Định danh, ý nghĩa dữ liệu và điều kiện bàn giao hợp lệ |
 

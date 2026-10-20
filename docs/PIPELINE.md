@@ -10,7 +10,7 @@
 | Trạng thái | Tài liệu đối chiếu source; không phải kết quả chạy lại pipeline/GPU/browser/Isaac |
 | Mặc định job mới | Các preset hiện có dùng `scene.geometry_method=shell`, `scene.geometry_review=required`, `scene.refinement=multiview_v1` |
 
-Tài liệu này trình bày **cơ chế đang có trong code**. Phạm vi sản phẩm và nghiệm thu thuộc [PRD](PRD.md); ranh giới module/process, DB/artifact và deployment thuộc [ARCHITECTURE](../ARCHITECTURE.md). Schema chi tiết vẫn lấy từ model/API; công thức đánh giá nằm ở [EVALUATION](EVALUATION.md), lệnh cài/chạy ở [OPERATIONS](OPERATIONS.md).
+Tài liệu này trình bày **cơ chế đang có trong code**. Phạm vi sản phẩm và nghiệm thu thuộc [PRD](PRD.md); ranh giới module/process, DB/artifact và deployment thuộc [ARCHITECTURE](ARCHITECTURE.md). Schema chi tiết vẫn lấy từ model/API; công thức đánh giá nằm ở [EVALUATION](EVALUATION.md), lệnh cài/chạy ở [OPERATIONS](OPERATIONS.md).
 
 ### 0.1 Ba khái niệm cần phân biệt
 

@@ -10,7 +10,7 @@ Mỗi chủ đề có **một** tài liệu trình bày chính. Tài liệu khá
 | [BRAINSTORM](BRAINSTORM.md) | Vì sao chọn bài toán này, lập luận định vị | Cần hiểu gốc ý tưởng |
 | [MASTER_PITCH](MASTER_PITCH.md) | Câu chuyện sản phẩm, người dùng, thông điệp, điều được phép nói | Chuẩn bị trình bày, viết nội dung giới thiệu |
 | [PRD](PRD.md) | Sản phẩm phải làm gì, cho ai, nghiệm thu bằng tiêu chí nào | Quyết định phạm vi, viết tiêu chí hoàn thành |
-| [ARCHITECTURE](../ARCHITECTURE.md) | Hệ thống gồm phần nào, mỗi phần giữ dữ liệu gì, nối với nhau ra sao | Thêm module, đổi nơi lưu, đổi cách triển khai |
+| [ARCHITECTURE](ARCHITECTURE.md) | Hệ thống gồm phần nào, mỗi phần giữ dữ liệu gì, nối với nhau ra sao | Thêm module, đổi nơi lưu, đổi cách triển khai |
 | [PIPELINE](PIPELINE.md) | Dữ liệu đi qua những bước nào, nhánh nào, chờ người dùng ở đâu | Sửa một bước xử lý, chẩn đoán job |
 | [CONTRACTS](CONTRACTS.md) | Quy tắc định danh, checksum, tọa độ, revision, bằng chứng giữa các phần | Đổi schema, thêm artifact, đổi luồng duyệt |
 | [UX](UX.md) | Màn hình, thao tác, quyền và trạng thái hiển thị | Sửa giao diện, viết hướng dẫn người dùng |

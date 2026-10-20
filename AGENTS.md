@@ -40,7 +40,7 @@ Technical decisions follow specific authorities:
 | Product scope, priority, user behavior, acceptance | `docs/PRD.md` |
 | Dataset, leakage rules, metrics, evaluation protocol | `docs/EVALUATION.md` |
 | Shared contracts, schemas, runtime rules | `docs/CONTRACTS.md` + models in `src/models/contracts/` |
-| Canonical repository placement & architecture | `ARCHITECTURE.md` |
+| Canonical repository placement & architecture | `docs/ARCHITECTURE.md` |
 | Processing stages, branches, wait points | `docs/PIPELINE.md` |
 | Studio Web UX / Viewer interaction | `docs/UX.md` |
 | Install, run, deploy, restore | `docs/OPERATIONS.md` |

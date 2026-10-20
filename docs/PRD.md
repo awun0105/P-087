@@ -21,7 +21,7 @@ Các mã `G-01…G-07`, `SM-01…SM-07`, `FR-00…FR-13`, `NFR-01…NFR-08` và 
 | Nội dung | Nơi trình bày chính |
 | --- | --- |
 | Câu chuyện sản phẩm, lập luận thị trường, nội dung pitching | [MASTER_PITCH](MASTER_PITCH.md); PRD chỉ rút yêu cầu sản phẩm |
-| Thành phần hệ thống và ranh giới module | [ARCHITECTURE](../ARCHITECTURE.md) |
+| Thành phần hệ thống và ranh giới module | [ARCHITECTURE](ARCHITECTURE.md) |
 | Trình tự xử lý, thuật toán và nhánh runtime hiện tại | [PIPELINE](PIPELINE.md) |
 | Schema, tọa độ, checksum và bàn giao artifact | [CONTRACTS](CONTRACTS.md) và model trong source |
 | Chi tiết màn hình và tương tác | [UX](UX.md) |
