@@ -15,6 +15,7 @@ import { notifySuccess, FieldError } from "@/components/studio/feedback";
 import { login, register, registerGuest } from "@/lib/api/auth";
 import { APP_HOME } from "@/lib/routes";
 import { BrandIcon } from "@/components/studio/primitives";
+import { startTrialGuest } from "@/features/studio/auth/trialGuest";
 
 /** Chỉ cho quay lại đường dẫn nội bộ (tránh open redirect qua `?next=`); thiếu/không hợp lệ thì về Tổng quan của app. */
 export function safeNext(value: string | null): string {
@@ -195,7 +196,7 @@ function EntryPending() {
 export function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
-  const { refresh } = useAuth();
+  const { me, refresh } = useAuth();
   const next = safeNext(params.get("next"));
   const gate = useEntryGate(next);
   const { fieldErrors, validate } = useFieldValidation();
@@ -205,22 +206,27 @@ export function LoginForm() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const trialEnabled = me?.guest_signup_enabled === true;
 
-  async function submit(event: React.FormEvent) {
-    event.preventDefault();
+  async function enter(action: () => Promise<unknown>, success: string, failure: string) {
     if (busy) return;
     setBusy(true);
     setError(null);
     try {
-      await login(email, password);
+      await action();
       gate.markNavigated();
       await refresh();
-      notifySuccess("Đã đăng nhập.");
+      notifySuccess(success);
       router.replace(next);
     } catch (cause) {
-      setError(authErrorMessage(cause, "Đăng nhập thất bại"));
+      setError(authErrorMessage(cause, failure));
       setBusy(false);
     }
+  }
+
+  function submit(event: React.FormEvent) {
+    event.preventDefault();
+    void enter(() => login(email, password), "Đã đăng nhập.", "Đăng nhập thất bại");
   }
 
   if (gate.pending && !busy) return <EntryPending />;
@@ -307,6 +313,22 @@ export function LoginForm() {
           <span>Đăng nhập</span>
         </button>
       </form>
+      {trialEnabled && (
+        <div className="mt-5 border-t border-line pt-5">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void enter(startTrialGuest, "Đã vào bằng tài khoản dùng thử.", "Chưa vào dùng thử được")}
+            className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-line-strong bg-paper-raised px-5 font-ui text-sm font-semibold text-foreground transition-all hover:border-primary focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-primary/30 disabled:pointer-events-none disabled:opacity-60"
+          >
+            Dùng thử ngay
+          </button>
+          <p className="mt-2 text-center font-ui text-xs leading-5 text-muted-foreground">
+            Không cần đăng ký. Bạn nhận một tài khoản Khách riêng trên trình duyệt này, chỉ thấy scene của mình và có
+            hạn mức xử lý mỗi ngày.
+          </p>
+        </div>
+      )}
     </Shell>
   );
 }
