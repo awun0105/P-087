@@ -55,10 +55,18 @@ def usage_vram(usage: ResourceUsage) -> float | None:
     return None
 
 
-def load_usages(database: RuntimeDatabase) -> list[ResourceUsage]:
-    """Mọi bản ghi đo đọc được; dòng hỏng hoặc của schema lạ bị bỏ qua, không làm hỏng gate."""
+def load_usages(database: RuntimeDatabase, *, job_ids: Sequence[str] | None = None) -> list[ResourceUsage]:
+    """Mọi bản ghi đo đọc được (hoặc chỉ của `job_ids`, dùng index theo job); dòng hỏng hoặc schema lạ bị bỏ qua."""
+    if job_ids is not None and not job_ids:
+        return []
     with database.transaction() as tx:
-        rows = tx.execute("SELECT payload FROM r2s_resource_usage").fetchall()
+        if job_ids is None:
+            rows = tx.execute("SELECT payload FROM r2s_resource_usage").fetchall()
+        else:
+            marks = ",".join("?" for _ in job_ids)
+            rows = tx.execute(
+                f"SELECT payload FROM r2s_resource_usage WHERE job_id IN ({marks})", tuple(job_ids)
+            ).fetchall()
     usages: list[ResourceUsage] = []
     for row in rows:
         try:

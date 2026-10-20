@@ -1,8 +1,9 @@
 """Scene Studio: tạo scene từ video đã upload, liệt kê scene, tiến trình job."""
 
 from datetime import UTC, datetime
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict
 
@@ -17,6 +18,7 @@ from src.api.auth import (
     require_contributor,
 )
 from src.api.ownership import authorize_upload_mutation, owner_mutation_allowed
+from src.api.product.http_cache import checksum_etag, not_modified
 from src.api.studio import deps
 from src.api.studio.error_view import filter_job_progress_errors, filter_manifest_errors
 from src.models.contracts.manifests import JobManifest, JobStatus, StageId, StageStatus
@@ -372,9 +374,6 @@ def list_scenes(user: UserRecord | None = Depends(require_contributor)) -> Scene
     """Scene của Studio (project tạo từ upload); project fixture/dataset không hiện ở đây."""
     registry = deps.registry()
     scenes: list[SceneSummary] = []
-    measured = (
-        processing_seconds(load_usages(registry.persistence.database)) if registry.persistence is not None else {}
-    )
     requesters = job_requesters(registry.persistence.database) if registry.persistence is not None else {}
     projects = registry.list_projects()
     # Tra tài khoản chỉ khi có bản ghi cần điền role hiện tại (snapshot cũ không có role) hoặc người yêu cầu cũ.
@@ -385,11 +384,20 @@ def list_scenes(user: UserRecord | None = Depends(require_contributor)) -> Scene
     requester_actors = (
         job_requester_actors(registry.persistence.database, actors) if requesters and registry.persistence else {}
     )
+    listed = []
     for project in projects:
         if project.input_manifest_ref is None:
             continue
         jobs = registry.list_jobs(project.project_id)
-        latest = max(jobs, key=lambda job: job.started_at) if jobs else None
+        listed.append((project, jobs, max(jobs, key=lambda job: job.started_at) if jobs else None))
+    # T-054: chỉ đọc số đo của các job đang hiển thị (index theo job), không quét cả bảng mỗi lần danh sách được poll.
+    shown = [latest.job_id for _, _, latest in listed if latest is not None]
+    measured = (
+        processing_seconds(load_usages(registry.persistence.database, job_ids=shown))
+        if registry.persistence is not None
+        else {}
+    )
+    for project, jobs, latest in listed:
         if latest is not None:
             latest = filter_manifest_errors(latest, user)
         project_owner_id = project.created_by.user_id if project.created_by is not None else None
@@ -470,10 +478,20 @@ def get_job_progress(job_id: str, user: UserRecord | None = Depends(require_cont
 
 
 @router.get("/jobs/{job_id}/stage-views", response_model=StageViewList)
-def get_stage_views(job_id: str) -> StageViewList:
-    """Kết quả xem được của từng bước (ADR 0005); UI chọn một lớp để nạp."""
+def get_stage_views(
+    job_id: str,
+    response: Response,
+    if_none_match: Annotated[str | None, Header()] = None,
+) -> StageViewList | Response:
+    """Kết quả xem được của từng bước (ADR 0005); UI chọn một lớp để nạp. ETag theo revision manifest (T-054)."""
     try:
-        return stage_views(deps.registry(), job_id)
+        registry = deps.registry()
+        etag = checksum_etag(registry.get_job(job_id).job_manifest_checksum)
+        if not_modified(if_none_match, etag):
+            return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag})
+        response.headers["ETag"] = etag
+        response.headers["Cache-Control"] = "private, no-cache"
+        return stage_views(registry, job_id)
     except JobNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
 
