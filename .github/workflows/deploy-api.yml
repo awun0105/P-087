@@ -50,7 +50,7 @@ jobs:
       - name: Verify public health endpoint
         run: |
           for i in $(seq 1 12); do
-            code=$(curl -s -o /dev/null -w '%{http_code}' https://real2sim-api.35-186-156-57.sslip.io/health || true)
+            code=$(curl -s -o /dev/null -w '%{http_code}' https://real2sim-api.34-64-53-60.sslip.io/health || true)
             [ "$code" = "200" ] && echo "health OK" && exit 0
             sleep 5
           done
