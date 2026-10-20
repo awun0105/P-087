@@ -142,6 +142,8 @@ class StageId(StrEnum):
     INPUT_VALIDATE = "ST-INPUT-VALIDATE"
     PRIVACY_GATE = "ST-PRIVACY-GATE"
     FRAME_EXTRACT = "ST-FRAME-EXTRACT"
+    #: Bước người dùng xem bản đã che; chỉ dùng cho mốc bước và màn tiến trình, không ghi vào StageArtifact (T-056).
+    ANONYMIZATION_REVIEW = "ST-ANONYMIZATION-REVIEW"
     CAMERA_POSE = "ST-CAMERA-POSE"
     VISUAL_RECON = "ST-VISUAL-RECON"
     RGB_GEOMETRY = "ST-RGB-GEOMETRY"
