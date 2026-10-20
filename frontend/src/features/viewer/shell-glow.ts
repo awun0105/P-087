@@ -37,6 +37,8 @@ const SHELL_OPACITY: Record<ShellStyle, number> = { selected: 0.2, idle: 0.06 };
 const WIRE_OPACITY = 0.4;
 const PENDING_OPACITY = 0.06;
 const PULSE_PERIOD_MS = 2000;
+/** Khoảng cách tối thiểu giữa hai lần cập nhật nhịp (≈10 lần/giây). */
+const PULSE_FRAME_MS = 100;
 const PULSE_AMPLITUDE = 0.01;
 
 interface PointRecord {
@@ -124,10 +126,17 @@ export class ShellGlowLayer {
   constructor(private readonly host: SceneOverlay) {}
 
   /** Nhịp nhẹ của vỏ đang chọn: độ mờ 0,19–0,21; tắt khi bật giảm chuyển động. */
+  private lastPulseAt = -Infinity;
+
   private readonly onUpdate = (): void => {
     if (this.destroyed) return;
+    const now = performance.now();
     const reduce = prefersReducedMotion();
-    const wave = (1 - Math.cos((2 * Math.PI * performance.now()) / PULSE_PERIOD_MS)) / 2;
+    // T-064: mỗi lần nhịp là một lần vẽ lại cả cảnh splat; nhịp chậm (biên độ ±0,01) nên ~10 lần/giây là đủ mượt.
+    // Giảm chuyển động thì trả độ mờ gốc ngay, không chờ nhịp.
+    if (!reduce && now - this.lastPulseAt < PULSE_FRAME_MS) return;
+    if (!reduce) this.lastPulseAt = now;
+    const wave = (1 - Math.cos((2 * Math.PI * now) / PULSE_PERIOD_MS)) / 2;
     let animating = false;
     for (const record of this.shells.values()) {
       if (record.style !== "selected" || record.tone !== "normal") continue;

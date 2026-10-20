@@ -381,4 +381,15 @@ describe("ShellGlowLayer: nhịp phát sáng và trạng thái", () => {
     layer.destroy();
     expect(app.off).toHaveBeenCalledWith("update", handler);
   });
+
+  it("nhịp của vỏ đang chọn yêu cầu vẽ tối đa khoảng 10 lần/giây, không vẽ lại cả cảnh mỗi khung (T-064)", async () => {
+    await layer.setShell("A", GLB_URL, "selected");
+    vi.mocked(host.requestFrame).mockClear();
+    for (let now = 0; now < 1000; now += 1000 / 60) {
+      vi.mocked(performance.now).mockReturnValue(now);
+      frame()();
+    }
+    expect(vi.mocked(host.requestFrame).mock.calls.length).toBeLessThanOrEqual(11);
+    expect(vi.mocked(host.requestFrame).mock.calls.length).toBeGreaterThanOrEqual(5);
+  });
 });
