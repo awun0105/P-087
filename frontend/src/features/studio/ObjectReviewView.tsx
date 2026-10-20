@@ -197,6 +197,7 @@ type ROIForm = { minX: string; minY: string; minZ: string; maxX: string; maxY: s
 
 /** Mảng rỗng dùng chung: `?? []` tạo mảng mới mỗi render làm viewer dựng lại dấu bề mặt và vẽ lại (T-064). */
 const EMPTY_PLANES: readonly CollisionSurfacePlane[] = [];
+const NO_CAMERAS: StageView["cameras"] = [];
 const EMPTY_ROI: ROIForm = { minX: "", minY: "", minZ: "", maxX: "", maxY: "", maxZ: "" };
 const ROI_FIELDS: { key: keyof ROIForm; label: string }[] = [
   { key: "minX", label: "X nhỏ nhất (m)" },
@@ -371,7 +372,10 @@ export function ObjectReviewView({
   const [colliderFormReset, setColliderFormReset] = useState(0);
   const keepErrorAfterReload = useRef(false);
   const [filter, setFilter] = useState<Filter>("all");
-  const [cameras, setCameras] = useState<StageView["cameras"]>([]);
+  // `camerasFor` = job đã có kết quả camera (kể cả lỗi). Viewer chỉ dựng sau đó: đổi camera sẽ dựng lại viewer và tải lại SOG (T-064).
+  const [cameraState, setCameraState] = useState<{ jobId: string; cameras: StageView["cameras"] } | null>(null);
+  const cameras = cameraState?.jobId === jobId ? cameraState.cameras : NO_CAMERAS;
+  const camerasSettled = cameraState?.jobId === jobId;
   const [focus, setFocus] = useState<{ id: string; nonce: number } | undefined>();
   const [reload, setReload] = useState(0);
   const [tool, setTool] = useState<GizmoMode | "none">("none");
@@ -466,8 +470,12 @@ export function ObjectReviewView({
     // Camera quay hệ mét để mở scene tại góc camera đầu tiên; thiếu thì dùng camera mặc định.
     // Tách khỏi lần tải scene: camera không đổi khi sửa vật, tải lại sẽ tạo lại viewer 3D.
     getStageViews(jobId, controller.signal).then(
-      (views) => setCameras(views.find((view) => view.kind === "gaussian" && view.unit === "meter")?.cameras ?? []),
-      () => undefined,
+      (views) => {
+        if (!controller.signal.aborted) setCameraState({ jobId, cameras: views.find((view) => view.kind === "gaussian" && view.unit === "meter")?.cameras ?? NO_CAMERAS });
+      },
+      () => {
+        if (!controller.signal.aborted) setCameraState({ jobId, cameras: NO_CAMERAS });
+      },
     );
     return () => controller.abort();
   }, [jobId]);
@@ -854,7 +862,9 @@ export function ObjectReviewView({
             />
           </div>
         )}
-        {scene.environment.visual_ref ? (
+        {scene.environment.visual_ref && !camerasSettled ? (
+          <div className="flex h-full items-center justify-center text-sm text-on-dark/70">Đang mở khung 3D…</div>
+        ) : scene.environment.visual_ref ? (
           <MetricSceneView
             jobId={jobId}
             visual={scene.environment.visual_ref}
