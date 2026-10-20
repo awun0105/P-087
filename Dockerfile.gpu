@@ -65,9 +65,9 @@ RUN uv venv --python 3.12.14 .venv \
     && uv pip sync --python .venv/bin/python --require-hashes requirements.lock.txt \
     && uv pip check --python .venv/bin/python
 
-# Scene và ObjectGS cần header của đúng Python venv (CPATH). Không có GPU lúc build: kiểm gsplat không đòi GPU.
-RUN CPATH="$(.venv/bin/python -c 'import sysconfig; print(sysconfig.get_paths()["include"])')" \
-    scripts/gpu/install.sh /opt/real2sim --colmap=binary --skip-gpu-check --no-doctor \
+# Mỗi runtime tự lấy header của chính Python của nó (scene: 3.12, ObjectGS: 3.8); không đặt CPATH chung ở đây,
+# vì CPATH 3.12 làm gsplat của ObjectGS biên dịch sai header. Không có GPU lúc build: kiểm gsplat không đòi GPU.
+RUN scripts/gpu/install.sh /opt/real2sim --colmap=binary --skip-gpu-check --no-doctor \
     && uv cache clean
 
 COPY . .
