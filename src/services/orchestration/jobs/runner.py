@@ -492,6 +492,16 @@ def _record_runner_failure(attempt: _Attempt, error: BaseException) -> None:
         logger.info("Worker failure không ghi đè revision mới hơn")
 
 
+def _prepare_claimed_attempt(attempt: _Attempt) -> str:
+    """Chuẩn bị workspace + log id cho job vừa claim RUNNING; lỗi ở đây được ghi FAILED thay vì để job treo (T-048)."""
+    try:
+        attempt.workspace.mkdir(parents=True, exist_ok=False)
+        return _attempt_log_id(attempt.registry, attempt.job.job_id)
+    except BaseException as error:
+        _record_runner_failure(attempt, error)
+        raise
+
+
 def _start_attempt(
     job_id: str, expected_checksum: str | None, first_stage: StageId
 ) -> tuple[_Attempt, ResolvedProcessing]:
@@ -1671,9 +1681,9 @@ def run_reviewed_preview_job(job_id: str, *, expected_checksum: str | None = Non
         raise ValueError("Job đã chấp nhận bản đã che nhưng thiếu frame set")
     job = registry.record_stage_progress(job, _preview_start_stage(registry, job))
     workspace = settings.product_worker_root.expanduser().resolve() / job_id / f"attempt-{uuid4().hex}"
-    workspace.mkdir(parents=True, exist_ok=False)
     attempt = _Attempt(registry, settings, job, workspace)
-    with job_log_context(job_id, _attempt_log_id(registry, job_id)):
+    log_id = _prepare_claimed_attempt(attempt)
+    with job_log_context(job_id, log_id):
         try:
             with attempt_lease(workspace):
                 attempt.job = _execute_lidar_ingest(attempt, frames)
@@ -1772,9 +1782,9 @@ def run_finalize_job(job_id: str, *, expected_checksum: str | None = None) -> Jo
         job = registry.record_stage_progress(job, StageId.RGB_GEOMETRY)
     attempt_id = f"finalize-{uuid4().hex}"
     workspace = settings.product_worker_root.expanduser().resolve() / job_id / attempt_id
-    workspace.mkdir(parents=True, exist_ok=False)
     attempt = _Attempt(registry, settings, job, workspace)
-    with job_log_context(job_id, _attempt_log_id(registry, job_id)):
+    log_id = _prepare_claimed_attempt(attempt)
+    with job_log_context(job_id, log_id):
         try:
             with attempt_lease(workspace):
                 request = {

@@ -597,11 +597,13 @@ def main(argv: list[str] | None = None) -> int:
                 return 130
         recover_interrupted_jobs(registry, settings)
         recover_expired_leases(registry)
+        recover_unwatched_running_jobs(registry)
         recover_interrupted(settings)
         import_service.recover_legacy_packaging()
         guard = QueueGuard()
         while True:
             guard.run("recover_leases", lambda: bool(recover_expired_leases(registry)))
+            guard.run("recover_unwatched", lambda: bool(recover_unwatched_running_jobs(registry)))
             # Job trong hàng đợi đi trước; rảnh mới nhận yêu cầu chạy lại tách theo vật (cùng dùng GPU).
             # Mỗi hàng đợi đi qua `guard`: một hàng lỗi (DB chập chờn, bản ghi hỏng) không làm worker thoát.
             handled = False
