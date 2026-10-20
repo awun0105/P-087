@@ -3,7 +3,8 @@
  * dùng XMLHttpRequest vì `fetch` chưa báo được tiến độ gửi body.
  */
 
-import { ApiError, apiFetch, apiUrl, fetchApi, type ApiResult } from "@/lib/api/client";
+import { ApiError, apiFetch, apiUrl, fetchApi, fetchConditional, type ApiResult } from "@/lib/api/client";
+import type { PipelineView } from "@/lib/contracts/pipeline";
 import { demoApiPath } from "@/lib/api/demo-session";
 import { clearDirectUploadResume, directUpload, xhrPutPart } from "@/lib/api/directUpload";
 import { verifyVideoPreparationChecksum } from "@/lib/contracts/videoPreparation";
@@ -183,6 +184,29 @@ export async function getJobProgress(jobId: string, signal?: AbortSignal): Promi
   } catch (cause) {
     return { ok: false, error: new ApiError(502, cause instanceof Error ? cause.message : "Tiến trình không hợp lệ") };
   }
+}
+
+export type PipelineFetch = { notModified: true } | { notModified: false; view: PipelineView; etag: string | null };
+
+/** Tiến trình hợp nhất của trang scene (T-060); gửi ETag để máy chủ trả 304 khi không có gì đổi. */
+export async function getJobPipeline(jobId: string, etag: string | null, signal?: AbortSignal): Promise<ApiResult<PipelineFetch>> {
+  const result = await fetchConditional<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/pipeline`, etag, signal);
+  if (!result.ok) return result;
+  if (result.data.notModified) return { ok: true, data: { notModified: true } };
+  try {
+    return { ok: true, data: { notModified: false, view: parsePipelineView(result.data.data), etag: result.data.etag } };
+  } catch (cause) {
+    return { ok: false, error: new ApiError(502, cause instanceof Error ? cause.message : "Tiến trình không hợp lệ") };
+  }
+}
+
+function parsePipelineView(value: unknown): PipelineView {
+  const record = value as Partial<PipelineView> | null;
+  if (!record || typeof record !== "object" || !Array.isArray(record.steps) || typeof record.version !== "string"
+      || !record.next_action || typeof record.next_action.kind !== "string") {
+    throw new Error("Tiến trình hợp nhất không hợp lệ");
+  }
+  return { ...(record as PipelineView), progress: parseJobProgress(record.progress) };
 }
 
 export function cancelJob(jobId: string): Promise<unknown> {
