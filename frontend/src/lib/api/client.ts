@@ -87,7 +87,7 @@ export async function fetchConditional<T>(
     const response = await fetch(`${apiBase()}${demoApiPath(path)}`, { headers, cache: "no-store", signal });
     if (response.status === 304) return { ok: true, data: { notModified: true } };
     if (!response.ok) return { ok: false, error: await toApiError(response) };
-    return { ok: true, data: { notModified: false, data: (await response.json()) as T, etag: response.headers.get("ETag") } };
+    return { ok: true, data: { notModified: false, data: (await response.json()) as T, etag: response.headers?.get?.("ETag") ?? null } };
   } catch (cause) {
     return { ok: false, error: new ApiError(0, `không gọi được backend: ${String(cause)}`) };
   }

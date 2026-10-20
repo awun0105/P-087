@@ -607,8 +607,41 @@ export function clearImportCamera(importId: string): Promise<ImportedScene> {
 // ── vật thể trong SceneIR (PRODUCT-07/07A, ADR 0006) ─────────────────────────
 
 /** SceneIR hiện tại của job; 404 khi bước tách vật thể chưa publish revision nào. */
-export function getJobScene(jobId: string, signal?: AbortSignal): Promise<ApiResult<SceneResponse>> {
-  return fetchApi<SceneResponse>(`${API}/jobs/${encodeURIComponent(jobId)}/scene`, { signal });
+/** T-063: bản scene đã tải gần nhất theo job (kèm ETag) và request đang bay, dùng chung cho mọi component của trang. */
+const sceneCache = new Map<string, { etag: string; data: SceneResponse }>();
+const sceneInFlight = new Map<string, Promise<ApiResult<SceneResponse>>>();
+
+/** Chỉ cho test: xoá bộ đệm scene giữa các ca. */
+export function clearSceneCache(): void {
+  sceneCache.clear();
+  sceneInFlight.clear();
+}
+
+async function loadJobScene(jobId: string): Promise<ApiResult<SceneResponse>> {
+  const cached = sceneCache.get(jobId);
+  const result = await fetchConditional<SceneResponse>(`${API}/jobs/${encodeURIComponent(jobId)}/scene`, cached?.etag ?? null);
+  if (!result.ok) return result;
+  if (result.data.notModified) {
+    return cached ? { ok: true, data: cached.data } : { ok: false, error: new ApiError(502, "Máy chủ trả 304 khi chưa có scene") };
+  }
+  if (result.data.etag) sceneCache.set(jobId, { etag: result.data.etag, data: result.data.data });
+  return { ok: true, data: result.data.data };
+}
+
+/**
+ * SceneIR hiện tại (T-063): các component hỏi cùng lúc dùng chung một request; lần sau gửi ETag, máy chủ trả 304 thì dùng
+ * lại đúng đối tượng đã parse (không tải lại ~650 KB, không parse lại, React thấy cùng tham chiếu). `signal` chỉ để caller
+ * bỏ qua kết quả; request chung không bị hủy theo một caller.
+ */
+export async function getJobScene(jobId: string, signal?: AbortSignal): Promise<ApiResult<SceneResponse>> {
+  let pending = sceneInFlight.get(jobId);
+  if (!pending) {
+    pending = loadJobScene(jobId).finally(() => sceneInFlight.delete(jobId));
+    sceneInFlight.set(jobId, pending);
+  }
+  const result = await pending;
+  if (signal?.aborted) return { ok: false, error: new ApiError(0, "đã hủy") };
+  return result;
 }
 
 /** Choose one allow-listed LiDAR candidate; the server reruns eligibility and owns the revision CAS. */
