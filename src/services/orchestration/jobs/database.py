@@ -21,6 +21,25 @@ class RuntimeStateConflictError(RuntimeError):
     """State đã đổi ở process khác; caller phải đọc lại trước khi retry command."""
 
 
+_TRANSIENT_SQLITE_MESSAGES = ("locked", "busy")
+
+
+def is_transient_database_error(error: BaseException) -> bool:
+    """Lỗi DB thoáng qua (khoá, mất kết nối, hết giờ) mà lần thử sau có thể qua; không gồm xung đột trạng thái."""
+    if isinstance(error, RuntimeStateConflictError):
+        return False
+    if isinstance(error, ConnectionError | TimeoutError):
+        return True
+    if isinstance(error, sqlite3.OperationalError):
+        message = str(error).lower()
+        return any(word in message for word in _TRANSIENT_SQLITE_MESSAGES)
+    try:
+        import psycopg
+    except ImportError:
+        return False
+    return isinstance(error, psycopg.OperationalError | psycopg.InterfaceError)
+
+
 class SqlCursor(Protocol):
     """Phần DB-API dùng chung giữa sqlite3 và psycopg."""
 
