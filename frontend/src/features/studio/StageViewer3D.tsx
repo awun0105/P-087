@@ -24,6 +24,7 @@ import { themeColor } from "@/lib/theme";
 import { jobArtifactContentUrl } from "@/lib/api/endpoints";
 import { cn } from "@/lib/cn";
 import type { StageView } from "@/lib/contracts/studio";
+import { viewerRenderer } from "@/features/viewer/renderer-setting";
 
 /** Lớp cần thư viện 3D (3DGS, lưới va chạm, khung hệ mét); tải động để bước Frames/Cameras không kéo three/PlayCanvas (T-065). */
 export function Stage3DLayer({ jobId, view, views }: { jobId: string; view: StageView; views: StageView[] }) {
@@ -76,7 +77,7 @@ function GaussianLayer({ jobId, view, cameras }: { jobId: string; view: StageVie
     <PlayCanvasScene
       contentUrl={jobArtifactContentUrl(jobId, ref)}
       contentFilename={ref.artifact_uri.split("/").pop() ?? "scene.sog"}
-      renderer="webgl"
+      renderer={viewerRenderer()}
       showControls
       mode="VISUAL"
       capability={capability}

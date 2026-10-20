@@ -48,6 +48,7 @@ import type { CollisionSurfacePlane, RegionPreview } from "@/lib/api/studio";
 import { useWalkSession } from "@/features/studio/value/useWalkSession";
 import { themeColor } from "@/lib/theme";
 import { cn } from "@/lib/cn";
+import { viewerRenderer } from "@/features/viewer/renderer-setting";
 
 const EMPTY_OBJECTS: readonly OverlayObject[] = [];
 const NO_PHYSICS: readonly PhysicsObjectInput[] = [];
@@ -699,7 +700,7 @@ export function MetricSceneView({
       <PlayCanvasScene
         contentUrl={contentUrl}
         contentFilename={visual.artifact_uri.split("/").pop() ?? "scene.sog"}
-        renderer="webgl"
+        renderer={viewerRenderer()}
         showControls
         mode="VISUAL"
         capability={capability}

@@ -23,6 +23,7 @@ import type { SplatInspection } from "@/features/viewer/splat-inspection";
 import { confirmMetric, getDemoPoints, getMetricAssist, getMetricProposal, measureOnLidar, previewMetric } from "@/lib/api/studio";
 import type { LidarMeasurements, MetricInput, MetricPreview, MetricProposal } from "@/lib/contracts/studio";
 import { HelpDetails, notifySuccess } from "@/components/studio/feedback";
+import { viewerRenderer } from "@/features/viewer/renderer-setting";
 
 export interface MetricDraft { points: InspectionState["points"]; typed: { anchor: string; check: string } }
 
@@ -218,7 +219,7 @@ export function MetricConfirmView({
               <PlayCanvasScene
                 contentUrl={contentUrl}
                 contentFilename={filename}
-                renderer="webgl"
+                renderer={viewerRenderer()}
                 mode="VISUAL"
                 capability={capability}
                 onFailed={fail}
@@ -260,7 +261,7 @@ export function MetricConfirmView({
             <PlayCanvasScene
               contentUrl={contentUrl}
               contentFilename={filename}
-              renderer="webgl"
+              renderer={viewerRenderer()}
               mode="VISUAL"
               capability={capability}
               onFailed={fail}

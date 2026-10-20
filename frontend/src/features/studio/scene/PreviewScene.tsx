@@ -19,6 +19,7 @@ import {
 } from "@/features/viewer/source-frame";
 import { useJobCameras } from "@/features/studio/scene/useJobCameras";
 import { cn } from "@/lib/cn";
+import { viewerRenderer } from "@/features/viewer/renderer-setting";
 
 /** Bản xem SfM trung tính; hỗ trợ góc nhìn camera ban đầu và điều hướng Fly/Walk/Orbit. */
 export function PreviewScene({
@@ -134,7 +135,7 @@ export function PreviewScene({
             <PlayCanvasScene
               contentUrl={contentUrl}
               contentFilename={filename}
-              renderer="webgl"
+              renderer={viewerRenderer()}
               mode="VISUAL"
               showControls
               capability={capability}
