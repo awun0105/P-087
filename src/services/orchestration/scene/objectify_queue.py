@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import Event, Thread
@@ -35,6 +35,7 @@ from src.services.orchestration.jobs.admission import (
     Resource,
     ResourceAdmission,
     WaitReason,
+    wait_exceeded,
 )
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeTransaction
 from src.services.orchestration.jobs.heartbeat import HeartbeatTolerance
@@ -196,6 +197,8 @@ class _Record(BaseModel):
     input_checksum: Checksum | None = None
     config_checksum: Checksum | None = None
     resource_wait: ObjectifyResourceWait | None = None
+    #: Lúc bắt đầu chờ tài nguyên của lượt này (T-050); None khi không chờ hoặc bản ghi cũ.
+    resource_wait_since: datetime | None = None
     correction_command: ObjectMembershipReassignCommand | None = None
     region_object_id: str | None = None
     region_command: ObjectRegionCommand | None = None
@@ -666,6 +669,20 @@ def _bind_checksums(
     return updated, None
 
 
+_WAIT_REASON_TEXT = {
+    "gate_error": "cổng tài nguyên lỗi",
+    "unmeasured": "chưa đo được máy",
+    "exceeds_machine": "cấu hình vượt khả năng máy",
+    "external": "chương trình khác đang chiếm",
+    "busy": "máy đang bận",
+}
+
+
+def _wait_exceeded_message(reasons: Mapping[str, str], limit_seconds: float) -> str:
+    causes = ", ".join(sorted({_WAIT_REASON_TEXT.get(reason, reason) for reason in reasons.values()})) or "không rõ"
+    return f"Không xếp được tài nguyên sau {round(limit_seconds / 60)} phút ({causes}). Kiểm tra máy xử lý rồi thử lại."
+
+
 def _requeue_wait(
     settings: Settings,
     job_id: str,
@@ -699,6 +716,7 @@ def _requeue_wait(
                 update={
                     "status": "queued",
                     "resource_wait": ObjectifyResourceWait.from_admission(result),
+                    "resource_wait_since": current.resource_wait_since or datetime.now(UTC),
                     "lease_token": None,
                     "lease_expires_at": None,
                     "heartbeat_at": None,
@@ -723,6 +741,9 @@ def _finish(settings: Settings, job_id: str, running: _Record, outcome: dict[str
             final.update(status="cancelled", error="Đã hủy theo yêu cầu.", result_revision=None, resource_wait=None)
         elif final.get("status") == "done":
             final["cancellation_requested"] = False
+        # Lượt đã kết thúc: không còn chờ tài nguyên.
+        final["resource_wait_since"] = None
+        final["resource_wait"] = None
         _write(tx, job_id, current.model_copy(update={**final, "finished_at": now, "lease_expires_at": now}))
     return True
 
@@ -850,6 +871,10 @@ def process_next(registry: ProjectRegistry, settings: Settings) -> bool:
         if admitted.status != "admitted":
             if admitted.status == "identity_conflict":
                 raise ObjectifyError("operation identity trùng với input/config khác; yêu cầu bị chặn")
+            limit = getattr(settings, "product_resource_wait_max_seconds", 1800)
+            since = running.resource_wait_since
+            if since is not None and wait_exceeded(admitted.reasons, since, datetime.now(UTC), limit):
+                raise ObjectifyError(_wait_exceeded_message(admitted.reasons, limit), retryable=True)
             _requeue_wait(settings, job_id, running, admitted)
             return False
         operation_request[0] = request

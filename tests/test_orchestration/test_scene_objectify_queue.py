@@ -1469,3 +1469,81 @@ def test_objectify_heartbeat_aborts_on_persistent_errors(monkeypatch: pytest.Mon
     stop.set()
     thread.join(timeout=2)
     assert abort_reason[0] == "lease_lost" and cancel_event.is_set()
+
+
+def _waiting(reason: str):  # noqa: ANN202
+    from src.services.orchestration.jobs.admission import OperationAdmissionResult
+
+    def admit(_self, request):  # noqa: ANN001, ANN202
+        return OperationAdmissionResult(
+            request=request,
+            status="waiting_resources",
+            required_gb={"vram": 1.0, "ram": None, "disk": None},
+            available_gb={"vram": None, "ram": None, "disk": None},
+            capacity_gb={"vram": None, "ram": None, "disk": None},
+            waiting_on=["vram"],
+            reasons={"vram": reason},
+        )
+
+    return admit
+
+
+def _queued_boxes(world, monkeypatch, tmp_path, reason: str):  # noqa: ANN001, ANN202
+    registry, job, bundle, settings = world
+    monkeypatch.setattr(scene_extraction, "objectify_with_retry", _always_fail)
+    extract_scene(registry, job, bundle, settings, tmp_path / "work")
+    scene_objectify_queue.request(registry, settings, job.job_id, "rev-001", "boxes")
+    monkeypatch.setattr(scene_objectify_queue, "use_boxes", lambda *args, **kwargs: None)
+    monkeypatch.setattr(scene_objectify_queue.ResourceAdmission, "admit_operation", _waiting(reason))
+    return registry, job, settings
+
+
+def _age_wait(settings, job_id: str, minutes: int) -> None:  # noqa: ANN001
+    from datetime import UTC, datetime, timedelta
+
+    with scene_objectify_queue._database(settings).transaction(write=True) as tx:
+        record = scene_objectify_queue._read(tx, job_id, lock=True)
+        since = datetime.now(UTC) - timedelta(minutes=minutes)
+        scene_objectify_queue._write(tx, job_id, record.model_copy(update={"resource_wait_since": since}))
+
+
+def test_objectify_wait_fails_after_limit(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    """T-050: a wait that is not caused by a busy machine ends as a retryable failure after 30 minutes."""
+    registry, job, settings = _queued_boxes(world, monkeypatch, tmp_path, "gate_error")
+    assert scene_objectify_queue.process_next(registry, settings) is False
+    _age_wait(settings, job.job_id, 31)
+    scene_objectify_queue.process_next(registry, settings)
+    with scene_objectify_queue._database(settings).transaction() as tx:
+        record = scene_objectify_queue._read(tx, job.job_id)
+    assert record.status == "failed" and record.retryable is True
+    assert "cổng tài nguyên lỗi" in (record.error or "")
+
+
+def test_objectify_busy_wait_never_fails(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    registry, job, settings = _queued_boxes(world, monkeypatch, tmp_path, "busy")
+    scene_objectify_queue.process_next(registry, settings)
+    _age_wait(settings, job.job_id, 600)
+    scene_objectify_queue.process_next(registry, settings)
+    with scene_objectify_queue._database(settings).transaction() as tx:
+        record = scene_objectify_queue._read(tx, job.job_id)
+    assert record.status == "queued"
+
+
+def test_first_wait_records_since_and_keeps_it(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    registry, job, settings = _queued_boxes(world, monkeypatch, tmp_path, "unmeasured")
+    scene_objectify_queue.process_next(registry, settings)
+    with scene_objectify_queue._database(settings).transaction() as tx:
+        first = scene_objectify_queue._read(tx, job.job_id).resource_wait_since
+    scene_objectify_queue.process_next(registry, settings)
+    with scene_objectify_queue._database(settings).transaction() as tx:
+        second = scene_objectify_queue._read(tx, job.job_id).resource_wait_since
+    assert first is not None and first == second
+
+
+def test_old_record_without_wait_since_reads() -> None:
+    legacy = (
+        '{"status":"queued","mode":"geometry","base_revision":"rev-002",'
+        '"requested_at":"2026-10-18T08:00:00+00:00","phase":null}'
+    )
+    record = scene_objectify_queue._Record.model_validate_json(legacy)
+    assert record.resource_wait_since is None
