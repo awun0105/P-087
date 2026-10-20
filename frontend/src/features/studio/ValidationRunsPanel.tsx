@@ -2,7 +2,9 @@
 
 import { errorMessage } from "@/lib/ui-error";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+
+import { usePolling } from "@/features/studio/usePolling";
 
 import { Badge, Button, Notice } from "@/components/studio/primitives";
 import {
@@ -72,34 +74,26 @@ export function ValidationRunsPanel({
 
   useEffect(() => {
     scopeRef.current = scope;
-    const controller = new AbortController();
-    let timer: ReturnType<typeof setTimeout> | undefined;
+  }, [scope]);
 
-    const load = async () => {
-      try {
-        const value = await listValidationRuns(jobId, controller.signal);
-        if (controller.signal.aborted) return;
-        setSnapshot({ queryKey, runs: value, error: null });
-        if (value.some((run) => ACTIVE.has(run.status))) {
-          timer = setTimeout(() => void load(), 5000);
-        }
-      } catch (cause: unknown) {
-        if (!controller.signal.aborted) {
-          setSnapshot((previous) => ({
-            queryKey,
-            runs: previous?.queryKey === queryKey ? previous.runs : [],
-            error: errorMessage(cause, "Không đọc được lịch sử Isaac validation"),
-          }));
-        }
+  // Hỏi lại mỗi 5 s chỉ khi còn lượt đang chạy (T-063); tab ẩn thì nghỉ, quay lại thì hỏi ngay.
+  const hasActive = !loading && visibleRuns.some((item) => ACTIVE.has(item.status));
+  const load = useCallback(async (signal: AbortSignal) => {
+    try {
+      const value = await listValidationRuns(jobId, signal);
+      if (signal.aborted) return;
+      setSnapshot({ queryKey, runs: value, error: null });
+    } catch (cause: unknown) {
+      if (!signal.aborted) {
+        setSnapshot((previous) => ({
+          queryKey,
+          runs: previous?.queryKey === queryKey ? previous.runs : [],
+          error: errorMessage(cause, "Không đọc được lịch sử Isaac validation"),
+        }));
       }
-    };
-
-    void load();
-    return () => {
-      controller.abort();
-      if (timer !== undefined) clearTimeout(timer);
-    };
-  }, [jobId, sceneRevision, candidateChecksum, queryKey, scope]);
+    }
+  }, [jobId, queryKey]);
+  usePolling(load, 5000, loading || hasActive, queryKey);
 
   async function mutate(key: string, action: () => Promise<ValidationRunView>, selected = false) {
     const actionScope = scope;
