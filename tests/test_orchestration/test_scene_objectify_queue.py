@@ -1409,3 +1409,63 @@ def test_rejected_request_records_no_scene_request(world, monkeypatch, tmp_path)
         scene_objectify_queue.request(registry, settings, job.job_id, base.scene_revision, "geometry")
 
     assert len(_scene_requests(settings, job.job_id)) == 1
+
+
+def _beat_until(abort_reason: list, cancel_event, seconds: float) -> None:  # noqa: ANN001
+    import time as _time
+
+    deadline = _time.monotonic() + seconds
+    while _time.monotonic() < deadline and not cancel_event.is_set():
+        _time.sleep(0.05)
+
+
+def test_objectify_heartbeat_survives_one_locked_database_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """T-049: one locked-database blip must not cancel a long geometry build."""
+    import sqlite3
+    from threading import Event
+    from types import SimpleNamespace
+
+    from src.services.orchestration.scene import objectify_queue as queue
+
+    calls = {"n": 0}
+
+    def cancel_reason(*args: object) -> None:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(queue, "_cancel_reason", cancel_reason)
+    cancel_event, abort_reason = Event(), [None]
+    record = SimpleNamespace(lease_token="t", lease_generation=1)
+    stop, thread = queue._start_heartbeat(
+        SimpleNamespace(), "job-x", record, SimpleNamespace(), [None], cancel_event, abort_reason
+    )
+    _beat_until(abort_reason, cancel_event, 1.5)
+    stop.set()
+    thread.join(timeout=2)
+    assert calls["n"] >= 2
+    assert abort_reason[0] is None and not cancel_event.is_set()
+
+
+def test_objectify_heartbeat_aborts_on_persistent_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    import sqlite3
+    from datetime import timedelta
+    from threading import Event
+    from types import SimpleNamespace
+
+    from src.services.orchestration.scene import objectify_queue as queue
+
+    def cancel_reason(*args: object) -> None:
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(queue, "_cancel_reason", cancel_reason)
+    monkeypatch.setattr(queue, "_LEASE_TTL", timedelta(seconds=1.2))
+    cancel_event, abort_reason = Event(), [None]
+    record = SimpleNamespace(lease_token="t", lease_generation=1)
+    stop, thread = queue._start_heartbeat(
+        SimpleNamespace(), "job-x", record, SimpleNamespace(), [None], cancel_event, abort_reason
+    )
+    _beat_until(abort_reason, cancel_event, 4)
+    stop.set()
+    thread.join(timeout=2)
+    assert abort_reason[0] == "lease_lost" and cancel_event.is_set()

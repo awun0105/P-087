@@ -37,6 +37,7 @@ from src.services.orchestration.jobs.admission import (
     WaitReason,
 )
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeTransaction
+from src.services.orchestration.jobs.heartbeat import HeartbeatTolerance
 from src.services.orchestration.jobs.profile import machine_runtime_checksum
 from src.services.orchestration.jobs.stage_results import geometry_surface_note
 from src.services.orchestration.jobs.stage_views import job_bundle
@@ -601,9 +602,11 @@ def _start_heartbeat(
 
     def beat() -> None:
         last_heartbeat = time.monotonic()
+        tolerance = HeartbeatTolerance(_LEASE_TTL)
         while not stop.wait(_CANCEL_POLL_SECONDS):
             try:
                 reason = _cancel_reason(settings, job_id, record.lease_token or "", record.lease_generation)
+                tolerance.succeeded()
                 if reason is not None:
                     abort_reason[0] = reason
                     cancel_event.set()
@@ -628,7 +631,10 @@ def _start_heartbeat(
                     )
                     return
                 last_heartbeat = time.monotonic()
+                tolerance.succeeded()
             except Exception as error:  # noqa: BLE001 - expiry plus commit fencing handles DB outages
+                if tolerance.tolerate(error):
+                    continue  # DB chập chờn: thử lại nhịp sau, lease vẫn còn hạn
                 logger.warning("Objectify heartbeat lỗi job=%s cause=%s", job_id, type(error).__name__)
                 abort_reason[0] = "lease_lost"
                 cancel_event.set()
