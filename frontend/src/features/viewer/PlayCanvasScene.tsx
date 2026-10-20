@@ -37,6 +37,7 @@ import {
 } from "@/features/viewer/source-frame";
 import type { SplatInspection } from "./splat-inspection";
 import { EMPTY_INSPECTION, type InspectionState } from "./inspection-history";
+import { createRuntimePublisher } from "./runtime-publisher";
 
 import "@playcanvas/supersplat-viewer/viewer.css";
 
@@ -315,6 +316,8 @@ export function PlayCanvasScene({
       return;
     }
     let disposed = false;
+    // T-064: thời gian quỹ đạo / tiến độ tải báo tối đa 4 lần/giây; mỗi lần báo render lại cả cây host.
+    const publishRuntime = createRuntimePublisher(publish);
     let handle: ViewerHandleLike | null = null;
     let inspection: SplatInspection | null = null;
     const subscriptions: { off(): void }[] = [];
@@ -521,7 +524,7 @@ export function PlayCanvasScene({
           subscriptions.push(viewer.events.on(event, () => {
             if (!disposed) {
               if (event === "loaded:changed" && viewer.state.loaded) activateInitialMode();
-              publish(readRuntime(viewer));
+              publishRuntime(readRuntime(viewer));
             }
           }));
         }
@@ -529,7 +532,7 @@ export function PlayCanvasScene({
         if (viewer.app?.assets) {
           subscriptions.push(viewer.app.assets.on("error", () => { if (!disposed) onFailed(); }));
         }
-        publish(readRuntime(viewer));
+        publishRuntime(readRuntime(viewer));
         if (enableInspection && onInspectionState) {
           try {
             const { SplatInspection } = await import("./splat-inspection");
@@ -551,6 +554,7 @@ export function PlayCanvasScene({
 
     return () => {
       disposed = true;
+      publishRuntime.dispose();
       subscriptions.forEach((subscription) => subscription.off());
       if (orient && handle?.app) (handle.app as unknown as ViewerAppLike).off("update", orient);
       setCollisionViewer(null);
