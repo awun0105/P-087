@@ -111,3 +111,37 @@ def test_without_object_store_api_serves_file(tmp_path: Path, monkeypatch: pytes
     reference = _published(registry, job_id, monkeypatch)
     assert registry.presigned_artifact_url(job_id, reference, 300) is None
     assert registry.resolve_artifact(job_id, reference).is_file()
+
+
+def test_allow_list_is_cached_per_manifest_and_scene_head(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """One Studio page requests hundreds of artifacts; the allow-list is rebuilt only when job or scene moves."""
+    from types import SimpleNamespace
+
+    registry, job_id = _world(tmp_path, None)
+    builds: list[str] = []
+    monkeypatch.setattr(registry, "_build_product_visible_references", lambda job: builds.append(job) or {})
+    state = {"head": None, "manifest": "sha256:" + "1" * 64}
+    monkeypatch.setattr(
+        registry.scene.head_repository,
+        "get",
+        lambda job: None if state["head"] is None else SimpleNamespace(head_checksum=state["head"]),
+    )
+    monkeypatch.setattr(registry, "get_job", lambda job: SimpleNamespace(job_manifest_checksum=state["manifest"]))
+
+    registry._product_visible_references(job_id)
+    registry._product_visible_references(job_id)
+    assert len(builds) == 2  # no committed scene head yet: never cached
+
+    state["head"] = "sha256:" + "a" * 64
+    registry._product_visible_references(job_id)
+    registry._product_visible_references(job_id)
+    assert len(builds) == 3
+
+    state["head"] = "sha256:" + "b" * 64  # scene edited
+    registry._product_visible_references(job_id)
+    assert len(builds) == 4
+
+    state["manifest"] = "sha256:" + "2" * 64  # job manifest advanced
+    registry._product_visible_references(job_id)
+    registry._product_visible_references(job_id)
+    assert len(builds) == 5

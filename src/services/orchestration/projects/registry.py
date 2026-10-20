@@ -5,6 +5,8 @@ unit/fixture cũ, không phải đường persistence của deployed API.
 """
 
 import logging
+import threading
+from collections import OrderedDict
 from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
@@ -128,6 +130,8 @@ _SCHEMA_VERSION = "1.0"
 _FIXTURE_SEED = 7
 #: Giá trị chỗ giữ chỗ; canonical checksum bỏ qua chính field này nên không ảnh hưởng digest.
 _PLACEHOLDER_CHECKSUM = "sha256:" + "0" * 64
+#: Jobs whose artifact allow-list stays cached in one API process.
+_VISIBLE_CACHE_ENTRIES = 16
 
 
 class ProjectRegistry:
@@ -171,6 +175,10 @@ class ProjectRegistry:
         self._job_owners: dict[str, str | None] = {}
         self._project_jobs: dict[str, list[str]] = {}
         self._attempts: dict[str, list[JobAttemptRecord]] = {}
+        #: (job_id, manifest checksum, scene head checksum) → allow-list. A Studio page asks for one
+        #: artifact per object (hundreds at once); rebuilding the allow-list costs ~150 ms of CPU each.
+        self._visible_cache: OrderedDict[tuple[str, str, str], dict[str, ArtifactRef]] = OrderedDict()
+        self._visible_cache_lock = threading.Lock()
 
     # --- seeding ----------------------------------------------------------
 
@@ -2021,6 +2029,32 @@ class ProjectRegistry:
             return self.resolver.require(canonical)
 
     def _product_visible_references(self, job_id: str) -> dict[str, ArtifactRef]:
+        """Allow-list, cached per committed job manifest + scene head (both immutable once checksummed)."""
+        key = self._visible_cache_key(job_id)
+        if key is not None:
+            with self._visible_cache_lock:
+                cached = self._visible_cache.get(key)
+                if cached is not None:
+                    self._visible_cache.move_to_end(key)
+                    return dict(cached)
+        indexed = self._build_product_visible_references(job_id)
+        if key is not None:
+            with self._visible_cache_lock:
+                self._visible_cache[key] = dict(indexed)
+                while len(self._visible_cache) > _VISIBLE_CACHE_ENTRIES:
+                    self._visible_cache.popitem(last=False)
+        return indexed
+
+    def _visible_cache_key(self, job_id: str) -> tuple[str, str, str] | None:
+        """Cache only DB-backed jobs with a committed scene head; anything pending is rebuilt every time."""
+        if self.persistence is None or job_id == self._fixture_job_id or self.scene.head_repository is None:
+            return None
+        head = self.scene.head_repository.get(job_id)
+        if head is None:
+            return None
+        return job_id, self.get_job(job_id).job_manifest_checksum, head.head_checksum
+
+    def _build_product_visible_references(self, job_id: str) -> dict[str, ArtifactRef]:
         """URI được phép tải: artifact của job cộng ref hình học trong SceneIR.
 
         Ref của SceneIR là `ProductArtifactRef` nên contract chỉ cho `product_input`
