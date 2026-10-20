@@ -115,6 +115,25 @@ def test_reused_stage_takes_mark_from_earlier_attempt(job) -> None:  # noqa: ANN
     assert camera.timing_source == "recorded" and camera.completed_at == _T0 + timedelta(minutes=3)
 
 
+def test_retry_does_not_show_old_attempt_timing_on_steps_not_run_yet(job) -> None:  # noqa: ANN001
+    """Review fix: after a retry, a step still pending must not carry the failed attempt's times."""
+    failed = StepMark(
+        job_id="job-a",
+        run_kind="pipeline",
+        run_id="1",
+        step_id="ST-RGB-GEOMETRY",
+        started_at=_T0,
+        completed_at=_T0 + timedelta(minutes=42),
+        outcome="failed",
+    )
+    progress = _progress(_done_until(StageId.METRIC_CANONICALIZE)).model_copy(update={"attempt": 2})
+    geometry = next(
+        step for step in compose_steps(progress, job, [failed], None, None) if step.step_id == StageId.RGB_GEOMETRY
+    )
+    assert geometry.state == "pending"
+    assert (geometry.started_at, geometry.completed_at) == (None, None)
+
+
 def test_legacy_job_without_marks_is_inferred(job) -> None:  # noqa: ANN001
     steps = compose_steps(_progress(_done_until(StageId.CAMERA_POSE)), job, [], None, None)
     assert {step.timing_source for step in steps if step.state == "succeeded"} == {"inferred"}

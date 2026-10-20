@@ -25,11 +25,15 @@ _ACTIVE = frozenset({"queued", "running"})
 _BUILD_MODES = frozenset({"geometry", "region", "membership"})
 
 
-def _pipeline_mark(marks: Sequence[StepMark], step: StageId, attempt: int) -> StepMark | None:
-    """Mốc của lượt hiện tại; bước được tái dùng lấy mốc của lượt gần nhất trước đó."""
+def _pipeline_mark(marks: Sequence[StepMark], step: StageId, attempt: int, *, reused: bool = True) -> StepMark | None:
+    """Mốc của lượt hiện tại; bước có kết quả tái dùng (`reused`) lấy mốc của lượt gần nhất trước đó.
+
+    Bước chưa chạy / đang chạy / lỗi ở lượt này chỉ dùng mốc của chính lượt này: mốc lượt cũ (vd. lượt lỗi trước khi
+    chạy lại) không được hiện như thời gian của bước chưa bắt đầu.
+    """
     candidates = [mark for mark in marks if mark.run_kind == "pipeline" and mark.step_id == step.value]
     for run in sorted({int(mark.run_id) for mark in candidates if mark.run_id.isdigit()}, reverse=True):
-        if run > attempt:
+        if run > attempt or (run != attempt and not reused):
             continue
         found = next(mark for mark in candidates if mark.run_id == str(run))
         if found.started_at is not None or found.completed_at is not None:
@@ -75,7 +79,7 @@ def _anonymization_step(progress: JobProgress, job: JobManifest, marks: Sequence
     frames = sanitized_frame_stage(job)
     return _timed(
         step,
-        _pipeline_mark(marks, StageId.ANONYMIZATION_REVIEW, progress.attempt),
+        _pipeline_mark(marks, StageId.ANONYMIZATION_REVIEW, progress.attempt, reused=state == "succeeded"),
         frames.completed_at if frames is not None else None,
         accepted.completed_at if accepted is not None else None,
     )
@@ -151,7 +155,7 @@ def compose_steps(
     for stage in progress.stages:
         step = _timed(
             _job_step(stage, progress),
-            _pipeline_mark(marks, stage.stage_id, progress.attempt),
+            _pipeline_mark(marks, stage.stage_id, progress.attempt, reused=stage.state in {"succeeded", "skipped"}),
             stage.started_at,
             stage.completed_at,
         )
