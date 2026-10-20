@@ -466,6 +466,10 @@ def _record_runner_failure(attempt: _Attempt, error: BaseException) -> None:
     details = {"exception_type": type(error).__name__}
     if isinstance(error, ExpectedDurationError | GpuBudgetExceededError):
         code, message = error.code, str(error)
+    elif isinstance(error, KeyboardInterrupt | SystemExit):
+        # Worker bị tắt (SIGTERM/Ctrl-C, deploy): gián đoạn giống mất lease, không phải lỗi của job.
+        code = "INTERRUPTED_SHUTDOWN"
+        message = "Worker dừng giữa chừng (tắt hoặc khởi động lại máy xử lý). Bấm Thử lại để chạy tiếp."
     else:
         code, message = "PREVIEW_RUNNER_FAILED", "Worker dừng trước checkpoint hợp lệ; kiểm log attempt và runtime"
     try:
