@@ -112,6 +112,12 @@ export function guidanceFor(error: ExecutionError | null | undefined): ErrorGuid
         fix: "Thử lại. Nếu lặp lại, báo quản trị viên kiểm tra máy xử lý và dữ liệu LiDAR.",
       };
 
+    case "RESOURCE_WAIT_EXCEEDED":
+      return {
+        cause: "Việc này chờ tài nguyên quá lâu mà không phải vì máy đang bận việc khác (máy xử lý chưa đo được hoặc kiểm tra tài nguyên bị lỗi), nên đã dừng.",
+        fix: "Báo quản trị viên kiểm tra GPU và driver của máy xử lý, rồi bấm Thử lại.",
+      };
+
     case "INTERRUPTED_SHUTDOWN":
       return {
         cause: "Máy xử lý bị tắt hoặc khởi động lại khi bước này đang chạy, nên lượt chạy bị gián đoạn.",
