@@ -70,8 +70,9 @@ RUN uv venv --python 3.12.14 .venv \
 RUN scripts/gpu/install.sh /opt/real2sim --colmap=binary --skip-gpu-check --no-doctor \
     && uv cache clean
 
+# Quyền chạy lấy từ git (100755), không cần RUN chmod: lớp code là lớp duy nhất đổi giữa hai lần build, nên
+# build có cache chỉ đóng lớp này mà không phải tải các lớp runtime nặng phía trước về để chạy lệnh.
 COPY . .
-RUN chmod +x scripts/gpu/docker_entrypoint.sh scripts/gpu/isaac_python.sh
 ENV R2S_REQUIRE_FULL_RUNTIME=1
 
 VOLUME ["/data"]

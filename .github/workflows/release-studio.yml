@@ -117,6 +117,10 @@ jobs:
             ISAAC_ACCEPT_EULA=${{ steps.image.outputs.accept }}
           push: true
           tags: ${{ steps.image.outputs.name }}:${{ github.sha }}
+          # Runtime layers (CUDA, COLMAP, torch, SAM2, ObjectGS) rarely change; reuse them from the registry so a
+          # code-only change rebuilds just the final COPY layer (~10 min instead of ~70).
+          cache-from: type=registry,ref=${{ steps.image.outputs.name }}:buildcache
+          cache-to: type=registry,ref=${{ steps.image.outputs.name }}:buildcache,mode=max,image-manifest=true,oci-mediatypes=true
       - name: Record digest
         env:
           IMAGE: ${{ steps.image.outputs.name }}
