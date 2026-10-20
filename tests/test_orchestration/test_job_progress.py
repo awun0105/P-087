@@ -363,3 +363,34 @@ def test_progress_upgrades_legacy_shutdown_failure(tmp_path: Path) -> None:
     failed = job_progress(job, attempts, preview_ready=False)
 
     assert failed.error is not None and failed.error.retryable is True
+
+
+def test_stage_progress_poll_records_completion(tmp_path: Path) -> None:
+    """T-056: a worker's SUCCEEDED line closes that stage's mark right away, before the receipt is committed."""
+    from src.services.orchestration.jobs.step_marks import list_marks
+
+    registry = _registry(tmp_path)
+    job = registry.create_job(JobCreateInput(project_id="project-fixture-001"))
+    running = registry.transition_job(
+        job.job_id, TransitionRequest(target_status=JobStatus.RUNNING, current_stage=StageId.CAMERA_POSE)
+    )
+    attempt = _Attempt(registry, SimpleNamespace(), running, tmp_path)
+    progress_file = tmp_path / "preview.progress.jsonl"
+    reader = _StageProgress(attempt, progress_file)
+    done_at = datetime.now(UTC)
+    finished = StageArtifact(
+        stage_id=StageId.CAMERA_POSE,
+        status="SUCCEEDED",
+        artifact_type="CameraPoses",
+        artifact_uri="artifact://jobs/x/poses.json",
+        artifact_checksum="sha256:" + "c" * 64,
+        data_class="derived",
+        started_at=done_at,
+        completed_at=done_at,
+    )
+    progress_file.write_text(finished.model_dump_json() + "\n")
+    reader.poll()
+
+    marks = {mark.step_id: mark for mark in list_marks(registry.persistence.database, job.job_id)}
+    assert marks[StageId.CAMERA_POSE.value].completed_at == done_at
+    assert marks[StageId.CAMERA_POSE.value].outcome == "succeeded"

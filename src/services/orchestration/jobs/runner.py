@@ -99,6 +99,7 @@ from src.services.orchestration.jobs.progress import (
     awaiting_reviewed_preview,
     metric_confirmation_stage,
 )
+from src.services.orchestration.jobs.step_marks import MarkWrite, record_marks
 from src.services.orchestration.jobs.workspace import attempt_lease, cleanup_attempt_workspace, cleanup_finished_job
 from src.services.orchestration.processing.capability import latest as latest_capability
 from src.services.orchestration.processing.capability import probe as probe_capability
@@ -187,6 +188,9 @@ class _AcceptedRecipeEvidence:
     recipe: InputRecipe
 
 
+_MARK_OUTCOMES = {StageStatus.SUCCEEDED: "succeeded", StageStatus.FAILED: "failed", StageStatus.CANCELLED: "cancelled"}
+
+
 class _StageProgress:
     """Đọc dần progress file của REC (JSON lines StageArtifact) và đẩy stage RUNNING vào job."""
 
@@ -194,6 +198,8 @@ class _StageProgress:
         self.attempt = attempt
         self.path = path
         self.offset = 0
+        #: Số lượt chạy hiện tại, dùng làm run_id của mốc bước (T-056); đọc lười ở lần ghi đầu.
+        self.run_id: str | None = None
 
     def poll(self) -> None:
         """Chỉ xử lý dòng hoàn chỉnh; dòng đang ghi dở đợi lượt sau."""
@@ -210,6 +216,27 @@ class _StageProgress:
                 self.attempt.job = self.attempt.registry.record_stage_progress(
                     self.attempt.job, stage.stage_id, started_at=stage.started_at
                 )
+            elif stage.completed_at is not None and stage.status in _MARK_OUTCOMES:
+                self._mark_finished(stage)
+
+    def _mark_finished(self, stage: StageArtifact) -> None:
+        """Ghi mốc kết thúc ngay khi worker báo xong (T-056); receipt cuối lượt vẫn ghi lại cùng mốc."""
+        persistence = self.attempt.registry.persistence
+        if persistence is None or stage.completed_at is None:
+            return
+        if self.run_id is None:
+            try:
+                self.run_id = str(persistence.list_attempts(self.attempt.job.job_id)[-1].attempt)
+            except Exception as error:  # noqa: BLE001 - mốc bước là đo đạc, không được làm hỏng lượt chạy
+                logger.warning("Không đọc được lượt chạy để ghi mốc bước cause=%s", type(error).__name__)
+                return
+        record_marks(
+            persistence.database,
+            self.attempt.job.job_id,
+            "pipeline",
+            self.run_id,
+            [MarkWrite("finish", stage.stage_id.value, stage.completed_at, _MARK_OUTCOMES[stage.status])],
+        )
 
 
 class ExpectedDurationError(TimeoutError):
