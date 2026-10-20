@@ -1,63 +1,30 @@
-# Architecture Diagram
+# Sơ đồ kiến trúc
 
-> **Ghi chú Real2Sim (2026-09-29):** các sơ đồ phía dưới là mẫu của ban tổ chức
-> (chat agent LangGraph), giữ nguyên theo quy tắc additive-only. Kiến trúc thật của
-> Real2Sim nằm ở [`ARCHITECTURE.md`](../ARCHITECTURE.md) và mục "Real2Sim Studio" cuối file.
+Bản tóm tắt bằng hình cho hồ sơ nộp bài. Giải thích đầy đủ từng thành phần, ranh giới và cách lưu dữ liệu nằm ở [ARCHITECTURE](../ARCHITECTURE.md); luồng xử lý từng bước nằm ở [PIPELINE](PIPELINE.md).
 
-
-## System Overview
+## Hệ thống đang chạy
 
 ```mermaid
-graph TB
-    User([User]) --> UI[Frontend<br/>React/Next.js]
-    UI -->|REST API| API[FastAPI Backend]
-    API --> Agent[LangGraph Agent]
-    Agent --> LLM[LLM Service<br/>GPT-4o / Gemini]
-    Agent --> Tools[Agent Tools]
-    Tools --> DB[(Database)]
-    Agent --> VS[Vector Store<br/>ChromaDB]
+flowchart LR
+    USER(["Người dùng / trình duyệt"]) --> WEB["Studio Next.js<br/>Vercel"]
+    WEB -->|"HTTP /api/v1"| API["FastAPI<br/>máy ảo Google Cloud, Seoul"]
+    API --> DB[("PostgreSQL<br/>Supabase")]
+    API --> R2[("Artifact store<br/>Cloudflare R2")]
+    USER -.->|"link tải lên/tải về có hạn"| R2
+    CONTROL["GPU controller"] -->|"thuê / trả máy"| RUNPOD["RunPod"]
+    RUNPOD -.-> GPU["Worker GPU<br/>FFmpeg, COLMAP, Brush, tách vật, mesh"]
+    GPU -->|"nhận job, báo tiến trình"| DB
+    GPU -->|"đọc input, ghi kết quả"| R2
 ```
 
-## Agent Flow
+## Thành phần
 
-```mermaid
-graph LR
-    START((Start)) --> Input[Parse Input]
-    Input --> Analyze[Analyze Query]
-    Analyze --> Decide{Need Tool?}
-    Decide -->|Yes| CallTool[Call Tool]
-    CallTool --> Analyze
-    Decide -->|No| Generate[Generate Response]
-    Generate --> END((End))
-```
-
-## Component Details
-
-| Component | Technology | Purpose |
-|-----------|-----------|---------|
-| Frontend | React/Next.js | User interface |
-| Backend | FastAPI | API server |
-| Agent | LangGraph | AI agent orchestration |
-| LLM | OpenAI/Gemini | Language model |
-| Database | PostgreSQL/SQLite | Data persistence |
-| Vector Store | ChromaDB | RAG / embeddings |
-
-## Real2Sim Studio — triển khai đã chốt (ADR 0003)
-
-```mermaid
-graph LR
-    U([Người dùng / trình duyệt]) --> UI[Web UI<br/>Next.js trên Vercel]
-    UI -->|REST| API[Server điều khiển<br/>FastAPI trên Railway]
-    API --> DB[(PostgreSQL<br/>Supabase)]
-    U -->|presigned upload/download| R2[(Cloudflare R2<br/>video, frame, 3DGS, export)]
-    API -->|bật/tắt, giao job| GPU[GPU worker Vast.ai / dự phòng RunPod<br/>COLMAP, Brush, SOG, LOD<br/>+ pipeline v2: mask SAM2, Gaussian có nhãn, vá nền]
-    GPU -->|đọc input, ghi artifact| R2
-    GPU -->|tiến trình, kết quả| API
-    API -->|cấp link có hạn| R2
-```
-
-Hiện trạng chạy thật vẫn là một máy (`scripts/gpu/run_stack.sh`); sơ đồ trên là
-đích triển khai theo [plan Cloud Studio](plans/active/2026-09-29-cloud-studio.md).
-Pipeline v2 ([ADR 0007](decisions/0007-object-centric-hybrid-usd-pipeline.md)) chạy thêm các chặng GPU nặng
-trên cùng worker thuê (ước tính 16–24 GB); đầu ra là USD lai cho Isaac Sim.
-
+| Thành phần | Công nghệ | Việc |
+| --- | --- | --- |
+| Studio | Next.js, React, TypeScript, PlayCanvas/SuperSplat | Tải video, xem và chỉnh scene 3D, duyệt vật, theo dõi tiến trình |
+| API | Python 3.12, FastAPI | Tài khoản và quyền, project, job, revision scene, đóng gói, duyệt và phát hành |
+| Database | PostgreSQL (Supabase); SQLite khi chạy một máy | Metadata, hàng đợi job, con trỏ revision hiện hành |
+| Artifact store | Cloudflare R2; thư mục cục bộ khi chạy một máy | Video, frame, Gaussian, mesh, gói OpenUSD, báo cáo, mỗi file có checksum |
+| Worker GPU | Docker image GPU trên RunPod | Dựng cảnh, tách vật, tạo hình khối và collider |
+| GPU controller | Python, RunPod API | Thuê máy khi có job, trả máy khi rảnh, giới hạn chi phí |
+| Kiểm định | NVIDIA Isaac Sim, OpenUSD | Nạp và chạy gói mô phỏng; cần máy có Isaac, image cloud hiện chưa có |
