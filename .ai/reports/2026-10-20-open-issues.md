@@ -40,14 +40,7 @@ Lượt đo độ nét chạy 1 luồng chiếm phần lớn: khoảng 4–5 ph�
 
 **Giải quyết:** lọc theo người tạo ở danh sách scene và mọi đường xem chi tiết (giữ scene mẫu công khai). Giới hạn số tài khoản Khách mới mỗi ngày theo địa chỉ IP.
 
-## 9. Thuê GPU còn phải xử lý bằng tay — [API]
-- RunPod hết máy A5000: sau 3 lần, bộ điều khiển ngừng thuê và không tự mở lại.
-- RunPod trả lời không rõ ràng: bộ điều khiển kẹt ở trạng thái `unknown`.
-- Danh mục image mới chỉ được đọc khi máy chủ API khởi động lại.
-
-**Giải quyết:** tự thử lại sau một khoảng chờ tăng dần. Tự gỡ trạng thái kẹt khi RunPod không có máy nào mang tên của lần thuê đó. Đọc lại danh mục khi file thay đổi. Cân nhắc thêm loại GPU dự phòng đã chứng nhận.
-
-## 10. Đầu vào ảnh và chất lượng quay chụp — [GPU] [API] [Web]
+## 9. Đầu vào ảnh và chất lượng quay chụp — [GPU] [API] [Web]
 - Chưa nhận ảnh rời (JPG/PNG/HEIC).
 - Trình duyệt nén mạnh video có ít khung/giây.
 - Phần hướng dẫn quay chụp thiếu các điểm quyết định chất lượng.
