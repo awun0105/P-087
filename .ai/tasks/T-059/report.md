@@ -1,0 +1,12 @@
+# T-059 report
+- `pipeline/models.py`: `PipelineStep`, `PipelineWait`, `PipelineView` (`StepActor`, `StepState`, `TimingSource`).
+- `pipeline/view.py`: `compose_steps` (bước job theo thứ tự + `ANONYMIZATION_REVIEW` khi có frame đã che; `OBJECT_CONFIRM`/`SCENE_DECOMPOSE` khi scene có bước duyệt vật; mốc ghi > suy luận > không có; lỗi `OBJECTIFY_AWAITING_CHOICE`, `OBJECT_GEOMETRY_BUILD_FAILED`), `current_step`, `is_usable`, `scene_operation_wait`.
+- `progress.studio_pipeline`: thêm `LIDAR_ODOMETRY` khi job có artifact hoặc đang ở bước đó.
+- Route `GET /api/v1/jobs/{id}/pipeline` (`scenes.py`): `PipelineViewResponse` = view + `progress` (đúng shape `/progress`) + `objectify` + `gpu` (chỉ khi chờ máy; bỏ elapsed/remaining để không phá 304). Thân `/progress` tách thành `_job_progress_response` dùng chung.
+- `/scenes`: `SceneSummary.next_action` từ cùng hàm `next_action` (không đọc gói / vật chờ).
+- Frontend: `lib/contracts/pipeline.ts`, `SceneSummary.next_action?`.
+- Đo (fixture, in-process, 50 lần): đầy đủ trung vị 11,6 ms (p95 12,5); 304 trung vị 11,4 ms.
+- Lệch plan:
+  - ETag tính bằng băm nội dung view (không tính version sớm từ các truy vấn rẻ): đúng tuyệt đối, không sót trường hợp; 304 tiết kiệm truyền và render ở giao diện, không tiết kiệm CPU server. Mục tiêu "304 ≤ 8 ms" không đạt (11 ms).
+  - Không đếm số transaction trong test.
+- Test: test_pipeline_view (15), test_pipeline_route (6, gồm GPU), test_scene_list_next_action; role matrix khai báo route mới.
