@@ -65,5 +65,5 @@ T-064 | Viewer không dựng lại, không vẽ thừa, tab ẩn thì nghỉ | i
 T-065 | Tải lười Walk, trang bước song song, chia nhỏ JS | implemented | architect
 T-066 | Ảnh frame thu nhỏ | implemented | architect
 T-067 | Vật nhẹ: SOG cho vật, tải giới hạn, vỏ không tải lại | implemented | architect
-T-068 | SOG xem nhanh: màu bậc 0 và LOD cho job mới | planned | engineer
+T-068 | SOG xem nhanh: màu bậc 0 và LOD cho job mới | implemented | architect
 T-069 | Full regression, đo trước/sau, bàn giao | planned | engineer
