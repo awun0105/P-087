@@ -750,3 +750,25 @@ def test_extraction_rejects_path_traversal(tmp_path: Path) -> None:
     with pytest.raises(PackagePublishError, match="path"):
         extract_package(archive_path, tmp_path / "staging")
     assert not outside.exists()
+
+
+def test_validation_hashes_each_referenced_file_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Repeated references to one artifact must not re-hash it (large SOG files are cited by every revision)."""
+    import scripts.cloud.package_publish as publisher
+
+    archive_path, _ = _make_package(tmp_path)
+    staging = tmp_path / "staging"
+    extract_package(archive_path, staging)
+    calls: dict[Path, int] = {}
+    real = publisher.sha256_file
+
+    def counting(path: Path) -> str:
+        calls[Path(path)] = calls.get(Path(path), 0) + 1
+        return real(path)
+
+    monkeypatch.setattr(publisher, "sha256_file", counting)
+    original_refs = publisher._validate_row_payloads
+    monkeypatch.setattr(publisher, "_validate_row_payloads", lambda rows: original_refs(rows) * 5)
+    validate_staged_package(staging)
+    # One hash for the job-manifest terminal check, at most one more for all reference checks.
+    assert calls and max(calls.values()) <= 2

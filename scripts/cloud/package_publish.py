@@ -788,7 +788,11 @@ def validate_staged_package(root: Path) -> StagedPackage:
         path = _artifact_path(artifacts, uri)
         if not path.is_file():
             raise PackagePublishError(f"referenced artifact is missing: {uri}")
-        observed = verified.setdefault(path, sha256_file(path))
+        # Many references can point at one large file (e.g. every scene revision cites the same SOG):
+        # hash each file once. setdefault() would evaluate sha256_file on every reference.
+        observed = verified.get(path)
+        if observed is None:
+            observed = verified[path] = sha256_file(path)
         if observed != checksum:
             raise PackagePublishError(f"artifact checksum mismatch for {uri}: expected {checksum}, observed {observed}")
     # The manifest check above can be the only check for a small package.  All
