@@ -12,6 +12,8 @@ from collections.abc import Callable
 from pathlib import Path
 from threading import BoundedSemaphore, Lock
 
+from src.runtime_env import runtime_env
+
 logger = logging.getLogger(__name__)
 
 #: Chuyển đồng thời tối đa: mỗi lần ~0,5 s CPU cho 6 MB; giữ API còn CPU cho request khác.
@@ -26,12 +28,9 @@ class CompactConversionError(RuntimeError):
 
 
 def compact_cli() -> Path | None:
-    """CLI splat-transform của deployment (GPU worker: `R2S_VOXEL_CLI`, image API: `REC05_VOXEL_CLI`); None nếu không có."""
-    for name in ("R2S_VOXEL_CLI", "REC05_VOXEL_CLI"):
-        value = os.environ.get(name)
-        if value and Path(value).is_file():
-            return Path(value)
-    return None
+    """CLI splat-transform của deployment (`R2S_VOXEL_CLI`, image API cũ đặt tên cũ — `runtime_env` đọc cả hai); None nếu không có."""
+    value = runtime_env(os.environ, "R2S_VOXEL_CLI")
+    return Path(value) if value and Path(value).is_file() else None
 
 
 def compact_etag(checksum: str) -> str:
