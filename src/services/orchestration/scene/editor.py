@@ -8,8 +8,10 @@ Vì vậy editor không sửa `SceneIR` tại chỗ — nó dựng revision kế
 import json
 import logging
 import re
+from collections import OrderedDict
 from collections.abc import Callable
 from pathlib import Path
+from threading import Lock
 
 from pydantic import ValidationError
 
@@ -20,11 +22,13 @@ from src.models.contracts.scene import SceneIR, SceneObject
 from src.services.orchestration.artifacts import (
     ArtifactAlreadyExistsError,
     ArtifactResolver,
+    ArtifactStoreError,
     FilesystemArtifactStore,
     sha256_bytes,
     sha256_file,
     with_canonical_checksum,
 )
+from src.services.orchestration.artifacts.store import _file_version
 from src.services.orchestration.jobs.database import RuntimeStateConflictError, RuntimeTransaction
 from src.services.orchestration.scene.errors import (
     SceneEditRejectedError,
@@ -62,6 +66,8 @@ _ROOT_REVISION = "rev-001"
 _LINEAGE_CACHE_JOBS = 8
 
 logger = logging.getLogger(__name__)
+#: Số revision head đã kiểm giữ lại trong một tiến trình.
+_HEAD_CACHE_MAX = 64
 
 
 class SceneEditor:
@@ -80,6 +86,9 @@ class SceneEditor:
         self.store = FilesystemArtifactStore(resolver)
         self.head_repository = head_repository
         self._revisions: dict[str, SceneRevision] = {}
+        #: T-053: (URI, checksum) của head → (revision đã kiểm, phiên bản file trên đĩa).
+        self._head_cache: OrderedDict[tuple[str, str], tuple[SceneRevision, tuple]] = OrderedDict()
+        self._head_cache_lock = Lock()
         #: job_id → (head revision, revisions already proven to be in its lineage, next revision to prove).
         #: Revisions are immutable, so a walk from one head is reused until that job's head moves.
         self._lineage: dict[str, tuple[str, dict[str, SceneRevision], str | None]] = {}
@@ -546,7 +555,35 @@ class SceneEditor:
         return scene
 
     def _load_head_revision(self, head: SceneHeadRecord) -> SceneRevision:
-        """Resolve only the exact immutable artifact named by the committed DB head."""
+        """Resolve only the exact immutable artifact named by the committed DB head.
+
+        T-053: the verified revision is kept per (URI, checksum) while the file on disk keeps the same version
+        (size, mtime…); an edited file is re-read and rejected by the same checks.
+        """
+        key = (head.scene_reference.artifact_uri, head.scene_reference.artifact_checksum)
+        with self._head_cache_lock:
+            cached = self._head_cache.get(key)
+        if cached is not None and cached[1] == self._local_version(head.scene_reference.artifact_uri):
+            return cached[0]
+        revision = self._load_head_revision_uncached(head)
+        version = self._local_version(head.scene_reference.artifact_uri)
+        if version is not None:
+            with self._head_cache_lock:
+                self._head_cache[key] = (revision, version)
+                self._head_cache.move_to_end(key)
+                while len(self._head_cache) > _HEAD_CACHE_MAX:
+                    self._head_cache.popitem(last=False)
+        return revision
+
+    def _local_version(self, uri: str) -> tuple | None:
+        """Phiên bản file trên đĩa này (không hỏi kho file); None khi chưa có bản cục bộ."""
+        try:
+            path = self.resolver.resolve(uri)
+            return _file_version(path) if path.is_file() else None
+        except (OSError, ValueError, ArtifactStoreError):
+            return None
+
+    def _load_head_revision_uncached(self, head: SceneHeadRecord) -> SceneRevision:
         revision = self._load_revision(head.job_id, head.scene_revision, fresh=True)
         if revision is None:
             raise SceneEditRejectedError("Committed scene head points to a missing SceneIR artifact")

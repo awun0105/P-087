@@ -625,3 +625,41 @@ def test_legacy_scene_with_invalid_artifacts_stays_blocked_with_a_user_safe_mess
         assert info.value.user_message.startswith("Dữ liệu scene này không qua được bước kiểm tra")
     assert repository.get(_JOB_ID) is None
     assert repository.get_repair(_JOB_ID).status == "BLOCKED"
+
+
+# ── T-053: the committed head revision is parsed once per checksum ───────────
+
+
+def test_current_scene_parses_once_per_head(scene_state: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
+    from src.services.orchestration.scene import editor as editor_module
+
+    editor = _head_editor(scene_state)
+    _publish_root(editor)
+    parses: list[int] = []
+    real = editor_module.SceneIR.model_validate_json
+    monkeypatch.setattr(editor_module.SceneIR, "model_validate_json", lambda data: parses.append(1) or real(data))
+    first = editor.current(_JOB_ID)
+    second = editor.current(_JOB_ID)
+    assert first.scene.scene_revision == second.scene.scene_revision == "rev-001"
+    assert len(parses) <= 1
+
+
+def test_new_head_is_loaded(scene_state: SimpleNamespace) -> None:
+    editor = _head_editor(scene_state)
+    _publish_root(editor)
+    editor.current(_JOB_ID)
+    _edit(editor, "rev-001", 1.0)
+    assert editor.current(_JOB_ID).scene.scene_revision == "rev-002"
+
+
+def test_tampered_head_scene_file_is_rejected(scene_state: SimpleNamespace) -> None:
+    editor = _head_editor(scene_state)
+    _publish_root(editor)
+    editor.current(_JOB_ID)
+    path = scene_state.resolver.resolve(scene_artifact_uri(_JOB_ID, "rev-001"))
+    os.chmod(path, 0o644)
+    path.write_text(path.read_text(encoding="utf-8").replace("object-rack-001", "object-rack-999"), encoding="utf-8")
+    from src.services.orchestration.scene.errors import SceneEditRejectedError
+
+    with pytest.raises(SceneEditRejectedError):
+        editor.current(_JOB_ID)
