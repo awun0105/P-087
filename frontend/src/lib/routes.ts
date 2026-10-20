@@ -1,5 +1,5 @@
 /**
- * Đường dẫn gốc của ứng dụng (owner quyết 01/10/2026, STUDIO_UX_SPEC.md §3.1):
+ * Đường dẫn gốc của ứng dụng (owner quyết 01/10/2026):
  *
  * - `/` là trang giới thiệu (landing), nằm ngoài AppShell — trang đầu tiên khi mở domain;
  * - trang chính của app là Tổng quan ở `/overview`;

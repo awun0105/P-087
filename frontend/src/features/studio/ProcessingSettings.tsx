@@ -144,7 +144,7 @@ export function ProcessingSettings({
 
       <MachinePanel capability={capability} machineLabel={machineLabel} evaluation={evaluation} editable={editable} />
 
-      {/* Thông số chi tiết thu gọn khi đang dùng preset và không có ô cảnh báo (STUDIO_UX_SPEC.md P3). */}
+      {/* Thông số chi tiết thu gọn khi đang dùng preset và không có ô cảnh báo. */}
       <details className="group mt-6" open={!editable || (activePreset === null && !scenarioPreset) || flagged}>
         <summary className="cursor-pointer text-sm font-medium text-ink-muted select-none hover:text-ink">
           Thông số chi tiết ({detailParameters.length} tham số)

@@ -146,7 +146,7 @@ Component `frontend/src/components/shadcn/*`, hook `frontend/src/hooks/use-mobil
 sidebar/header của `frontend/src/features/shell/` lấy từ
 [`arhamkhnz/next-shadcn-admin-dashboard`](https://github.com/arhamkhnz/next-shadcn-admin-dashboard)
 commit `3502692` (2026-09-28), MIT License — Copyright (c) 2024 Mohammed Arham Khan. Đã đổi đường
-dẫn import và theme; không chép các trang domain mẫu (docs/archived/STUDIO_UX_SPEC.md §3.2).
+dẫn import và theme; không chép các trang domain mẫu.
 
 `frontend/src/styles/shadcn-variants.css` chép từ gói npm `shadcn@4.21.0` (`dist/tailwind.css`), MIT License.
 Dependency thêm: `radix-ui@1.6.7` (MIT), `tw-animate-css@1.4.0` (MIT).

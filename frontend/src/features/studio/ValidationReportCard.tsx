@@ -29,7 +29,7 @@ function ResultBadge({ value }: { value: string }) {
 }
 
 /**
- * Báo cáo validation của đúng gói thuộc revision hiện tại (STUDIO_UX_SPEC.md S10): từng check, từng cặp Start–Goal,
+ * Báo cáo validation của đúng gói thuộc revision hiện tại: từng check, từng cặp Start–Goal,
  * bằng chứng đi kèm và "Nguồn kết quả" để đối chiếu checksum. Chỉ đọc; quyết định duyệt nằm ở `ReviewPanel`.
  *
  * Cờ proof chỉ do backend đặt khi selected worker run, report và RuntimeManifest đã xác minh khớp.

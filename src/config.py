@@ -126,7 +126,7 @@ class Settings(BaseSettings):
     product_rerun_recording_dir: Path = Path("./data/rerun_recordings")
     #: Thư mục giữ file của scene đã vào thùng rác; None → `trash/` cạnh ARTIFACT_ROOT (cùng filesystem, dời là rename).
     product_trash_root: Path | None = None
-    #: Mục nằm trong thùng rác quá số ngày này thì tự bị xoá hẳn (owner chốt 7 ngày, STUDIO_UX_SPEC D-15); 0 = tắt.
+    #: Mục nằm trong thùng rác quá số ngày này thì tự bị xoá hẳn (owner chốt 7 ngày); 0 = tắt.
     product_trash_retention_days: int = Field(default=7, ge=0, le=365)
     #: Số lần thử tách theo vật trước khi dừng và để người dùng chọn (chạy lại / dùng hộp).
     product_objectify_attempts: int = Field(default=3, ge=1, le=10)

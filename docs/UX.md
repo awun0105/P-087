@@ -6,7 +6,7 @@ Tài liệu mô tả người dùng vào đâu, xem được gì, cần làm gì
 
 [PRD](PRD.md) giữ yêu cầu và quyền sản phẩm. [PIPELINE](PIPELINE.md) giải thích các bước xử lý bên trong. [CONTRACTS](CONTRACTS.md) giải thích dữ liệu, revision và bằng chứng. UX chỉ mô tả cách các nội dung đó xuất hiện và được thao tác trên giao diện.
 
-Bản đặc tả cũ [archived/STUDIO_UX_SPEC.md](archived/STUDIO_UX_SPEC.md) chỉ còn để tra các mã quyết định D-xx/Q-xx mà chú thích trong code trích dẫn; bố cục đề xuất và mốc triển khai trong đó không phải hành vi hiện hành.
+Bản đặc tả cũ `STUDIO_UX_SPEC.md` đã bỏ ngày 20/10/2026; các mã D-xx/Q-xx còn gặp trong hồ sơ task cũ tra trong lịch sử Git.
 
 ### 0.1 Các khái niệm dùng trên giao diện
 

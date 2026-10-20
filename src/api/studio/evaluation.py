@@ -1,4 +1,4 @@
-"""Bảng đánh giá của một scene và bản xuất báo cáo (STUDIO_UX_SPEC D-16).
+"""Bảng đánh giá của một scene và bản xuất báo cáo.
 
 Số liệu tính lại mỗi lần đọc từ artifact bất biến của job; route không lưu gì.
 """

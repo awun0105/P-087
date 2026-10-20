@@ -243,7 +243,7 @@ function parseROI(form: ROIForm): { min_xyz_m: [number, number, number]; max_xyz
   return { min_xyz_m: [minX, minY, minZ], max_xyz_m: [maxX, maxY, maxZ] };
 }
 
-/** Trạng thái lưu SceneObject cho header scene (STUDIO_UX_SPEC.md Q5: mỗi thao tác là một revision). */
+/** Trạng thái lưu SceneObject cho header scene (mỗi thao tác là một revision). */
 export type SaveState =
   | { status: "saved"; revision: string }
   | { status: "saving"; revision: string }
@@ -276,7 +276,7 @@ const FILTERS: { value: Filter; label: string; match: (object: SceneObject, hidd
 ];
 
 /**
- * Studio vật thể (ADR 0006, PRODUCT-07/07A, STUDIO_UX_SPEC.md P5): danh sách · viewport 3DGS hệ mét ·
+ * Studio vật thể (ADR 0006, PRODUCT-07/07A): danh sách · viewport 3DGS hệ mét ·
  * inspector. Người dùng xác nhận/loại ứng viên, ẩn/đổi tên vật đã xác nhận hoặc thêm vật cản hộp.
  * Mỗi thao tác là một revision SceneIR mới ở backend; màn hình chỉ giữ revision vừa nhận, không tự
  * sửa scene ở client.

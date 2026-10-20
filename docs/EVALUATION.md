@@ -26,7 +26,7 @@ Kết quả của việc này không thay cho việc kia. Ví dụ: PSNR cao ở
 
 ### 1.1 TorWIC-SLAM và phạm vi kết quả hiện có
 
-Mọi số đối chứng đang lưu trong repo lấy từ dataset TorWIC-SLAM, chủ yếu traversal `Aisle_CW` (cảnh kho). Dataset có giấy phép CC BY-NC 4.0; chỉ dùng cho nghiên cứu, không đưa vào sản phẩm thương mại. Các thành phần được dùng:
+**Từ 20/10/2026 dự án không còn dùng TorWIC.** Mục này và các kết quả ở mục 6 được giữ làm lịch sử, vì evaluator trong `eval/` và mọi số đối chứng đang lưu đều lấy từ dataset TorWIC-SLAM, chủ yếu traversal `Aisle_CW` (cảnh kho). Đo cảnh mới cần nguồn đối chứng khác (mục 7). Dataset có giấy phép CC BY-NC 4.0; chỉ dùng cho nghiên cứu, không đưa vào sản phẩm thương mại. Các thành phần được dùng:
 
 | Thành phần | Dùng để |
 | --- | --- |
@@ -280,7 +280,7 @@ Khi trích một số trong báo cáo hay pitch, ghi kèm: file nguồn, job, ng
 | So đường đi Start–Goal với nhãn (`path_validation`) và độ phủ vật (`object_coverage`) | Chưa có code; các evaluator mục 3.7 và 3.8 không thay thế được |
 | Tách ảnh giữ lại theo góc nhìn khác rõ | Số ảnh hiện tại thiên lạc quan (mục 1.4) |
 | Ngưỡng ở trạng thái khóa | Không có kết luận đạt/không đạt nào hợp lệ |
-| Kết quả ngoài TorWIC | PRD mục 10.1 yêu cầu cảnh trong nhà thực và case có kiểm soát; cần chủ dự án chốt bộ cảnh |
+| Dữ liệu đối chứng thay TorWIC | TorWIC không còn dùng; PRD mục 10.1 yêu cầu cảnh trong nhà thực và case có kiểm soát, mỗi cảnh cần số đo tham chiếu độc lập; cần chủ dự án chốt bộ cảnh |
 | Ghi chép thời gian làm tay công bằng | SM-06 chỉ có công cụ ghi, chưa có phép so trên cảnh thật |
 
 ## 8. Chạy lại kiểm tra của evaluator
@@ -319,4 +319,4 @@ Chưa có test cho `brush_quality`, `click_error`, `lidar_clearance`, `lidar_odo
 - Tự kiểm: [`src/services/orchestration/evaluation/`](../src/services/orchestration/evaluation/), [`evaluation_reference_v1.json`](../configs/product/evaluation_reference_v1.json).
 - Lớp dữ liệu và hợp đồng: [`artifacts.py`](../src/models/contracts/artifacts.py), [`validation.py`](../src/models/contracts/validation.py), [`release.py`](../src/models/contracts/release.py).
 - Chuẩn bị dataset: [`scripts/torwic/`](../scripts/torwic/), [`scripts/demo/`](../scripts/demo/).
-- Tài liệu cũ đã đối chiếu: [`archived/DATASET_PLAYBOOK.md`](archived/DATASET_PLAYBOOK.md), `docs/execution/TEAM_EXECUTION_CONTRACT.md` chương 5, `docs/plans/active/2026-10-02-evaluation-system.md`.
+- Tài liệu cũ đã đối chiếu: `DATASET_PLAYBOOK.md` (đã bỏ 20/10/2026, còn trong lịch sử Git), `docs/execution/TEAM_EXECUTION_CONTRACT.md` chương 5, `docs/plans/active/2026-10-02-evaluation-system.md`.

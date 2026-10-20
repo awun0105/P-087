@@ -32,7 +32,7 @@ Dữ liệu evaluation-only (GT, split giữ lại) chỉ dùng trong evaluator,
 
 ## Chỉ số tự kiểm trong Studio (không phải benchmark)
 
-Bảng đánh giá của từng scene trong Studio (`src/services/orchestration/evaluation/`, STUDIO_UX_SPEC D-16) đo từ chính
+Bảng đánh giá của từng scene trong Studio (`src/services/orchestration/evaluation/`) đo từ chính
 artifact của job, không dùng GT, nên có cho cả dữ liệu người dùng. Nó không thay các benchmark ở trên: benchmark trả lời
 "hệ thống chính xác tới đâu trên dataset đối chứng", bảng tự kiểm trả lời "scene này có dấu hiệu sai không".
 

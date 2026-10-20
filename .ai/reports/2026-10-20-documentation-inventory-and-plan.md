@@ -1050,3 +1050,7 @@ Cập nhật liên kết sống: AGENTS.md (authority map), PRD mục 0.1, ARCHI
 ### 18.4 Kiểm tra
 
 Liên kết cục bộ, đề mục trùng, fence trên 17 file đã sửa: PASS. `scripts.check_foundation`: PASS 5/5. Frontend `tsc --noEmit` và eslint cho `registry.tsx` (chỉ đổi chú thích): sạch. `git diff --check`: PASS. Không chạy lại full suite vì chỉ đổi tài liệu và một dòng chú thích.
+
+### 18.5 Bỏ hẳn hai tài liệu lưu trữ
+
+Theo yêu cầu chủ dự án (20/10/2026, dự án không còn dùng TorWIC), xóa `docs/archived/STUDIO_UX_SPEC.md` và `docs/archived/DATASET_PLAYBOOK.md`. Bỏ phần trích dẫn hai file này trong khoảng 40 chú thích ở `src/`, `frontend/`, `tests/`, `scripts/`, `eval/` và `THIRD_PARTY_NOTICES.md`; nội dung giải thích giữ nguyên. EVALUATION mục 1.1 và 7, STATUS ghi rõ TorWIC chỉ còn là lịch sử. Hồ sơ lịch sử không sửa. Kiểm tra: py_compile, ruff check/format, 24 pytest (thùng rác, đánh giá), typecheck và eslint frontend, 10 vitest, Foundation 5/5 đều đạt.

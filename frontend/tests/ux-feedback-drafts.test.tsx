@@ -39,7 +39,7 @@ describe("feedback và boundary lỗi", () => {
     expect(errorMessage(new ApiError(405, "Method Not Allowed"))).toBe("Không thực hiện được thao tác. Hãy thử lại.");
     expect(errorMessage(new ApiError(400, "<html><body>Bad Gateway</body></html>"))).not.toContain("<html");
     expect(errorMessage(new ApiError(503, "Máy chủ đang bảo trì tới 9 giờ"))).toBe("Máy chủ chưa xử lý được yêu cầu. Hãy thử lại.");
-    // 401/404 giữ hướng phục hồi chung của STUDIO_UX_SPEC.md, kể cả khi backend có câu riêng.
+    // 401/404 giữ hướng phục hồi chung, kể cả khi backend có câu riêng.
     expect(errorMessage(new ApiError(401, "Cần đăng nhập"))).toContain("Đăng nhập để tiếp tục");
     expect(errorMessage(new ApiError(404, "không tìm thấy upload: upload-x"))).toContain("quay về Scenes");
   });

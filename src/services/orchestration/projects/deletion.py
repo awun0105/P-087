@@ -1,6 +1,6 @@
 """Thùng rác scene: gỡ scene khỏi Studio theo cách khôi phục được, và xoá hẳn khi người dùng chọn.
 
-Dùng chung cho trang Thùng rác của Studio (STUDIO_UX_SPEC D-15, API `studio/trash.py`) và CLI vận hành `delete_cli`.
+Dùng chung cho trang Thùng rác của Studio (API `studio/trash.py`) và CLI vận hành `delete_cli`.
 
 Một scene = project + các job của nó. Gỡ scene kéo theo journal và yêu cầu dựng lại vật của job, thư mục artifact của
 job/project, thư mục làm việc của worker và bản ghi Rerun. Upload nguồn chỉ bị gỡ khi không còn scene hay bản nhập nào

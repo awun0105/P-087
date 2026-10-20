@@ -56,7 +56,7 @@ Deploy Studio tự động bằng workflow đang lỗi vì `VERCEL_TOKEN` hết 
 | Thư viện mẫu, phiên demo | Production cho thư viện | 3 mẫu: drjohnson rev-198, room rev-062, playroom rev-003; `/api/v1/samples` trả 200 | Phiên demo dùng SQLite và thư mục cục bộ; chưa kiểm mở phiên demo trên production. Mẫu không được ghi là đã kiểm định Isaac |
 | Tài khoản Guest/Editor/Reviewer, dùng thử | Production | Đăng nhập và nút dùng thử trên web thật, 20/10 | Test ma trận quyền đang đỏ vì route mẫu và phiên demo chưa được phân loại |
 | Bảng giá trị `/benchmark` | Code | Audit trên SQLite local tìm 4 lỗi, đã sửa F1 và F3 (`.ai/reports/benchmark-*-20261018/`) | Chưa rõ F2 (giới hạn giờ GPU bỏ qua lần chạy lỗi) đã sửa; chi phí là giá khai báo × giờ, không phải hóa đơn |
-| Đo so với dữ liệu đối chứng | Local | Kết quả trong `eval/results/`, chỉ TorWIC | Không có `EvaluationReport`, chưa có so đường đi Start–Goal (EVALUATION mục 7) |
+| Đo so với dữ liệu đối chứng | Local, lịch sử | Kết quả trong `eval/results/`, chỉ TorWIC; dự án ngừng dùng TorWIC từ 20/10/2026 | Không có `EvaluationReport`, chưa có so đường đi Start–Goal (EVALUATION mục 7) |
 | Controller GPU, hàng đợi, chia GPU | Production cho controller | Controller bật, giới hạn 0,55 USD/giờ, tổng 5 USD, trả máy sau 30 phút rảnh; pod A5000 chạy 3 worker | Chia GPU theo mức đo (T-072) và hàng đợi theo bước (T-073) mới là plan; RunPod hay hết A5000 trong mức giá, controller tạm dừng sau 3 lần và cần `resume` |
 
 ## 3. Chất lượng code

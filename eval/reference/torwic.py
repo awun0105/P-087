@@ -1,7 +1,7 @@
 """Phần dùng chung của các evaluator đối chứng trên TorWIC: pose ground truth, pose của job, ghi bản ghi.
 
-**Chỉ dùng ở evaluator.** Ground truth (`traj_gt.txt`, `groundtruth_map.ply`) không bao giờ đi vào runtime sản phẩm
-(DATASET_PLAYBOOK). Job được đọc qua registry của deployment đang cấu hình bằng biến môi trường, nên evaluator chạy
+**Chỉ dùng ở evaluator.** Ground truth (`traj_gt.txt`, `groundtruth_map.ply`) không bao giờ đi vào runtime sản phẩm.
+Job được đọc qua registry của deployment đang cấu hình bằng biến môi trường, nên evaluator chạy
 được trên máy local lẫn máy chủ có kho file từ xa.
 
 Quy ước ghép frame: video demo được ghép từ các ảnh liên tiếp của một traversal, nên frame `i` của video là ảnh

@@ -1486,7 +1486,7 @@ export interface TrashItem {
   detail: string;
 }
 
-/** Một mục thùng rác (STUDIO_UX_SPEC.md D-15). */
+/** Một mục thùng rác. */
 export interface TrashEntry {
   entry_id: string;
   title: string;
@@ -1574,7 +1574,7 @@ export function purgeTrash(entryIds: string[]): Promise<TrashActionResult> {
   return trashAction("purge", entryIds);
 }
 
-/** Một chỉ số của bảng đánh giá (STUDIO_UX_SPEC.md D-16). `value` null = chưa đo; `display` nêu lý do. */
+/** Một chỉ số của bảng đánh giá. `value` null = chưa đo; `display` nêu lý do. */
 export interface EvaluationMetric {
   key: string;
   label: string;

@@ -1,4 +1,4 @@
-"""Sinh tóm tắt và khuyến nghị theo quy tắc từ các chỉ số đánh giá (STUDIO_UX_SPEC D-16)."""
+"""Sinh tóm tắt và khuyến nghị theo quy tắc từ các chỉ số đánh giá."""
 
 from src.services.orchestration.evaluation.models import Metric, StageEvaluation, Verdict
 

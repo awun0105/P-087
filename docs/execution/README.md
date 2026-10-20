@@ -7,7 +7,7 @@ track/task files không được override chúng.
 ## Authority Order
 
 1. [`PRD.md`](../PRD.md) — product scope, priority và acceptance.
-2. [`EVALUATION.md`](../EVALUATION.md) — dataset, leakage và evaluation protocol (bản cũ: [`archived/DATASET_PLAYBOOK.md`](../archived/DATASET_PLAYBOOK.md)).
+2. [`EVALUATION.md`](../EVALUATION.md) — dataset, leakage và evaluation protocol.
 3. [`TEAM_EXECUTION_CONTRACT.md`](./TEAM_EXECUTION_CONTRACT.md) — shared artifact, runtime, review và handoff contracts.
 4. [`ARCHITECTURE.md`](../../ARCHITECTURE.md) — canonical repository placement và module ownership.
 5. [`INTEGRATION_PLAYBOOK.md`](./INTEGRATION_PLAYBOOK.md) — technical baseline và tool choices.

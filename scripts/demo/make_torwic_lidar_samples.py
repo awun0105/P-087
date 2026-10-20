@@ -10,7 +10,7 @@ Với một đoạn `[--start, --start + --count)` của một traversal, tạo 
 Quỹ đạo và thời điểm frame được cắt đúng theo đoạn nên dòng *i* luôn ứng với frame *i* của video — đây là quy ước
 của gói LiDAR. Quỹ đạo là `traj_gt.txt` của dataset (**ground truth**): khi tạo scene phải khai "quỹ đạo chuẩn của
 dataset". Bộ mẫu là dữ liệu demo, dùng mọi frame của đoạn (kể cả frame mà benchmark split giữ lại để đánh giá), nên
-không dùng kết quả từ nó làm số liệu đánh giá (DATASET_PLAYBOOK).
+không dùng kết quả từ nó làm số liệu đánh giá.
 
     python -m scripts.demo.make_torwic_lidar_samples --dataset-root "/media/usb/AI20K/TorWIC SLAM Dataset" \\
         --traversal Aisle_CW --start 100 --count 500 --out "/media/usb/AI20K/P-087 lidar samples"

@@ -35,7 +35,7 @@ export function remainingLabel(expiresAt: string | null, now: number): string {
 }
 
 /**
- * Trang Thùng rác (STUDIO_UX_SPEC.md D-15): scene đã gỡ nằm ở đây tới khi được khôi phục hoặc xoá hẳn. Chọn từng mục,
+ * Trang Thùng rác: scene đã gỡ nằm ở đây tới khi được khôi phục hoặc xoá hẳn. Chọn từng mục,
  * nhiều mục hoặc tất cả. Xoá hẳn không hoàn tác được (xoá cả file trên kho) nên luôn qua bước xác nhận và chỉ Reviewer
  * làm được; backend vẫn kiểm quyền.
  */

@@ -1,4 +1,4 @@
-"""Thùng rác scene của Studio (STUDIO_UX_SPEC D-15): gỡ, liệt kê, khôi phục, xoá hẳn.
+"""Thùng rác scene của Studio: gỡ, liệt kê, khôi phục, xoá hẳn.
 
 Gỡ và khôi phục: Editor. Xoá hẳn không hoàn tác được (xoá cả object trên kho file) nên chỉ Reviewer.
 Logic nằm ở `orchestration/projects/deletion.py`; route chỉ đổi lỗi nghiệp vụ thành mã HTTP.

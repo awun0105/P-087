@@ -2,7 +2,7 @@
 
 **Câu hỏi:** scene dựng từ một video của TorWIC đúng tới đâu so với ground truth của dataset.
 
-**Ranh giới dữ liệu:** `traj_gt.txt` và `groundtruth_map.ply` là evaluation-only (DATASET_PLAYBOOK). Evaluator đọc job
+**Ranh giới dữ liệu:** `traj_gt.txt` và `groundtruth_map.ply` là evaluation-only. Evaluator đọc job
 đã chạy xong qua registry của deployment; không có đường nào đưa ground truth vào runtime sản phẩm.
 
 **Ghép frame:** frame `i` của video là ảnh `start + i` của traversal (video demo ghép từ ảnh liên tiếp). Truyền đúng
