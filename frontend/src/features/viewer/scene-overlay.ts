@@ -348,8 +348,6 @@ export interface OverlayObject {
   url: string | null;
   /** `gsplat` (mặc định): PLY Gaussian của vật tách từ scene. `model`: GLB hình khối của asset thư viện. */
   kind?: "gsplat" | "model";
-  /** Định dạng Gaussian của `url` (T-067): `sog` nhỏ gọn khi scene có bản xem trước, mặc định `ply`. */
-  format?: "ply" | "sog";
   position: Vec3;
   rotation_xyzw: [number, number, number, number];
   visible: boolean;
@@ -772,7 +770,7 @@ export class SceneOverlay {
           const model = item.kind === "model";
           const asset = model
             ? new Asset(`r2s-object-${item.id}`, "container", { url: item.url, filename: "asset.glb" })
-            : new Asset(`r2s-object-${item.id}`, "gsplat", { url: item.url, filename: item.format === "sog" ? "object.sog" : "object.ply" });
+            : new Asset(`r2s-object-${item.id}`, "gsplat", { url: item.url, filename: "object.ply" });
           record.asset = asset;
           asset.once("load", () => {
             this.finishObjectLoad(asset);

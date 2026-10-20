@@ -1,4 +1,4 @@
-/** T-067: Gaussian của vật tải tối đa 4 cùng lúc; vật đang chọn trước, vật ẩn sau cùng; SOG dùng đúng parser. */
+/** T-067: Gaussian của vật tải tối đa 4 cùng lúc; vật đang chọn trước, vật ẩn sau cùng. */
 import { Asset } from "playcanvas";
 import { describe, expect, it, vi } from "vitest";
 
@@ -52,12 +52,5 @@ describe("object splat loading (T-067)", () => {
     overlay.setObjects(items.filter((entry) => entry.id !== "o4"));
     (app.assets.load.mock.calls[0][0] as Asset).fire("load");
     expect(loadedNames(app)).not.toContain("r2s-object-o4");
-  });
-
-  it("uses the SOG parser for a compact object preview", () => {
-    const app = fakeApp();
-    const overlay = new SceneOverlay(app as unknown as ViewerAppLike);
-    overlay.setObjects([item("a", { url: "/objects/a.sog", format: "sog" })]);
-    expect(((app.assets.load.mock.calls[0][0] as Asset).file as { filename?: string } | null)?.filename).toBe("object.sog");
   });
 });

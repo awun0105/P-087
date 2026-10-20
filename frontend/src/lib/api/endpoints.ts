@@ -81,6 +81,14 @@ export function jobFrameThumbnailUrl(
   });
 }
 
+/** Gaussian của vật dạng PLY nén (T-067); máy chủ chuyển hướng về PLY gốc khi không nén được. Chỉ cho `ObjectGaussians`. */
+export function jobCompactGaussiansUrl(jobId: string, ref: { artifact_uri: string; artifact_checksum: string }): string {
+  return apiUrl(`/api/v1/jobs/${encodeURIComponent(jobId)}/objects/compact`, {
+    artifact_uri: ref.artifact_uri,
+    artifact_checksum: ref.artifact_checksum,
+  });
+}
+
 /** Lớp LiDAR đã căn chỉnh của scene (float32 xyz, mét, Z-up); `key` đổi theo bản căn chỉnh để cache đúng bản. */
 export function jobLidarOverlayUrl(jobId: string, key: string): string {
   return apiUrl(`/api/v1/jobs/${encodeURIComponent(jobId)}/lidar-overlay`, { v: key });
