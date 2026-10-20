@@ -14,6 +14,7 @@ import { useObjectify } from "@/features/studio/scene/objectifyContext";
 import { timelineFromSteps } from "@/features/studio/scene/pipeline";
 import { usePipelineView } from "@/features/studio/scene/pipelineContext";
 import { stepActions } from "@/features/studio/scene/stepActions";
+import { GpuStartupNotice } from "@/features/studio/GpuStartupNotice";
 import { geometryReviewStep, objectifyStageOverride, type GeometryStep } from "@/features/studio/scene/useObjectify";
 import { QueueStatus } from "@/features/studio/scene/QueueStatus";
 import { ResourceWaitDetail } from "@/features/studio/scene/ResourceWaitDetail";
@@ -149,6 +150,7 @@ export function ProgressTab({ jobId, progress, info, busy, canCancel, canAccept 
           : progress.waiting_for === "resources" ? "Đang chờ đủ tài nguyên trên máy xử lý." : "Job đã vào hàng đợi, đang chờ máy xử lý."} Cấu hình đã chọn được giữ nguyên; job tự chạy tiếp khi đến lượt và đủ tài nguyên.</p>
         <ProgressBar value={null} label="Đang chờ trong hàng đợi" />
         {progress.queue && <QueueStatus queue={progress.queue} />}
+        {pipelineView?.gpu && <GpuStartupNotice capacity={pipelineView.gpu} />}
         {progress.waiting_for === "resources" && progress.resource_wait && <ResourceWaitDetail wait={progress.resource_wait} />}
       </div>}
       {objectify.error && objectOverride && <Notice tone="rust" className="mb-4">{objectify.error}</Notice>}
