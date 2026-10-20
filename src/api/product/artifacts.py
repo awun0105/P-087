@@ -1,5 +1,6 @@
 """Artifact của job: danh sách được phép thấy, bytes theo allow-list, preview 3DGS, bản ghi Rerun."""
 
+import json
 import logging
 from pathlib import Path
 from threading import Thread
@@ -19,6 +20,7 @@ from src.services.orchestration.artifacts import (
     ArtifactNotFoundError,
     ArtifactStoreError,
     compact_gaussians,
+    quick_sog,
     thumbnails,
 )
 from src.services.orchestration.jobs.display_glb import display_space_glb
@@ -228,6 +230,79 @@ def get_compact_object_gaussians(
         return RedirectResponse(
             original, status_code=status.HTTP_307_TEMPORARY_REDIRECT, headers={"Cache-Control": "private, no-store"}
         )
+    return FileResponse(
+        path, media_type="application/octet-stream", headers={**headers, "X-Content-Type-Options": "nosniff"}
+    )
+
+
+def _quick_source(
+    job_id: str, artifact_uri: str, artifact_checksum: str
+) -> tuple[ProjectRegistry, ArtifactRef, ArtifactRef]:
+    """Ref SOG trong allow-list của job cho bản xem nhanh (T-068); không phải SOG thì 404."""
+    deps.job_or_404(job_id)
+    try:
+        reference = ArtifactRef(
+            artifact_type="ArtifactContent",
+            schema_version="1.0",
+            artifact_uri=artifact_uri,
+            artifact_checksum=artifact_checksum,
+            data_class="derived",
+            producer_stage="ST-EDIT",
+            job_id=job_id,
+        )
+        registry = deps.registry()
+        canonical = registry.authorized_artifact(job_id, reference)
+    except ValidationError as error:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)) from error
+    except ArtifactStoreError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+    if not canonical.artifact_uri.endswith(".sog"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bản xem nhanh chỉ có cho SOG")
+    return registry, reference, canonical
+
+
+def _quick_root(registry: ProjectRegistry) -> Path:
+    return registry.runtime_resolver.artifact_root.parent / "cache" / "quick-sog"
+
+
+@router.get("/jobs/{job_id}/artifacts/quick/status")
+def get_quick_view_status(
+    job_id: str,
+    artifact_uri: str = Query(..., min_length=1),
+    artifact_checksum: Checksum = Query(...),
+) -> Response:
+    """`ready` / `building` / `unavailable`; chưa có thì bắt đầu tạo nền. Không đệm: trạng thái đổi khi tạo xong."""
+    registry, reference, canonical = _quick_source(job_id, artifact_uri, artifact_checksum)
+
+    def source() -> Path:
+        return registry.resolve_artifact(job_id, reference)
+
+    state = quick_sog.ensure(
+        _quick_root(registry), canonical.artifact_checksum, source, compact_gaussians.compact_cli()
+    )
+    return Response(
+        json.dumps({"state": state}),
+        media_type="application/json",
+        headers={"Cache-Control": "private, no-store"},
+    )
+
+
+@router.get("/jobs/{job_id}/artifacts/quick")
+def get_quick_view(
+    job_id: str,
+    artifact_uri: str = Query(..., min_length=1),
+    artifact_checksum: Checksum = Query(...),
+    if_none_match: Annotated[str | None, Header()] = None,
+) -> Response:
+    """Bản xem nhanh đã tạo của một SOG (T-068); chưa có thì 404 (giao diện dùng bản đầy đủ)."""
+    registry, _, canonical = _quick_source(job_id, artifact_uri, artifact_checksum)
+    etag = quick_sog.quick_etag(canonical.artifact_checksum)
+    headers = {"ETag": etag, "Cache-Control": IMMUTABLE_PRIVATE}
+    if not_modified(if_none_match, etag):
+        return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=headers)
+    path = quick_sog.ready_path(_quick_root(registry), canonical.artifact_checksum)
+    if path is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bản xem nhanh chưa có")
     return FileResponse(
         path, media_type="application/octet-stream", headers={**headers, "X-Content-Type-Options": "nosniff"}
     )
