@@ -13,7 +13,7 @@ from src.api.product import deps
 from src.api.product.http_cache import IMMUTABLE_PRIVATE, checksum_etag, not_modified
 from src.models.contracts.artifacts import ArtifactRef, Checksum
 from src.models.contracts.preview import ReconstructionPreview
-from src.services.orchestration.artifacts import ArtifactNotFoundError, ArtifactStoreError
+from src.services.orchestration.artifacts import ArtifactNotFoundError, ArtifactStoreError, thumbnails
 from src.services.orchestration.jobs.display_glb import display_space_glb
 from src.services.orchestration.jobs.stage_views import job_bundle
 from src.services.orchestration.projects import JobNotFoundError, ProjectRegistry
@@ -119,6 +119,52 @@ def get_artifact_content(
             "X-Content-Type-Options": "nosniff",
         },
     )
+
+
+@router.get("/jobs/{job_id}/frames/thumbnail")
+def get_frame_thumbnail(
+    job_id: str,
+    artifact_uri: str = Query(..., min_length=1),
+    artifact_checksum: Checksum = Query(...),
+    width: int = Query(320),
+    if_none_match: Annotated[str | None, Header()] = None,
+) -> Response:
+    """Ảnh frame thu nhỏ (JPEG) cho lưới bước Frame (T-066); cùng allow-list với route content."""
+    if width not in thumbnails.ALLOWED_WIDTHS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"width phải là một trong {sorted(thumbnails.ALLOWED_WIDTHS)}",
+        )
+    deps.job_or_404(job_id)
+    try:
+        reference = ArtifactRef(
+            artifact_type="ArtifactContent",
+            schema_version="1.0",
+            artifact_uri=artifact_uri,
+            artifact_checksum=artifact_checksum,
+            data_class="derived",
+            producer_stage="ST-EDIT",
+            job_id=job_id,
+        )
+        registry = deps.registry()
+        canonical = registry.authorized_artifact(job_id, reference)
+        etag = thumbnails.thumbnail_etag(canonical.artifact_checksum, width)
+        headers = {"ETag": etag, "Cache-Control": IMMUTABLE_PRIVATE}
+        if not_modified(if_none_match, etag):
+            return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=headers)
+        root = registry.runtime_resolver.artifact_root.parent / "cache" / "thumbnails"
+        body = thumbnails.get_thumbnail(
+            root, canonical.artifact_checksum, width, lambda: registry.resolve_artifact(job_id, reference)
+        )
+    except ValidationError as error:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)) from error
+    except ArtifactStoreError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+    except OSError as error:  # Pillow: không đọc được ảnh (không phải ảnh, hỏng).
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail="Frame không đọc được"
+        ) from error
+    return Response(body, media_type="image/jpeg", headers={**headers, "X-Content-Type-Options": "nosniff"})
 
 
 @router.get("/jobs/{job_id}/artifacts/content/{filename}")

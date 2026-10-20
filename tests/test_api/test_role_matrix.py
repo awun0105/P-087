@@ -80,6 +80,7 @@ AUTHENTICATED = {
     ("GET", "/jobs/{job_id}/anonymization/frames/{frame_name}"),
     ("GET", "/jobs/{job_id}/artifacts"),
     ("GET", "/jobs/{job_id}/artifacts/content"),
+    ("GET", "/jobs/{job_id}/frames/thumbnail"),
     ("GET", "/jobs/{job_id}/artifacts/content/{filename}"),
     ("GET", "/jobs/{job_id}/attempts"),
     ("GET", "/jobs/{job_id}/demo"),
