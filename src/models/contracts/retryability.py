@@ -58,6 +58,10 @@ _TRANSIENT_EXCEPTION_TYPES = frozenset(
 )
 
 
+#: Exceptions raised in a runner when the worker process itself is being stopped.
+_SHUTDOWN_EXCEPTION_TYPES = frozenset({"KeyboardInterrupt", "SystemExit"})
+
+
 def classify_retryability(error_code: str, details: Mapping[str, object] | None = None) -> bool:
     """Return whether this known error can plausibly recover in a fresh attempt.
 
@@ -73,5 +77,16 @@ def classify_retryability(error_code: str, details: Mapping[str, object] | None 
 
 
 def is_execution_error_retryable(error: ExecutionError) -> bool:
-    """Honor the producer flag only when its error type is allowed by policy."""
+    """Honor the producer flag only when its error type is allowed by policy.
+
+    A runner stopped by a worker shutdown (SIGTERM/Ctrl-C, deploy) is an interruption, not a
+    failure of the job, so it is always retryable — including jobs recorded before that rule,
+    which carry ``retryable=False``.
+    """
+    if (
+        error.error_code == "PREVIEW_RUNNER_FAILED"
+        and error.details is not None
+        and error.details.get("exception_type") in _SHUTDOWN_EXCEPTION_TYPES
+    ):
+        return True
     return error.retryable and classify_retryability(error.error_code, error.details)

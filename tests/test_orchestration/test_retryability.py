@@ -50,3 +50,26 @@ def test_execution_error_retry_flag_cannot_override_error_code_policy() -> None:
         retryable=True,
     )
     assert is_execution_error_retryable(error) is False
+
+
+def _runner_failure(exception_type: str) -> ExecutionError:
+    return ExecutionError(
+        error_code="PREVIEW_RUNNER_FAILED",
+        stage_id=StageId.VISUAL_RECON,
+        human_message="Worker dừng trước checkpoint hợp lệ",
+        retryable=False,
+        details={"exception_type": exception_type},
+    )
+
+
+def test_legacy_shutdown_failure_is_retryable() -> None:
+    """Jobs failed by a worker SIGTERM before T-047 were stored non-retryable; policy now rescues them."""
+    assert is_execution_error_retryable(_runner_failure("KeyboardInterrupt")) is True
+
+
+def test_system_exit_failure_is_retryable() -> None:
+    assert is_execution_error_retryable(_runner_failure("SystemExit")) is True
+
+
+def test_other_runner_failure_stays_non_retryable() -> None:
+    assert is_execution_error_retryable(_runner_failure("ValueError")) is False
