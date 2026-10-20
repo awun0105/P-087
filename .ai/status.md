@@ -46,7 +46,7 @@ T-045 | Chạy 9 scene Deep Blending + Mip-NeRF 360 từ ảnh (chỉ vận hàn
 T-046 | Vòng lặp worker không chết vì một lỗi | implemented | summarizer
 T-047 | Tắt worker giữa chừng thì cho chạy lại, kể cả job cũ | implemented | summarizer
 T-048 | Không còn job RUNNING mà không ai trông | implemented | summarizer
-T-049 | Chịu lỗi DB thoáng qua khi gia hạn và kiểm hủy | planned | engineer
+T-049 | Chịu lỗi DB thoáng qua khi gia hạn và kiểm hủy | implemented | summarizer
 T-050 | Chờ tài nguyên và hạn tự tính không lặp vô hạn | planned | engineer
 T-051 | File theo checksum: giữ vĩnh viễn, không băm lại, URL R2 ổn định | planned | engineer
 T-052 | Lưới va chạm Walk dựng một lần, trả 304 | planned | engineer
