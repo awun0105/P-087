@@ -59,3 +59,35 @@ def test_no_gpu_worker_skips_the_step_silently(tmp_path, monkeypatch) -> None:  
     monkeypatch.setattr(runner.lod, "lod_cli", lambda: None)
     runner._build_view_lods(_attempt(tmp_path))
     assert writes == []
+
+
+def test_shutdown_during_the_step_closes_its_mark_and_still_stops(tmp_path, monkeypatch) -> None:  # noqa: ANN001
+    """Review fix: a worker stopped mid-build must not leave "running" forever on a finished scene."""
+    import pytest
+
+    writes = []
+    monkeypatch.setattr(runner, "record_marks", lambda db, job, kind, run, items: writes.append(list(items)))
+    monkeypatch.setattr(runner.lod, "lod_cli", lambda: tmp_path / "cli.mjs")
+
+    def interrupted(*args):  # noqa: ANN002, ANN202
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(runner.lod, "build_job_view_lods", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        runner._build_view_lods(_attempt(tmp_path))
+    assert writes[-1][0].kind == "finish" and writes[-1][0].outcome == "cancelled"
+
+
+def test_a_database_blip_on_the_start_mark_does_not_fail_the_finished_job(tmp_path, monkeypatch) -> None:  # noqa: ANN001
+    calls = []
+
+    def flaky(db, job, kind, run, items):  # noqa: ANN001, ANN202
+        calls.append(list(items))
+        if len(calls) == 1:
+            raise RuntimeError("db blip")
+
+    monkeypatch.setattr(runner, "record_marks", flaky)
+    monkeypatch.setattr(runner.lod, "lod_cli", lambda: tmp_path / "cli.mjs")
+    monkeypatch.setattr(runner.lod, "build_job_view_lods", lambda *args: 1)
+    runner._build_view_lods(_attempt(tmp_path))
+    assert calls[-1][0].outcome == "succeeded"

@@ -1805,8 +1805,15 @@ def _build_view_lods(attempt: _Attempt) -> None:
         logger.warning("Không đọc được lượt chạy cho bước LOD cause=%s", type(error).__name__)
         return
     step = StageId.VIEW_LOD.value
-    record_marks(persistence.database, job_id, "pipeline", run_id, [MarkWrite("start", step, datetime.now(UTC))])
-    outcome = "succeeded"
+
+    def mark(write: MarkWrite) -> None:
+        try:
+            record_marks(persistence.database, job_id, "pipeline", run_id, [write])
+        except Exception as error:  # noqa: BLE001 - mốc bước là đo đạc; job đã xong không được bị đánh lỗi
+            logger.warning("Không ghi được mốc bước LOD cause=%s", type(error).__name__)
+
+    mark(MarkWrite("start", step, datetime.now(UTC)))
+    outcome = "cancelled"
     try:
         built = lod.build_job_view_lods(
             attempt.registry.runtime_resolver,
@@ -1815,13 +1822,14 @@ def _build_view_lods(attempt: _Attempt) -> None:
             cli,
             Path(attempt.settings.product_worker_root) / "lod",
         )
+        outcome = "succeeded"
         logger.info("Bước LOD job=%s đã tạo %d bộ", job_id, built)
     except Exception as error:  # noqa: BLE001 - scene vẫn xem bằng SOG gốc; bộ dựng ngầm thử lại sau
         outcome = "failed"
         logger.warning("Không tạo được bộ LOD job=%s cause=%s", job_id, type(error).__name__)
-    record_marks(
-        persistence.database, job_id, "pipeline", run_id, [MarkWrite("finish", step, datetime.now(UTC), outcome)]
-    )
+    finally:
+        # Worker bị dừng giữa chừng (KeyboardInterrupt/SystemExit) vẫn đóng mốc, rồi lỗi đi tiếp như cũ.
+        mark(MarkWrite("finish", step, datetime.now(UTC), outcome))
 
 
 def run_finalize_job(job_id: str, *, expected_checksum: str | None = None) -> JobManifest:
