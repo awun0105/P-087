@@ -3,12 +3,13 @@
 from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Query, Response, status
+from fastapi import APIRouter, HTTPException, Query, Request, Response, status
 from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import ValidationError
 
 from src.api import schemas
 from src.api.product import deps
+from src.api.product.http_cache import IMMUTABLE_PRIVATE, checksum_etag, not_modified
 from src.models.contracts.artifacts import ArtifactRef, Checksum
 from src.models.contracts.preview import ReconstructionPreview
 from src.services.orchestration.artifacts import ArtifactNotFoundError, ArtifactStoreError
@@ -58,6 +59,7 @@ def get_job_preview(job_id: str) -> ReconstructionPreview:
 
 @router.get("/jobs/{job_id}/artifacts/content")
 def get_artifact_content(
+    request: Request,
     job_id: str,
     artifact_uri: str = Query(..., min_length=1),
     artifact_checksum: Checksum = Query(...),
@@ -81,11 +83,24 @@ def get_artifact_content(
             job_id=job_id,
         )
         registry = deps.registry()
+        # T-051: kiểm quyền trước; trình duyệt đã có đúng bản (checksum trong URL) thì trả 304, không đọc file.
+        etag = checksum_etag(registry.authorized_artifact(job_id, reference).artifact_checksum)
+        if not_modified(request, etag):
+            return Response(
+                status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag, "Cache-Control": IMMUTABLE_PRIVATE}
+            )
         # Có kho file: trình duyệt tải thẳng từ R2 bằng link có hạn (ADR 0003), API không
         # cõng file lớn qua băng thông tính phí. Quyền đọc vẫn kiểm theo allow-list ở trên.
-        link = registry.presigned_artifact_url(job_id, reference, deps.settings().artifact_presign_seconds)
+        presign_seconds = deps.settings().artifact_presign_seconds
+        link = registry.presigned_artifact_url(job_id, reference, presign_seconds)
         if link is not None:
-            return RedirectResponse(link, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+            # Link được tái dùng khi còn ≥ nửa thời hạn (ArtifactRemote): trình duyệt giữ redirect trong khoảng đó.
+            keep = max(0, presign_seconds // 2 - 60)
+            return RedirectResponse(
+                link,
+                status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+                headers={"Cache-Control": f"private, max-age={keep}"},
+            )
         path = registry.resolve_artifact(job_id, reference)
     except ValidationError as error:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)) from error
@@ -96,7 +111,8 @@ def get_artifact_content(
         path,
         media_type="application/octet-stream",
         headers={
-            "Cache-Control": "private, no-cache",
+            "Cache-Control": IMMUTABLE_PRIVATE,
+            "ETag": etag,
             "X-Content-Type-Options": "nosniff",
         },
     )
@@ -104,6 +120,7 @@ def get_artifact_content(
 
 @router.get("/jobs/{job_id}/artifacts/content/{filename}")
 def get_named_artifact_content(
+    request: Request,
     job_id: str,
     filename: str,
     artifact_uri: str = Query(..., min_length=1),
@@ -112,7 +129,7 @@ def get_named_artifact_content(
     """Tên file dùng chọn parser; quyền đọc vẫn bind URI/checksum canonical."""
     if filename != artifact_uri.rsplit("/", 1)[-1]:
         raise HTTPException(status_code=404, detail="artifact filename does not match its reference")
-    return get_artifact_content(job_id, artifact_uri, artifact_checksum)
+    return get_artifact_content(request, job_id, artifact_uri, artifact_checksum)
 
 
 def _require_walk_allowed(registry: ProjectRegistry, job_id: str) -> None:

@@ -506,3 +506,57 @@ async def test_collision_surface_mark_fill_remove_and_stale_revision(client) -> 
     )
     assert removed.status_code == 201, removed.text
     assert removed.json()["scene"]["provenance"]["collision_surface_planes"] == []
+
+
+# ── T-051: checksum-addressed artifacts are cached by the browser ────────────
+
+
+async def _geometry_params(client) -> dict:
+    reference = (await _scene(client))["scene"]["environment"]["geometry_ref"]
+    return {"artifact_uri": reference["artifact_uri"], "artifact_checksum": reference["artifact_checksum"]}
+
+
+@pytest.mark.asyncio
+async def test_artifact_content_is_immutable_and_has_etag(client) -> None:
+    params = await _geometry_params(client)
+    r = await client.get(f"{_JOB}/artifacts/content", params=params)
+    assert r.status_code == 200
+    assert "immutable" in r.headers["cache-control"] and "private" in r.headers["cache-control"]
+    assert r.headers["etag"] == '"' + params["artifact_checksum"].removeprefix("sha256:") + '"'
+
+
+@pytest.mark.asyncio
+async def test_matching_if_none_match_returns_304_without_reading_file(client, monkeypatch) -> None:
+    from src.api.product import deps as product_deps
+
+    params = await _geometry_params(client)
+    registry = product_deps.registry()
+
+    def never(*args: object) -> None:
+        raise AssertionError("file must not be resolved for a 304")
+
+    monkeypatch.setattr(registry, "resolve_artifact", never)
+    etag = '"' + params["artifact_checksum"].removeprefix("sha256:") + '"'
+    r = await client.get(f"{_JOB}/artifacts/content", params=params, headers={"If-None-Match": etag})
+    assert r.status_code == 304
+
+
+@pytest.mark.asyncio
+async def test_if_none_match_still_checks_permission(client) -> None:
+    checksum = "0" * 64
+    r = await client.get(
+        f"{_JOB}/artifacts/content",
+        params={
+            "artifact_uri": "artifact://jobs/job-fixture-001/evaluation_only/groundtruth_map.mock",
+            "artifact_checksum": "sha256:" + checksum,
+        },
+        headers={"If-None-Match": f'"{checksum}"'},
+    )
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_artifact_range_request_still_works(client) -> None:
+    params = await _geometry_params(client)
+    r = await client.get(f"{_JOB}/artifacts/content", params=params, headers={"Range": "bytes=0-2"})
+    assert r.status_code == 206 and r.content == b"ply"
