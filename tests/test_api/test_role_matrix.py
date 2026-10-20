@@ -52,6 +52,7 @@ AUTHENTICATED = {
     ("GET", "/jobs/{job_id}/value-metrics"),
     ("GET", "/jobs/{job_id}/value-metrics.md"),
     ("GET", "/jobs/{job_id}/value-metrics.csv"),
+    ("GET", "/gpu/status"),
     ("GET", "/value-metrics/benchmark"),
     ("GET", "/value-metrics/benchmark.md"),
     ("GET", "/value-metrics/benchmark.csv"),

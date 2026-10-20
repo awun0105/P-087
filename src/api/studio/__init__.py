@@ -12,6 +12,7 @@ from src.api.studio import (
     assemblies,
     demo,
     evaluation,
+    gpu,
     imports,
     metric,
     processing,
@@ -40,6 +41,7 @@ for module in (
     demo,
     anonymization,
     value,
+    gpu,
 ):
     router.include_router(module.router, dependencies=[Depends(require_contributor)])
 for module in (samples, processing):
