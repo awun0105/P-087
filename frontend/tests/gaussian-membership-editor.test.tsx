@@ -29,6 +29,8 @@ describe("Gaussian membership preview/apply", () => {
   it("previews source rows without mutation, then queues the exact reviewed command", async () => {
     vi.mocked(api.previewMembership).mockResolvedValue(preview);
     vi.mocked(api.regenerateMembership).mockResolvedValue({ status: "queued", mode: "membership", base_revision: "rev-012" } as api.ObjectifyState);
+    // Vòng poll chung hỏi trạng thái ngay sau khi gửi (T-060): worker vẫn đang xếp hàng.
+    vi.mocked(api.getObjectifyState).mockResolvedValue({ status: "queued", mode: "membership", base_revision: "rev-012" } as api.ObjectifyState);
     render(<GaussianMembershipEditor jobId="job-a" scene={scene} objectId="object-a" onClose={vi.fn()} onPublished={vi.fn()} />);
     const iframe = await select();
     expect(api.previewMembership).toHaveBeenCalledWith("job-a", expect.objectContaining({ expected_scene_revision: "rev-012", source_gaussian_indices: [1, 2], source_visual_checksum: checksum }));
@@ -62,14 +64,17 @@ describe("Gaussian membership preview/apply", () => {
   it("loads the published revision only after the worker reports success", async () => {
     vi.mocked(api.previewMembership).mockResolvedValue(preview);
     vi.mocked(api.regenerateMembership).mockResolvedValue({ status: "queued", mode: "membership", base_revision: "rev-012" } as api.ObjectifyState);
-    vi.mocked(api.getObjectifyState).mockResolvedValue({ status: "done", mode: "membership", base_revision: "rev-012", result_revision: "rev-013" } as api.ObjectifyState);
+    // T-060: vòng poll chung hỏi ngay rồi mỗi 3 s; lần đầu worker còn chạy, lần sau mới báo xong.
+    vi.mocked(api.getObjectifyState)
+      .mockResolvedValueOnce({ status: "running", mode: "membership", base_revision: "rev-012" } as api.ObjectifyState)
+      .mockResolvedValue({ status: "done", mode: "membership", base_revision: "rev-012", result_revision: "rev-013" } as api.ObjectifyState);
     const published = vi.fn();
     render(<GaussianMembershipEditor jobId="job-a" scene={scene} objectId="object-a" onClose={vi.fn()} onPublished={published} />);
     await select();
     vi.useFakeTimers();
     await act(async () => { fireEvent.click(screen.getByText("Apply và tái tạo")); });
     expect(published).not.toHaveBeenCalled();
-    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
     expect(published).toHaveBeenCalledOnce();
     expect(screen.getByText(/done.*rev-013/)).toBeInTheDocument();
   });

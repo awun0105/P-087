@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { usePolling } from "@/features/studio/usePolling";
 import { Button } from "@/components/studio/primitives";
 import { cancelObjectify, getObjectifyState, previewMembership, regenerateMembership, type MembershipPreview, type ObjectifyState } from "@/lib/api/studio";
 import { jobArtifactContentUrl } from "@/lib/api/endpoints";
@@ -58,23 +59,24 @@ export function GaussianMembershipEditor({ jobId, scene, objectId, onClose, onPu
     return () => { alive = false; window.removeEventListener("message", receive); };
   }, [jobId, scene.scene_revision, membership.labels_ref.artifact_checksum, context]);
 
-  useEffect(() => {
-    if (!active) return;
-    const controller = new AbortController();
-    const timer = setInterval(() => {
-      void getObjectifyState(jobId, controller.signal).then(next => {
-        if (controller.signal.aborted) return;
-        if (operation.operation_id && next.operation_id !== operation.operation_id) {
-          setOperation({ ...operation, status: "failed", error: "Lần xử lý đã thay đổi; tải scene mới trước khi tiếp tục." });
-          return;
-        }
-        setOperation(next);
-        if (next.status === "done" && next.mode === "membership" && next.base_revision === scene.scene_revision && next.result_revision) onPublished();
-        if (next.status === "failed") setError(next.error ?? "Tái tạo thất bại; scene cũ được giữ nguyên.");
-      }).catch(cause => { if (!controller.signal.aborted) setError(errorMessage(cause, "Không tải được tiến độ")); });
-    }, 1500);
-    return () => { controller.abort(); clearInterval(timer); };
-  }, [active, jobId, onPublished, operation, scene.scene_revision]);
+  // T-060: dùng vòng poll chung (dừng khi tab ẩn, không khởi động lại mỗi lần trạng thái đổi), nhịp 3 s.
+  const followOperation = useCallback(async (signal: AbortSignal) => {
+    if (!operation) return;
+    try {
+      const next = await getObjectifyState(jobId, signal);
+      if (signal.aborted) return;
+      if (operation.operation_id && next.operation_id !== operation.operation_id) {
+        setOperation({ ...operation, status: "failed", error: "Lần xử lý đã thay đổi; tải scene mới trước khi tiếp tục." });
+        return;
+      }
+      setOperation(next);
+      if (next.status === "done" && next.mode === "membership" && next.base_revision === scene.scene_revision && next.result_revision) onPublished();
+      if (next.status === "failed") setError(next.error ?? "Tái tạo thất bại; scene cũ được giữ nguyên.");
+    } catch (cause) {
+      if (!signal.aborted) setError(errorMessage(cause, "Không tải được tiến độ"));
+    }
+  }, [jobId, onPublished, operation, scene.scene_revision]);
+  usePolling(followOperation, 3000, active);
 
   useEffect(() => {
     if (!busy || !pending.current) return;
