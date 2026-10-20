@@ -1,8 +1,10 @@
 """Artifact của job: danh sách được phép thấy, bytes theo allow-list, preview 3DGS, bản ghi Rerun."""
 
+import logging
 from pathlib import Path
 from threading import Thread
 from typing import Annotated, Literal
+from urllib.parse import quote, urlencode
 
 from fastapi import APIRouter, Header, HTTPException, Query, Response, status
 from fastapi.responses import FileResponse, RedirectResponse
@@ -13,7 +15,12 @@ from src.api.product import deps
 from src.api.product.http_cache import IMMUTABLE_PRIVATE, checksum_etag, not_modified
 from src.models.contracts.artifacts import ArtifactRef, Checksum
 from src.models.contracts.preview import ReconstructionPreview
-from src.services.orchestration.artifacts import ArtifactNotFoundError, ArtifactStoreError, thumbnails
+from src.services.orchestration.artifacts import (
+    ArtifactNotFoundError,
+    ArtifactStoreError,
+    compact_gaussians,
+    thumbnails,
+)
 from src.services.orchestration.jobs.display_glb import display_space_glb
 from src.services.orchestration.jobs.stage_views import job_bundle
 from src.services.orchestration.projects import JobNotFoundError, ProjectRegistry
@@ -33,6 +40,7 @@ from src.services.scene.collision_ownership import SourceCollisionOwnershipError
 from src.services.scene.geometry_state import require_geometry_ready
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.get("/jobs/{job_id}/artifacts", response_model=schemas.ArtifactListResponse)
@@ -165,6 +173,64 @@ def get_frame_thumbnail(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail="Frame không đọc được"
         ) from error
     return Response(body, media_type="image/jpeg", headers={**headers, "X-Content-Type-Options": "nosniff"})
+
+
+@router.get("/jobs/{job_id}/objects/compact")
+def get_compact_object_gaussians(
+    job_id: str,
+    artifact_uri: str = Query(..., min_length=1),
+    artifact_checksum: Checksum = Query(...),
+    if_none_match: Annotated[str | None, Header()] = None,
+) -> Response:
+    """Gaussian của một vật dạng PLY nén (T-067); cùng allow-list với route content, chỉ cho `ObjectGaussians`.
+
+    Thiếu runtime splat-transform hoặc chuyển lỗi thì chuyển hướng về PLY gốc để viewer vẫn mở được.
+    """
+    deps.job_or_404(job_id)
+    try:
+        reference = ArtifactRef(
+            artifact_type="ArtifactContent",
+            schema_version="1.0",
+            artifact_uri=artifact_uri,
+            artifact_checksum=artifact_checksum,
+            data_class="derived",
+            producer_stage="ST-EDIT",
+            job_id=job_id,
+        )
+        registry = deps.registry()
+        canonical = registry.authorized_artifact(job_id, reference)
+        if canonical.artifact_type != "ObjectGaussians":
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chỉ hỗ trợ Gaussian của vật")
+        etag = compact_gaussians.compact_etag(canonical.artifact_checksum)
+        headers = {"ETag": etag, "Cache-Control": IMMUTABLE_PRIVATE}
+        if not_modified(if_none_match, etag):
+            return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=headers)
+        cli = compact_gaussians.compact_cli()
+        root = registry.runtime_resolver.artifact_root.parent / "cache" / "compact-objects"
+        path = (
+            compact_gaussians.get_compact(
+                root, canonical.artifact_checksum, lambda: registry.resolve_artifact(job_id, reference), cli
+            )
+            if cli is not None
+            else None
+        )
+    except ValidationError as error:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)) from error
+    except ArtifactStoreError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+    except compact_gaussians.CompactConversionError as error:
+        logger.warning("Không nén được Gaussian của vật job=%s cause=%s", job_id, error)
+        path = None
+    if path is None:
+        original = f"/api/v1/jobs/{quote(job_id, safe='')}/artifacts/content?" + urlencode(
+            {"artifact_uri": artifact_uri, "artifact_checksum": artifact_checksum}
+        )
+        return RedirectResponse(
+            original, status_code=status.HTTP_307_TEMPORARY_REDIRECT, headers={"Cache-Control": "private, no-store"}
+        )
+    return FileResponse(
+        path, media_type="application/octet-stream", headers={**headers, "X-Content-Type-Options": "nosniff"}
+    )
 
 
 @router.get("/jobs/{job_id}/artifacts/content/{filename}")
