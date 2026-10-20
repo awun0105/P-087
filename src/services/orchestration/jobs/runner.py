@@ -88,7 +88,8 @@ from src.services.orchestration.jobs.dispatch import (
     require_profile,
     resolve_job_processing,
 )
-from src.services.orchestration.jobs.lease import lease_lost
+from src.services.orchestration.jobs.heartbeat import HeartbeatTolerance
+from src.services.orchestration.jobs.lease import LEASE_TTL, lease_lost
 from src.services.orchestration.jobs.log_context import configure_worker_logging, job_log_context
 from src.services.orchestration.jobs.models import PreparedInputReceipt, TransitionRequest
 from src.services.orchestration.jobs.profile import machine_runtime_checksum
@@ -296,19 +297,26 @@ def _run_tool(
             )
             started = time.monotonic()
             deadline = started + deadline_limit
+            tolerance = HeartbeatTolerance(LEASE_TTL)
             last_heartbeat = 0.0
             pause = Event()
             try:
                 while process.poll() is None:
                     now_mono = time.monotonic()
-                    if now_mono - last_heartbeat >= 3.0:
-                        if attempt.registry.persistence is not None:
-                            touch_job_reservation(attempt.registry.persistence.database, attempt.job.job_id)
-                        last_heartbeat = now_mono
-                    if progress is not None:
-                        progress.poll()  # Tự cập nhật attempt.job trước khi so revision để phát hiện cancel.
-                    current = attempt.registry.get_job(attempt.job.job_id)
-                    if current.job_manifest_checksum != attempt.job.job_manifest_checksum:
+                    try:
+                        if now_mono - last_heartbeat >= 3.0:
+                            if attempt.registry.persistence is not None:
+                                touch_job_reservation(attempt.registry.persistence.database, attempt.job.job_id)
+                            last_heartbeat = now_mono
+                        if progress is not None:
+                            progress.poll()  # Tự cập nhật attempt.job trước khi so revision để phát hiện cancel.
+                        current = attempt.registry.get_job(attempt.job.job_id)
+                        tolerance.succeeded()
+                    except Exception as error:
+                        if not tolerance.tolerate(error):
+                            raise
+                        current = None  # DB chập chờn: bỏ qua kiểm hủy ở nhịp này (T-049)
+                    if current is not None and current.job_manifest_checksum != attempt.job.job_manifest_checksum:
                         raise PreviewCancelledError("Job revision đã thay đổi trong khi worker chạy")
                     if lease_lost(attempt.job.job_id):
                         raise PreviewCancelledError("Mất lease job; máy khác đã nhận việc, dừng tiến trình con")

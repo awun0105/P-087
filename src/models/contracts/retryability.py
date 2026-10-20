@@ -54,6 +54,9 @@ _TRANSIENT_EXCEPTION_TYPES = frozenset(
         "TimeoutError",
         "TimeoutExpired",
         "OutOfMemoryError",
+        # Lỗi DB kéo dài (sqlite/psycopg) sau khi đã chịu hết khoảng cho phép: lần chạy mới có thể qua.
+        "OperationalError",
+        "InterfaceError",
     }
 )
 
