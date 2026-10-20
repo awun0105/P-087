@@ -191,7 +191,7 @@ export interface StageProgress {
 
 export type ResourceName = "vram" | "ram" | "disk";
 /** busy: job khác đang dùng; external: chương trình khác chiếm; exceeds_machine: vượt tổng máy; unmeasured: không đo được. */
-export type ResourceWaitReason = "busy" | "external" | "exceeds_machine" | "unmeasured";
+export type ResourceWaitReason = "busy" | "external" | "exceeds_machine" | "unmeasured" | "gate_error";
 
 /** Lần đo gần nhất của worker khi job chờ tài nguyên (bind đúng revision của job). */
 export interface ResourceWaitView {
@@ -554,7 +554,7 @@ export function parseJobProgress(value: unknown): JobProgress {
     const capacity = wait.capacity_gb ?? {};
     if (!isRecord(reasons) || !isRecord(capacity) ||
         !Object.entries(reasons).every(([key, reason]) => ["vram", "ram", "disk"].includes(key) &&
-          ["busy", "external", "exceeds_machine", "unmeasured"].includes(String(reason))) ||
+          ["busy", "external", "exceeds_machine", "unmeasured", "gate_error"].includes(String(reason))) ||
         !Object.entries(capacity).every(([key, amount]) => ["vram", "ram", "disk"].includes(key) &&
           (amount === null || isFiniteNumber(amount)))) {
       throw new Error("Lý do chờ tài nguyên không hợp lệ");

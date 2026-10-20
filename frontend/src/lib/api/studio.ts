@@ -819,7 +819,7 @@ export function restoreSceneRevision(
 export type ObjectifyMode = "objectify" | "boxes" | "membership" | "geometry" | "region";
 
 export type OperationResource = "vram" | "ram" | "disk";
-export type OperationWaitReason = "busy" | "external" | "exceeds_machine" | "unmeasured";
+export type OperationWaitReason = "busy" | "external" | "exceeds_machine" | "unmeasured" | "gate_error";
 
 export interface ObjectifyResourceWait {
   status: "waiting_resources" | "waiting_gpu_affinity" | "worker_busy" | "identity_conflict";
