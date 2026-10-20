@@ -285,6 +285,38 @@ Nguồn hiện tại: [SceneObjectifyConfig và nhánh Draft](../src/services/or
 | Preflight / export PASS | Các kiểm tra tĩnh và khả năng export tương ứng đã đạt | Physics đã chạy thành công trong Isaac |
 | Validation runtime, approval, release hợp lệ | Có bằng chứng và quyết định cho candidate/checksum tương ứng | Các revision sửa về sau cũng được duyệt |
 
+### 7.1 Đọc tiến trình trên giao diện (Sprint 8, 2026-10-20)
+
+Trang scene hỏi **một** route `GET /jobs/{id}/pipeline` (có ETag, không đổi thì trả 304). Route trả:
+
+- `steps`: danh sách bước do backend dựng, mỗi bước có `owner` là **máy** (system) hoặc **người** (user) và trạng thái
+  `pending / running / waiting / succeeded / failed / skipped`. Ba bước mới hiện rõ trên dòng thời gian: xem bản đã che
+  (`ANONYMIZATION_REVIEW`, người), LiDAR odometry (máy, khi job có LiDAR), duyệt vật (`OBJECT-CONFIRM`, người).
+- `next_action`: việc tiếp theo, tính bằng một hàm duy nhất ở backend và dùng chung cho chuông, nhãn đầu trang, danh sách
+  scene, thông báo trong Studio:
+
+| `next_action` | Ai làm | Nghĩa |
+| --- | --- | --- |
+| `wait_system` | máy | Máy đang chạy, đang xếp hàng, chờ tài nguyên hoặc đang bật máy GPU |
+| `review_anonymization` | người | Xem bản đã che mặt/biển số rồi xác nhận |
+| `confirm_metric` | người | Chọn điểm và nhập kích thước thật để có tỉ lệ mét |
+| `retry_job` / `job_failed` | người | Job lỗi; có thể chạy lại / phải sửa nguyên nhân trước |
+| `job_cancelled` | — | Đã huỷ, kết quả đã có vẫn giữ |
+| `choose_object_method` | người | Tách theo vật chưa thành công: chạy lại hoặc dùng hộp ứng viên |
+| `confirm_objects` | người | Còn ứng viên vật chưa xác nhận |
+| `review_objects` | người | Duyệt vật rồi bấm Tạo mesh |
+| `retry_geometry` | người | Tạo mesh lỗi; chỉnh vùng rồi thử lại |
+| `scene_ready` / `create_package` / `fix_preflight` | người | Scene đã dựng; tạo gói mô phỏng / sửa theo preflight |
+| `review_package` / `await_review` / `released` | người | Có gói; chờ Reviewer; đã phát hành |
+
+- `wait`: lý do máy đang chờ (`queue`, `resources`, `runtime`, `scene_operation`); `gpu`: trạng thái bật máy GPU.
+
+Nhịp hỏi lại: máy đang chạy 3 giây, chờ người 15 giây, xong việc 60 giây; tab trình duyệt ẩn thì không hỏi.
+
+**Mốc thời gian từng bước** (bảng `r2s_step_marks`, migration v26): mỗi bước ghi lúc bắt đầu và kết thúc, kể cả bước của
+người (xem bản đã che, duyệt vật) và các lượt chạy lại trong Studio (Tạo mesh, chỉnh vùng). Đây là nền để tính tổng thời gian
+máy + người cho một scene; báo cáo tổng hợp chưa làm trong Sprint 8.
+
 Khảo sát này chỉ đọc source/cấu hình và Git history. Không dùng kết quả test cũ để tuyên bố runtime hiện tại đạt. Không đo thời gian xử lý; các mô tả như “nhanh hơn” chỉ nên kiểm bằng benchmark riêng, không suy ra số giây từ kiến trúc.
 
 Kiểm tra tài liệu: đối chiếu call path bằng CodeGraph và graphify; đọc các nhánh thực thi liên quan; kiểm cấu hình preset và source lịch sử. Chỉ thêm file Markdown này, không sửa source/config, không chạy dịch vụ và không commit.

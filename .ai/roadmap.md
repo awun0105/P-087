@@ -122,3 +122,10 @@ Kế hoạch tổng (đọc trước mọi task): `.ai/plans/2026-10-20-pipeline
 - Lệnh `reset-password` trong `auth.cli`.
 - ObjectGS **chưa từng chạy đầu-cuối** qua worker trên một scene thật (HANDOFF PR-05 dòng 67, 79: "Full Studio worker job is unverified", "E2E NOT RUN"). Bằng chứng "mesh hở" hiện chỉ từ cube tổng hợp 96 px (1000/8000 vòng) và chạy lại trên dữ liệu Room đã tạo bằng `objectify_v1` — không đủ để kết luận chất lượng. Cần một lượt chạy đầu-cuối với `scene.geometry_method=objectgs` trên scene thật trước khi quyết mặc định.
 - Scene Room `job-a14981f78f85` rev-100 (60 vật, tạo bằng `objectify_v1` SAM2+CoACD, **không** dùng ObjectGS) không mở được lưới va chạm/Walk từ khi có kiểm `require_closed_cuts` (commit `ee6b69f0`, 15/10): API trả 409 `UNREPAIRED_COLLISION_CUT: 954 new boundary edges remain` vì lỗ khoét vùng vật không nằm trên mặt phẳng nên không vá được. Cần quyết: xem trước/Walk hiện lưới kèm cảnh báo thay vì từ chối (giữ chặt cho xuất USD), và frontend không gọi lại khi 409.
+### Kết quả Sprint 8 (2026-10-20)
+
+T-046…T-069 đã cài (trạng thái `implemented`, chờ review). Bàn giao, số đo và lưu ý deploy:
+`docs/plans/active/2026-10-20-pipeline-stability/HANDOFF.md`. Migration mới: v26. Lệch kế hoạch đáng chú ý (chi tiết trong
+ledger và report): T-067 dùng PLY nén tạo lười trên API thay cho SOG trong pipeline; T-068 tạo bản xem nhanh nền trên API thay
+cho artifact pipeline; T-065 hoãn Web Worker; T-063 gom request ở tầng API thay cho Provider.
+
