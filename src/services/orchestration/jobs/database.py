@@ -489,6 +489,24 @@ MIGRATIONS += (
         ),
     ),
 )
+MIGRATIONS += (
+    (
+        26,
+        (
+            # T-056: mốc bắt đầu / kết thúc từng bước (pipeline job và hàng đợi tách vật), ghi lúc xảy ra.
+            """CREATE TABLE r2s_step_marks (
+                job_id TEXT NOT NULL,
+                run_kind TEXT NOT NULL,
+                run_id TEXT NOT NULL,
+                step_id TEXT NOT NULL,
+                started_at TEXT,
+                completed_at TEXT,
+                outcome TEXT,
+                PRIMARY KEY (job_id, run_kind, run_id, step_id)
+            )""",
+        ),
+    ),
+)
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
 

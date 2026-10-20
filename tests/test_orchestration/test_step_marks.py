@@ -102,3 +102,68 @@ def test_failed_revision_closes_open_marks(job) -> None:  # noqa: ANN001
     at = _T0 + timedelta(minutes=12)
     writes = marks_for_revision(previous, current, _event(1, JobStatus.FAILED, StageId.CAMERA_POSE, at))
     assert writes == [MarkWrite("close", None, at, "failed")]
+
+
+# ── storage ──────────────────────────────────────────────────────────────────
+
+
+def _db(tmp_path: Path):  # noqa: ANN202
+    from src.services.orchestration.jobs.database import RuntimeDatabase
+
+    return RuntimeDatabase(f"sqlite:///{tmp_path / 'marks.db'}")
+
+
+def test_start_keeps_earliest_time(tmp_path: Path) -> None:
+    from src.services.orchestration.jobs.step_marks import list_marks, record_marks
+
+    database = _db(tmp_path)
+    record_marks(database, "job-a", "pipeline", "1", [MarkWrite("start", "ST-CAMERA-POSE", _T0)])
+    record_marks(database, "job-a", "pipeline", "1", [MarkWrite("start", "ST-CAMERA-POSE", _T0 + timedelta(minutes=2))])
+    (mark,) = list_marks(database, "job-a")
+    assert mark.started_at == _T0
+
+
+def test_finish_keeps_first_completion(tmp_path: Path) -> None:
+    from src.services.orchestration.jobs.step_marks import list_marks, record_marks
+
+    database = _db(tmp_path)
+    first = _T0 + timedelta(minutes=5)
+    record_marks(database, "job-a", "pipeline", "1", [MarkWrite("finish", "ST-METRIC-CANONICALIZE", first, "succeeded")])
+    record_marks(
+        database, "job-a", "pipeline", "1", [MarkWrite("finish", "ST-METRIC-CANONICALIZE", first + timedelta(hours=1), "failed")]
+    )
+    (mark,) = list_marks(database, "job-a")
+    assert (mark.completed_at, mark.outcome) == (first, "succeeded")
+
+
+def test_close_only_touches_open_started_marks(tmp_path: Path) -> None:
+    from src.services.orchestration.jobs.step_marks import list_marks, record_marks
+
+    database = _db(tmp_path)
+    done = _T0 + timedelta(minutes=3)
+    record_marks(
+        database,
+        "job-a",
+        "pipeline",
+        "1",
+        [
+            MarkWrite("start", "ST-FRAME-EXTRACT", _T0),
+            MarkWrite("finish", "ST-FRAME-EXTRACT", done, "succeeded"),
+            MarkWrite("start", "ST-CAMERA-POSE", done),
+            MarkWrite("close", None, _T0 + timedelta(minutes=9), "failed"),
+        ],
+    )
+    marks = {mark.step_id: mark for mark in list_marks(database, "job-a")}
+    assert marks["ST-FRAME-EXTRACT"].outcome == "succeeded"
+    assert marks["ST-CAMERA-POSE"].outcome == "failed"
+
+
+def test_record_marks_logs_and_swallows_database_errors(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    from src.services.orchestration.jobs.step_marks import record_marks
+
+    class Broken:
+        def transaction(self, write: bool = False):  # noqa: ANN202
+            raise RuntimeError("db down")
+
+    record_marks(Broken(), "job-a", "pipeline", "1", [MarkWrite("start", "x", _T0)])  # type: ignore[arg-type]
+    assert "job-a" in caplog.text
