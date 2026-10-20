@@ -61,3 +61,15 @@ def test_jobs_waiting_on_purpose_are_untouched(tmp_path: Path, monkeypatch: pyte
 
     assert recover_unwatched_running_jobs(registry, now=_later()) == 0
     assert registry.get_job(job.job_id).status == JobStatus.RUNNING
+
+
+def test_sweep_runs_at_most_once_per_interval() -> None:
+    """Review fix: the unwatched-job scan reads the whole event journal; once per half lease TTL is enough."""
+    from src.services.orchestration.jobs.worker_cli import Periodic
+
+    sweep = Periodic(300.0)
+    assert sweep.due(1000.0) is True
+    assert sweep.due(1003.0) is False
+    assert sweep.due(1299.0) is False
+    assert sweep.due(1300.0) is True
+    assert sweep.due(1301.0) is False

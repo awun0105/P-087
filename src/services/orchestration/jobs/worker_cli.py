@@ -88,6 +88,20 @@ class QueueGuard:
         return min(2 ** (max(self.failures.values()) - 1), _MAX_BACKOFF_SECONDS)
 
 
+class Periodic:
+    """`due(now)` đúng ở lần đầu và sau mỗi `interval` giây (đồng hồ đơn điệu); dùng cho việc quét đắt trong vòng poll."""
+
+    def __init__(self, interval: float) -> None:
+        self.interval = interval
+        self._next: float | None = None
+
+    def due(self, now: float) -> bool:
+        if self._next is not None and now < self._next:
+            return False
+        self._next = now + self.interval
+        return True
+
+
 def poll_queues(guard: QueueGuard, steps: list[tuple[str, Callable[[], bool]]]) -> bool:
     """Chạy lần lượt các hàng đợi tới khi một hàng có việc; hàng lỗi không chặn các hàng sau."""
     return any(guard.run(name, step) for name, step in steps)
@@ -614,9 +628,14 @@ def main(argv: list[str] | None = None) -> int:
         recover_interrupted(settings)
         import_service.recover_legacy_packaging()
         guard = QueueGuard()
+        # Quét job RUNNING không lease đọc cả nhật ký sự kiện; trường hợp này cần ≥ một TTL lease mới xuất hiện,
+        # nên quét mỗi nửa TTL là đủ (lần khởi động đã quét ở trên).
+        unwatched_sweep = Periodic(LEASE_TTL.total_seconds() / 2)
+        unwatched_sweep.due(time.monotonic())
         while True:
             guard.run("recover_leases", lambda: bool(recover_expired_leases(registry)))
-            guard.run("recover_unwatched", lambda: bool(recover_unwatched_running_jobs(registry)))
+            if unwatched_sweep.due(time.monotonic()):
+                guard.run("recover_unwatched", lambda: bool(recover_unwatched_running_jobs(registry)))
             # Job trong hàng đợi đi trước; rảnh mới nhận yêu cầu chạy lại tách theo vật (cùng dùng GPU).
             # Mỗi hàng đợi đi qua `guard`: một hàng lỗi (DB chập chờn, bản ghi hỏng) không làm worker thoát.
             handled = False
