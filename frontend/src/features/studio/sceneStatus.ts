@@ -1,6 +1,7 @@
 import type { JobManifest, JobStatus, StageId } from "@/lib/contracts/api";
 import type { JobProgress, SceneSummary } from "@/lib/contracts/studio";
 import { stageMeta } from "@/features/studio/stages";
+import { nextActionView } from "@/features/studio/nextAction";
 import type { GeometryStep } from "@/features/studio/scene/useObjectify";
 
 export type SceneStatusTone = "neutral" | "ember" | "sage" | "ochre" | "rust";
@@ -49,6 +50,24 @@ const GEOMETRY_STATUS: Record<GeometryReview, SceneStatusView> = {
 
 /** Trạng thái của một thẻ ở danh sách Scenes/Tổng quan: gom mọi điều danh sách biết về scene. */
 export function sceneSummaryStatus(scene: SceneSummary): SceneStatusView {
+  // T-062: cùng bảng câu chữ với trang scene, theo việc tiếp theo backend tính.
+  if (scene.next_action && scene.latest_job) {
+    const job = scene.latest_job;
+    return nextActionView(
+      { kind: scene.next_action, step_id: null, owner: scene.next_action === "wait_system" ? "system" : "user", pending_count: null },
+      {
+        wait: job.status === "QUEUED" ? { kind: "queue", step_id: null, since: null } : null,
+        waitingFor: null,
+        objectifyMode: null,
+        phase: null,
+        currentStepShort: job.current_stage ? stageMeta(job.current_stage)?.short ?? null : null,
+        isReviewer: false,
+        gpu: null,
+        now: 0,
+      },
+    ).status;
+  }
+  // API cũ chưa gửi `next_action`. TODO(T-063): bỏ sau khi bản API mới đã lên.
   return sceneStatus(
     scene.latest_job,
     scene.preview_ready,
