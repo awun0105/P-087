@@ -4,7 +4,9 @@
  */
 export function viewerRenderer(
   setting: string | undefined = process.env.NEXT_PUBLIC_VIEWER_RENDERER,
-  hasWebGpu: boolean = typeof navigator !== "undefined" && "gpu" in navigator,
+  hasWebGpu?: boolean,
 ): "webgpu" | "webgl" {
-  return setting === "auto" && hasWebGpu ? "webgpu" : "webgl";
+  // Turbopack không parse được toán tử `in` trong giá trị mặc định của tham số, nên kiểm tra ở thân hàm.
+  const webGpu = hasWebGpu ?? (typeof navigator !== "undefined" && "gpu" in navigator);
+  return setting === "auto" && webGpu ? "webgpu" : "webgl";
 }
