@@ -22,7 +22,11 @@ import { usePolling } from "@/features/studio/usePolling";
 import { ValueTrackingContext } from "@/features/studio/value/tracking-context";
 import { useOperatorTime } from "@/features/studio/value/useOperatorTime";
 import { getJob, getPreview, getProject, jobArtifactContentUrl } from "@/lib/api/endpoints";
-import { cancelJob, getJobProgress, retryJob } from "@/lib/api/studio";
+import { cancelJob, getJobPipeline, retryJob, type PipelineFetch } from "@/lib/api/studio";
+import type { ApiResult } from "@/lib/api/client";
+import type { PipelineView } from "@/lib/contracts/pipeline";
+import { pipelinePollInterval } from "@/features/studio/scene/pipeline";
+import { PipelineContext } from "@/features/studio/scene/pipelineContext";
 import { cn } from "@/lib/cn";
 import { useUrlState } from "@/features/studio/useUrlState";
 import { useNavigationGuard } from "@/features/shell/NavigationGuard";
@@ -75,6 +79,9 @@ const ResultsTab = dynamic(() => import("@/features/studio/scene/ResultsTab").th
  */
 export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "progress" }) {
   const [progress, setProgress] = useState<JobProgress | null>(null);
+  // T-060: một vòng poll `/pipeline` cho cả trang; ETag để không render lại khi không có gì đổi.
+  const [pipeline, setPipeline] = useState<PipelineView | null>(null);
+  const pipelineEtag = useRef<string | null>(null);
   const [info, setInfo] = useState<SceneInfo | null>(null);
   const [loadedPreview, setPreview] = useState<(Preview & { attempt: number }) | null>(null);
   const preview = loadedPreview?.attempt === progress?.attempt ? loadedPreview : null;
@@ -82,6 +89,8 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
   const [busy, setBusy] = useState(false);
   const [pollingKey, setPollingKey] = useState(0);
   const [retrySync, setRetrySync] = useState<RetrySync | null>(null);
+  // Mỗi lượt bấm Thử lại tăng số này để vòng poll hỏi ngay (T-060); kết thúc đồng bộ thì không đổi.
+  const [retryRound, setRetryRound] = useState(0);
   const retryInFlight = useRef(false);
   const pollSequence = useRef(0);
   const latestAppliedPoll = useRef<{ jobId: string; pollId: number; progress: JobProgress } | null>(null);
@@ -126,8 +135,12 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
   const poll = useCallback(
     async (signal: AbortSignal) => {
       const pollId = ++pollSequence.current;
-      const result = await getJobProgress(jobId, signal);
+      const fetched = await getJobPipeline(jobId, pipelineEtag.current, signal);
       if (signal.aborted) return;
+      if (fetched.ok && fetched.data.notModified) return; // không có gì đổi: không cập nhật state nào
+      const result: ApiResult<JobProgress> = fetched.ok
+        ? { ok: true, data: (fetched.data as Extract<PipelineFetch, { notModified: false }>).view.progress }
+        : fetched;
       const latest = latestAppliedPoll.current;
       if (latest?.jobId === jobId && pollId < latest.pollId) return;
       if (!result.ok) {
@@ -154,6 +167,10 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
         if (olderAttempt || sameAttemptRegressed) return;
       }
       latestAppliedPoll.current = { jobId, pollId, progress: result.data };
+      if (fetched.ok && !fetched.data.notModified) {
+        pipelineEtag.current = fetched.data.etag;
+        setPipeline(fetched.data.view);
+      }
       const pendingRetry = retrySyncRef.current;
       let retryNotice: string | null = null;
       let acknowledgedAttempt: number | null = null;
@@ -199,11 +216,13 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
     [jobId, loadedPreview],
   );
 
-  const finished = progress?.status === "SUCCEEDED" || progress?.status === "FAILED" || progress?.status === "CANCELLED";
   const waitingMetric = progress?.waiting_for === "metric_confirmation";
   const retryPending = retrySync?.jobId === jobId;
-  // Dừng poll khi job kết thúc hoặc đang chờ chính người dùng; tiếp tục khi worker còn làm.
-  usePolling(async (signal) => { await poll(signal); }, 3000, retryPending || !(finished || (preview !== null && waitingMetric)), pollingKey);
+  // Không dừng hẳn: chờ người thì hỏi thưa (xác nhận ở tab khác vẫn hiện), xong việc thì rất thưa (T-060).
+  // Bắt đầu một lượt Thử lại thì hỏi ngay (khoá đổi → vòng poll chạy lại từ lần gọi đầu).
+  usePolling(async (signal) => { await poll(signal); }, retryPending ? 3000 : pipelinePollInterval(pipeline), true, `${pollingKey}:${retryRound}`);
+
+  const refreshPipeline = useCallback(() => setPollingKey((k) => k + 1), []);
 
   async function act(action: () => Promise<unknown>, success: string) {
     if (busy) return;
@@ -233,6 +252,7 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
     const submitting: RetrySync = { jobId, fromAttempt: failed.attempt, afterPollId: pollSequence.current + 1, status: "submitting" };
     retrySyncRef.current = submitting;
     setRetrySync(submitting);
+    setRetryRound((round) => round + 1);
     let retryStatus: "accepted" | "rejected" | "uncertain" = "accepted";
     let message: string | undefined;
     try {
@@ -275,6 +295,8 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
     jobId,
     enabled: sceneReady,
     onRevision: (revision) => { setSave({ status: "saved", revision }); setPollingKey((k) => k + 1); },
+    external: pipeline ? pipeline.objectify : undefined,
+    onRefresh: refreshPipeline,
   });
   const status = progress
     ? progressSceneStatus(progress, objectify.state?.awaiting_choice === true && !objectify.pending, geometryReviewStep(objectify.state))
@@ -311,6 +333,7 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
   }, [current]);
 
   return (
+    <PipelineContext.Provider value={pipeline}>
     <ObjectifyContext.Provider value={objectify}>
     <ValueTrackingContext.Provider value={walkTracking}>
     <main aria-label={current === "studio" ? "Studio toàn màn hình" : undefined} className={cn("flex flex-col", current === "studio" ? "fixed inset-0 z-40 h-dvh bg-paper" : "h-[calc(100dvh-3rem)]")}>
@@ -429,5 +452,6 @@ export function ScenePage({ jobId, initialTab }: { jobId: string; initialTab?: "
     </main>
     </ValueTrackingContext.Provider>
     </ObjectifyContext.Provider>
+    </PipelineContext.Provider>
   );
 }
