@@ -57,7 +57,7 @@ T-056 | Bảng mốc bước, ghi từ pipeline job | implemented | summarizer
 T-057 | Pha có kiểu và mốc bước cho hàng đợi tách vật | implemented | summarizer
 T-058 | Hàm thuần việc tiếp theo | implemented | summarizer
 T-059 | Endpoint tiến trình hợp nhất, nhẹ, có 304 | implemented | summarizer
-T-060 | Một vòng poll mỗi trang, không re-render khi không đổi | planned | engineer
+T-060 | Một vòng poll mỗi trang, không re-render khi không đổi | implemented | summarizer
 T-061 | Dòng tiến trình vẽ từ bước thật | planned | engineer
 T-062 | Một nguồn việc cần làm cho chuông, banner, đầu trang, danh sách | planned | engineer
 T-063 | Một nguồn dữ liệu scene/gói/duyệt; dọn nhánh chết | planned | engineer
