@@ -13,6 +13,9 @@ import type { SceneIR } from "@/lib/contracts/api";
 import type { JobProgress } from "@/lib/contracts/studio";
 import { isJobStale, useNow, type Tab, type StudioMode } from "@/features/studio/scene/state";
 import { useObjectify } from "@/features/studio/scene/objectifyContext";
+import { usePipelineView } from "@/features/studio/scene/pipelineContext";
+import { nextActionView } from "@/features/studio/nextAction";
+import { stageMeta } from "@/features/studio/stages";
 import { geometryReviewStep } from "@/features/studio/scene/useObjectify";
 import { geometryPhaseLabel, objectGeometryState } from "@/lib/scene/geometry-state";
 import { cn } from "@/lib/cn";
@@ -97,13 +100,15 @@ export function NextAction({
     setError(null);
     setDetail({ scene: scene.data.scene, pkg: values[0].status === "fulfilled" ? values[0].value : null, review: values[1].status === "fulfilled" ? values[1].value : null });
   }, [jobId]);
+  // T-062: trong trang scene, việc tiếp theo đến từ `/pipeline`; chuông không tự tải scene, gói, duyệt nữa.
+  const pipelineView = usePipelineView();
   useEffect(() => {
-    if (!sceneReady || revision === null) return;
+    if (!sceneReady || revision === null || pipelineView) return;
     const controller = new AbortController();
     const timer = setTimeout(() => void load(controller.signal), 0);
     return () => { clearTimeout(timer); controller.abort(); };
-  }, [revision, sceneReady, load]);
-  usePolling(load, 10000, sceneReady);
+  }, [revision, sceneReady, load, pipelineView]);
+  usePolling(load, 10000, sceneReady && !pipelineView);
   if (!progress) return null;
   let title: string | null = null;
   let description: string | null = null;
@@ -111,7 +116,22 @@ export function NextAction({
   let pendingCount: number | null = null;
   // Đang đọc trạng thái chưa phải là thông báo cần người dùng chú ý: chuông không bật chấm cho nó.
   let reading = false;
-  if (geometry?.state === "running") {
+  if (pipelineView && !retryState && !stale) {
+    const view = nextActionView(pipelineView.next_action, {
+      wait: pipelineView.wait,
+      waitingFor: progress.waiting_for ?? null,
+      objectifyMode: pipelineView.objectify?.mode ?? null,
+      phase: pipelineView.objectify?.phase ?? null,
+      currentStepShort: progress.current_stage ? stageMeta(progress.current_stage)?.short ?? null : null,
+      isReviewer: isReviewer(me),
+      gpu: pipelineView.gpu,
+      now,
+    });
+    title = view.title || null;
+    description = view.description || null;
+    action = view.target;
+    pendingCount = pipelineView.next_action.pending_count;
+  } else if (geometry?.state === "running") {
     const building = objectify.state?.mode === "geometry";
     title = building ? "Đang tạo mesh" : "Đang dựng lại vùng";
     description = (geometry.cancelling ? "Đang dừng…" : geometryPhaseLabel(geometry.phase)) ?? "Đang xếp hàng.";

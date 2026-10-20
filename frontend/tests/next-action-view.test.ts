@@ -31,7 +31,7 @@ describe("one table of next-action wording (T-062)", () => {
   it("never calls the metric wait 'collision'", () => {
     const view = nextActionView({ kind: "confirm_metric", step_id: "ST-METRIC-CANONICALIZE", owner: "user", pending_count: null }, ctx);
     expect(view.status.label).not.toMatch(/collision/i);
-    expect(view.target).toEqual({ tab: "studio", mode: "metric" });
+    expect(view.target).toEqual({ tab: "studio", mode: "metric", label: "Xác nhận tỉ lệ mét" });
   });
   it("counts objects to review in the description", () => {
     const view = nextActionView({ kind: "review_objects", step_id: "ST-OBJECT-CONFIRM", owner: "user", pending_count: 3 }, ctx);

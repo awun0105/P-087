@@ -57,7 +57,8 @@ function pipelineOf(data: unknown) {
       notModified: false as const,
       etag: null,
       view: {
-        job_id: progress.job_id, scene_revision: null, usable: false, steps, current_step: null, wait: null, version: "v",
+        job_id: progress.job_id, scene_revision: null, usable: false, steps, current_step: null, version: "v",
+        wait: progress.status === "QUEUED" ? { kind: "queue", step_id: null, since: null } : null,
         next_action: { kind, step_id: null, owner: kind === "wait_system" ? "system" : "user", pending_count: null },
         progress: data, objectify: null, gpu: null,
       },
