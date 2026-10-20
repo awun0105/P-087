@@ -14,8 +14,8 @@ Nhánh `develop`, chưa push.
    hàm `next_action` duy nhất, route `/jobs/{id}/pipeline`, trang scene hỏi một route với nhịp theo trạng thái, dòng thời
    gian từ bước của backend, một bảng câu chữ cho chuông/đầu trang/danh sách/Studio.
 4. **Xem scene nhanh (T-063…T-068).** Một lần tải scene/gói/duyệt cho cả trang; viewer không vẽ lại thừa, dựng một lần, nghỉ
-   khi ẩn; Walk tải lười; bước lưới chỉ tải lưới; chia JS; ảnh frame thu nhỏ; Gaussian vật dạng PLY nén, tải 4 cái một lúc;
-   vỏ không tải lại khi chọn; bản xem nhanh cho scene lớn.
+   khi ẩn; Walk tải lười; bước lưới chỉ tải lưới; chia JS; ảnh frame thu nhỏ; Gaussian vật tải 4 cái một lúc (vật đang chọn trước);
+   vỏ không tải lại khi chọn; scene lớn mở bằng bộ LOD (T-070): hiện bản thô ngay rồi mịn dần tới đủ chất lượng gốc.
 5. **T-069.** Sửa `/scenes` gọi đôi `preview_ready` (do T-059), định dạng một file test, tài liệu.
 
 ## Số đo trước / sau
@@ -38,9 +38,9 @@ Dữ liệu `data/studio_local`, bản sao DB SQLite, gọi trong tiến trình 
 | Mở Studio scene Ready | Ammo 1,2 MB + lưới va chạm + collider tải ngay | chỉ tải khi bấm "Đi bộ" |
 | Bước Collision mesh | SOG 10–30 MB + lưới | chỉ lưới (0,1–1 MB); SOG khi bấm "Hiện kèm 3DGS" |
 | Bước Frames (48 ảnh, job-a14981f78f85) | 362,9 MB | ≈ 0,7 MB ảnh thu nhỏ |
-| Gaussian 61 vật (job-bfc7d73f0dbf) | 56,2 MB PLY, 60 request cùng lúc | 14,7 MB PLY nén, ≤ 4 cùng lúc |
+| Gaussian 61 vật (job-bfc7d73f0dbf) | 56,2 MB PLY, 60 request cùng lúc | 56,2 MB PLY gốc, ≤ 4 cùng lúc, vật đang chọn trước |
 | Chọn/bỏ chọn vật 5 lần | 11 lần tải GLB vỏ | 1 |
-| SOG scene lớn (1,86 triệu splat) | 28,7 MB | 6,3 MB bản xem nhanh (từ lần mở thứ hai) |
+| SOG scene lớn (2 triệu điểm, job-f9f14e7fbfb1) | phải tải 31 MB mới hiện | hiện sau 9,4 MB (bộ LOD), mịn dần tới đủ chất lượng |
 
 Không đo được: kích thước chunk JS sau khi chia (không chạy `next build` vì máy chủ dev đang dùng `frontend/.next`).
 
@@ -50,7 +50,8 @@ Không đo được: kích thước chunk JS sau khi chia (không chạy `next b
 2. Scene **chờ xác nhận tỉ lệ mét**: chuông và đầu trang nói "Cần bạn xác nhận tỉ lệ mét", nút đưa vào Studio.
 3. Scene **Draft** (chờ duyệt vật): bước "Duyệt vật" ở trạng thái chờ; bấm chọn vật nhiều lần — vỏ đổi sáng ngay, không nhấp nháy tải lại.
 4. Scene **Ready**: mở Studio — 3DGS hiện, vật hiện dần (vật đang chọn trước). Bấm nút **Đi bộ** (bàn chân) — "Đang chuẩn bị
-   đi bộ…" rồi tự vào Walk. Mở scene lớn lần hai: hiện bản nhẹ; nút lấp lánh **Chất lượng đầy đủ** tải bản gốc.
+   đi bộ…" rồi tự vào Walk. Scene lớn đã có bộ LOD: hình hiện gần như ngay (bản thô) rồi mịn dần; nhìn gần phải đủ chi tiết
+   như bản gốc, xoay không giật.
 5. Từng **trang bước**: Frames hiện ảnh nhỏ, bấm ảnh mở ảnh gốc; Cameras không có thư viện 3D; Collision mesh chỉ có lưới,
    nút "Hiện kèm 3DGS".
 6. **Đổi tab** Studio ↔ Tiến trình khi đang Walk: quay lại không còn Walk, không giật.
@@ -58,6 +59,7 @@ Không đo được: kích thước chunk JS sau khi chia (không chạy `next b
 
 ## Lưu ý deploy
 
+- **Mã bước mới `ST-VIEW-LOD`** (danh sách bước của backend và Studio): API, worker và Studio lên cùng đợt.
 - **Migration v26** (`r2s_step_marks`). API và worker phải lên **cùng lúc**: code cũ từ chối DB ở schema mới hơn.
   Thứ tự: dừng worker → deploy API (tự chạy migration) → deploy worker (CPU và GPU image).
 - Migration v26 và 13 test `test_step_marks.py` đã chạy qua trên PostgreSQL 16 thật (phiên GPU kiểm, 2026-10-20). Phần ghi
@@ -65,11 +67,12 @@ Không đo được: kích thước chunk JS sau khi chia (không chạy `next b
 - Bản vá production `becd0b3e` (bỏ `json_extract` chỉ SQLite có trong hai lần quét job RUNNING, gồm lần quét của T-048) đã ở
   `develop` và production; không cần làm lại.
 - Header `Cache-Control` của R2 chỉ áp cho file tải lên **sau** khi deploy; file cũ vẫn dùng được (API trả cache header).
-- Route mới cần runtime splat-transform trên **API** (`REC05_VOXEL_CLI` có sẵn trong `Dockerfile`): PLY nén cho vật và bản
-  xem nhanh. Không có runtime thì tự quay về file gốc. Bản xem nhanh tốn ≈ 1 phút CPU/scene lớn, một việc một lúc, `nice 10`.
-- Thư mục đệm dẫn xuất cạnh `ARTIFACT_ROOT`: `cache/walk-collision` (tự dọn 7 ngày), `cache/thumbnails`,
-  `cache/compact-objects`, `cache/quick-sog` (chưa tự dọn; xoá lúc nào cũng được). File `*.unavailable` trong `quick-sog`
-  đánh dấu không tạo được bản nhẹ; xoá để thử lại.
+- **Bộ LOD (T-070)**: job xong thì runner tạo ngay trong cùng lượt (bước "Chuẩn bị xem 3D mượt"); ngoài ra worker **có GPU** tạo lúc rảnh (cần `R2S_VOXEL_CLI` và `nvidia-smi` trên máy đó; image GPU đã có
+  splat-transform). Không cần cấu hình thêm. Job cũ được tạo bù tự động, job mới trước. Mỗi SOG lớn tốn vài phút GPU một lần;
+  chưa có bộ LOD thì giao diện mở SOG gốc như trước. Bộ LOD nằm ở `jobs/<job>/derived/lod/` trong kho file (xoá job là xoá
+  theo); dấu bỏ qua ở `cache/lod-skip` (xoá để thử lại).
+- Thư mục đệm dẫn xuất cạnh `ARTIFACT_ROOT`: `cache/walk-collision` (tự dọn 7 ngày), `cache/thumbnails` (chưa tự dọn; xoá lúc
+  nào cũng được).
 - `NEXT_PUBLIC_VIEWER_RENDERER=auto` (tuỳ chọn) cho phép WebGPU; mặc định `webgl`.
 - Khuyến nghị chạy API nhiều tiến trình uvicorn: việc dựng lưới va chạm lần đầu vẫn chiếm CPU.
 
@@ -79,7 +82,7 @@ Xem `.ai/tasks/T-069/report.md` (số pass/fail thật và các test đỏ có t
 
 ## Backlog còn lại
 
-- Web Worker parse lưới va chạm (T-065 bước 3); LOD cho SOG; tải trước SOG bước 5 song song với camera.
+- Web Worker parse lưới va chạm (T-065 bước 3); tải trước SOG bước 5 song song với camera.
 - Báo cáo tổng thời gian máy + người từ `r2s_step_marks` (mục tiêu telemetry ban đầu).
-- Dọn tự động cho `cache/thumbnails`, `cache/compact-objects`, `cache/quick-sog`.
+- Dọn tự động cho `cache/thumbnails`. Bộ LOD cho bản xem bước 5 khi Studio chưa có scene (`PreviewScene` nhận URL sẵn).
 - Test role matrix đỏ do các route `demo-sessions`/`samples` chưa khai báo (có trước Sprint 8).
