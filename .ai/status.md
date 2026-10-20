@@ -43,3 +43,27 @@ T-042 | GPU worker trên RunPod Serverless | planned | engineer
 T-044 | Trang tiến trình nói đúng, đủ cho scene thật và scene mẫu | accepted | —
 T-043 | Dừng công cụ theo tiến độ và khối lượng scene | accepted | —
 T-045 | Chạy 9 scene Deep Blending + Mip-NeRF 360 từ ảnh (chỉ vận hành, không sửa code) | in-progress | engineer
+T-046 | Vòng lặp worker không chết vì một lỗi | planned | engineer
+T-047 | Tắt worker giữa chừng thì cho chạy lại, kể cả job cũ | planned | engineer
+T-048 | Không còn job RUNNING mà không ai trông | planned | engineer
+T-049 | Chịu lỗi DB thoáng qua khi gia hạn và kiểm hủy | planned | engineer
+T-050 | Chờ tài nguyên và hạn tự tính không lặp vô hạn | planned | engineer
+T-051 | File theo checksum: giữ vĩnh viễn, không băm lại, URL R2 ổn định | planned | engineer
+T-052 | Lưới va chạm Walk dựng một lần, trả 304 | planned | engineer
+T-053 | Đệm SceneIR / JobManifest đã parse; gzip; CORS | planned | engineer
+T-054 | Danh sách scene và stage-views nhẹ | planned | engineer
+T-055 | Một hàm trạng thái hình học theo vật | planned | engineer
+T-056 | Bảng mốc bước, ghi từ pipeline job | planned | engineer
+T-057 | Pha có kiểu và mốc bước cho hàng đợi tách vật | planned | engineer
+T-058 | Hàm thuần việc tiếp theo | planned | engineer
+T-059 | Endpoint tiến trình hợp nhất, nhẹ, có 304 | planned | engineer
+T-060 | Một vòng poll mỗi trang, không re-render khi không đổi | planned | engineer
+T-061 | Dòng tiến trình vẽ từ bước thật | planned | engineer
+T-062 | Một nguồn việc cần làm cho chuông, banner, đầu trang, danh sách | planned | engineer
+T-063 | Một nguồn dữ liệu scene/gói/duyệt; dọn nhánh chết | planned | engineer
+T-064 | Viewer không dựng lại, không vẽ thừa, tab ẩn thì nghỉ | planned | engineer
+T-065 | Tải lười Walk, trang bước song song, chia nhỏ JS | planned | engineer
+T-066 | Ảnh frame thu nhỏ | planned | engineer
+T-067 | Vật nhẹ: SOG cho vật, tải giới hạn, vỏ không tải lại | planned | engineer
+T-068 | SOG xem nhanh: màu bậc 0 và LOD cho job mới | planned | engineer
+T-069 | Full regression, đo trước/sau, bàn giao | planned | engineer
