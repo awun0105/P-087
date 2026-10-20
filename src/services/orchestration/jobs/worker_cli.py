@@ -5,6 +5,7 @@ reclaim RUNNING theo timeout vì trainer có thể vẫn còn sống trên host 
 """
 
 import argparse
+import json
 import logging
 import os
 import signal
@@ -163,6 +164,28 @@ def _record_dispatch_failure(registry: ProjectRegistry, job: JobManifest, cause:
         logger.info("Không ghi đè job hoặc privacy revision mới hơn khi ghi dispatch failure")
 
 
+def latest_running_job_ids(tx) -> list[str]:
+    """Job whose newest event is RUNNING, on SQLite and PostgreSQL alike.
+
+    The status is read in Python: `json_extract` is SQLite-only and made every worker exit at startup on the
+    production PostgreSQL database. The scan reads one payload per job (newest event only).
+    """
+    rows = tx.execute(
+        "SELECT e.job_id, e.payload FROM r2s_job_events e JOIN "
+        "(SELECT job_id, MAX(version) AS version FROM r2s_job_events GROUP BY job_id) latest "
+        "ON e.job_id=latest.job_id AND e.version=latest.version"
+    ).fetchall()
+    running = []
+    for job_id, payload in rows:
+        try:
+            status = json.loads(payload).get("status") if isinstance(payload, str) else (payload or {}).get("status")
+        except ValueError:
+            continue
+        if status == "RUNNING":
+            running.append(str(job_id))
+    return running
+
+
 def recover_interrupted_jobs(registry: ProjectRegistry, settings: Settings) -> int:
     """Lúc worker khởi động: đánh dấu FAILED (retryable=True) các job RUNNING bị mồ côi trên host này.
 
@@ -175,12 +198,7 @@ def recover_interrupted_jobs(registry: ProjectRegistry, settings: Settings) -> i
         return 0
     database = registry.persistence.database
     with database.transaction() as tx:
-        rows = tx.execute(
-            "SELECT e.job_id, e.payload FROM r2s_job_events e JOIN "
-            "(SELECT job_id, MAX(version) AS version FROM r2s_job_events GROUP BY job_id) latest "
-            "ON e.job_id=latest.job_id AND e.version=latest.version "
-            "WHERE json_extract(e.payload, '$.status') = 'RUNNING'"
-        ).fetchall()
+        rows = [(job_id, None) for job_id in latest_running_job_ids(tx)]
 
     recovered = 0
     worker_root = settings.product_worker_root
@@ -393,12 +411,7 @@ def recover_unwatched_running_jobs(registry: ProjectRegistry, *, now: datetime |
     database = registry.persistence.database
     current = now or datetime.now(UTC)
     with database.transaction() as tx:
-        rows = tx.execute(
-            "SELECT e.job_id FROM r2s_job_events e JOIN "
-            "(SELECT job_id, MAX(version) AS version FROM r2s_job_events GROUP BY job_id) latest "
-            "ON e.job_id=latest.job_id AND e.version=latest.version "
-            "WHERE json_extract(e.payload, '$.status') = 'RUNNING'"
-        ).fetchall()
+        rows = [(job_id,) for job_id in latest_running_job_ids(tx)]
     recovered = 0
     for (job_id,) in rows:
         try:
