@@ -33,6 +33,8 @@ class CollisionKey:
     preview: bool
     frame: Literal["display", "canonical"]
     config_checksum: str
+    #: URI nguồn đã kiểm khớp revision lúc dựng; khoá gồm cả URI để lần trúng đệm vẫn gắn đúng nguồn.
+    source_uri: str = ""
 
     @property
     def digest(self) -> str:

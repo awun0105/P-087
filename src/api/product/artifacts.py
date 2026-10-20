@@ -1,6 +1,7 @@
 """Artifact của job: danh sách được phép thấy, bytes theo allow-list, preview 3DGS, bản ghi Rerun."""
 
 from pathlib import Path
+from threading import Thread
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response, status
@@ -16,11 +17,13 @@ from src.services.orchestration.artifacts import ArtifactNotFoundError, Artifact
 from src.services.orchestration.jobs.display_glb import display_space_glb
 from src.services.orchestration.jobs.stage_views import job_bundle
 from src.services.orchestration.projects import JobNotFoundError, ProjectRegistry
+from src.services.orchestration.scene.collision_cache import CollisionKey, CollisionPayload, WalkCollisionCache
 from src.services.orchestration.scene.errors import (
     ObjectGeometryNotReadyError,
     SceneError,
     SceneHeadNotReadyError,
     SceneNotAvailableError,
+    SceneRevisionConflictError,
 )
 from src.services.orchestration.scene.physics_collision import (
     effective_collision_bytes,
@@ -143,8 +146,23 @@ def _require_walk_allowed(registry: ProjectRegistry, job_id: str) -> None:
     require_geometry_ready(scene, "Walk")
 
 
+_WALK_CACHES: dict[Path, WalkCollisionCache] = {}
+
+
+def _walk_cache(registry: ProjectRegistry) -> WalkCollisionCache:
+    """Một đệm cho mỗi kho artifact; thư mục đĩa cạnh ARTIFACT_ROOT (không ghi được thì chỉ dùng bộ nhớ)."""
+    root = registry.runtime_resolver.artifact_root.parent / "cache" / "walk-collision"
+    cache = _WALK_CACHES.get(root)
+    if cache is None:
+        cache = _WALK_CACHES[root] = WalkCollisionCache(root)
+        # Dọn file đệm không dùng quá 7 ngày một lần mỗi tiến trình, ở luồng nền.
+        Thread(target=cache.prune, name="walk-collision-prune", daemon=True).start()
+    return cache
+
+
 @router.get("/jobs/{job_id}/walk-collision/{filename}")
 def get_walk_collision(
+    request: Request,
     job_id: str,
     filename: str,
     artifact_uri: str = Query(..., min_length=1),
@@ -188,18 +206,46 @@ def get_walk_collision(
         shared = 0
         floor = 0
         repaired = 0
+        etag = '"' + identity.removeprefix("sha256:") + ":" + frame + '"'
+        cache_control = "private, no-cache"
         if scene_revision is not None:
-            scene, background = effective_collision_for_revision(
-                registry, job_id, scene_revision, preview_pending=preview is True
+            # T-052: revision phải là head hiện tại (như trước) rồi mới đọc đệm; dựng chỉ khi đệm chưa có.
+            if registry.scene.current(job_id).scene.scene_revision != scene_revision:
+                raise SceneRevisionConflictError("collision request does not match current SceneIR revision")
+            key = CollisionKey(
+                job_id=job_id,
+                scene_revision=scene_revision,
+                source_checksum=artifact_checksum,
+                preview=preview is True,
+                frame=frame,
+                config_checksum=registry.get_job(job_id).config_checksum,
+                source_uri=artifact_uri,
             )
-            selected = scene.environment.collision_source_ref or scene.environment.geometry_ref
-            if (artifact_uri, artifact_checksum) != (selected.artifact_uri, selected.artifact_checksum):
-                raise SourceCollisionOwnershipError("collision URL does not bind the selected SceneIR source")
-            payload = effective_collision_bytes(background, display=frame == "display")
-            identity = background.identity
-            shared = background.retained_shared_triangles
-            floor = background.protected_surface_triangles
-            repaired = background.repaired_triangles
+            if not_modified(request, key.etag):
+                return Response(
+                    status_code=status.HTTP_304_NOT_MODIFIED,
+                    headers={"ETag": key.etag, "Cache-Control": IMMUTABLE_PRIVATE},
+                )
+
+            def build() -> CollisionPayload:
+                scene, background = effective_collision_for_revision(
+                    registry, job_id, scene_revision, preview_pending=preview is True
+                )
+                selected = scene.environment.collision_source_ref or scene.environment.geometry_ref
+                if (artifact_uri, artifact_checksum) != (selected.artifact_uri, selected.artifact_checksum):
+                    raise SourceCollisionOwnershipError("collision URL does not bind the selected SceneIR source")
+                return CollisionPayload(
+                    body=effective_collision_bytes(background, display=frame == "display"),
+                    identity=background.identity,
+                    shared=background.retained_shared_triangles,
+                    floor=background.protected_surface_triangles,
+                    repaired=background.repaired_triangles,
+                )
+
+            composed = _walk_cache(registry).get_or_build(key, build)
+            payload, identity = composed.body, composed.identity
+            shared, floor, repaired = composed.shared, composed.floor, composed.repaired
+            etag, cache_control = key.etag, IMMUTABLE_PRIVATE
         else:
             if dynamic or preview is True:
                 raise SourceCollisionOwnershipError("object collision composition requires scene_revision")
@@ -221,7 +267,7 @@ def get_walk_collision(
         media_type="model/gltf-binary",
         # Nội dung gắn với checksum trong URL nên trình duyệt được giữ lại.
         headers={
-            "Cache-Control": "private, no-cache",
+            "Cache-Control": cache_control,
             "X-Content-Type-Options": "nosniff",
             "X-Scene-Revision": scene_revision or "source-preview",
             "X-Collision-Composition": identity,
@@ -235,7 +281,7 @@ def get_walk_collision(
             else "confirmed"
             if scene_revision
             else "source-preview",
-            "ETag": '"' + identity.removeprefix("sha256:") + ":" + frame + '"',
+            "ETag": etag,
         },
     )
 
