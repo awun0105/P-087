@@ -8,6 +8,8 @@ import math
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any, NamedTuple
 
+from pydantic import ValidationError
+
 from src.models.contracts.manifests import JobManifest, StageId, StageStatus
 from src.services.orchestration.artifacts import ArtifactResolver, ArtifactStoreError
 from src.services.orchestration.jobs.progress import metric_confirmation_stage
@@ -170,7 +172,11 @@ def recorded_results(registry: ProjectRegistry, job: JobManifest) -> dict[str, A
                 from src.services.orchestration.scene import objectify_queue  # tránh vòng import
 
                 # T-055: cùng một quy tắc "Tạo mesh lỗi" với danh sách scene và hàng tiến trình.
-                request = objectify_queue.latest_request(registry.persistence.database, job.job_id)
+                try:
+                    request = objectify_queue.latest_request(registry.persistence.database, job.job_id)
+                except ValidationError:
+                    logger.warning("Bản ghi hàng đợi tách vật không đọc được job=%s", job.job_id)
+                    request = None
                 if objectify_queue.review_state(request, state, scene.scene_revision) == "failed":
                     result["object_geometry"]["state"] = "failed"
                 if (
