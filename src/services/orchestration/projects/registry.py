@@ -2022,7 +2022,8 @@ class ProjectRegistry:
         """Resolve ref canonical, không dùng checksum do client chọn làm authority."""
         canonical = self.authorized_artifact(job_id, reference)
         try:
-            return self.runtime_resolver.require(canonical)
+            # T-051: băm một lần mỗi phiên bản file trên đĩa (kích thước, mtime…); file bị sửa thì băm lại và từ chối.
+            return self.runtime_resolver.require_unchanged(canonical)
         except ArtifactNotFoundError:
             if job_id != self._fixture_job_id:
                 raise
