@@ -225,9 +225,9 @@ def job_progress(
         ),
         job.completed_at,
     )
-    if failure is not None and failure.retryable and not is_execution_error_retryable(failure):
-        # Project old broad retry flags through today's policy so the UI agrees with POST /retry.
-        failure = failure.model_copy(update={"retryable": False})
+    if failure is not None and failure.retryable != is_execution_error_retryable(failure):
+        # Retry flags follow today's policy in both directions (lower and raise) so the UI agrees with POST /retry.
+        failure = failure.model_copy(update={"retryable": not failure.retryable})
     # Pipeline chạy tuần tự: journal cho thấy đã sang stage sau → stage trước đã xong,
     # dù StageArtifact của nó chỉ được commit cùng receipt ở cuối attempt.
     advanced = {

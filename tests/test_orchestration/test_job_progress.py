@@ -336,3 +336,30 @@ def test_running_job_advances_updated_at_from_heartbeat(tmp_path: Path) -> None:
     hb_time = _T0 + timedelta(minutes=15)
     progress_with_hb = job_progress(job, attempts, preview_ready=False, heartbeat_at=hb_time)
     assert progress_with_hb.updated_at == hb_time
+
+
+def test_progress_upgrades_legacy_shutdown_failure(tmp_path: Path) -> None:
+    """A job stopped by a worker SIGTERM before T-047 shows Retry, matching POST /retry."""
+    error = ExecutionError(
+        error_code="PREVIEW_RUNNER_FAILED",
+        stage_id=StageId.CAMERA_POSE,
+        human_message="Worker dừng trước checkpoint hợp lệ",
+        retryable=False,
+        details={"exception_type": "KeyboardInterrupt"},
+    )
+    job = _job(
+        tmp_path,
+        status=JobStatus.FAILED,
+        current_stage=StageId.CAMERA_POSE,
+        completed_at=_T0 + timedelta(minutes=9),
+        stage_artifacts=[_succeeded(stage, 2) for stage in MVP_PIPELINE[:3]],
+    )
+    attempts = [
+        _event(1, JobStatus.QUEUED, StageId.INPUT_VALIDATE, 0),
+        _event(1, JobStatus.RUNNING, StageId.CAMERA_POSE, 3),
+        _event(1, JobStatus.FAILED, StageId.CAMERA_POSE, 9, error),
+    ]
+
+    failed = job_progress(job, attempts, preview_ready=False)
+
+    assert failed.error is not None and failed.error.retryable is True
