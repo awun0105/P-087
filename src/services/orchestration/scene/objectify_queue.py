@@ -149,15 +149,27 @@ def geometry_review(
     object_geometry: ObjectGeometry | None,
     scene_revision: str,
 ) -> GeometryReview | None:
-    """Việc còn lại của bước "Duyệt vật & Tạo mesh" cho danh sách scene; cùng quy tắc với hàng tiến trình của Studio.
-
-    `running`: đang dựng (Tạo mesh hoặc dựng lại vùng). Draft: `failed` khi Tạo mesh lỗi trên đúng revision này, ngược lại
-    `waiting`. Scene Ready không còn việc chờ người dùng nên trả None, kể cả khi lần dựng lại vùng gần nhất lỗi.
-    """
+    """Việc còn lại của bước "Duyệt vật & Tạo mesh" cho danh sách scene; cùng quy tắc với hàng tiến trình của Studio."""
     if object_geometry is None:
         return None
     with _database(settings).transaction() as tx:
         record = _read(tx, job_id)
+    return review_state(record, object_geometry, scene_revision)
+
+
+def latest_request(database: RuntimeDatabase, job_id: str) -> _Record | None:
+    """Yêu cầu mới nhất của hàng đợi tách vật cho job (chỉ đọc)."""
+    with database.transaction() as tx:
+        return _read(tx, job_id)
+
+
+def review_state(
+    record: _Record | None, object_geometry: ObjectGeometry | None, scene_revision: str
+) -> GeometryReview | None:
+    """Quy tắc duy nhất (T-055). `running`: đang dựng (Tạo mesh hoặc dựng lại vùng). Draft: `failed` khi Tạo mesh lỗi
+    trên đúng revision này, ngược lại `waiting`. Scene Ready không còn việc chờ người dùng nên trả None."""
+    if object_geometry is None:
+        return None
     if record is not None and record.status in {"queued", "running"} and record.mode in _BUILD_MODES:
         return "running"
     if object_geometry != "awaiting_review":

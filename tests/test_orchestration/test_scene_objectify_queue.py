@@ -1547,3 +1547,22 @@ def test_old_record_without_wait_since_reads() -> None:
     )
     record = scene_objectify_queue._Record.model_validate_json(legacy)
     assert record.resource_wait_since is None
+
+
+def test_review_state_rule_is_shared() -> None:
+    """T-055: one rule for 'Duyệt vật & Tạo mesh' used by the scene list and the stage results."""
+    from datetime import UTC, datetime
+
+    def record(status: str, mode: str = "geometry", base: str = "rev-002"):  # noqa: ANN202
+        return scene_objectify_queue._Record(
+            status=status, mode=mode, base_revision=base, requested_at=datetime(2026, 10, 20, tzinfo=UTC)
+        )
+
+    review = scene_objectify_queue.review_state
+    assert review(None, None, "rev-002") is None
+    assert review(None, "awaiting_review", "rev-002") == "waiting"
+    assert review(record("running"), "awaiting_review", "rev-002") == "running"
+    assert review(record("running", mode="region"), "ready", "rev-003") == "running"
+    assert review(record("failed"), "awaiting_review", "rev-002") == "failed"
+    assert review(record("failed", base="rev-001"), "awaiting_review", "rev-002") == "waiting"
+    assert review(record("failed"), "ready", "rev-002") is None
