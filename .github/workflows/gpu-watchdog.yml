@@ -1,0 +1,61 @@
+name: GPU watchdog
+
+# Independent of the API VM: if the VM (and its RunPod controller) is down, this still reconciles and
+# terminates GPU pods this deployment owns once they are idle, so a dead control plane cannot leave a
+# paid GPU running. `runpod_controller watchdog` never provisions and yields to a live leader.
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: gpu-watchdog
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  watchdog:
+    # Secrets live only on the personal deployment repository.
+    if: github.repository == 'awun0105/P-087'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12.14"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install uv==0.9.4
+          uv pip sync requirements.lock.txt --system
+
+      - name: Render watchdog environment
+        env:
+          WATCHDOG_API_ENV: ${{ secrets.WATCHDOG_API_ENV }}
+          GPU_RELEASE_CATALOG_JSON: ${{ secrets.GPU_RELEASE_CATALOG_JSON }}
+        run: |
+          umask 077
+          printf '%s\n' "$WATCHDOG_API_ENV" > "$RUNNER_TEMP/api.env"
+          printf '%s\n' "$GPU_RELEASE_CATALOG_JSON" > "$RUNNER_TEMP/gpu-catalog.json"
+          python -m scripts.cloud.watchdog_env --api-env "$RUNNER_TEMP/api.env" \
+            --catalog "$RUNNER_TEMP/gpu-catalog.json" --checkout "$GITHUB_WORKSPACE" \
+            --scratch "$RUNNER_TEMP/scratch" --out "$RUNNER_TEMP/watchdog.env"
+          rm -f "$RUNNER_TEMP/api.env"
+
+      - name: Reconcile owned GPU pods
+        run: |
+          python - <<'EOF'
+          import os, runpy, sys
+          from dotenv import dotenv_values
+          for key, value in dotenv_values(os.path.join(os.environ["RUNNER_TEMP"], "watchdog.env")).items():
+              os.environ[key] = value
+          sys.argv = ["runpod_controller", "watchdog"]
+          runpy.run_module("scripts.cloud.runpod_controller", run_name="__main__")
+          EOF
