@@ -1,0 +1,57 @@
+name: Deploy API (GCE VM)
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "src/**"
+      - "scripts/**"
+      - "configs/**"
+      - "Dockerfile"
+      - ".dockerignore"
+      - "requirements.in"
+      - "requirements*.lock.txt"
+      - "pyproject.toml"
+      - ".github/workflows/deploy-api.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-api
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Prepare SSH
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.GCE_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "${{ secrets.GCE_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+
+      - name: Upload source tree to VM
+        run: |
+          ssh -i ~/.ssh/deploy_key "${{ secrets.GCE_USER }}@${{ secrets.GCE_HOST }}" \
+            'rm -rf ~/p087.new && mkdir -p ~/p087.new'
+          git archive --format=tar HEAD \
+            | ssh -i ~/.ssh/deploy_key "${{ secrets.GCE_USER }}@${{ secrets.GCE_HOST }}" \
+                'tar -x -C ~/p087.new'
+
+      - name: Build image and restart API on VM
+        run: |
+          ssh -i ~/.ssh/deploy_key "${{ secrets.GCE_USER }}@${{ secrets.GCE_HOST }}" \
+            "~/real2sim/deploy.sh ${{ github.sha }}"
+
+      - name: Verify public health endpoint
+        run: |
+          for i in $(seq 1 12); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' https://real2sim-api.35-186-156-57.sslip.io/health || true)
+            [ "$code" = "200" ] && echo "health OK" && exit 0
+            sleep 5
+          done
+          echo "public health check failed (last code: $code)"; exit 1
