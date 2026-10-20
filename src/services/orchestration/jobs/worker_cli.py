@@ -11,7 +11,7 @@ import signal
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from threading import Event, Thread
 from typing import Protocol
@@ -24,7 +24,7 @@ from src.services.orchestration.gpu.worker import ManagedWorker
 from src.services.orchestration.jobs.admission import ResourceAdmission
 from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeStateConflictError
 from src.services.orchestration.jobs.dispatch import load_prepared_profile, prepared_frame_reference, require_profile
-from src.services.orchestration.jobs.lease import expired_job_ids, leased, release_expired
+from src.services.orchestration.jobs.lease import LEASE_TTL, expired_job_ids, has_lease, leased, release_expired
 from src.services.orchestration.jobs.log_context import configure_worker_logging, job_log_context
 from src.services.orchestration.jobs.models import TransitionRequest
 from src.services.orchestration.jobs.profile import ExecutionProfile
@@ -371,6 +371,63 @@ def _leased_call(registry: ProjectRegistry, job_id: str, call: Callable[[], obje
             return False
         call()
     return True
+
+
+def intentionally_unleased(job: JobManifest) -> bool:
+    """Job RUNNING mà không worker nào giữ lease **có chủ ý**: chờ người hoặc chờ worker nhận bước kế."""
+    if awaiting_anonymization_review(job) or awaiting_reviewed_preview(job) or awaiting_finalize(job):
+        return True
+    return job.current_stage == StageId.METRIC_CANONICALIZE and not any(
+        stage.stage_id == StageId.METRIC_CANONICALIZE for stage in job.stage_artifacts
+    )
+
+
+def recover_unwatched_running_jobs(registry: ProjectRegistry, *, now: datetime | None = None) -> int:
+    """T-048: job RUNNING không lease, không chờ có chủ ý, quá một TTL lease → FAILED cho chạy lại.
+
+    Mọi lượt chạy runner giữ lease trước khi ghi RUNNING, nên trường hợp này chỉ xảy ra khi runner chết
+    trong khe không ghi được lỗi (hoặc job chạy trước khi có lease). Máy nào cũng xử lý được.
+    """
+    if registry.persistence is None:
+        return 0
+    database = registry.persistence.database
+    current = now or datetime.now(UTC)
+    with database.transaction() as tx:
+        rows = tx.execute(
+            "SELECT e.job_id FROM r2s_job_events e JOIN "
+            "(SELECT job_id, MAX(version) AS version FROM r2s_job_events GROUP BY job_id) latest "
+            "ON e.job_id=latest.job_id AND e.version=latest.version "
+            "WHERE json_extract(e.payload, '$.status') = 'RUNNING'"
+        ).fetchall()
+    recovered = 0
+    for (job_id,) in rows:
+        try:
+            job = registry.get_job(job_id)
+            if job.status != JobStatus.RUNNING or intentionally_unleased(job) or has_lease(database, job_id):
+                continue
+            attempts = registry.list_job_attempts(job_id)
+            if not attempts or current - attempts[-1].recorded_at < LEASE_TTL:
+                continue
+            details = {"job_id": job_id, "stage": job.current_stage, "reason": "no_lease"}
+            error = ExecutionError(
+                stage_id=job.current_stage,
+                error_code="INTERRUPTED_SHUTDOWN",
+                human_message="Không còn máy xử lý nào chạy bước này. Bấm Thử lại để chạy tiếp.",
+                retryable=classify_retryability("INTERRUPTED_SHUTDOWN", details),
+                details=details,
+            )
+            registry.transition_job(
+                job_id,
+                TransitionRequest(target_status=JobStatus.FAILED, error=error),
+                expected_checksum=job.job_manifest_checksum,
+            )
+            recovered += 1
+            logger.info("Job %s RUNNING không có lease, đưa về FAILED (retryable=True)", job_id)
+        except RuntimeStateConflictError:
+            continue  # Máy khác đã xử lý trước (CAS).
+        except Exception as error:  # noqa: BLE001 - một job lỗi không được chặn các job khác
+            logger.warning("Không xử lý được job không lease %s: %s", job_id, type(error).__name__)
+    return recovered
 
 
 def recover_expired_leases(registry: ProjectRegistry, *, now: datetime | None = None) -> int:
