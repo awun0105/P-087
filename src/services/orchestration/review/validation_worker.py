@@ -40,6 +40,7 @@ from src.services.orchestration.jobs.admission import (
     ResourceAdmission,
 )
 from src.services.orchestration.jobs.database import RuntimeStateConflictError
+from src.services.orchestration.jobs.heartbeat import HeartbeatTolerance
 from src.services.orchestration.projects.registry import ProjectRegistry
 from src.services.orchestration.review.simulation_package import SimulationPackage, current_package
 from src.services.orchestration.review.validation_queue import (
@@ -108,15 +109,19 @@ class _ValidationHeartbeat:
         self.cancel_event.set()
 
     def _run(self) -> None:
+        tolerance = HeartbeatTolerance(self.queue.lease_ttl)
         while not self.stop_event.wait(_HEARTBEAT_SECONDS):
             try:
                 if self.queue.heartbeat(self.claim):
                     self._abort("cancelled")
                     return
+                tolerance.succeeded()
             except RuntimeStateConflictError:
                 self._abort("lease_lost")
                 return
             except Exception as error:  # noqa: BLE001 - lease loss must terminate the child process
+                if tolerance.tolerate(error):
+                    continue  # DB chập chờn: thử lại nhịp sau trong khi lease còn hạn
                 logger.warning(
                     "Isaac validation heartbeat failed run=%s cause=%s",
                     self.claim.run.run_id,
