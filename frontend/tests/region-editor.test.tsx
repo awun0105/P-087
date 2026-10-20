@@ -36,10 +36,10 @@ import {
 import type { ObjectRegionCommand, SceneObject } from "@/lib/contracts/api";
 
 // Các test API dùng bản thật; test hook thay bằng bản giả và trả về bản thật sau mỗi test.
-// T-068: viewer dùng bản gốc ngay (không hỏi trạng thái bản xem nhanh) trong test này.
-vi.mock("@/features/viewer/useQuickView", async () => {
+// T-070: viewer dùng SOG gốc ngay (không hỏi bộ LOD) trong test này.
+vi.mock("@/features/viewer/useLodView", async () => {
   const { jobArtifactContentUrl } = await import("@/lib/api/endpoints");
-  return { useQuickView: (jobId: string, ref: { artifact_uri: string; artifact_checksum: string }) => ({ url: jobArtifactContentUrl(jobId, ref), quick: false, settled: true, showFull: () => undefined }) };
+  return { useLodView: (jobId: string, ref: { artifact_uri: string; artifact_checksum: string }) => ({ url: jobArtifactContentUrl(jobId, ref), filename: ref.artifact_uri.split("/").pop(), lod: false, settled: true }) };
 });
 vi.mock("@/lib/api/studio", async (original) => {
   const actual = await original<typeof import("@/lib/api/studio")>();

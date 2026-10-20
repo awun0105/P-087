@@ -25,8 +25,7 @@ import { jobArtifactContentUrl } from "@/lib/api/endpoints";
 import { cn } from "@/lib/cn";
 import type { StageView } from "@/lib/contracts/studio";
 import { viewerRenderer } from "@/features/viewer/renderer-setting";
-import { QuickViewButton } from "@/features/viewer/QuickViewButton";
-import { useQuickView } from "@/features/viewer/useQuickView";
+import { useLodView } from "@/features/viewer/useLodView";
 
 /** Lớp cần thư viện 3D (3DGS, lưới va chạm, khung hệ mét); tải động để bước Frames/Cameras không kéo three/PlayCanvas (T-065). */
 export function Stage3DLayer({ jobId, view, views }: { jobId: string; view: StageView; views: StageView[] }) {
@@ -71,16 +70,16 @@ function GaussianLayer({ jobId, view, cameras }: { jobId: string; view: StageVie
   const displayRotation = view.unit === "arbitrary" ? view.display_rotation_xyzw ?? undefined : undefined;
   const initialCamera = useMemo(() => recordingCameraPose(sourceFrame, cameras, 60, displayRotation), [sourceFrame, cameras, displayRotation]);
   const ref = view.refs[0];
-  const quickView = useQuickView(jobId, ref ?? null);
+  const lodView = useLodView(jobId, ref ?? null);
   if (!ref) return <Notice>Bước này chưa có file 3DGS.</Notice>;
-  if (!quickView.settled) return <p role="status" className="p-6 text-sm text-on-dark/80">Đang tải bản xem 3DGS…</p>;
+  if (!lodView.settled) return <p role="status" className="p-6 text-sm text-on-dark/80">Đang tải bản xem 3DGS…</p>;
   if (capability === "failed" || capability === "unavailable") {
     return <p className="grid size-full place-items-center text-sm text-on-dark/80">{playCanvasErrorMessage(capability)}</p>;
   }
   return (
     <PlayCanvasScene
-      contentUrl={quickView.url}
-      contentFilename={ref.artifact_uri.split("/").pop() ?? "scene.sog"}
+      contentUrl={lodView.url}
+      contentFilename={lodView.filename}
       renderer={viewerRenderer()}
       showControls
       mode="VISUAL"
@@ -99,7 +98,6 @@ function GaussianLayer({ jobId, view, cameras }: { jobId: string; view: StageVie
           className="sse-buttonGroup flex items-center shrink-0 border border-line-dark"
           onPointerDown={(e) => e.stopPropagation()}
         >
-          <QuickViewButton view={quickView} />
           <button
             type="button"
             className="sse-controlButton flex items-center justify-center text-on-dark/80 hover:text-on-dark transition-colors disabled:opacity-40"

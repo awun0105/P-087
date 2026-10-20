@@ -9,7 +9,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ObjectReviewView, type SaveState } from "@/features/studio/ObjectReviewView";
 import { SimulationPackagePanel } from "@/features/studio/SimulationPackagePanel";
 import { ObjectifyContext, type ObjectifyHandle } from "@/features/studio/scene/objectifyContext";
-import { jobArtifactContentUrl, jobCompactGaussiansUrl } from "@/lib/api/endpoints";
+import { jobArtifactContentUrl } from "@/lib/api/endpoints";
 
 vi.mock("@/features/studio/StageViewer3D", () => ({
   CollisionMeshCanvas: () => <div data-testid="mesh" />,
@@ -1626,8 +1626,7 @@ describe("ObjectReviewView vỏ và Gaussian theo Draft/Ready (T-017)", () => {
     const stage = screen.getByTestId("metric-scene");
     const objects = JSON.parse(stage.getAttribute("data-objects") ?? "[]") as { id: string; url: string | null }[];
     const visual = { ...ref, artifact_type: "ObjectGaussians" } as never;
-    // T-067: Gaussian của vật tải bản PLY nén (nhỏ ~4 lần); máy chủ tự trả PLY gốc khi không nén được.
-    expect(objects.find((item) => item.id === "candidate-002")?.url).toBe(jobCompactGaussiansUrl("job-a", visual));
+    expect(objects.find((item) => item.id === "candidate-002")?.url).toBe(jobArtifactContentUrl("job-a", visual));
     expect(stage.getAttribute("data-shells")).toBe("[]");
   });
 

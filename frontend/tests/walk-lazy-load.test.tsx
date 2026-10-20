@@ -7,10 +7,10 @@ import type { PhysicsObjectInput } from "@/features/viewer/usePhysicsPlay";
 
 const renderViewer = vi.hoisted(() => vi.fn());
 const loadAmmo = vi.hoisted(() => vi.fn(() => new Promise(() => undefined)));
-// T-068: viewer dùng bản gốc ngay (không hỏi trạng thái bản xem nhanh) trong test này.
-vi.mock("@/features/viewer/useQuickView", async () => {
+// T-070: viewer dùng SOG gốc ngay (không hỏi bộ LOD) trong test này.
+vi.mock("@/features/viewer/useLodView", async () => {
   const { jobArtifactContentUrl } = await import("@/lib/api/endpoints");
-  return { useQuickView: (jobId: string, ref: { artifact_uri: string; artifact_checksum: string }) => ({ url: jobArtifactContentUrl(jobId, ref), quick: false, settled: true, showFull: () => undefined }) };
+  return { useLodView: (jobId: string, ref: { artifact_uri: string; artifact_checksum: string }) => ({ url: jobArtifactContentUrl(jobId, ref), filename: ref.artifact_uri.split("/").pop(), lod: false, settled: true }) };
 });
 vi.mock("@/features/viewer/shell-glow", () => ({ ShellGlowLayer: class { destroy = vi.fn(); setShell = vi.fn(); clear = vi.fn(); setHovered = vi.fn(); } }));
 vi.mock("@/features/viewer/scene-overlay", () => ({ SceneOverlay: class { prioritizeObject = vi.fn();

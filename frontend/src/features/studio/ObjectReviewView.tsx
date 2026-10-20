@@ -42,7 +42,7 @@ import type { GizmoMode, OverlayBox, OverlayObject } from "@/features/viewer/sce
 import type { ShellSpec } from "@/features/viewer/shell-glow";
 import type { PhysicsObjectInput } from "@/features/viewer/usePhysicsPlay";
 import { ApiError } from "@/lib/api/client";
-import { jobArtifactContentUrl, jobCompactGaussiansUrl, listJobArtifacts } from "@/lib/api/endpoints";
+import { jobArtifactContentUrl, listJobArtifacts } from "@/lib/api/endpoints";
 import {
   addBoxObstacle,
   addCatalogObject,
@@ -74,8 +74,7 @@ const CollisionMeshCanvas = dynamic(() => import("@/features/studio/StageViewer3
 
 /** Hình riêng của một vật trong viewer: Gaussian của vật tách từ scene, hoặc GLB của asset thư viện. */
 function objectVisual(jobId: string, object: SceneObject, previews: ReadonlySet<string>): Pick<OverlayObject, "url" | "kind"> {
-  // T-067: PLY nén (nhỏ ~4 lần); máy chủ tự trả PLY gốc khi không nén được.
-  if (object.visual_ref?.artifact_type === "ObjectGaussians") return { url: jobCompactGaussiansUrl(jobId, object.visual_ref), kind: "gsplat" };
+  if (object.visual_ref?.artifact_type === "ObjectGaussians") return { url: jobArtifactContentUrl(jobId, object.visual_ref), kind: "gsplat" };
   const family = object.provenance?.catalog_family;
   if (typeof family === "string" && previews.has(family)) return { url: catalogPreviewUrl(family), kind: "model" };
   return { url: null };

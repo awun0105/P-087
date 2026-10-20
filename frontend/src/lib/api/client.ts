@@ -102,6 +102,11 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   return result.data;
 }
 
+/** URL tuyệt đối của một đường dẫn API không có tham số (vd. file trong bộ LOD được đọc theo đường dẫn tương đối). */
+export function apiPathUrl(path: string): string {
+  return `${apiBase()}${demoApiPath(path)}`;
+}
+
 export function apiUrl(path: string, params: Record<string, string | readonly string[]>): string {
   // Mảng thành tham số lặp lại (`?dynamic=a&dynamic=b`), đúng cách FastAPI đọc `list[str]`.
   const query = new URLSearchParams(
