@@ -6,6 +6,7 @@
  */
 
 import type { JobManifest, StageId } from "@/lib/contracts/api";
+import type { NextActionKind } from "@/lib/contracts/pipeline";
 
 export type VideoMediaType = "video/mp4" | "video/quicktime";
 
@@ -157,6 +158,8 @@ export interface SceneSummary {
   awaiting_object_choice?: boolean;
   /** Bước "Duyệt vật & Tạo mesh": chờ duyệt, đang dựng, Tạo mesh lỗi; null = không còn việc hoặc scene cũ. API cũ không gửi. */
   geometry_review?: "waiting" | "running" | "failed" | null;
+  /** Việc tiếp theo, cùng hàm với trang scene (T-059); API cũ không gửi trường này. */
+  next_action?: NextActionKind | null;
   /** Caller-specific ownership decision; absent on older APIs is treated as denied. */
   capabilities?: { can_delete_project: boolean };
   /** Thời gian máy đã xử lý (tổng các bước đã chạy xong), không gồm lúc xếp hàng và lúc chờ người dùng; null = chưa đo. */
