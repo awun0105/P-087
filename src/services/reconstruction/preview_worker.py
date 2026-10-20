@@ -252,13 +252,20 @@ class _PreviewExecution:
             isinstance(cause, ColmapError) and cause.code == "COLMAP_GUIDANCE_INVALID"
         )
         visual = isinstance(cause, VisualError)
-        error_code = "LIDAR_ALIGNMENT_INVALID" if lidar else cause.code if visual else "RECONSTRUCTION_PREVIEW_FAILED"
+        # Lỗi COLMAP đã có mã, lời nhắn và trích log đã che đường dẫn; log của attempt nằm trên pod đã trả nên
+        # không được nuốt chúng thành câu chung.
+        colmap = isinstance(cause, ColmapError) and not lidar
+        error_code = (
+            "LIDAR_ALIGNMENT_INVALID" if lidar else cause.code if visual or colmap else "RECONSTRUCTION_PREVIEW_FAILED"
+        )
         human_message = (
             str(cause)
-            if lidar or visual
+            if lidar or visual or colmap
             else "Preview failed; inspect attempt logs and configured runtime before retrying"
         )
         details = {"exception_type": type(cause).__name__}
+        if colmap:
+            details.update(cause.details)
         error = ExecutionError(
             error_code=error_code,
             stage_id=self.publication.current_stage,

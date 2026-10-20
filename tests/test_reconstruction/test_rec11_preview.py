@@ -16,6 +16,7 @@ from src.services.orchestration.artifacts import ArtifactResolver, FilesystemArt
 from src.services.orchestration.artifacts.errors import ArtifactAlreadyExistsError
 from src.services.reconstruction import preview_cli
 from src.services.reconstruction.adapters.brush_runtime import Invocation
+from src.services.reconstruction.adapters.colmap_runtime import ColmapError
 from src.services.reconstruction.adapters.splat import SplatArtifactProcessor, SplatRuntimeSettings
 from src.services.reconstruction.preview_models import PreparedPreviewRequest, PreparedPreviewResult
 from src.services.reconstruction.preview_worker import PreparedPreviewWorker, PreviewDependencies
@@ -122,6 +123,27 @@ def test_failure_is_durable_without_false_success(tmp_path: Path, failure: str) 
     assert result.delivery_ref is None and result.raw_visual_ref is None
     assert resolver.require(ref).is_file()
     assert "/private" not in result.model_dump_json()
+
+
+def test_colmap_failure_keeps_its_code_and_redacted_log(tmp_path: Path) -> None:
+    """The pod's attempt log is gone after release: the stored error is the only evidence left."""
+    worker, request, _ = preview(tmp_path)
+    worker = PreparedPreviewWorker(replace(worker.deps, colmap=LoggedFailure()))
+    result, _ = worker.run(request, tmp_path / "failure")
+    assert result.error.error_code == "COLMAP_NO_MODEL" and result.error.stage_id == StageId.CAMERA_POSE
+    assert result.error.human_message == "COLMAP produced no sparse model"
+    assert result.error.details["exception_type"] == "ColmapError"
+    assert result.error.details["log_excerpt"] == "Discarding reconstruction due to no initial pair"
+    assert str(tmp_path) not in result.model_dump_json()
+
+
+class LoggedFailure(FixtureProcess):
+    def capabilities(self, workspace: Path, matching_mode: str = "sequential") -> tuple[str, str, str]:
+        raise ColmapError(
+            "COLMAP_NO_MODEL",
+            "COLMAP produced no sparse model",
+            details={"log_excerpt": "Discarding reconstruction due to no initial pair"},
+        )
 
 
 class BrokenBrush(FixtureBrush):
