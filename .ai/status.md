@@ -43,7 +43,7 @@ T-042 | GPU worker trên RunPod Serverless | planned | engineer
 T-044 | Trang tiến trình nói đúng, đủ cho scene thật và scene mẫu | accepted | —
 T-043 | Dừng công cụ theo tiến độ và khối lượng scene | accepted | —
 T-045 | Chạy 9 scene Deep Blending + Mip-NeRF 360 từ ảnh (chỉ vận hành, không sửa code) | in-progress | engineer
-T-046 | Vòng lặp worker không chết vì một lỗi | planned | engineer
+T-046 | Vòng lặp worker không chết vì một lỗi | implemented | summarizer
 T-047 | Tắt worker giữa chừng thì cho chạy lại, kể cả job cũ | planned | engineer
 T-048 | Không còn job RUNNING mà không ai trông | planned | engineer
 T-049 | Chịu lỗi DB thoáng qua khi gia hạn và kiểm hủy | planned | engineer
