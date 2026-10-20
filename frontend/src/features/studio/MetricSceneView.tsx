@@ -231,6 +231,9 @@ export function MetricSceneView({
     setMeasuring(state.measuring);
     notifyInspection?.(state);
   }, [notifyInspection]);
+  // T-065: Ammo, lưới va chạm Walk và collider chỉ tải khi người dùng bấm Đi bộ lần đầu; giữ trong phiên.
+  const [walkWanted, setWalkWanted] = useState(false);
+  const autoWalked = useRef(false);
   const [wheelFactor, setWheelFactor] = useState(2);
   const [thirdPerson, setThirdPerson] = useState(false);
 
@@ -379,6 +382,12 @@ export function MetricSceneView({
 
   // Góc nhìn thứ ba chỉ có nghĩa khi đang đi bộ; lưới va chạm (nạp xong mới có) giữ camera không lùi xuyên tường.
   const walking = runtime.cameraMode === "walk";
+  useEffect(() => {
+    // Đã bấm Đi bộ và viewer vừa cho phép Walk: vào Walk một lần, không ép lại khi người dùng tự đổi chế độ sau đó.
+    if (!walkWanted || !runtime.walkAllowed || autoWalked.current) return;
+    autoWalked.current = true;
+    controls.current?.setCameraMode("walk");
+  }, [walkWanted, runtime.walkAllowed]);
   useWalkSession({ walking, sceneRevision });
   useEffect(() => {
     // Trích đỉnh của lưới va chạm một lần mỗi khi lưới nạp xong, không lặp lại mỗi lần bật/tắt.
@@ -394,7 +403,7 @@ export function MetricSceneView({
     app: viewerApp,
     overlay,
     walking,
-    collisionUrl: walkCollisionUrl,
+    collisionUrl: walkWanted ? walkCollisionUrl : null,
     objects: physicsObjects,
     overlayObjects: objects,
     onObjectCollision: useCallback((collision: CollisionQuery | null) => viewerControls?.setObjectCollision(collision), [viewerControls]),
@@ -705,7 +714,7 @@ export function MetricSceneView({
         initialCameraMode="fly"
         annotations={annotations}
         onApp={onApp}
-        collisionUrl={walkBlocker || (physicsObjects.length > 0 && physics.status.state !== "ready") ? null : walkCollisionUrl}
+        collisionUrl={!walkWanted || walkBlocker || (physicsObjects.length > 0 && physics.status.state !== "ready") ? null : walkCollisionUrl}
         onCollisionError={setWalkCollisionError}
         onRuntime={setRuntime}
         wheelFactor={wheelFactor}
@@ -734,6 +743,23 @@ export function MetricSceneView({
             >
               <RotateCcw className="size-4" aria-hidden />
             </button>
+            {!lockedReason && walkCollisionUrl && !runtime.hasCollision && (
+              // Nút Đi bộ của viewer chỉ hiện khi lưới va chạm đã nạp; nút này bắt đầu tải (T-065).
+              <button
+                type="button"
+                className="sse-controlButton flex items-center justify-center text-on-dark/80 hover:text-on-dark transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                disabled={!runtime.loaded || Boolean(walkBlocker) || (walkWanted && !walkCollisionError)}
+                title={walkBlocker ?? (walkWanted && !walkCollisionError ? "Đang chuẩn bị đi bộ…" : "Đi bộ trong scene (tải lưới va chạm)")}
+                aria-label="Đi bộ"
+                onClick={() => {
+                  autoWalked.current = false;
+                  setWalkCollisionError(null);
+                  setWalkWanted(true);
+                }}
+              >
+                <Footprints className="size-4" aria-hidden />
+              </button>
+            )}
             {lockedReason && (
               // Viewer chỉ hiện nút Đi bộ khi lưới va chạm có sẵn; trong Draft thì hiện nút khoá kèm lý do.
               <button

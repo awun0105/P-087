@@ -39,6 +39,14 @@ const visual = { artifact_uri: "artifact://jobs/j/background.sog", artifact_chec
 const collision = { artifact_uri: "artifact://jobs/j/collision.glb", artifact_checksum: "sha256:mesh" };
 const cameras: [] = [];
 
+/** T-065: lưới va chạm Walk chỉ nạp sau khi bấm Đi bộ. */
+function askWalk() {
+  act(() => renderViewer.mock.lastCall![0].onRuntime({ loaded: true, progress: 100, hasCollision: false, walkAllowed: false, cameraMode: "fly", hasAnimation: false, animationPaused: true, animationDuration: 0, animationTime: 0 }));
+  const controls = render(renderViewer.mock.lastCall![0].extraControls);
+  fireEvent.click(controls.getByRole("button", { name: "Đi bộ" }));
+  controls.unmount();
+}
+
 it("hover chỉ làm sáng vật dưới chuột; kéo camera, rời canvas và chọn điểm thì tắt", () => {
   const props = { jobId: "j", visual, cameras, shells: [{ id: "A", url: "/shell.glb", style: "idle" as const }], onPickBox: vi.fn(), inspection: { onReady: vi.fn(), onState: vi.fn() } };
   const { rerender } = render(<MetricSceneView {...props} />);
@@ -75,12 +83,14 @@ it("hover chỉ làm sáng vật dưới chuột; kéo camera, rời canvas và 
 describe("MetricSceneView effective collision", () => {
   it("requests the original reconstruction collision explicitly for a stage preview", () => {
     render(<MetricSceneView jobId="j" visual={visual} collision={collision} cameras={cameras} reconstruction />);
+    askWalk();
     const url = renderViewer.mock.lastCall![0].collisionUrl;
     expect(url).toContain("reconstruction=true");
     expect(url).not.toContain("scene_revision");
   });
   it("changes revision collision URL while preserving the reconstruction content URL", () => {
     const { rerender } = render(<MetricSceneView jobId="j" visual={visual} collision={collision} cameras={cameras} sceneRevision="rev-1" />);
+    askWalk();
     const before = renderViewer.mock.lastCall![0];
     expect(before.collisionUrl).toContain("scene_revision=rev-1");
     rerender(<MetricSceneView jobId="j" visual={visual} collision={collision} cameras={cameras} sceneRevision="rev-2" />);
@@ -166,6 +176,7 @@ it("uses preview URLs and sends a picked canonical triangle to surface annotatio
   const panel = render(<div data-testid="surface-tools" />).getByTestId("surface-tools");
   render(<MetricSceneView surfaceToolsTarget={panel} jobId="j" visual={visual} collision={collision} sceneRevision="rev-1" collisionPreview cameras={cameras} onMarkSurface={onMarkSurface} onRemoveSurface={onRemoveSurface} onFillSurface={onFillSurface} surfacePlanes={[{id:"plane-1",kind:"floor",source_checksum:"sha256:mesh",points:[[0,0,0],[1,0,0],[0,1,0]]}]} />);
   act(()=>renderViewer.mock.lastCall![0].onApp({}, {setObjectCollision:vi.fn(),setCameraMode:vi.fn()}));
+  askWalk();
   expect(within(screen.getByLabelText("Chọn layer hiển thị")).queryByRole("button", {name: "Đánh dấu sàn"})).toBeNull();
   expect(within(panel).getByRole("button", {name: "Đánh dấu sàn"})).toBeInTheDocument();
   expect(renderViewer.mock.lastCall![0].collisionUrl).toContain("preview=true");
@@ -206,12 +217,11 @@ describe("MetricSceneView khoá Draft (T-013)", () => {
     expect(walk).toHaveAttribute("title", "Cần tạo mesh trước");
   });
 
-  it("ngoài Draft thì không có nút Đi bộ khoá và lưới va chạm vẫn được nạp", () => {
+  it("ngoài Draft thì nút Đi bộ bấm được và bấm mới nạp lưới va chạm (T-065)", () => {
     render(<MetricSceneView jobId="j" visual={visual} collision={collision} cameras={cameras} sceneRevision="rev-1" />);
-    const props = renderViewer.mock.lastCall![0];
-    expect(props.collisionUrl).toContain("scene_revision=rev-1");
-    const controls = render(props.extraControls);
-    expect(controls.queryByRole("button", { name: "Đi bộ" })).toBeNull();
+    expect(renderViewer.mock.lastCall![0].collisionUrl).toBeNull();
+    askWalk();
+    expect(renderViewer.mock.lastCall![0].collisionUrl).toContain("scene_revision=rev-1");
   });
 
   it("khoá Dịch và Xoay của vật đang chọn, không mở gizmo", () => {
