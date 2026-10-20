@@ -81,7 +81,7 @@ export function NextAction({
       document.removeEventListener("keydown", handleKey);
     };
   }, [isOpen]);
-  const now = useNow(progress?.status === "RUNNING");
+  const now = useNow(progress?.status === "RUNNING" && !progress?.waiting_for);
   const stale = isJobStale(progress, now);
   // Việc tạo mesh / dựng lại vùng và trạng thái Draft (T-021): cùng nguồn với hàng "Duyệt vật & Tạo mesh".
   const objectify = useObjectify({ jobId });

@@ -42,7 +42,7 @@ export function ProgressTab({ jobId, progress, info, busy, canCancel, canAccept 
   retryHint?: string;
 }) {
   const reviewing = progress?.waiting_for === "anonymization_review";
-  const now = useNow(progress?.status === "RUNNING" || progress?.status === "QUEUED");
+  const now = useNow((progress?.status === "RUNNING" || progress?.status === "QUEUED") && !progress?.waiting_for);
   const stale = isJobStale(progress, now);
   // Bước "Tách vật thể" luôn ghi thành công vì scene đã được tạo; nếu tách theo vật lỗi hết số lần thử thì hàng bước đó
   // phải báo lỗi và có nút chọn tiếp tại chỗ, không chỉ trong màn chi tiết vật thể.
