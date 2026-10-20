@@ -22,3 +22,14 @@ describe("guidance for a resource wait that ran out (T-050)", () => {
     expect(guidance?.fix).toContain("Thử lại");
   });
 });
+
+describe("guidance for pipeline-view step errors (T-061)", () => {
+  it("explains object extraction that needs a choice", () => {
+    const guidance = guidanceFor({ error_code: "OBJECTIFY_AWAITING_CHOICE", stage_id: "ST-OBJECT-EXTRACT", human_message: "", retryable: true });
+    expect(guidance?.fix).toContain("hộp ứng viên");
+  });
+  it("explains a failed mesh build", () => {
+    const guidance = guidanceFor({ error_code: "OBJECT_GEOMETRY_BUILD_FAILED", stage_id: "ST-SCENE-DECOMPOSE", human_message: "", retryable: true });
+    expect(guidance?.fix).toContain("Tạo mesh");
+  });
+});
