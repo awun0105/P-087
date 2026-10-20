@@ -611,10 +611,26 @@ export function clearImportCamera(importId: string): Promise<ImportedScene> {
 const sceneCache = new Map<string, { etag: string; data: SceneResponse }>();
 const sceneInFlight = new Map<string, Promise<ApiResult<SceneResponse>>>();
 
+/** Request đọc đang bay theo khoá (gói, trạng thái duyệt): các panel hỏi cùng lúc dùng chung; xong là quên, lần sau hỏi lại. */
+const sharedInFlight = new Map<string, Promise<unknown>>();
+
 /** Chỉ cho test: xoá bộ đệm scene giữa các ca. */
 export function clearSceneCache(): void {
   sceneCache.clear();
   sceneInFlight.clear();
+  sharedInFlight.clear();
+}
+
+/** `signal` chỉ để caller thôi chờ; request chung không bị hủy theo một caller. */
+async function shareInFlight<T>(key: string, signal: AbortSignal | undefined, load: () => Promise<T>): Promise<T> {
+  let pending = sharedInFlight.get(key) as Promise<T> | undefined;
+  if (!pending) {
+    pending = load().finally(() => sharedInFlight.delete(key));
+    sharedInFlight.set(key, pending);
+  }
+  const value = await pending;
+  if (signal?.aborted) throw new DOMException("đã hủy", "AbortError");
+  return value;
 }
 
 async function loadJobScene(jobId: string): Promise<ApiResult<SceneResponse>> {
@@ -1074,8 +1090,8 @@ function parseSimulationPackage(value: unknown): SimulationPackageView | null {
 
 /** Gói của revision scene hiện tại; null khi chưa tạo hoặc scene đã sửa sau lần tạo. */
 export async function getSimulationPackage(jobId: string, signal?: AbortSignal): Promise<SimulationPackageView | null> {
-  return parseSimulationPackage(
-    await apiFetch<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/simulation-package`, { signal }),
+  return shareInFlight(`package:${jobId}`, signal, async () =>
+    parseSimulationPackage(await apiFetch<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/simulation-package`)),
   );
 }
 
@@ -1428,7 +1444,9 @@ function parseReviewState(value: unknown): ReviewStateView {
 }
 
 export async function getReviewState(jobId: string, signal?: AbortSignal): Promise<ReviewStateView> {
-  return parseReviewState(await apiFetch<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/review-state`, { signal }));
+  return shareInFlight(`review:${jobId}`, signal, async () =>
+    parseReviewState(await apiFetch<unknown>(`${API}/jobs/${encodeURIComponent(jobId)}/review-state`)),
+  );
 }
 
 /** Quyết định trên đúng gói + báo cáo đang hiển thị; backend lấy reviewer từ phiên đăng nhập. */

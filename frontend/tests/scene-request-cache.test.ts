@@ -32,3 +32,25 @@ describe("one scene download per revision for the whole page (T-063)", () => {
     expect(result.ok).toBe(false);
   });
 });
+
+describe("package and review state share in-flight requests (T-063)", () => {
+  it("asks the server once when two panels load the package together, and again later", async () => {
+    const reply = () => new Response(JSON.stringify(null), { status: 404 });
+    const fetchMock = vi.fn().mockImplementation(async () => reply());
+    vi.stubGlobal("fetch", fetchMock);
+    const { getSimulationPackage } = await import("@/lib/api/studio");
+    await Promise.allSettled([getSimulationPackage("job-1"), getSimulationPackage("job-1")]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await getSimulationPackage("job-1").catch(() => null);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("asks the server once when two panels load the review state together", async () => {
+    const state = { job_id: "job-1", scene_revision: "rev-002", package: null, decisions: [] };
+    const fetchMock = vi.fn().mockImplementation(async () => new Response(JSON.stringify(state), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { getReviewState } = await import("@/lib/api/studio");
+    await Promise.allSettled([getReviewState("job-1"), getReviewState("job-1")]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
