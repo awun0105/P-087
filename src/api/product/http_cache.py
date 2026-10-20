@@ -3,8 +3,6 @@
 Chỉ dùng `private`: mọi request vẫn qua kiểm quyền trước khi trả 304 hay nội dung.
 """
 
-from fastapi import Request
-
 IMMUTABLE_PRIVATE = "private, max-age=31536000, immutable"
 
 
@@ -13,9 +11,8 @@ def checksum_etag(checksum: str) -> str:
     return '"' + checksum.removeprefix("sha256:") + '"'
 
 
-def not_modified(request: Request, etag: str) -> bool:
+def not_modified(header: str | None, etag: str) -> bool:
     """Trình duyệt đã có đúng bản này (`If-None-Match` chứa ETag, hoặc `*`)."""
-    header = request.headers.get("if-none-match")
     if not header:
         return False
     tags = {tag.strip().removeprefix("W/") for tag in header.split(",")}

@@ -2,9 +2,9 @@
 
 from pathlib import Path
 from threading import Thread
-from typing import Literal
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, Header, HTTPException, Query, Response, status
 from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import ValidationError
 
@@ -62,10 +62,10 @@ def get_job_preview(job_id: str) -> ReconstructionPreview:
 
 @router.get("/jobs/{job_id}/artifacts/content")
 def get_artifact_content(
-    request: Request,
     job_id: str,
     artifact_uri: str = Query(..., min_length=1),
     artifact_checksum: Checksum = Query(...),
+    if_none_match: Annotated[str | None, Header()] = None,
 ) -> Response:
     """Trả bytes của một artifact **đã nằm trong allow-list của job**.
 
@@ -88,7 +88,7 @@ def get_artifact_content(
         registry = deps.registry()
         # T-051: kiểm quyền trước; trình duyệt đã có đúng bản (checksum trong URL) thì trả 304, không đọc file.
         etag = checksum_etag(registry.authorized_artifact(job_id, reference).artifact_checksum)
-        if not_modified(request, etag):
+        if not_modified(if_none_match, etag):
             return Response(
                 status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag, "Cache-Control": IMMUTABLE_PRIVATE}
             )
@@ -123,16 +123,16 @@ def get_artifact_content(
 
 @router.get("/jobs/{job_id}/artifacts/content/{filename}")
 def get_named_artifact_content(
-    request: Request,
     job_id: str,
     filename: str,
     artifact_uri: str = Query(..., min_length=1),
     artifact_checksum: Checksum = Query(...),
+    if_none_match: Annotated[str | None, Header()] = None,
 ) -> Response:
     """Tên file dùng chọn parser; quyền đọc vẫn bind URI/checksum canonical."""
     if filename != artifact_uri.rsplit("/", 1)[-1]:
         raise HTTPException(status_code=404, detail="artifact filename does not match its reference")
-    return get_artifact_content(request, job_id, artifact_uri, artifact_checksum)
+    return get_artifact_content(job_id, artifact_uri, artifact_checksum, if_none_match)
 
 
 def _require_walk_allowed(registry: ProjectRegistry, job_id: str) -> None:
@@ -162,7 +162,6 @@ def _walk_cache(registry: ProjectRegistry) -> WalkCollisionCache:
 
 @router.get("/jobs/{job_id}/walk-collision/{filename}")
 def get_walk_collision(
-    request: Request,
     job_id: str,
     filename: str,
     artifact_uri: str = Query(..., min_length=1),
@@ -172,6 +171,7 @@ def get_walk_collision(
     frame: Literal["display", "canonical"] = Query(default="display"),
     preview: bool = Query(default=False),
     reconstruction: bool = False,
+    if_none_match: Annotated[str | None, Header()] = None,
 ) -> Response:
     """Shared effective environment for SceneIR consumers; raw preview only before scene review.
 
@@ -221,7 +221,7 @@ def get_walk_collision(
                 config_checksum=registry.get_job(job_id).config_checksum,
                 source_uri=artifact_uri,
             )
-            if not_modified(request, key.etag):
+            if not_modified(if_none_match, key.etag):
                 return Response(
                     status_code=status.HTTP_304_NOT_MODIFIED,
                     headers={"ETag": key.etag, "Cache-Control": IMMUTABLE_PRIVATE},
