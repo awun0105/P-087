@@ -10,6 +10,7 @@ import os
 import signal
 import time
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from threading import Event, Thread
@@ -56,6 +57,39 @@ from src.services.orchestration.storage import runtime_resolver
 from src.services.orchestration.uploads.scene_imports import ImportService
 
 logger = logging.getLogger(__name__)
+
+#: Thời gian nghỉ tối đa (giây) khi một hàng đợi lỗi liên tiếp.
+_MAX_BACKOFF_SECONDS = 60
+
+
+@dataclass
+class QueueGuard:
+    """Đếm lỗi liên tiếp theo hàng đợi; một hàng đợi lỗi không được làm thoát vòng lặp worker."""
+
+    failures: dict[str, int] = field(default_factory=dict)
+
+    def run(self, name: str, step: Callable[[], bool]) -> bool:
+        """Chạy một lượt của hàng đợi; lỗi thường được ghi log và coi như không có việc."""
+        try:
+            handled = step()
+        except Exception:
+            count = self.failures.get(name, 0) + 1
+            self.failures[name] = count
+            logger.exception("Hàng đợi %s lỗi lần %d liên tiếp", name, count)
+            return False
+        self.failures.pop(name, None)
+        return handled
+
+    def backoff_seconds(self) -> float:
+        """0 khi không hàng đợi nào đang lỗi; ngược lại 1, 2, 4… giây, tối đa 60."""
+        if not self.failures:
+            return 0
+        return min(2 ** (max(self.failures.values()) - 1), _MAX_BACKOFF_SECONDS)
+
+
+def poll_queues(guard: QueueGuard, steps: list[tuple[str, Callable[[], bool]]]) -> bool:
+    """Chạy lần lượt các hàng đợi tới khi một hàng có việc; hàng lỗi không chặn các hàng sau."""
+    return any(guard.run(name, step) for name, step in steps)
 
 
 class PreparedRunner(Protocol):
@@ -508,34 +542,51 @@ def main(argv: list[str] | None = None) -> int:
         recover_expired_leases(registry)
         recover_interrupted(settings)
         import_service.recover_legacy_packaging()
+        guard = QueueGuard()
         while True:
-            recover_expired_leases(registry)
+            guard.run("recover_leases", lambda: bool(recover_expired_leases(registry)))
             # Job trong hàng đợi đi trước; rảnh mới nhận yêu cầu chạy lại tách theo vật (cùng dùng GPU).
+            # Mỗi hàng đợi đi qua `guard`: một hàng lỗi (DB chập chờn, bản ghi hỏng) không làm worker thoát.
             handled = False
             with managed.operation() as allowed:
                 if allowed:
                     if args.demo_operation:
-                        handled = {
-                            "pipeline": lambda: dispatch_next(registry, admission=admission),
-                            "registration": registration_worker.process_next,
-                            "validation": validation_worker.process_next,
-                            "scene": lambda: process_next(registry, settings),
-                        }[args.demo_operation]()
+                        handled = guard.run(
+                            args.demo_operation,
+                            {
+                                "pipeline": lambda: dispatch_next(registry, admission=admission),
+                                "registration": registration_worker.process_next,
+                                "validation": validation_worker.process_next,
+                                "scene": lambda: process_next(registry, settings),
+                            }[args.demo_operation],
+                        )
                     else:
-                        handled = (
-                            (supports("pipeline") and dispatch_next(registry, admission=admission))
-                            or (supports("registration") and registration_worker.process_next())
-                            or (supports("validation") and validation_worker.process_next())
-                            or (supports("scene") and process_next(registry, settings))
-                            or (supports("import") and import_service.process_next(admission=admission))
-                            or process_demo_session(settings, registry, admission)
+                        handled = poll_queues(
+                            guard,
+                            [
+                                (
+                                    "pipeline",
+                                    lambda: supports("pipeline") and dispatch_next(registry, admission=admission),
+                                ),
+                                (
+                                    "registration",
+                                    lambda: supports("registration") and registration_worker.process_next(),
+                                ),
+                                ("validation", lambda: supports("validation") and validation_worker.process_next()),
+                                ("scene", lambda: supports("scene") and process_next(registry, settings)),
+                                (
+                                    "import",
+                                    lambda: supports("import") and import_service.process_next(admission=admission),
+                                ),
+                                ("demo", lambda: process_demo_session(settings, registry, admission)),
+                            ],
                         )
             if not handled:
                 admission.release()
             if args.once:
                 return 0
             if not handled:
-                pause.wait(settings.product_queue_poll_seconds)
+                pause.wait(max(settings.product_queue_poll_seconds, guard.backoff_seconds()))
     except KeyboardInterrupt:
         return 130
     finally:
