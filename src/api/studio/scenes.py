@@ -1,5 +1,6 @@
 """Scene Studio: tạo scene từ video đã upload, liệt kê scene, tiến trình job."""
 
+import hashlib
 from datetime import UTC, datetime
 from typing import Annotated
 
@@ -21,10 +22,14 @@ from src.api.ownership import authorize_upload_mutation, owner_mutation_allowed
 from src.api.product.http_cache import checksum_etag, not_modified
 from src.api.studio import deps
 from src.api.studio.error_view import filter_job_progress_errors, filter_manifest_errors
+from src.api.studio.gpu import deployment_id
 from src.models.contracts.manifests import JobManifest, JobStatus, StageId, StageStatus
+from src.models.contracts.scene import SceneIR
+from src.models.contracts.validation import RuleResult
 from src.services.orchestration.artifacts import ArtifactStoreError, sha256_file
 from src.services.orchestration.auth import Actor, UserRecord, actor_of, with_current_role
 from src.services.orchestration.auth.quota_ledger import GuestQuotaExceededError, GuestQuotaIdempotencyConflictError
+from src.services.orchestration.gpu.status import GpuCapacity, gpu_capacity
 from src.services.orchestration.jobs.admission import job_reservation, resource_wait
 from src.services.orchestration.jobs.database import RuntimeStateConflictError
 from src.services.orchestration.jobs.lidar_overlay import lidar_overlay_file
@@ -37,8 +42,18 @@ from src.services.orchestration.jobs.progress import (
 from src.services.orchestration.jobs.queue import job_requester_actors, job_requesters, queue_position
 from src.services.orchestration.jobs.stage_results import stage_notes
 from src.services.orchestration.jobs.stage_views import StageViewList, stage_views
+from src.services.orchestration.jobs.step_marks import list_marks
 from src.services.orchestration.jobs.thumbnails import scene_thumbnail
 from src.services.orchestration.jobs.worker_runtimes import has_live_runtime
+from src.services.orchestration.pipeline.models import PipelineView, PipelineWait
+from src.services.orchestration.pipeline.next_action import (
+    NextActionFacts,
+    PackageFacts,
+    SceneOperationFacts,
+    next_action,
+    pending_candidates,
+)
+from src.services.orchestration.pipeline.view import compose_steps, current_step, is_usable, scene_operation_wait
 from src.services.orchestration.processing import build_job_config, evaluate, is_presets_file, preset_values
 from src.services.orchestration.processing.observed import load_usages, processing_seconds
 from src.services.orchestration.projects import (
@@ -49,6 +64,8 @@ from src.services.orchestration.projects import (
 from src.services.orchestration.projects.errors import ProjectNotFoundError
 from src.services.orchestration.projects.models import UploadProjectInput
 from src.services.orchestration.projects.registry import ProjectRegistry
+from src.services.orchestration.review.simulation_package import current_package
+from src.services.orchestration.review.workflow import review_state
 from src.services.orchestration.scene import objectify_queue
 from src.services.orchestration.scene.errors import SceneError
 from src.services.orchestration.scene.objectify import AWAITING_CHOICE
@@ -433,7 +450,13 @@ def list_scenes(user: UserRecord | None = Depends(require_contributor)) -> Scene
 @router.get("/jobs/{job_id}/progress", response_model=JobProgressResponse)
 def get_job_progress(job_id: str, user: UserRecord | None = Depends(require_contributor)) -> JobProgressResponse:
     """Tiến trình từng stage của attempt hiện tại; UI poll endpoint này."""
-    registry = deps.registry()
+    return _job_progress_response(deps.registry(), job_id, user)[1]
+
+
+def _job_progress_response(
+    registry: ProjectRegistry, job_id: str, user: UserRecord | None
+) -> tuple[JobManifest, JobProgressResponse]:
+    """Thân của `/progress`, dùng chung với `/pipeline` (T-059)."""
     try:
         job = registry.get_job(job_id)
         attempts = registry.list_job_attempts(job_id)
@@ -463,7 +486,7 @@ def get_job_progress(job_id: str, user: UserRecord | None = Depends(require_cont
         user,
         registry.get_job_owner_user_id(job_id) if user is not None and user.role == "guest" else None,
     )
-    return JobProgressResponse(
+    return job, JobProgressResponse(
         **progress.model_dump(),
         capabilities=JobMutationCapabilities(
             can_mutate=allowed,
@@ -476,6 +499,127 @@ def get_job_progress(job_id: str, user: UserRecord | None = Depends(require_cont
             and progress.error.retryable,
         ),
     )
+
+
+class PipelineViewResponse(PipelineView):
+    """Một lần gọi đủ cho trang scene: bước, chờ gì, việc tiếp theo, kèm tiến trình và hàng đợi tách vật (T-059)."""
+
+    progress: JobProgressResponse
+    objectify: objectify_queue.ObjectifyState | None = None
+    gpu: GpuCapacity | None = None
+
+
+def _pipeline_wait(progress: JobProgressResponse) -> PipelineWait | None:
+    if progress.waiting_for in {"anonymization_review", "metric_confirmation"}:
+        step = (
+            StageId.ANONYMIZATION_REVIEW
+            if progress.waiting_for == "anonymization_review"
+            else StageId.METRIC_CANONICALIZE
+        )
+        return PipelineWait(kind="user", step_id=step)
+    if progress.waiting_for in {"resources", "runtime"}:
+        return PipelineWait(kind=progress.waiting_for, step_id=progress.current_stage)
+    if progress.status == JobStatus.QUEUED:
+        return PipelineWait(kind="queue", step_id=progress.current_stage)
+    return None
+
+
+def _ready_facts(
+    registry: ProjectRegistry, job_id: str, scene: SceneIR
+) -> tuple[int | None, PackageFacts | None, str | None]:
+    """Vật chờ xác nhận, gói và trạng thái duyệt của revision hiện tại; đọc lỗi thì để None (không làm hỏng cả view)."""
+    try:
+        package = current_package(registry, job_id)
+        review = review_state(registry, job_id)
+    except (SceneError, ArtifactStoreError, ValueError, OSError):
+        return pending_candidates(scene), None, None
+    facts = PackageFacts(
+        exists_for_revision=package is not None
+        and package.scene_revision == scene.scene_revision
+        and package.package_ref is not None,
+        preflight_failed=package is not None and package.preflight.blocking_result == RuleResult.FAIL,
+    )
+    status_value = review.record.status.value if review.record.scene_revision == scene.scene_revision else None
+    return pending_candidates(scene), facts, status_value
+
+
+@router.get("/jobs/{job_id}/pipeline", response_model=PipelineViewResponse)
+def get_job_pipeline(
+    job_id: str,
+    response: Response,
+    user: UserRecord | None = Depends(require_contributor),
+    if_none_match: Annotated[str | None, Header()] = None,
+) -> PipelineViewResponse | Response:
+    """Tiến trình hợp nhất: danh sách bước thật tới khi scene dùng được, ai đang làm gì, việc tiếp theo (T-059).
+
+    ETag theo nội dung: không có gì đổi thì trả 304, trình duyệt không phải tải và vẽ lại.
+    """
+    registry = deps.registry()
+    job, progress = _job_progress_response(registry, job_id, user)
+    database = registry.persistence.database if registry.persistence is not None else None
+    scene: SceneIR | None = None
+    try:
+        scene = registry.scene.current(job_id).scene
+    except (SceneError, ArtifactStoreError, ValueError, OSError):
+        scene = None
+    geometry = object_geometry_view(scene) if scene is not None else None
+    objectify = objectify_queue.state(registry, deps.settings(), job_id) if scene is not None and database else None
+    marks = list_marks(database, job_id) if database is not None else []
+    steps = compose_steps(progress, job, marks, objectify, geometry)
+    awaiting_choice = (
+        objectify is not None and objectify.awaiting_choice and objectify.status not in {"queued", "running"}
+    )
+    operation = (
+        SceneOperationFacts(
+            status=objectify.status,
+            mode=objectify.mode,
+            on_current_revision=objectify.base_revision == objectify.scene_revision,
+        )
+        if objectify is not None and objectify.mode is not None
+        else None
+    )
+    pending: int | None = None
+    package: PackageFacts | None = None
+    review_status: str | None = None
+    if scene is not None and progress.status == JobStatus.SUCCEEDED and geometry in {None, "ready"}:
+        pending, package, review_status = _ready_facts(registry, job_id, scene)
+    elif scene is not None:
+        pending = pending_candidates(scene)
+    action = next_action(
+        NextActionFacts(
+            job_status=progress.status,
+            waiting_for=progress.waiting_for,
+            failure_retryable=progress.error.retryable if progress.error is not None else None,
+            awaiting_object_choice=awaiting_choice,
+            object_geometry=geometry,
+            scene_operation=operation,
+            pending_candidates=pending,
+            package=package,
+            review_status=review_status,
+        )
+    )
+    waiting_for_machine = progress.status == JobStatus.QUEUED or progress.waiting_for in {"resources", "runtime"}
+    gpu = gpu_capacity(database, deployment_id()) if waiting_for_machine and database is not None else None
+    view = PipelineViewResponse(
+        job_id=job_id,
+        scene_revision=scene.scene_revision if scene is not None else None,
+        usable=is_usable(progress.status, geometry, awaiting_choice),
+        steps=steps,
+        current_step=current_step(steps),
+        wait=_pipeline_wait(progress) or scene_operation_wait(objectify, geometry),
+        next_action=action,
+        version="",
+        progress=progress,
+        objectify=objectify,
+        gpu=gpu.model_copy(update={"elapsed_seconds": None, "remaining_seconds": None}) if gpu is not None else None,
+    )
+    version = hashlib.sha256(view.model_dump_json(exclude={"version"}).encode("utf-8")).hexdigest()[:32]
+    etag = f'"{version}"'
+    if not_modified(if_none_match, etag):
+        return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag})
+    response.headers["ETag"] = etag
+    response.headers["Cache-Control"] = "private, no-cache"
+    return view.model_copy(update={"version": version})
 
 
 @router.get("/jobs/{job_id}/stage-views", response_model=StageViewList)

@@ -97,6 +97,7 @@ AUTHENTICATED = {
     ("GET", "/jobs/{job_id}/metric/proposal"),
     ("GET", "/jobs/{job_id}/preview"),
     ("GET", "/jobs/{job_id}/progress"),
+    ("GET", "/jobs/{job_id}/pipeline"),
     ("GET", "/jobs/{job_id}/release-download"),
     ("POST", "/jobs/{job_id}/release-seal"),
     ("POST", "/jobs/{job_id}/retry"),
