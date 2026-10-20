@@ -61,7 +61,7 @@ T-060 | Một vòng poll mỗi trang, không re-render khi không đổi | imple
 T-061 | Dòng tiến trình vẽ từ bước thật | implemented | summarizer
 T-062 | Một nguồn việc cần làm cho chuông, banner, đầu trang, danh sách | implemented | summarizer
 T-063 | Một nguồn dữ liệu scene/gói/duyệt; dọn nhánh chết | implemented | architect
-T-064 | Viewer không dựng lại, không vẽ thừa, tab ẩn thì nghỉ | planned | engineer
+T-064 | Viewer không dựng lại, không vẽ thừa, tab ẩn thì nghỉ | implemented | architect
 T-065 | Tải lười Walk, trang bước song song, chia nhỏ JS | planned | engineer
 T-066 | Ảnh frame thu nhỏ | planned | engineer
 T-067 | Vật nhẹ: SOG cho vật, tải giới hạn, vỏ không tải lại | planned | engineer
