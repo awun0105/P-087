@@ -798,8 +798,8 @@ def test_membership_queue_reuses_admission_revision_fence_and_cancellation(world
     ):
         calls.append(command)
         assert actor_id == "fixture-user"
-        progress("surface_quality")
-        assert scene_objectify_queue.state(registry, settings, job_id).phase == "surface_quality"
+        progress("quality")
+        assert scene_objectify_queue.state(registry, settings, job_id).phase == "quality"
         if finish == "quality_failure":
             raise ValueError("surface quality gate failed")
         if finish == "running_cancel":
@@ -1566,3 +1566,84 @@ def test_review_state_rule_is_shared() -> None:
     assert review(record("failed"), "awaiting_review", "rev-002") == "failed"
     assert review(record("failed", base="rev-001"), "awaiting_review", "rev-002") == "waiting"
     assert review(record("failed"), "ready", "rev-002") is None
+
+
+# ── T-057: typed phases and recorded phase marks ─────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "queued",
+        "observations",
+        "collider_and_background",
+        "shell",
+        "objectgs",
+        "quality",
+        "collider",
+        "environment",
+        "publish",
+        "done",
+    ],
+)
+def test_legacy_phase_values_read(value: str) -> None:
+    raw = f'{{"status":"running","mode":"geometry","base_revision":"rev-002","requested_at":"2026-10-18T08:00:00+00:00","phase":"{value}"}}'
+    assert scene_objectify_queue._Record.model_validate_json(raw).phase == value
+
+
+def test_unknown_phase_reads_as_none() -> None:
+    raw = '{"status":"running","mode":"geometry","base_revision":"rev-002","requested_at":"2026-10-18T08:00:00+00:00","phase":"something_else"}'
+    assert scene_objectify_queue._Record.model_validate_json(raw).phase is None
+
+
+def _geometry_run(world, monkeypatch, tmp_path, *, fail: bool = False):  # noqa: ANN001, ANN202
+    registry, job, _, settings = world
+    base = _geometry_draft(world, monkeypatch, tmp_path)
+    monkeypatch.setattr(scene_objectify_queue, "box_candidates_require_gpu", lambda _: False)
+
+    def operation(
+        registry_arg, settings_arg, job_id, *, expected_revision, workspace, commit_guard, cancel_event, progress
+    ):  # noqa: ANN001, ANN202
+        progress("shell")
+        progress("collider")
+        if fail:
+            raise ValueError("collider failed")
+        progress("publish")
+        ready = base.model_copy(update={"provenance": {**base.provenance, "object_geometry": "ready"}})
+        return registry.scene.publish_next(
+            job_id, expected_revision, ready, "geometry", commit_guard=commit_guard
+        ).revision.scene.scene_revision
+
+    monkeypatch.setattr(scene_objectify_queue, "build_object_geometry", operation, raising=False)
+    accepted = scene_objectify_queue.request(
+        registry, settings, job.job_id, base.scene_revision, "geometry", actor_id="u"
+    )
+    scene_objectify_queue.process_next(registry, settings)
+    return registry, job, settings, accepted
+
+
+def _marks(settings, job_id: str) -> dict:  # noqa: ANN001
+    from src.services.orchestration.jobs.database import RuntimeDatabase
+    from src.services.orchestration.jobs.step_marks import list_marks
+
+    return {
+        mark.step_id: mark
+        for mark in list_marks(RuntimeDatabase(settings.database_url), job_id)
+        if mark.run_kind == "scene_operation"
+    }
+
+
+def test_geometry_operation_records_phase_marks(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    _, job, settings, accepted = _geometry_run(world, monkeypatch, tmp_path)
+    marks = _marks(settings, job.job_id)
+    assert {"queue", "operation", "shell", "collider", "publish"} <= set(marks)
+    assert all(mark.run_id == f"geometry:{accepted.operation_id}" for mark in marks.values())
+    assert marks["operation"].outcome == "succeeded"
+    assert marks["shell"].completed_at is not None and marks["shell"].outcome == "succeeded"
+
+
+def test_failed_operation_closes_marks_and_clears_phase(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    registry, job, settings, _ = _geometry_run(world, monkeypatch, tmp_path, fail=True)
+    marks = _marks(settings, job.job_id)
+    assert marks["operation"].outcome == "failed" and marks["collider"].outcome == "failed"
+    assert scene_objectify_queue.state(registry, settings, job.job_id).phase is None

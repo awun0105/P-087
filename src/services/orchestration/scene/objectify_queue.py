@@ -15,10 +15,10 @@ from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import Event, Thread
-from typing import Literal
+from typing import Annotated, Literal, get_args
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, BeforeValidator, ConfigDict
 
 from src.config import Settings
 from src.models.contracts.artifacts import Checksum, JsonObject
@@ -42,6 +42,7 @@ from src.services.orchestration.jobs.heartbeat import HeartbeatTolerance
 from src.services.orchestration.jobs.profile import machine_runtime_checksum
 from src.services.orchestration.jobs.stage_results import geometry_surface_note
 from src.services.orchestration.jobs.stage_views import job_bundle
+from src.services.orchestration.jobs.step_marks import MarkOutcome, MarkWrite, record_marks
 from src.services.orchestration.processing.capability import worker_identity
 from src.services.orchestration.processing.telemetry import Outcome, ResourceContext, ResourceSampler, sampled_section
 from src.services.orchestration.processing.usage_recording import build_sampler, record_usage
@@ -60,6 +61,26 @@ logger = logging.getLogger(__name__)
 
 ObjectifyStatus = Literal["idle", "queued", "running", "done", "failed", "cancelled"]
 ObjectifyMode = Literal["objectify", "boxes", "membership", "geometry", "region"]
+#: Pha của một lượt hàng đợi (T-057). Bản ghi cũ có giá trị khác được đọc thành None.
+ObjectifyPhase = Literal[
+    "queued",
+    "observations",
+    "collider_and_background",
+    "shell",
+    "objectgs",
+    "quality",
+    "collider",
+    "environment",
+    "publish",
+    "done",
+]
+_PHASES = frozenset(get_args(ObjectifyPhase))
+
+
+def _known_phase(value: object) -> object:
+    return value if value is None or value in _PHASES else None
+
+
 _LEASE_TTL = timedelta(seconds=90)
 _LEASE_HEARTBEAT_SECONDS = 20.0
 _CANCEL_POLL_SECONDS = 0.5
@@ -127,7 +148,7 @@ class ObjectifyState(BaseModel):
     finished_at: datetime | None = None
     resource_wait: ObjectifyResourceWait | None = None
     operation_id: str | None = None
-    phase: str | None = None
+    phase: Annotated[ObjectifyPhase | None, BeforeValidator(_known_phase)] = None
     cancellation_requested: bool = False
     #: Trạng thái hình học theo vật của scene hiện tại; None = scene không có khoá `object_geometry` (luồng cũ).
     object_geometry: Literal["awaiting_review", "ready"] | None = None
@@ -216,7 +237,7 @@ class _Record(BaseModel):
     worker_id: str | None = None
     worker_host: str | None = None
     worker_pid: int | None = None
-    phase: str | None = None
+    phase: Annotated[ObjectifyPhase | None, BeforeValidator(_known_phase)] = None
     cancellation_requested: bool = False
 
 
@@ -525,8 +546,12 @@ def recover_interrupted(settings: Settings) -> int:
                     else "Worker lease expired; bấm chạy lại để thử tiếp."
                 ),
                 "finished_at": now,
+                "phase": None,
             }
             _write(tx, job_id, record.model_copy(update=update))
+            _mark_operation_end(
+                settings, job_id, record, "cancelled" if record.cancellation_requested else "failed", now
+            )
             recovered += 1
     return recovered
 
@@ -721,6 +746,7 @@ def _requeue_wait(
             current.model_copy(
                 update={
                     "status": "queued",
+                    "phase": "queued",
                     "resource_wait": ObjectifyResourceWait.from_admission(result),
                     "resource_wait_since": current.resource_wait_since or datetime.now(UTC),
                     "lease_token": None,
@@ -747,11 +773,48 @@ def _finish(settings: Settings, job_id: str, running: _Record, outcome: dict[str
             final.update(status="cancelled", error="Đã hủy theo yêu cầu.", result_revision=None, resource_wait=None)
         elif final.get("status") == "done":
             final["cancellation_requested"] = False
+        if final.get("status") in {"failed", "cancelled"}:
+            final["phase"] = None  # không hiện pha cũ sau khi lượt dừng (T-057)
         # Lượt đã kết thúc: không còn chờ tài nguyên.
         final["resource_wait_since"] = None
         final["resource_wait"] = None
         _write(tx, job_id, current.model_copy(update={**final, "finished_at": now, "lease_expires_at": now}))
+    status = str(final.get("status"))
+    _mark_operation_end(settings, job_id, running, _MARK_OUTCOME.get(status, "failed"), now)
     return True
+
+
+_MARK_OUTCOME: dict[str, MarkOutcome] = {"done": "succeeded", "failed": "failed", "cancelled": "cancelled"}
+
+
+def _operation_run_id(record: _Record) -> str:
+    """run_id của mốc bước: `<mode>:<operation_id>`; mỗi lượt Tạo mesh / sửa vùng giữ lịch sử riêng."""
+    return f"{record.mode}:{record.operation_id or 'legacy'}"
+
+
+def _mark_operation_start(settings: Settings, job_id: str, running: _Record) -> None:
+    now = datetime.now(UTC)
+    record_marks(
+        _database(settings),
+        job_id,
+        "scene_operation",
+        _operation_run_id(running),
+        [
+            MarkWrite("start", "queue", running.requested_at),
+            MarkWrite("finish", "queue", running.started_at or now, "succeeded"),
+            MarkWrite("start", "operation", running.started_at or now),
+        ],
+    )
+
+
+def _mark_operation_end(settings: Settings, job_id: str, record: _Record, outcome: MarkOutcome, at: datetime) -> None:
+    record_marks(
+        _database(settings),
+        job_id,
+        "scene_operation",
+        _operation_run_id(record),
+        [MarkWrite("finish", "operation", at, outcome), MarkWrite("close", None, at, outcome)],
+    )
 
 
 def _commit_guard(
@@ -825,6 +888,7 @@ def process_next(registry: ProjectRegistry, settings: Settings) -> bool:
     if claimed is None:
         return False
     job_id, running = claimed
+    last_phase: list[str | None] = [None]
     operation_request: list[OperationAdmissionRequest | None] = [None]
     cancel_event = Event()
     abort_reason: list[str | None] = [None]
@@ -885,6 +949,8 @@ def process_next(registry: ProjectRegistry, settings: Settings) -> bool:
             return False
         operation_request[0] = request
         reserved = True
+        # Mốc bước chỉ ghi khi lượt thật sự được chạy (đã qua cổng tài nguyên), không ghi khi xếp lại chờ.
+        _mark_operation_start(settings, job_id, running)
         if cancel_event.is_set():
             raise ProcessCancelledError("Objectify operation was cancelled")
 
@@ -913,6 +979,16 @@ def process_next(registry: ProjectRegistry, settings: Settings) -> bool:
                             cancel_event.set()
                             raise ProcessCancelledError(f"{running.mode} progress lost worker lease")
                         _write(tx, job_id, record.model_copy(update={"phase": phase}))
+                    now = datetime.now(UTC)
+                    writes = [MarkWrite("finish", last_phase[0], now, "succeeded")] if last_phase[0] else []
+                    record_marks(
+                        _database(settings),
+                        job_id,
+                        "scene_operation",
+                        _operation_run_id(running),
+                        [*writes, MarkWrite("start", phase, now)],
+                    )
+                    last_phase[0] = phase
 
                 if running.mode == "geometry":
                     revision = build_object_geometry(
