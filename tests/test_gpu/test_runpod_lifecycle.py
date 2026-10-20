@@ -912,3 +912,15 @@ def test_forget_unknown_only_when_no_pod_carries_the_intent_name(world):
         retired = [json.loads(r[0]) for r in tx.execute("SELECT payload FROM r2s_gpu_history").fetchall()]
     assert any(h["intent"] == intent and h["state"] == "terminated" for h in retired)
     assert controller.forget_unknown() == "nothing_to_forget"
+
+
+def test_rest_pod_shape_with_top_level_gpu_count_is_a_valid_allocation(world):
+    """RunPod REST v1 returns gpuCount at the top level, "gpu": null and "image": null next to imageName."""
+    controller, store, provider, _ = world
+    assert controller.tick() == "created"
+    pod = provider.pods[0]
+    pod.pop("gpu")
+    pod.update({"gpu": None, "gpuCount": 1, "image": None, "machine": {"gpuTypeId": "qualified-gpu"}})
+    with store.locked() as (_, c, now):
+        c.workers["worker"] = {"ready": True, "busy": False, "heartbeat": now}
+    assert controller.tick() == "ready"

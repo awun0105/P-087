@@ -95,7 +95,8 @@ class Controller:
         return (
             isinstance(env, dict)
             and pod.get("name") == f"r2s-{c.deployment}-{c.intent}"
-            and pod.get("image", pod.get("imageName")) == profile.image
+            # RunPod returns "image": null alongside "imageName"; a present-but-null key must not hide imageName.
+            and (pod.get("image") or pod.get("imageName")) == profile.image
             and env.get("GPU_BOOT_TOKEN") == c.boot_token
             and env.get("GPU_DEPLOYMENT_ID") == c.deployment
             and env.get("GPU_INTENT_ID") == c.intent
@@ -360,7 +361,8 @@ class Controller:
         try:
             allocation_ok = (
                 (pod.get("machine") or {}).get("gpuTypeId") in profile.gpu_types
-                and int((pod.get("gpu") or {}).get("count", 0)) == 1
+                # RunPod REST returns a top-level gpuCount with "gpu": null; older shapes nest it under gpu.count.
+                and int(pod.get("gpuCount") or (pod.get("gpu") or {}).get("count") or 0) == 1
                 and float(pod.get("memoryInGb") or 0) >= profile.min_ram_gb
                 and int(pod.get("vcpuCount") or 0) >= profile.min_cpus
             )
