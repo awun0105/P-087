@@ -21,6 +21,8 @@ class GpuSettings(BaseSettings):
     poll_seconds: float = Field(default=15, ge=1, le=300)
     idle_seconds: int = Field(default=240, ge=1)
     startup_timeout_seconds: int = Field(default=1200, ge=60)
+    # A pod whose entrypoint has started but whose last boot mark is older than this is stuck: drop it early.
+    boot_stall_seconds: int = Field(default=900, ge=60)
     max_lifetime_seconds: int = Field(default=43200, ge=60)
     max_provision_attempts: int = Field(default=3, ge=1, le=10)
     max_hourly_usd: float | None = Field(default=None, gt=0, allow_inf_nan=False)

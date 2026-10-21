@@ -1020,3 +1020,51 @@ def test_control_row_stays_readable_by_workers_from_an_older_release(tmp_path):
 
     newer = {**saved, "field_from_a_newer_controller": 1}
     assert load_control(newer).state == "starting"
+
+
+def _mark_boot(monkeypatch, tmp_path, store, step, *, failed=False):
+    from src.services.orchestration.gpu import boot as gpu_boot
+
+    monkeypatch.setenv("GPU_BOOT_TOKEN", store.read().boot_token)
+    monkeypatch.setenv("GPU_DEPLOYMENT_ID", "test")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'state.db'}")
+    return gpu_boot.mark(step, failed=failed)
+
+
+def test_pod_whose_boot_step_failed_is_dropped_at_once(world, monkeypatch, tmp_path):
+    controller, store, provider, work = world
+    assert controller.tick() == "created"
+    assert _mark_boot(monkeypatch, tmp_path, store, "weights", failed=True)
+    assert controller.tick() == "draining"
+    assert store.read().error == "boot_failed:weights"
+
+
+def test_pod_stuck_on_a_boot_step_is_dropped_before_the_startup_timeout(world, monkeypatch, tmp_path):
+    controller, store, provider, work = world
+    assert controller.tick() == "created"
+    assert _mark_boot(monkeypatch, tmp_path, store, "preflight")
+    assert controller.tick() == "starting"
+    with store.locked() as (_, c, now):
+        c.workers["boot"]["at"] = now - controller.policy.boot_stall_seconds
+    assert controller.tick() == "draining"
+    assert store.read().error == "boot_stalled:preflight"
+
+
+def test_pod_without_boot_marks_still_waits_for_the_image_pull(world):
+    controller, store, provider, work = world
+    assert controller.tick() == "created"
+    with store.locked() as (_, c, now):
+        c.created_at = now - controller.policy.boot_stall_seconds
+    assert controller.tick() == "starting"
+
+
+def test_boot_mark_from_a_retired_generation_is_ignored(world, monkeypatch, tmp_path):
+    controller, store, provider, work = world
+    assert controller.tick() == "created"
+    monkeypatch.setenv("GPU_BOOT_TOKEN", "stale")
+    monkeypatch.setenv("GPU_DEPLOYMENT_ID", "test")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'state.db'}")
+    from src.services.orchestration.gpu import boot as gpu_boot
+
+    assert not gpu_boot.mark("weights", failed=True)
+    assert controller.tick() == "starting"

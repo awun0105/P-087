@@ -62,12 +62,23 @@ export PRODUCT_GEOMETRY_CONFIG="${PRODUCT_GEOMETRY_CONFIG:-/opt/real2sim/app/con
 export PRODUCT_SCENE_TIMEOUT_SECONDS="${PRODUCT_SCENE_TIMEOUT_SECONDS:-3600}"
 
 PY=.venv/bin/python
+# Pod do controller thuê (có GPU_BOOT_TOKEN): ghi từng bước khởi động vào bảng điều khiển, bước lỗi thì ghi kèm --failed,
+# để controller bỏ ngay pod hỏng hoặc kẹt thay vì chờ hết thời gian khởi động. Ghi mốc không bao giờ làm hỏng khởi động.
+BOOT_STEP=start
+boot_mark() {
+  BOOT_STEP="$1"
+  [ -n "${GPU_BOOT_TOKEN:-}" ] && "$PY" -m src.services.orchestration.gpu.boot "$@" || true
+}
+trap '[ -n "${GPU_BOOT_TOKEN:-}" ] && "$PY" -m src.services.orchestration.gpu.boot "$BOOT_STEP" --failed || true' ERR
+boot_mark start
 # Bộ che khuôn mặt/biển số (AUD-18): người vận hành khai thư mục trọng số thì pod tự tải hai file từ kho file của
 # deployment và kiểm sha256 (đã có đủ thì không tải lại). Không lấy được thì dừng ngay, vì worker thiếu trọng số
 # sẽ làm hỏng mọi job có che.
 if [ -n "${PRODUCT_EGOBLUR_WEIGHTS:-}" ]; then
+  boot_mark weights
   "$PY" -m scripts.gpu.egoblur_weights fetch --to "$PRODUCT_EGOBLUR_WEIGHTS"
 fi
+boot_mark manifest
 [ -f "$PRODUCT_RUNTIME_MANIFEST" ] || "$PY" -m scripts.gpu.make_runtime_manifest --out "$PRODUCT_RUNTIME_MANIFEST"
 
 # Registry năng lực của luồng nhập mới (AUD-24): sinh từ bản ghi kiểm định đã commit + identity runtime đo ngay trên
@@ -75,6 +86,7 @@ fi
 # một file mà không lệch chuỗi checksum. Sinh lỗi thì bỏ biến: luồng nhập báo "chưa có bộ xử lý phù hợp" thay vì
 # chạy với một registry hỏng. Không bao giờ dùng make_input_runtime_registry (lời khai dev-local) ở đây.
 export PRODUCT_INPUT_RUNTIME_REGISTRY="${PRODUCT_INPUT_RUNTIME_REGISTRY:-$STATE/input_runtime_registry.json}"
+boot_mark registry
 if ! "$PY" -m scripts.gpu.qualify_input_runtimes --out "$PRODUCT_INPUT_RUNTIME_REGISTRY"; then
   echo "[!] Không sinh được registry năng lực input; luồng nhập mới sẽ báo chưa có bộ xử lý phù hợp." >&2
   unset PRODUCT_INPUT_RUNTIME_REGISTRY
@@ -85,8 +97,10 @@ mode="${1:-worker}"
 case "$mode" in
   worker)
     if [ -n "${GPU_BOOT_TOKEN:-}" ]; then
+      boot_mark preflight
       "$PY" -m scripts.kaggle.preflight
     fi
+    boot_mark worker
     exec "$PY" -m scripts.gpu.run_workers --workers "${STUDIO_WORKERS:-auto}"
     ;;
   stack)

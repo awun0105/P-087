@@ -11,6 +11,7 @@ from uuid import uuid4
 
 from dotenv import dotenv_values
 
+from src.services.orchestration.gpu.boot import BOOT_KEY
 from src.services.orchestration.gpu.catalog import ReleaseCatalog, ReleaseProfile, load_catalog
 from src.services.orchestration.gpu.config import GpuSettings
 from src.services.orchestration.gpu.provider import Provider, ProviderError
@@ -467,7 +468,13 @@ class Controller:
             else:
                 expired = now - c.created_at >= self.policy.startup_timeout_seconds
                 overprice = actual < float("inf") and actual > (self.policy.max_hourly_usd or 0)
-                if expired or overprice or retire or (ready and not allocation_ok):
+                # Marks exist only once the image is pulled and the entrypoint runs; until then the startup timeout rules.
+                boot = c.workers.get(BOOT_KEY)
+                if not ready and boot and boot.get("failed"):
+                    c.state, c.error = "draining", f"boot_failed:{boot.get('step')}"
+                elif not ready and boot and now - float(boot.get("at") or now) >= self.policy.boot_stall_seconds:
+                    c.state, c.error = "draining", f"boot_stalled:{boot.get('step')}"
+                elif expired or overprice or retire or (ready and not allocation_ok):
                     c.state, c.error = "draining", "startup_or_allocation_failed"
                 self._save(c)
                 return c.state
