@@ -12,6 +12,7 @@ giữ chỗ nằm trong cùng một transaction có khoá để hai worker khôn
 from __future__ import annotations
 
 import logging
+import os
 import time
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
@@ -42,6 +43,8 @@ from src.services.orchestration.processing.capability import (
 from src.services.orchestration.processing.observed import (
     PHASE_OPTIONAL_TOOLS,
     PHASE_TOOLS,
+    STEP_PHASE,
+    STEP_TOOLS,
     Measured,
     Phase,
     exhausted_before,
@@ -130,6 +133,9 @@ class Reservation(BaseModel):
     exclusive: bool = False
     #: Pha đang chạy (preview hoặc hoàn tất), để ước tính thời gian chờ của hàng đợi.
     phase: Literal["preview", "finalize"] | None = None
+    #: T-073: bước đang chạy và số luồng CPU nó giữ trên máy này (None với giữ chỗ của bản worker cũ / operation).
+    step: str | None = None
+    cpu_slots: int | None = Field(default=None, ge=1)
     reserved_at: datetime
     heartbeat_at: datetime
     #: CPU-only operation vẫn giữ RAM/đĩa nhưng không chiếm VRAM/GPU.
@@ -367,6 +373,12 @@ class ResourceAdmission:
 
     def _demand(self, job: JobManifest, phase: Phase, gpu_name: str | None) -> Demand | None:
         """Nhu cầu của job cho lần nhận này; None khi job chưa có mô hình ước lượng (legacy)."""
+        return self._tools_demand(job, PHASE_TOOLS[phase], PHASE_OPTIONAL_TOOLS[phase], gpu_name)
+
+    def _tools_demand(
+        self, job: JobManifest, tools: tuple[str, ...], optional_tools: tuple[str, ...], gpu_name: str | None
+    ) -> Demand | None:
+        """Nhu cầu khi chạy đúng các `tools` (một pha, hoặc một bước của T-073); không có tool nào thì theo ước lượng."""
         path = self.settings.product_processing_config
         profile = self.registry.execution_profile
         if (
@@ -394,7 +406,7 @@ class ResourceAdmission:
         scope: MeasuredScope = "estimate"
         exhausted = exhausted_before(usages, job.job_id)
         colmap_use_gpu = config.colmap.get("use_gpu", False)
-        if not exhausted and isinstance(colmap_use_gpu, bool):
+        if tools and not exhausted and isinstance(colmap_use_gpu, bool):
             observation_params = resource_observation_params(params, colmap_use_gpu=colmap_use_gpu)
 
             # Lượt chạy nặng hơn ở mọi thông số (`dominates`) là cận trên an toàn cho cấu hình này, nên cấu hình
@@ -403,8 +415,8 @@ class ResourceAdmission:
             def phase_budget(candidates: Iterable[ResourceUsage]) -> dict[Measured, float] | None:
                 return observed_budget(
                     candidates,
-                    tools=PHASE_TOOLS[phase],
-                    optional_tools=PHASE_OPTIONAL_TOOLS[phase],
+                    tools=tools,
+                    optional_tools=optional_tools,
                     params=observation_params,
                     gpu_name=gpu_name,
                     runtime_manifest_checksum=job.runtime_manifest_checksum,
@@ -541,6 +553,8 @@ class ResourceAdmission:
         exclusive: bool,
         phase: Phase | None = None,
         gpu_required: bool = True,
+        step: str | None = None,
+        cpu_slots: int | None = None,
     ) -> None:
         self._write_reservation(
             tx,
@@ -550,6 +564,8 @@ class ResourceAdmission:
             phase=phase,
             gpu_required=gpu_required,
             job_id=job.job_id,
+            step=step,
+            cpu_slots=cpu_slots,
         )
 
     def _write_reservation(
@@ -563,6 +579,8 @@ class ResourceAdmission:
         gpu_required: bool,
         job_id: str | None = None,
         operation: OperationAdmissionRequest | None = None,
+        step: str | None = None,
+        cpu_slots: int | None = None,
     ) -> None:
         now = datetime.now(UTC)
         reservation = Reservation(
@@ -585,7 +603,11 @@ class ResourceAdmission:
             config_checksum=operation.config_checksum if operation is not None else None,
             lease_token=operation.lease_token if operation is not None else None,
             lease_generation=operation.lease_generation if operation is not None else None,
+            step=step,
+            cpu_slots=cpu_slots,
         )
+        # Trường mới chỉ ghi khi có giá trị: payload của job theo lượt giữ nguyên dạng cũ.
+        late = {name for name in ("step", "cpu_slots") if getattr(reservation, name) is None}
         tx.execute(
             "INSERT INTO r2s_resource_reservations(worker_id,payload) VALUES (?,?) "
             "ON CONFLICT(worker_id) DO UPDATE SET payload=excluded.payload",
@@ -602,9 +624,10 @@ class ResourceAdmission:
                         "config_checksum",
                         "lease_token",
                         "lease_generation",
+                        *late,
                     }
                     if job_id is not None
-                    else None
+                    else late
                 ),
             ),
         )
@@ -809,7 +832,27 @@ class ResourceAdmission:
                 reasons[name] = "busy" if sharing[name] else "external"
         return _ResourceDecision(waiting, reasons, available, total, exclusive)
 
-    def _decide(self, job: JobManifest, demand: Demand | None, gpu_uuid: str | None, phase: Phase) -> bool:
+    def _cpu_short(self, others: list[Reservation], cpu_slots: int | None) -> bool:
+        """Bước xin `cpu_slots` luồng mà các worker khác trên máy này đã giữ gần hết số luồng CPU (T-073).
+
+        Bước khai nhiều hơn số luồng của máy được coi như khai đúng bằng số luồng đó, để không chờ vô hạn.
+        """
+        if not cpu_slots:
+            return False
+        capacity = os.cpu_count() or 1
+        held = sum(item.cpu_slots or 0 for item in others if item.host == self.host)
+        return held > 0 and held + min(cpu_slots, capacity) > capacity
+
+    def _decide(
+        self,
+        job: JobManifest,
+        demand: Demand | None,
+        gpu_uuid: str | None,
+        phase: Phase,
+        *,
+        step: str | None = None,
+        cpu_slots: int | None = None,
+    ) -> bool:
         """Đo, trừ phần worker khác đã giữ, rồi ghi giữ chỗ hoặc observation chờ trong một transaction."""
         free, total = self._resource_snapshot()
         now = datetime.now(UTC)
@@ -822,6 +865,13 @@ class ResourceAdmission:
                 return False
             others = self._others(tx, now)
             decision = self._assess(demand, gpu_uuid, others, free, total, strict_unknown=False)
+            if not decision.waiting_on and self._cpu_short(others, cpu_slots):
+                # Chờ luồng CPU là chờ ngắn (worker khác sắp xong bước của nó): không ghi snapshot chờ tài nguyên,
+                # màn tiến trình hiện "Đang chờ CPU" từ trạng thái bước.
+                tx.execute("DELETE FROM r2s_resource_waits WHERE job_id=?", (job.job_id,))
+                tx.execute("DELETE FROM r2s_resource_reservations WHERE worker_id=?", (self.worker_id,))
+                self._reserved = False
+                return False
             if demand is None and decision.waiting_on:
                 # Giữ nguyên semantics lịch sử: legacy jobs chờ GPU nhưng không tạo ResourceWait giả.
                 return False
@@ -856,6 +906,8 @@ class ResourceAdmission:
                     exclusive=decision.exclusive,
                     phase=phase,
                     gpu_required=demand is None or demand.gpu_required,
+                    step=step,
+                    cpu_slots=cpu_slots,
                 )
                 self._disk_short = False
         return not decision.waiting_on
@@ -1083,6 +1135,38 @@ class ResourceAdmission:
             len(purged),
         )
         return True
+
+    def step_demand(self, job: JobManifest, step: str, *, gpu_required: bool) -> Demand | None:
+        """Nhu cầu của một bước (T-073): số đo theo đúng tool của bước; bước CPU không giữ VRAM."""
+        gpu = bound_gpu()
+        tools, optional = STEP_TOOLS[step]
+        demand = self._tools_demand(job, tools, optional, gpu.name if gpu is not None else None)
+        if demand is None or gpu_required:
+            return demand
+        return demand.model_copy(update={"gpu_required": False, "required_gb": {**demand.required_gb, "vram": 0.0}})
+
+    def admit_step(self, job: JobManifest, step: str, *, gpu_required: bool, cpu_slots: int | None = None) -> bool:
+        """Như `__call__` nhưng theo bước: giữ chỗ chỉ trong lúc bước chạy, bước CPU giữ RAM/đĩa + luồng CPU.
+
+        Quy tắc chạy chung GPU (số đo đúng cấu hình / cận trên / ước lượng nhỏ hơn 50% VRAM trống) giữ nguyên.
+        """
+        try:
+            gpu = bound_gpu()
+            gpu_uuid = gpu.uuid if gpu is not None else None
+            demand = self.step_demand(job, step, gpu_required=gpu_required)
+            phase = STEP_PHASE[step]
+            admitted = self._decide(job, demand, gpu_uuid, phase, step=step, cpu_slots=cpu_slots)
+            if not admitted and self._disk_short and self._reclaim_disk(job):
+                admitted = self._decide(job, demand, gpu_uuid, phase, step=step, cpu_slots=cpu_slots)
+            return admitted
+        except Exception as error:  # noqa: BLE001 - ranh giới gate: lỗi đo/ghi observation không phải lỗi của job
+            logger.warning(
+                "Resource admission lỗi, thử lại lượt sau job=%s step=%s cause=%s",
+                job.job_id,
+                step,
+                type(error).__name__,
+            )
+            return False
 
     def __call__(self, job: JobManifest, phase: Phase = "preview") -> bool:
         """True khi worker được nhận job (và đã giữ chỗ); ngược lại giữ nguyên queue/config và ghi diagnostic.

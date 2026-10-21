@@ -29,6 +29,23 @@ Phase = Literal["preview", "finalize"]
 PHASE_TOOLS: dict[Phase, tuple[str, ...]] = {"preview": ("preview",), "finalize": ("finalize", "scene_extract")}
 #: Bước phụ trợ chạy cùng lần nhận job nhưng chỉ khi deployment bật (đề xuất tỉ lệ bằng MoGe-2).
 PHASE_OPTIONAL_TOOLS: dict[Phase, tuple[str, ...]] = {"preview": ("metric_proposal",), "finalize": ()}
+#: T-073: công cụ của từng bước xếp lịch (bắt buộc, phụ trợ); số đo cũ theo tool dùng lại được nguyên vẹn.
+#: Bước không có tool nào (bộ LOD) không có số đo: luôn theo ước lượng của cấu hình.
+STEP_TOOLS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
+    "prepare": (("prepare",), ()),
+    "pose_visual": (("preview",), ("metric_proposal",)),
+    "canonical_geometry": (("finalize",), ()),
+    "scene_extract": (("scene_extract",), ()),
+    "view_lod": ((), ()),
+}
+#: Pha (để ước tính thời gian chờ của hàng đợi) mà mỗi bước thuộc về.
+STEP_PHASE: dict[str, Phase] = {
+    "prepare": "preview",
+    "pose_visual": "preview",
+    "canonical_geometry": "finalize",
+    "scene_extract": "finalize",
+    "view_lod": "finalize",
+}
 
 
 def numeric_params(params: dict[str, ParamValue]) -> dict[str, float]:
