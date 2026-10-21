@@ -54,7 +54,7 @@ describe("tài khoản và đích sau xác thực", () => {
     render(<AccountPage />);
     expect(screen.getByRole("heading", { name: "Guest" })).toBeInTheDocument();
     expect(screen.getByText("Chưa tải được số lượt Guest còn lại.")).toBeInTheDocument();
-    expect(screen.getByText(/Guest có thể tạo job và thao tác trên job mình tạo/)).toBeInTheDocument();
+    expect(screen.getByText(/chỉ sửa scene mình tạo/)).toBeInTheDocument();
     expect(screen.queryByText("10 lần / 24 giờ")).toBeNull();
   });
   it("AppShell phân biệt role Guest và hiển thị quota/reset từ backend", async () => {
