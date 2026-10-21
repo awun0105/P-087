@@ -27,11 +27,11 @@ function terminal(scene: ImportedScene): boolean {
 
 function progressLabel(scene: ImportedScene | null): string {
   const operation = scene?.operation;
-  if (operation?.cancel_requested) return "Đang dừng worker an toàn trước khi xác nhận hủy…";
-  if (operation?.status === "QUEUED") return "Đang chờ worker nhận scene…";
-  if (operation?.status === "WAITING") return operation.error ?? "Worker đang chờ tài nguyên…";
-  if (operation?.status === "RUNNING") return "Máy chủ đang chuẩn bị bản xem SOG…";
-  return "Đang kiểm tra trạng thái import…";
+  if (operation?.cancel_requested) return "Đang hủy…";
+  if (operation?.status === "QUEUED") return "Đang xếp hàng…";
+  if (operation?.status === "WAITING") return operation.error ?? "Đang chờ tài nguyên…";
+  if (operation?.status === "RUNNING") return "Đang chuẩn bị bản xem…";
+  return "Đang kiểm tra trạng thái…";
 }
 
 function attemptStatusLabel(status: string): string {
@@ -40,7 +40,7 @@ function attemptStatusLabel(status: string): string {
     SUCCEEDED: "hoàn tất",
     FAILED: "thất bại",
     CANCELLED: "đã hủy",
-    INTERRUPTED: "worker bị gián đoạn",
+    INTERRUPTED: "bị gián đoạn",
   };
   return labels[status] ?? status;
 }
@@ -137,7 +137,7 @@ function ImportScenePageContent({ importId }: { importId: string }) {
       const latest = latestApplied.current;
       if (latest?.importId === importId && sequence < latest.sequence) return;
       if (!result.ok) {
-        setError(result.error.status === 404 ? "Không tìm thấy scene import này." : errorMessage(result.error));
+        setError(result.error.status === 404 ? "Không tìm thấy scene này." : errorMessage(result.error));
         return;
       }
       const next = result.data;
@@ -174,7 +174,7 @@ function ImportScenePageContent({ importId }: { importId: string }) {
   </main>;
   if (scene?.status === "READY") {
     const sourceLabel = scene.input_kind === "gaussian_sog"
-      ? "SOG tải lên · giữ nguyên bytes"
+      ? "SOG tải lên · giữ nguyên"
       : scene.input_kind === "gaussian_ply_colmap"
         ? "PLY + COLMAP → SOG"
         : "PLY → SOG";
@@ -192,8 +192,8 @@ function ImportScenePageContent({ importId }: { importId: string }) {
         onToggleBookmark={handleToggleBookmark}
         bookmarkStatus={saveStatus}
         badges={
-          <Badge tone="neutral" title="File 3DGS tải lên không có camera: không xác nhận tỉ lệ mét hay dựng collision">
-            Scene import · {sourceLabel}
+          <Badge tone="neutral" title="Scene 3DGS tải lên không có tỉ lệ mét hay va chạm">
+            Scene 3DGS · {sourceLabel}
           </Badge>
         }
       />
@@ -206,7 +206,7 @@ function ImportScenePageContent({ importId }: { importId: string }) {
         {scene.status === "FAILED" ? (
           <Notice tone="rust">{scene.operation?.error ?? scene.error ?? "Không nén được scene 3DGS."}</Notice>
         ) : (
-          <Notice tone="neutral">{scene.operation?.error ?? scene.error ?? "Scene import đã được hủy."}</Notice>
+          <Notice tone="neutral">{scene.operation?.error ?? scene.error ?? "Scene đã được hủy."}</Notice>
         )}
         {scene.operation?.attempt_history && scene.operation.attempt_history.length > 0 && (
           <details className="rounded-xl border border-line bg-paper-raised p-4 text-sm">
@@ -224,7 +224,7 @@ function ImportScenePageContent({ importId }: { importId: string }) {
         <div className="flex flex-wrap gap-2">
           {scene.capabilities?.can_retry && (
             <Button disabled={busy !== null} onClick={() => void runAction("retry")}>
-              {busy === "retry" ? "Đang xếp lại…" : "Thử lại scene import"}
+              {busy === "retry" ? "Đang xếp lại…" : "Thử lại"}
             </Button>
           )}
           <Link href="/new" className={buttonVariants({ variant: "secondary" })}>Chọn file khác</Link>
@@ -235,13 +235,13 @@ function ImportScenePageContent({ importId }: { importId: string }) {
   }
   return (
     <main className="mx-auto max-w-3xl space-y-5 px-4 py-10">
-      <h1 className="text-2xl font-extrabold tracking-tight">{scene?.name ?? "Đang mở scene import…"}</h1>
+      <h1 className="text-2xl font-extrabold tracking-tight">{scene?.name ?? "Đang mở scene…"}</h1>
       <Card className="space-y-3 p-6">
         <p className="flex items-center gap-2 text-sm" role="status">
           <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden />
           {progressLabel(scene)}
         </p>
-        <p className="text-sm text-ink-muted">PLY được chuyển sang SOG; SOG đã tải lên được giữ nguyên bytes. Cả hai chỉ vào scene viewer, không chạy reconstruction. Có thể rời trang và mở lại từ Scenes đã import khi xong.</p>
+        <p className="text-sm text-ink-muted">Đang chuẩn bị bản xem. Bạn có thể rời trang và mở lại từ Scenes đã import.</p>
         {actionError && <Notice tone="rust">{actionError}</Notice>}
         {scene?.capabilities?.can_cancel && (
           <Button variant="secondary" disabled={busy !== null} onClick={() => void runAction("cancel")}>

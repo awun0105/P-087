@@ -69,7 +69,7 @@ export function ImportSetupStep({ preselect, onBack }: { preselect: string | nul
       const created = await createImport(selected, normalizedName, key);
       clear();
       idempotency.current = null;
-      notifySuccess("Đã xếp scene import vào hàng đợi worker.");
+      notifySuccess("Đang mở scene.");
       router.push(`/imports/${encodeURIComponent(created.import_id)}`);
     } catch (cause) {
       setError(errorMessage(cause, "Không mở được scene 3DGS"));
@@ -85,13 +85,13 @@ export function ImportSetupStep({ preselect, onBack }: { preselect: string | nul
   }
   if (uploads.length === 0) {
     return <EmptyState icon={<Box aria-hidden />} title="Chưa có file 3DGS" action={<Button onClick={onBack}>Tải PLY/SOG/ZIP lên</Button>}>
-      File đã tải lên được máy chủ nhận diện là 3DGS sẽ xuất hiện ở đây.
+      File 3DGS bạn tải lên sẽ hiện ở đây.
     </EmptyState>;
   }
   return (
     <form onSubmit={submit} className="space-y-5">
-      <HelpDetails title="Giới hạn của scene import">
-        Scene import chỉ xem và chỉnh Gaussian trong editor; bản chỉnh sửa chỉ xuất ra PLY/SOG. Không có xác nhận tỉ lệ mét, collision, validation hay release.
+      <HelpDetails title="Scene 3DGS làm được gì?">
+        Chỉ xem và chỉnh Gaussian, xuất ra PLY/SOG. Không có tỉ lệ mét, va chạm, kiểm tra hay phát hành.
       </HelpDetails>
       <Card className="space-y-5 p-5 sm:p-6">
         <fieldset className="space-y-2">
@@ -107,18 +107,18 @@ export function ImportSetupStep({ preselect, onBack }: { preselect: string | nul
           ))}
         </fieldset>
         <div>
-          <label htmlFor={nameId} className="text-sm font-medium">Tên scene import</label>
+          <label htmlFor={nameId} className="text-sm font-medium">Tên scene</label>
           <input id={nameId} value={name} onChange={(event) => setName(event.target.value)} onBlur={() => setTouched(true)} aria-invalid={touched && !name.trim()} aria-describedby={touched && !name.trim() ? nameId + "-error" : undefined} maxLength={200} required className={INPUT} />
-          <FieldError id={nameId + "-error"} message={touched && !name.trim() ? "Nhập tên scene import." : null} />
+          <FieldError id={nameId + "-error"} message={touched && !name.trim() ? "Nhập tên scene." : null} />
         </div>
       </Card>
       {error && <Notice tone="rust">{error}</Notice>}
-      <p className="text-xs text-ink-muted">Form được giữ trong phiên tab. <button type="button" className="font-medium text-ember-strong" onClick={() => { clear(); setDraft({ ...EMPTY_SETUP, selected }); }}>Bỏ bản nháp</button></p>
+      <p className="text-xs text-ink-muted">Bản nháp được giữ trong tab này. <button type="button" className="font-medium text-ember-strong" onClick={() => { clear(); setDraft({ ...EMPTY_SETUP, selected }); }}>Bỏ bản nháp</button></p>
       <div className="flex items-center justify-between gap-3">
         <Button variant="ghost" onClick={onBack}><ArrowLeft aria-hidden /> Chọn file khác</Button>
         <Button type="submit" size="lg" disabled={!selected || !name.trim() || submitting}>
           {submitting ? <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden /> : <Box aria-hidden />}
-          Mở scene import
+          Mở scene
         </Button>
       </div>
     </form>
