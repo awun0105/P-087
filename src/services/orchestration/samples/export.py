@@ -6,11 +6,12 @@ cấp; không có số liệu nào do UI tự điền. Không bao giờ ghi đè
 """
 
 import json
+import logging
 import re
 import shutil
 import time
 import unicodedata
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -40,6 +41,7 @@ from src.services.reconstruction import camera_markers
 if TYPE_CHECKING:
     from src.services.orchestration.projects.registry import ProjectRegistry
 
+logger = logging.getLogger(__name__)
 _MEDIA = {".mp4": "video/mp4", ".mov": "video/quicktime", ".png": "image/png", ".jpg": "image/jpeg"}
 _MEDIA.update({".jpeg": "image/jpeg", ".sog": "application/octet-stream", ".ply": "application/octet-stream"})
 _ASSET_SUFFIXES = {"image": {".png", ".jpg", ".jpeg"}, "video": {".mp4", ".mov"}}
@@ -481,10 +483,13 @@ def _frozen_scene_revision(bundle_root: Path) -> str | None:
         return None
 
 
-def _restore_unpublished(
+def restore_unpublished(
     registry: "ProjectRegistry", library_root: Path, job_id: str, *, title: str | None, description: str | None
 ) -> DemoManifest | None:
-    """Mẫu của job đã bị bỏ mà scene (và tên, mô tả nếu có truyền) vẫn y như lúc xuất: gỡ dấu bỏ, không chép lại."""
+    """Mẫu của job đã bị bỏ mà scene (và tên, mô tả nếu có truyền) vẫn y như lúc xuất: gỡ dấu bỏ, không chép lại.
+
+    Chỉ dùng khi xuất bản mới thất bại, để thêm lại vẫn được dù bản chép mới hỏng.
+    """
     try:
         current = registry.scene.current(job_id).scene.scene_revision
     except Exception:  # noqa: BLE001 - chưa có scene thì không có gì để so
@@ -523,56 +528,136 @@ def publish_job_bundle(
     source: DemoSource,
     frames: int = 12,
     recording_dir: Path | None = None,
-    match_text: bool = True,
 ) -> DemoManifest:
     """Xuất job vào thư viện mẫu: dựng trong thư mục tạm rồi đổi tên một lần, không bao giờ ghi đè.
 
-    Mẫu cũ của job đã bị bỏ mà scene chưa đổi thì được đưa lại (`match_text=False`: không so tên và mô tả).
-
     Thư mục tạm bắt đầu bằng '.' nên `DemoLibrary` bỏ qua; lỗi giữa chừng thì thư mục tạm bị xoá.
     """
-    library_root.mkdir(parents=True, exist_ok=True)
-    lock = _acquire_publish_lock(library_root, job_id)
+    lock = acquire_publish_lock(library_root, job_id)
     try:
-        existing = published_sample_id(library_root, job_id)
-        if existing is not None:
-            raise AlreadyPublishedError(existing)
-        restored = _restore_unpublished(
+        return _publish_locked(
             registry,
-            library_root,
             job_id,
-            title=title if match_text else None,
-            description=description if match_text else None,
+            library_root,
+            title=title,
+            description=description,
+            source=source,
+            frames=frames,
+            recording_dir=recording_dir,
         )
-        if restored is not None:
-            return restored
-        slug = slugify(title) or "scene"
-        demo_id = f"{slug[:60]}-{job_id.removeprefix('job-')[:8]}"
+    finally:
+        shutil.rmtree(lock, ignore_errors=True)
+
+
+def acquire_publish_lock(library_root: Path, job_id: str) -> Path:
+    """Giữ khoá xuất của job; khoá còn thì `publication_status` báo đang chuẩn bị mẫu."""
+    library_root.mkdir(parents=True, exist_ok=True)
+    existing = published_sample_id(library_root, job_id)
+    if existing is not None:
+        raise AlreadyPublishedError(existing)
+    lock = _acquire_publish_lock(library_root, job_id)
+    _failure_path(library_root, job_id).unlink(missing_ok=True)
+    return lock
+
+
+def _publish_locked(
+    registry: "ProjectRegistry",
+    job_id: str,
+    library_root: Path,
+    *,
+    title: str,
+    description: str,
+    source: DemoSource,
+    frames: int,
+    recording_dir: Path | None,
+) -> DemoManifest:
+    existing = published_sample_id(library_root, job_id)
+    if existing is not None:
+        raise AlreadyPublishedError(existing)
+    slug = slugify(title) or "scene"
+    demo_id = f"{slug[:60]}-{job_id.removeprefix('job-')[:8]}"
+    target = library_root / demo_id
+    if (target / UNPUBLISHED_MARKER).exists():
+        demo_id = f"{demo_id}-{uuid4().hex[:8]}"
         target = library_root / demo_id
-        if (target / UNPUBLISHED_MARKER).exists():
-            demo_id = f"{demo_id}-{uuid4().hex[:8]}"
-            target = library_root / demo_id
+    if target.exists():
+        raise SampleExportError(f"Thư viện đã có mẫu {demo_id}")
+    temp = library_root / f".tmp-{demo_id}-{uuid4().hex[:8]}"
+    try:
+        manifest = export_job_bundle(
+            registry,
+            job_id,
+            temp,
+            demo_id=demo_id,
+            title=title,
+            description=description,
+            source=source,
+            frames=frames,
+            recording_dir=recording_dir,
+        )
         if target.exists():
             raise SampleExportError(f"Thư viện đã có mẫu {demo_id}")
-        temp = library_root / f".tmp-{demo_id}-{uuid4().hex[:8]}"
+        temp.rename(target)
+    finally:
+        if temp.exists():
+            shutil.rmtree(temp, ignore_errors=True)
+    return manifest
+
+
+def _failure_path(library_root: Path, job_id: str) -> Path:
+    return library_root / f".publish-failed-{job_id}.json"
+
+
+def publication_status(library_root: Path, job_id: str) -> tuple[bool, str | None]:
+    """(đang chuẩn bị mẫu, lỗi của lần xuất nền gần nhất) — đọc từ thư viện nên mọi tiến trình API đều thấy."""
+    lock = library_root / f".publishing-{job_id}"
+    try:
+        publishing = lock.is_dir() and time.time() - lock.stat().st_mtime < _LOCK_STALE_SECONDS
+    except OSError:
+        publishing = False
+    try:
+        error = json.loads(_failure_path(library_root, job_id).read_text(encoding="utf-8"))["detail"]
+    except (OSError, ValueError, KeyError, TypeError):
+        error = None
+    return publishing, error if isinstance(error, str) else None
+
+
+def publish_in_background(
+    registry: "ProjectRegistry",
+    job_id: str,
+    library_root: Path,
+    lock: Path,
+    *,
+    title: str,
+    description: str,
+    source: DemoSource,
+    recording_dir: Path | None = None,
+    on_published: Callable[[DemoManifest], None] | None = None,
+) -> None:
+    """Chạy trong luồng nền với khoá đã giữ: xuất bản mới từ job; lỗi thì dùng lại mẫu cũ chưa đổi, không thì ghi lỗi."""
+    try:
         try:
-            manifest = export_job_bundle(
+            manifest = _publish_locked(
                 registry,
                 job_id,
-                temp,
-                demo_id=demo_id,
+                library_root,
                 title=title,
                 description=description,
                 source=source,
-                frames=frames,
+                frames=12,
                 recording_dir=recording_dir,
             )
-            if target.exists():
-                raise SampleExportError(f"Thư viện đã có mẫu {demo_id}")
-            temp.rename(target)
-        finally:
-            if temp.exists():
-                shutil.rmtree(temp, ignore_errors=True)
-        return manifest
+        except Exception as error:
+            logger.exception("demo publish failed for %s", job_id)
+            restored = restore_unpublished(registry, library_root, job_id, title=None, description=None)
+            if restored is None:
+                detail = str(error) if isinstance(error, SampleExportError) else "Không ghi được vào thư viện mẫu"
+                _failure_path(library_root, job_id).write_text(json.dumps({"detail": detail}), encoding="utf-8")
+                return
+            manifest = restored
+        if on_published is not None:
+            on_published(manifest)
+    except Exception:
+        logger.exception("demo publish bookkeeping failed for %s", job_id)
     finally:
         shutil.rmtree(lock, ignore_errors=True)

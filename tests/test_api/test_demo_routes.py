@@ -147,7 +147,7 @@ def _fake_publish(calls):
 
     from src.services.orchestration.samples import DemoFile, DemoManifest
 
-    def fake(registry, job_id, root, *, title, description, source, frames=12, recording_dir=None, match_text=True):
+    def fake(registry, job_id, root, *, title, description, source, frames=12, recording_dir=None):
         calls.append((job_id, root, title, description, source))
         (root / "kho-1").mkdir(parents=True)
         manifest = DemoManifest(
@@ -167,6 +167,29 @@ def _fake_publish(calls):
         return manifest
 
     return fake
+
+
+class _InlineThread:
+    """Chạy việc xuất "nền" ngay trong request để test đọc được kết quả."""
+
+    def __init__(self, *, target, args=(), kwargs=None, **_ignored) -> None:
+        self._run = lambda: target(*args, **(kwargs or {}))
+
+    def start(self) -> None:
+        self._run()
+
+
+@pytest.fixture
+def inline_publish(monkeypatch):
+    from src.api.studio import demo as demo_api
+
+    monkeypatch.setattr(demo_api, "Thread", _InlineThread)
+
+
+def _patch_export(monkeypatch, fake) -> None:
+    from src.services.orchestration.samples import export
+
+    monkeypatch.setattr(export, "_publish_locked", fake)
 
 
 @pytest.mark.asyncio
@@ -197,67 +220,80 @@ async def test_publish_refuses_scenes_without_rights_and_anonymization(
 
 @pytest.mark.asyncio
 async def test_publish_exports_through_the_shared_service_and_audits_it(
-    client, library, reviewer, isolated_registry, monkeypatch
+    client, library, reviewer, isolated_registry, monkeypatch, inline_publish
 ) -> None:
-    from src.api.studio import demo as demo_api
     from src.services.orchestration.samples import DemoSource
 
     _attest(isolated_registry, monkeypatch, **_CONFIRMED)
     calls: list[tuple] = []
-    monkeypatch.setattr(demo_api, "publish_job_bundle", _fake_publish(calls))
+    _patch_export(monkeypatch, _fake_publish(calls))
     done = await client.post(
         f"{_JOB}/demo/publish", json={"confirm_public": True, "title": "Kho 1", "description": "Mô tả"}
     )
-    assert done.status_code == 201 and done.json() == {"sample_id": "kho-1", "title": "Kho 1"}
+    assert done.status_code == 202 and done.json() == {"status": "publishing"}
     (job_id, root, title, description, source) = calls[0]
     assert (job_id, root, title, description) == ("job-fixture-001", library, "Kho 1", "Mô tả")
     assert isinstance(source, DemoSource) and source.dataset == "Real2Sim Studio"
     assert reviewer.audits == [("user-reviewer", "demo.publish", "job-fixture-001", {"sample_id": "kho-1"})]
-    # Trạng thái demo của job báo mẫu đã có trong thư viện.
-    assert (await client.get(f"{_JOB}/demo")).json()["published_sample_id"] == "kho-1"
+    # Trạng thái demo của job báo mẫu đã có trong thư viện và không còn đang chuẩn bị.
+    state = (await client.get(f"{_JOB}/demo")).json()
+    assert (state["published_sample_id"], state["publishing"], state["publish_error"]) == ("kho-1", False, None)
 
 
 @pytest.mark.asyncio
-async def test_a_blank_title_falls_back_to_the_scene_name_instead_of_failing(
+async def test_a_publish_in_progress_is_reported_and_blocks_a_second_one(
     client, library, reviewer, isolated_registry, monkeypatch
 ) -> None:
     from src.api.studio import demo as demo_api
 
     _attest(isolated_registry, monkeypatch, **_CONFIRMED)
+    started: list[object] = []
+    monkeypatch.setattr(demo_api, "Thread", lambda **kwargs: type("T", (), {"start": lambda self: started.append(1)})())
+    done = await client.post(f"{_JOB}/demo/publish", json={"confirm_public": True})
+    assert done.status_code == 202 and started == [1]
+    state = (await client.get(f"{_JOB}/demo")).json()
+    assert state["publishing"] is True and state["published_sample_id"] is None
+    again = await client.post(f"{_JOB}/demo/publish", json={"confirm_public": True})
+    assert again.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_a_blank_title_falls_back_to_the_scene_name_instead_of_failing(
+    client, library, reviewer, isolated_registry, monkeypatch, inline_publish
+) -> None:
+    _attest(isolated_registry, monkeypatch, **_CONFIRMED)
     calls: list[tuple] = []
-    monkeypatch.setattr(demo_api, "publish_job_bundle", _fake_publish(calls))
+    _patch_export(monkeypatch, _fake_publish(calls))
     done = await client.post(f"{_JOB}/demo/publish", json={"confirm_public": True, "title": "    "})
-    assert done.status_code == 201
+    assert done.status_code == 202
     assert calls[0][2] == "Fixture warehouse project"
 
 
 @pytest.mark.asyncio
 async def test_publishing_a_job_twice_is_a_conflict_that_names_the_existing_sample(
-    client, library, reviewer, isolated_registry, monkeypatch
+    client, library, reviewer, isolated_registry, monkeypatch, inline_publish
 ) -> None:
-    from src.api.studio import demo as demo_api
-    from src.services.orchestration.samples.export import AlreadyPublishedError
-
     _attest(isolated_registry, monkeypatch, **_CONFIRMED)
-
-    def already(*args, **kwargs):
-        raise AlreadyPublishedError("kho-1")
-
-    monkeypatch.setattr(demo_api, "publish_job_bundle", already)
+    _patch_export(monkeypatch, _fake_publish([]))
+    assert (await client.post(f"{_JOB}/demo/publish", json={"confirm_public": True})).status_code == 202
+    reviewer.audits.clear()
     refused = await client.post(f"{_JOB}/demo/publish", json={"confirm_public": True})
     assert refused.status_code == 409 and "kho-1" in refused.json()["detail"]
     assert reviewer.audits == []
 
 
 @pytest.mark.asyncio
-async def test_publish_maps_export_failures_to_clear_conflicts(
-    client, library, reviewer, isolated_registry, monkeypatch
+async def test_publish_reports_export_failures_on_the_demo_state(
+    client, library, reviewer, isolated_registry, monkeypatch, inline_publish
 ) -> None:
     _attest(isolated_registry, monkeypatch, **_CONFIRMED)
     # Fixture không có preview đã xác minh: dịch vụ xuất từ chối thay vì tạo mẫu rỗng, và không để lại thư mục.
-    refused = await client.post(f"{_JOB}/demo/publish", json={"confirm_public": True})
-    assert refused.status_code == 409 and "bản xem 3DGS" in refused.json()["detail"]
-    assert list(library.iterdir()) == []
+    accepted = await client.post(f"{_JOB}/demo/publish", json={"confirm_public": True})
+    assert accepted.status_code == 202
+    state = (await client.get(f"{_JOB}/demo")).json()
+    assert state["publishing"] is False and "bản xem 3DGS" in state["publish_error"]
+    assert [path for path in library.iterdir() if not path.name.startswith(".")] == []
+    assert reviewer.audits == []
     missing = await client.post("/api/v1/jobs/job-nope/demo/publish", json={"confirm_public": True})
     assert missing.status_code == 404
 
