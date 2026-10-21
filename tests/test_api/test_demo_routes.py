@@ -111,7 +111,9 @@ def library(tmp_path, monkeypatch):
     monkeypatch.setattr(
         studio_deps,
         "settings",
-        lambda: SimpleNamespace(product_demo_dir=root, product_rerun_recording_dir=root / "recordings"),
+        lambda: SimpleNamespace(
+            product_demo_dir=root, product_rerun_recording_dir=root / "recordings", database_url="sqlite://"
+        ),
     )
     return root
 
@@ -145,7 +147,7 @@ def _fake_publish(calls):
 
     from src.services.orchestration.samples import DemoFile, DemoManifest
 
-    def fake(registry, job_id, root, *, title, description, source, frames=12, recording_dir=None):
+    def fake(registry, job_id, root, *, title, description, source, frames=12, recording_dir=None, match_text=True):
         calls.append((job_id, root, title, description, source))
         (root / "kho-1").mkdir(parents=True)
         manifest = DemoManifest(

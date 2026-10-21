@@ -1,5 +1,6 @@
 """Xuất job thành bundle trong thư viện mẫu: nguyên tử, không ghi đè, dọn thư mục tạm, gắn asset từng bước."""
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -361,6 +362,38 @@ def test_removed_job_can_be_published_again_without_overwriting_the_old_bundle(t
     assert second.demo_id != first.demo_id
     assert published_sample_id(root, JOB_ID) == second.demo_id
     assert (root / first.demo_id / "manifest.json").read_bytes() == original
+
+
+def test_republishing_an_unchanged_removed_sample_restores_it_without_copying(tmp_path: Path) -> None:
+    registry, _ = _registry(tmp_path)
+    root = tmp_path / "library"
+    first = publish_job_bundle(registry, JOB_ID, root, title="Kho", description="", source=SOURCE)
+    (root / first.demo_id / "workspace").mkdir()
+    revision = registry.scene.current(JOB_ID).scene.scene_revision
+    (root / first.demo_id / "workspace/snapshot.json").write_text(json.dumps({"head": {"scene_revision": revision}}))
+    DemoLibrary(root).unpublish(first.demo_id)
+
+    again = publish_job_bundle(
+        registry, JOB_ID, root, title="Tên khác", description="", source=SOURCE, match_text=False
+    )
+
+    assert again.demo_id == first.demo_id
+    assert published_sample_id(root, JOB_ID) == first.demo_id
+    assert sorted(path.name for path in root.iterdir() if not path.name.startswith(".")) == [first.demo_id]
+
+
+def test_removed_sample_is_exported_again_when_the_scene_changed(tmp_path: Path) -> None:
+    registry, _ = _registry(tmp_path)
+    root = tmp_path / "library"
+    first = publish_job_bundle(registry, JOB_ID, root, title="Kho", description="", source=SOURCE)
+    (root / first.demo_id / "workspace").mkdir()
+    (root / first.demo_id / "workspace/snapshot.json").write_text(json.dumps({"head": {"scene_revision": "rev-old"}}))
+    DemoLibrary(root).unpublish(first.demo_id)
+
+    again = publish_job_bundle(registry, JOB_ID, root, title="Kho", description="", source=SOURCE, match_text=False)
+
+    assert again.demo_id != first.demo_id
+    assert (root / first.demo_id / ".unpublished").exists()
 
 
 def test_sample_optional_object_geometry_is_validated(tmp_path: Path) -> None:

@@ -7,6 +7,7 @@ Ba thao tác riêng:
   đọc. Thư viện mẫu công khai, nên chỉ xuất khi project đã xác nhận quyền sử dụng và ẩn danh, và Reviewer xác nhận.
 """
 
+import logging
 from collections.abc import Callable
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -20,7 +21,7 @@ from src.services.orchestration.auth import UserRecord, actor_of
 from src.services.orchestration.jobs.database import RuntimeStateConflictError
 from src.services.orchestration.projects import JobNotFoundError
 from src.services.orchestration.projects.registry import ProjectRegistry
-from src.services.orchestration.samples import DemoSource
+from src.services.orchestration.samples import DemoSource, distributed
 from src.services.orchestration.samples.export import (
     AlreadyPublishedError,
     SampleExportError,
@@ -35,6 +36,7 @@ from src.services.orchestration.scene.errors import (
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class DemoResetRequest(BaseModel):
@@ -200,14 +202,19 @@ def post_demo_publish(
             description=request.description.strip(),
             source=DemoSource(dataset="Real2Sim Studio", sequence=project.name[:200], note=""),
             recording_dir=deps.settings().product_rerun_recording_dir,
+            # Ô tên điền sẵn tên scene: chỉ coi là sửa chữ khi người dùng đổi tên hoặc viết mô tả.
+            match_text=bool(request.description.strip()) or request.title not in (None, project.name.strip()),
         )
     except AlreadyPublishedError as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     except SampleExportError as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     except OSError as error:
+        logger.exception("demo publish failed for %s", job_id)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Không ghi được vào thư viện mẫu của máy chủ"
         ) from error
+    if distributed.enabled(deps.settings()):
+        distributed.republish(deps.settings(), manifest.demo_id)
     auth.auth_service().audit(user.user_id, "demo.publish", job_id, {"sample_id": manifest.demo_id})
     return DemoPublishResponse(sample_id=manifest.demo_id, title=manifest.title)

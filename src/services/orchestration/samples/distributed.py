@@ -132,6 +132,12 @@ def close(settings: Settings, session_id: str) -> None:
         tx.execute("UPDATE r2s_demo_sessions SET state='closed' WHERE session_id=?", (session_id,))
 
 
+def republish(settings: Settings, sample_id: str) -> None:
+    with RuntimeDatabase(settings.database_url).transaction(write=True) as tx:
+        tx.execute("SELECT pg_advisory_xact_lock(hashtextextended(?,0))", (f"r2s.demo.sample:{sample_id}",))
+        tx.execute("DELETE FROM r2s_demo_unpublished WHERE sample_id=?", (sample_id,))
+
+
 def unpublish(settings: Settings, sample_id: str) -> None:
     with RuntimeDatabase(settings.database_url).transaction(write=True) as tx:
         tx.execute("SELECT pg_advisory_xact_lock(hashtextextended(?,0))", (f"r2s.demo.sample:{sample_id}",))

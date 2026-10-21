@@ -474,6 +474,45 @@ def published_sample_id(library_root: Path, job_id: str) -> str | None:
     return None
 
 
+def _frozen_scene_revision(bundle_root: Path) -> str | None:
+    try:
+        return json.loads((bundle_root / "workspace/snapshot.json").read_bytes())["head"]["scene_revision"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def _restore_unpublished(
+    registry: "ProjectRegistry", library_root: Path, job_id: str, *, title: str | None, description: str | None
+) -> DemoManifest | None:
+    """Mẫu của job đã bị bỏ mà scene (và tên, mô tả nếu có truyền) vẫn y như lúc xuất: gỡ dấu bỏ, không chép lại."""
+    try:
+        current = registry.scene.current(job_id).scene.scene_revision
+    except Exception:  # noqa: BLE001 - chưa có scene thì không có gì để so
+        return None
+    candidates = []
+    for child in library_root.iterdir():
+        marker = child / UNPUBLISHED_MARKER
+        if not (child.is_dir() and marker.is_file()):
+            continue
+        try:
+            manifest = DemoManifest.model_validate_json((child / "manifest.json").read_bytes())
+        except (OSError, ValueError):
+            continue
+        if (
+            manifest.demo_id == child.name
+            and manifest.provenance.get("job_id") == job_id
+            and title in (None, manifest.title)
+            and description in (None, manifest.description)
+            and _frozen_scene_revision(child) == current
+        ):
+            candidates.append((marker.stat().st_mtime, child, manifest))
+    if not candidates:
+        return None
+    _, child, manifest = max(candidates, key=lambda item: item[0])
+    (child / UNPUBLISHED_MARKER).unlink()
+    return manifest
+
+
 def publish_job_bundle(
     registry: "ProjectRegistry",
     job_id: str,
@@ -484,8 +523,11 @@ def publish_job_bundle(
     source: DemoSource,
     frames: int = 12,
     recording_dir: Path | None = None,
+    match_text: bool = True,
 ) -> DemoManifest:
     """Xuất job vào thư viện mẫu: dựng trong thư mục tạm rồi đổi tên một lần, không bao giờ ghi đè.
+
+    Mẫu cũ của job đã bị bỏ mà scene chưa đổi thì được đưa lại (`match_text=False`: không so tên và mô tả).
 
     Thư mục tạm bắt đầu bằng '.' nên `DemoLibrary` bỏ qua; lỗi giữa chừng thì thư mục tạm bị xoá.
     """
@@ -495,6 +537,15 @@ def publish_job_bundle(
         existing = published_sample_id(library_root, job_id)
         if existing is not None:
             raise AlreadyPublishedError(existing)
+        restored = _restore_unpublished(
+            registry,
+            library_root,
+            job_id,
+            title=title if match_text else None,
+            description=description if match_text else None,
+        )
+        if restored is not None:
+            return restored
         slug = slugify(title) or "scene"
         demo_id = f"{slug[:60]}-{job_id.removeprefix('job-')[:8]}"
         target = library_root / demo_id
