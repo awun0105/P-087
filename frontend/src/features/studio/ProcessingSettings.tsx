@@ -38,7 +38,7 @@ const REVIEW_CHOICES: { value: string; title: string; hint?: string }[] = [
   {
     value: "auto",
     title: "Tạo mesh ngay, không duyệt",
-    hint: "Nhanh cho chạy hàng loạt. Vật tách sai vẫn sửa được sau, nhưng mỗi lần sửa phải dựng lại hình học.",
+    hint: "Nhanh hơn. Vật tách sai vẫn sửa được sau nhưng phải dựng lại.",
   },
 ];
 
@@ -94,8 +94,8 @@ export function ProcessingSettings({
           </h2>
           <p className="mt-1 text-sm text-ink-muted">
             {editable
-              ? "Chọn kịch bản để nhận cấu hình phù hợp với dữ liệu và máy xử lý. Bạn có thể chỉnh thêm ở phần chi tiết."
-              : "Thông số thật đã dùng khi xử lý sẵn video mẫu này — chỉ để xem."}
+              ? "Chọn kịch bản để nhận cấu hình phù hợp. Có thể chỉnh thêm ở phần chi tiết."
+              : "Thông số đã dùng cho video mẫu này, chỉ để xem."}
           </p>
         </div>
         {!editable && (
@@ -219,7 +219,7 @@ function ScenarioWizard({ onChange, suggesting, initialPreferences }: { onChange
   };
   return <section aria-label="Chọn nhanh kịch bản" className="mt-5 space-y-4">
     <h3 className="text-sm font-semibold">Chọn nhanh kịch bản</h3>
-    <p className="text-xs text-ink-muted">Chọn một mục để áp dụng gợi ý. Các lựa chọn dưới đây chỉ thay thông số, không đổi file đã tải lên.</p>
+    <p className="text-xs text-ink-muted">Chọn để áp dụng gợi ý. Chỉ đổi thông số, không đổi file đã tải lên.</p>
     {SCENARIO_QUESTIONS.map((question) => <fieldset key={question.key}>
       <legend className="mb-2 flex items-center gap-1.5 text-sm font-medium"><question.icon className="size-4" aria-hidden />{question.label}</legend>
       <div className="flex flex-wrap gap-2">{question.choices.map((choice) => <label key={choice.value} className={cn(
@@ -266,17 +266,13 @@ function MachinePanel({
     <div className="mt-5 rounded-xl bg-paper-sunken p-4">
       <p className="flex items-center gap-2 text-sm font-medium text-ink">
         <Cpu className="size-4 text-ink-muted" aria-hidden />
-        {editable ? "Máy xử lý (GPU server)" : "Máy đã xử lý"}
+        {editable ? "Máy xử lý" : "Máy đã xử lý"}
       </p>
       <p className="mt-1 text-sm text-ink-muted">
-        {header ?? "Chưa có số đo — worker chưa chạy hoặc chưa báo cấu hình. Không kiểm được nguy cơ crash."}
+        {header ?? "Chưa có số đo của máy xử lý nên chưa kiểm được cấu hình có vừa máy không."}
       </p>
       {editable && capability?.headroom_measured && <p className="mt-2 text-xs text-ink-subtle">
-        Tài nguyên còn trống đo lúc {new Date(capability.measured_at).toLocaleTimeString("vi-VN")}.{" "}
-        {capability.idle_measured_at
-          ? `Maximum là ước lượng theo lần đo lúc máy rảnh (${new Date(capability.idle_measured_at).toLocaleTimeString("vi-VN")}), không bị hạ khi máy đang chạy job khác;`
-          : "Máy chưa có lần đo lúc rảnh nên Maximum là ước lượng theo tổng năng lực máy;"}
-        {" "}khi đến lượt, worker đo lại và chờ nếu thiếu, giữ nguyên cấu hình bạn chọn.
+        Đo lúc {new Date(capability.measured_at).toLocaleTimeString("vi-VN")}. Khi đến lượt, máy đo lại và chờ nếu thiếu tài nguyên.
       </p>}
       {editable && evaluation && (
         <ul className="mt-4 grid gap-3 sm:grid-cols-3">
@@ -339,7 +335,7 @@ function ReviewChoice({
     return (
       <fieldset className="mt-5">
         <legend className="text-sm font-semibold text-ink">Sau khi tách vật</legend>
-        <p className="mt-2 text-xs text-ink-subtle">Job này tạo trước khi có lựa chọn này; dùng hành vi cũ (không dừng duyệt).</p>
+        <p className="mt-2 text-xs text-ink-subtle">Scene này tạo trước khi có lựa chọn này nên không dừng để duyệt.</p>
       </fieldset>
     );
   }

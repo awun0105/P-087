@@ -205,7 +205,7 @@ describe("thông báo tạo mesh theo vật (T-013)", () => {
     vi.mocked(cancelObjectify).mockResolvedValue(objectify({ status: "running", mode: "geometry", phase: "collider", operation_id: "op-7", cancellation_requested: true }));
     render(<ObjectifyNotice jobId="job-1" revision="rev-001" onRevision={vi.fn()} />);
 
-    expect(await screen.findByText(/Đang tạo mesh · Tạo collider \(CoACD\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/Đang tạo mesh · Tạo collider/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Hủy yêu cầu" }));
     await waitFor(() => expect(cancelObjectify).toHaveBeenCalledWith("job-1", "op-7"));
   });
