@@ -2,10 +2,10 @@
 
 import { errorMessage } from "@/lib/ui-error";
 
-import { Canvas } from "@react-three/fiber";
+import { Canvas, useThree } from "@react-three/fiber";
 import { Grid, OrbitControls } from "@react-three/drei";
 import { Loader2, Maximize, RotateCcw } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
@@ -187,12 +187,46 @@ function MeshLayer({ jobId, view }: { jobId: string; view: StageView }) {
   return <CollisionMeshCanvas url={jobArtifactContentUrl(jobId, ref)} />;
 }
 
+/** Phần chiều cao của lưới được giữ khi ẩn trần. */
+const CEILING_CUT = 0.75;
+
+/** Đặt camera nhìn chéo từ trên xuống, đủ xa để thấy cả lưới (vị trí mặc định có thể nằm lọt trong hoặc quá xa). */
+function FrameBounds({ bounds, onInvalidate }: { bounds: THREE.Box3; onInvalidate: (redraw: () => void) => void }) {
+  const get = useThree((state) => state.get);
+  const controlsReady = useThree((state) => state.controls !== null);
+  useEffect(() => onInvalidate(() => get().invalidate()), [get, onInvalidate]);
+  useEffect(() => {
+    if (bounds.isEmpty()) return;
+    const { camera } = get();
+    const controls = get().controls as { target: THREE.Vector3; update(): void } | null;
+    const center = bounds.getCenter(new THREE.Vector3());
+    const radius = Math.max(bounds.getSize(new THREE.Vector3()).length() / 2, 0.5);
+    const fov = camera instanceof THREE.PerspectiveCamera ? THREE.MathUtils.degToRad(camera.fov) : Math.PI / 4;
+    const distance = radius / Math.sin(fov / 2);
+    camera.position.copy(center).add(new THREE.Vector3(0.45, 0.8, 0.6).normalize().multiplyScalar(distance));
+    camera.near = Math.max(distance / 1000, 0.01);
+    camera.far = distance * 10;
+    camera.lookAt(center);
+    camera.updateProjectionMatrix();
+    if (controls) {
+      controls.target.copy(center);
+      controls.update();
+    }
+  }, [bounds, get, controlsReady]);
+  return null;
+}
+
 /**
  * Collision mesh canonical (mét, Z-up, sàn z = 0) trong three.js. `children` vẽ trong cùng
  * khung Z-up (vd hộp vật thể ứng viên); mesh và material được giải phóng khi unmount/đổi URL.
  */
 export function CollisionMeshCanvas({ url, children }: { url: string; children?: ReactNode }) {
-  const [state, setState] = useState<{ root?: THREE.Group; error?: string; triangles?: number } | null>(null);
+  const [state, setState] = useState<{ root?: THREE.Group; error?: string; triangles?: number; bounds?: THREE.Box3 } | null>(null);
+  const [hideCeiling, setHideCeiling] = useState(true);
+  const invalidate = useRef<(() => void) | null>(null);
+  const setInvalidate = useCallback((redraw: () => void) => { invalidate.current = redraw; }, []);
+  // Mặt cắt ngang bỏ phần trên của lưới: phòng kín nhìn từ ngoài chỉ là một hộp, cắt trần mới thấy bên trong.
+  const ceiling = useRef(new THREE.Plane(new THREE.Vector3(0, -1, 0), Number.MAX_VALUE));
 
   useEffect(() => {
     const controller = new AbortController();
@@ -210,11 +244,13 @@ export function CollisionMeshCanvas({ url, children }: { url: string; children?:
         let triangles = 0;
         root.traverse((object) => {
           if (!(object instanceof THREE.Mesh)) return;
-          object.material = new THREE.MeshStandardMaterial({ color: themeColor("--studio-geometry", "#2f7ea8"), flatShading: true, side: THREE.DoubleSide });
+          object.material = new THREE.MeshStandardMaterial({ color: themeColor("--studio-geometry", "#2f7ea8"), flatShading: true, side: THREE.DoubleSide, clippingPlanes: [ceiling.current] });
           const index = object.geometry.getIndex();
           triangles += (index ? index.count : object.geometry.getAttribute("position").count) / 3;
         });
-        setState({ root, triangles });
+        // Hộp bao trong hệ hiển thị Y-up (cùng phép xoay -90° quanh X của group cha).
+        const bounds = new THREE.Box3().setFromObject(root).applyMatrix4(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
+        setState({ root, triangles, bounds });
       })
       .catch((cause: unknown) => {
         if (!controller.signal.aborted) setState({ error: errorMessage(cause, "Không tải được lớp xem. Hãy thử lại.") });
@@ -224,6 +260,14 @@ export function CollisionMeshCanvas({ url, children }: { url: string; children?:
       if (root) disposeTree(root);
     };
   }, [url]);
+
+  const bounds = state?.bounds;
+  useEffect(() => {
+    if (!bounds || bounds.isEmpty()) return;
+    const height = bounds.max.y - bounds.min.y;
+    ceiling.current.constant = hideCeiling ? bounds.min.y + height * CEILING_CUT : Number.MAX_VALUE;
+    invalidate.current?.();
+  }, [bounds, hideCeiling]);
 
   // Mesh canonical Z-up; three.js Y-up → xoay -90° quanh X một lần ở group cha.
   const rotation = useMemo(() => [-Math.PI / 2, 0, 0] as [number, number, number], []);
@@ -237,7 +281,8 @@ export function CollisionMeshCanvas({ url, children }: { url: string; children?:
   }
   return (
     <>
-      <Canvas camera={{ position: [8, 10, 12], fov: 50 }} gl={{ antialias: true }}>
+      <Canvas camera={{ position: [8, 10, 12], fov: 50 }} gl={{ antialias: true, localClippingEnabled: true }}>
+        {state.bounds && <FrameBounds bounds={state.bounds} onInvalidate={setInvalidate} />}
         <ambientLight intensity={0.6} />
         <directionalLight position={[10, 20, 10]} intensity={0.9} />
         <group rotation={rotation}>
@@ -250,6 +295,14 @@ export function CollisionMeshCanvas({ url, children }: { url: string; children?:
       <p className="absolute bottom-3 left-3 rounded-md border border-line-dark bg-viewport-deep/85 px-2 py-1 text-xs text-on-dark/80">
         {state.triangles?.toLocaleString("vi-VN")} tam giác · lưới 1 m, sàn z = 0
       </p>
+      <button
+        type="button"
+        onClick={() => setHideCeiling((value) => !value)}
+        aria-pressed={hideCeiling}
+        className="absolute bottom-3 right-3 z-20 rounded-md bg-viewport-deep/90 px-3 py-1.5 text-xs text-on-dark hover:bg-viewport-deep"
+      >
+        {hideCeiling ? "Hiện trần" : "Ẩn trần"}
+      </button>
     </>
   );
 }
