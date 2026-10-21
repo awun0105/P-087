@@ -1,6 +1,7 @@
 import type { TimelineStageView } from "@/features/studio/PipelineTimeline";
 import { stageMeta, type TimelineStageMeta } from "@/features/studio/stages";
 import type { NextActionKind, PipelineView } from "@/lib/contracts/pipeline";
+import { formatWait } from "@/lib/format";
 import { geometryPhaseLabel } from "@/lib/scene/geometry-state";
 
 /** Việc đã xong hoặc chỉ còn việc không gấp: hỏi lại thưa (vẫn bắt được thay đổi từ nơi khác). */
@@ -40,9 +41,9 @@ export function timelineFromSteps(view: PipelineView, now: number): { stages: Ti
     const notes: string[] = [];
     if (step.state === "queued") notes.push("Đang chờ máy xử lý");
     if (step.actor === "user" && started !== null) {
-      const minutes = Math.max(0, Math.round(((step.completed_at ? Date.parse(step.completed_at) : now) - started) / 60000));
-      if (step.state === "waiting") notes.push(`Chờ bạn ${minutes} phút`);
-      else if (step.state === "succeeded" && step.completed_at) notes.push(`Bạn xử lý trong ${minutes} phút`);
+      const waited = formatWait(((step.completed_at ? Date.parse(step.completed_at) : now) - started) / 1000);
+      if (step.state === "waiting") notes.push(`Chờ bạn ${waited}`);
+      else if (step.state === "succeeded" && step.completed_at) notes.push(`Bạn xử lý trong ${waited}`);
     }
     const phase = geometryPhaseLabel(step.phase);
     if (phase) notes.push(phase);
