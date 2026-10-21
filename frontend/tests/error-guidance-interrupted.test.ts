@@ -10,7 +10,7 @@ describe("guidance for an interrupted worker", () => {
       human_message: "Worker dừng giữa chừng",
       retryable: true,
     });
-    expect(guidance?.cause).toContain("tắt hoặc khởi động lại");
+    expect(guidance?.cause).toContain("bị tắt giữa chừng");
     expect(guidance?.fix).toContain("Thử lại");
   });
 });
@@ -18,7 +18,7 @@ describe("guidance for an interrupted worker", () => {
 describe("guidance for a resource wait that ran out (T-050)", () => {
   it("says the wait stopped and to retry after checking the worker", () => {
     const guidance = guidanceFor({ error_code: "RESOURCE_WAIT_EXCEEDED", stage_id: "ST-CAMERA-POSE", human_message: "", retryable: true });
-    expect(guidance?.cause).toContain("chờ tài nguyên");
+    expect(guidance?.cause).toContain("Chờ máy xử lý quá lâu");
     expect(guidance?.fix).toContain("Thử lại");
   });
 });

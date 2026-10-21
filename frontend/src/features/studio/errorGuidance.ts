@@ -54,14 +54,14 @@ export function guidanceFor(error: ExecutionError | null | undefined): ErrorGuid
 
     case "FRAME_ANONYMIZATION_FAILED":
       return {
-        cause: "Bước che khuôn mặt và biển số không hoàn tất, nên video chưa được đưa vào dựng 3D.",
-        fix: "Thử lại. Nếu lặp lại, báo quản trị viên kiểm tra GPU và bộ phát hiện của máy xử lý.",
+        cause: "Chưa che xong khuôn mặt và biển số nên chưa dựng 3D.",
+        fix: "Thử lại. Nếu vẫn lỗi, báo quản trị viên.",
       };
 
     case "FRAME_ANONYMIZER_UNAVAILABLE":
       return {
-        cause: "Máy xử lý được yêu cầu che khuôn mặt và biển số nhưng chưa cài bộ phát hiện.",
-        fix: "Báo quản trị viên cấu hình bộ phát hiện trên máy xử lý.",
+        cause: "Máy xử lý chưa cài công cụ che khuôn mặt và biển số.",
+        fix: "Báo quản trị viên để cài đặt.",
       };
 
     case "COLMAP_OUT_OF_MEMORY":
@@ -84,14 +84,14 @@ export function guidanceFor(error: ExecutionError | null | undefined): ErrorGuid
 
     case "VISUAL_GPU_DEADLOCK":
       return {
-        cause: "Driver GPU ngừng phản hồi khi dựng 3DGS.",
-        fix: "Thử lại. Nếu lặp lại, báo quản trị viên kiểm tra driver GPU.",
+        cause: "GPU ngừng phản hồi khi dựng 3DGS.",
+        fix: "Thử lại. Nếu vẫn lỗi, báo quản trị viên.",
       };
 
     case "VISUAL_HANG_TIMEOUT":
       return {
         cause: "Bước dựng 3DGS không có tiến triển trong thời gian dài.",
-        fix: "Thử lại. Job tiếp tục từ checkpoint đã lưu.",
+        fix: "Thử lại. Lần chạy sau tiếp tục từ chỗ đã lưu.",
       };
 
     case "VISUAL_TIMEOUT":
@@ -102,14 +102,14 @@ export function guidanceFor(error: ExecutionError | null | undefined): ErrorGuid
 
     case "PROCESS_STALLED":
       return {
-        cause: "Một bước xử lý không ghi tiến triển trong thời gian cho phép nên đã bị dừng, có thể do treo.",
-        fix: "Thử lại. Nếu scene rất lớn và lặp lại, báo quản trị viên tăng thời gian chờ treo của công cụ đó.",
+        cause: "Một bước bị treo quá lâu nên đã dừng.",
+        fix: "Thử lại. Nếu vẫn lỗi, báo quản trị viên.",
       };
 
     case "LIDAR_ODOMETRY_STALLED":
       return {
-        cause: "Bước ước lượng quỹ đạo LiDAR không tiến triển trong thời gian cho phép nên đã bị dừng.",
-        fix: "Thử lại. Nếu lặp lại, báo quản trị viên kiểm tra máy xử lý và dữ liệu LiDAR.",
+        cause: "Bước ước lượng quỹ đạo LiDAR bị treo quá lâu nên đã dừng.",
+        fix: "Thử lại. Nếu vẫn lỗi, báo quản trị viên.",
       };
 
     case "OBJECTIFY_AWAITING_CHOICE":
@@ -120,32 +120,32 @@ export function guidanceFor(error: ExecutionError | null | undefined): ErrorGuid
 
     case "OBJECT_GEOMETRY_BUILD_FAILED":
       return {
-        cause: "Bước dựng bề mặt và lưới va chạm từng vật chưa xong; scene đang duyệt vẫn được giữ.",
-        fix: "Mở Studio để sửa vùng vật nếu cần, rồi bấm Thử lại Tạo mesh.",
+        cause: "Chưa tạo xong mesh cho các vật. Scene đang duyệt vẫn được giữ.",
+        fix: "Sửa vùng vật trong Studio nếu cần, rồi thử lại Tạo mesh.",
       };
 
     case "RESOURCE_WAIT_EXCEEDED":
       return {
-        cause: "Việc này chờ tài nguyên quá lâu mà không phải vì máy đang bận việc khác (máy xử lý chưa đo được hoặc kiểm tra tài nguyên bị lỗi), nên đã dừng.",
-        fix: "Báo quản trị viên kiểm tra GPU và driver của máy xử lý, rồi bấm Thử lại.",
+        cause: "Chờ máy xử lý quá lâu nên đã dừng.",
+        fix: "Báo quản trị viên kiểm tra máy xử lý, rồi bấm Thử lại.",
       };
 
     case "INTERRUPTED_SHUTDOWN":
       return {
-        cause: "Máy xử lý bị tắt hoặc khởi động lại khi bước này đang chạy, nên lượt chạy bị gián đoạn.",
-        fix: "Bấm Thử lại. Kết quả của các bước đã xong được giữ, job chạy tiếp từ bước bị gián đoạn.",
+        cause: "Máy xử lý bị tắt giữa chừng.",
+        fix: "Bấm Thử lại. Các bước đã xong được giữ.",
       };
 
     case "EXPECTED_DURATION_EXCEEDED":
       return {
-        cause: "Lượt chạy này lâu hơn hẳn thời gian thường thấy trên GPU này cho scene cỡ này, nên đã dừng.",
-        fix: "Thử lại khi máy xử lý rảnh. Nếu lặp lại, kiểm tra GPU hoặc giảm \"Số khung hình tối đa\".",
+        cause: "Lượt chạy lâu bất thường nên đã dừng.",
+        fix: "Thử lại khi máy rảnh, hoặc giảm \"Số khung hình tối đa\".",
       };
 
     case "GPU_BUDGET_EXCEEDED":
       return {
-        cause: "Scene này đã dùng hết số giờ GPU tối đa đặt cho mỗi scene nên không chạy thêm.",
-        fix: "Nếu scene này cần thêm giờ GPU, người vận hành nâng PRODUCT_JOB_GPU_HOURS_MAX rồi tạo lượt chạy mới.",
+        cause: "Scene đã dùng hết số giờ xử lý cho phép.",
+        fix: "Cần thêm giờ thì báo quản trị viên.",
       };
 
     default:
