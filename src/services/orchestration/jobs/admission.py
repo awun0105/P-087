@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from math import isfinite
@@ -42,6 +42,7 @@ from src.services.orchestration.processing.capability import (
 from src.services.orchestration.processing.observed import (
     PHASE_OPTIONAL_TOOLS,
     PHASE_TOOLS,
+    Measured,
     Phase,
     exhausted_before,
     load_usages,
@@ -51,6 +52,7 @@ from src.services.orchestration.processing.observed import (
 )
 from src.services.orchestration.processing.procfs import process_alive, process_table, process_tree
 from src.services.orchestration.processing.resources import estimate_gb
+from src.services.orchestration.processing.telemetry import ResourceUsage
 
 if TYPE_CHECKING:
     from src.services.orchestration.projects.registry import ProjectRegistry
@@ -71,6 +73,12 @@ OperationParentKind = Literal["job", "import"]
 STALE_AFTER = timedelta(minutes=15)
 #: Khoảng nghỉ giữa hai lần dọn scratch khi thiếu đĩa; dọn là quét thư mục, không cần mỗi lượt poll.
 RECLAIM_INTERVAL_SECONDS = 300.0
+#: Cấu hình chưa có số đo (cả trùng khớp lẫn cận trên) vẫn được chạy chung GPU nếu ước lượng VRAM không quá
+#: tỉ lệ này của phần VRAM còn trống sau khi trừ worker khác giữ; ước lượng lớn hơn thì chạy một mình để đo.
+UNMEASURED_SHARE_RATIO = 0.5
+#: Nguồn của số "cần": `exact` = số đo đúng cấu hình này; `upper_bound` = số đo của cấu hình nặng hơn ở mọi
+#: thông số; `estimate` = chỉ có ước lượng theo cấu hình.
+MeasuredScope = Literal["exact", "upper_bound", "estimate"]
 _LOCK_KEY = "real2sim.runtime.resource-reservations"
 
 
@@ -95,12 +103,14 @@ class ResourceWait(BaseModel):
     required_gb: dict[Resource, float]
     available_gb: dict[Resource, float | None]
     waiting_on: list[Resource]
-    #: `measured`: VRAM/RAM cần lấy từ số đo các lượt chạy trước; `configured_preview`: ước lượng theo cấu hình.
-    estimate_scope: Literal["configured_preview", "measured"] = "configured_preview"
+    #: `measured`: VRAM/RAM cần lấy từ số đo các lượt chạy trước của đúng cấu hình; `upper_bound`: lấy từ số đo
+    #: của cấu hình nặng hơn; `configured_preview`: ước lượng theo cấu hình.
+    estimate_scope: Literal["configured_preview", "measured", "upper_bound"] = "configured_preview"
     #: Mặc định rỗng để đọc được observation do bản worker trước ghi.
     reasons: dict[Resource, WaitReason] = Field(default_factory=dict)
     capacity_gb: dict[Resource, float | None] = Field(default_factory=dict)
-    #: Chưa có số đo cho cấu hình này (hoặc lượt trước hết bộ nhớ): job phải chạy một mình trên GPU.
+    #: Chưa có số đo cho cấu hình này, ước lượng lớn so với VRAM trống (hoặc lượt trước hết bộ nhớ): job phải chạy
+    #: một mình trên GPU.
     needs_exclusive_gpu: bool = False
 
 
@@ -288,10 +298,25 @@ class Demand(BaseModel):
 
     required_gb: dict[Resource, float]
     danger_ratio: float
-    #: True: VRAM/RAM lấy từ số đo → được chạy chung GPU. False: chỉ có ước lượng → phải chạy một mình.
-    measured: bool
+    #: `exact`/`upper_bound`: VRAM/RAM lấy từ số đo → được chạy chung GPU. `estimate`: chỉ có ước lượng → chạy một
+    #: mình, trừ khi ước lượng nhỏ so với VRAM trống (xem `UNMEASURED_SHARE_RATIO`).
+    measured_scope: MeasuredScope
     #: Mặc định giữ tương thích mọi caller reconstruction job hiện tại.
     gpu_required: bool = True
+    #: Job này từng có lượt chết vì hết bộ nhớ: luôn chạy một mình, không áp biên an toàn của ước lượng.
+    exhausted: bool = False
+
+    @property
+    def measured(self) -> bool:
+        """Số "cần" lấy từ số đo (đúng cấu hình hoặc cận trên), không phải ước lượng."""
+        return self.measured_scope != "estimate"
+
+
+_ESTIMATE_SCOPE: dict[MeasuredScope, Literal["configured_preview", "measured", "upper_bound"]] = {
+    "exact": "measured",
+    "upper_bound": "upper_bound",
+    "estimate": "configured_preview",
+}
 
 
 def job_drivers(registry: ProjectRegistry, settings: Settings, job: JobManifest) -> dict[str, float] | None:
@@ -366,28 +391,44 @@ class ResourceAdmission:
             return None
         usages = pipeline_usages(load_usages(self.database))
         budget = None
+        scope: MeasuredScope = "estimate"
+        exhausted = exhausted_before(usages, job.job_id)
         colmap_use_gpu = config.colmap.get("use_gpu", False)
-        if not exhausted_before(usages, job.job_id) and isinstance(colmap_use_gpu, bool):
+        if not exhausted and isinstance(colmap_use_gpu, bool):
             observation_params = resource_observation_params(params, colmap_use_gpu=colmap_use_gpu)
-            # A heavier configuration gives an upper bound, not a measurement of this config.
-            # New configurations use the existing exclusive-run path to collect their own measurements.
-            budget = observed_budget(
-                (usage for usage in usages if usage.params == observation_params),
-                tools=PHASE_TOOLS[phase],
-                optional_tools=PHASE_OPTIONAL_TOOLS[phase],
-                params=observation_params,
-                gpu_name=gpu_name,
-                runtime_manifest_checksum=job.runtime_manifest_checksum,
-            )
+
+            # Lượt chạy nặng hơn ở mọi thông số (`dominates`) là cận trên an toàn cho cấu hình này, nên cấu hình
+            # mới được chạy chung GPU theo số đo đó thay vì phải chạy một mình. Thiếu số đo của bất kỳ tool bắt
+            # buộc nào của phase thì vẫn không có ngân sách.
+            def phase_budget(candidates: Iterable[ResourceUsage]) -> dict[Measured, float] | None:
+                return observed_budget(
+                    candidates,
+                    tools=PHASE_TOOLS[phase],
+                    optional_tools=PHASE_OPTIONAL_TOOLS[phase],
+                    params=observation_params,
+                    gpu_name=gpu_name,
+                    runtime_manifest_checksum=job.runtime_manifest_checksum,
+                )
+
+            budget = phase_budget(usages)
+            if budget is not None:
+                # `exact` khi mọi tool bắt buộc đều có lượt đo đúng cấu hình này; không thì chỉ là cận trên.
+                exact = phase_budget(usage for usage in usages if usage.params == observation_params)
+                scope = "exact" if exact is not None else "upper_bound"
         if budget is None:
-            return Demand(required_gb=estimate, danger_ratio=presets.resource_model.danger_ratio, measured=False)
+            return Demand(
+                required_gb=estimate,
+                danger_ratio=presets.resource_model.danger_ratio,
+                measured_scope="estimate",
+                exhausted=exhausted,
+            )
         # Đĩa vẫn theo ước lượng: số đo scratch chỉ là phần trong workspace, chưa gồm artifact publish.
         required: dict[Resource, float] = {
             "vram": round(budget["vram"], 2),
             "ram": round(budget["ram"], 2),
             "disk": estimate["disk"],
         }
-        return Demand(required_gb=required, danger_ratio=presets.resource_model.danger_ratio, measured=True)
+        return Demand(required_gb=required, danger_ratio=presets.resource_model.danger_ratio, measured_scope=scope)
 
     def operation_profile_for_job(self, job: JobManifest, *, gpu_required: bool) -> OperationResourceProfile:
         """Use the job's existing finalize resource model for a heavy scene operation.
@@ -718,6 +759,17 @@ class ResourceAdmission:
             if name == "vram" and any(item.exclusive for item in peers):
                 value = 0.0
             available[name] = value
+        if (
+            exclusive
+            and isinstance(demand, Demand)
+            and gpu_required
+            and not demand.exhausted
+            and available["vram"] is not None
+            and demand.required_gb["vram"] <= available["vram"] * UNMEASURED_SHARE_RATIO
+        ):
+            # Chưa có số đo nhưng ước lượng nhỏ so với VRAM còn trống: chạy chung, không bắt chạy một mình.
+            # Peer đang chạy một mình làm `available` = 0 nên vẫn không chen vào job đang đo.
+            exclusive = False
 
         if demand is None:
             # Compatibility path: legacy job chưa có resource model chỉ yêu cầu GPU rảnh.
@@ -781,7 +833,7 @@ class ResourceAdmission:
                     required_gb=demand.required_gb,
                     available_gb=decision.available_gb,
                     waiting_on=decision.waiting_on,
-                    estimate_scope="measured" if demand.measured else "configured_preview",
+                    estimate_scope=_ESTIMATE_SCOPE[demand.measured_scope],
                     reasons=decision.reasons,
                     capacity_gb=decision.capacity_gb,
                     needs_exclusive_gpu=decision.exclusive,

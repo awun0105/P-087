@@ -203,8 +203,8 @@ export interface ResourceWaitView {
   required_gb: Record<ResourceName, number>;
   available_gb: Record<ResourceName, number | null>;
   waiting_on: ResourceName[];
-  /** measured: số "cần" lấy từ số đo các lượt chạy trước; configured_preview: ước lượng theo cấu hình. */
-  estimate_scope: "configured_preview" | "measured";
+  /** measured: số "cần" lấy từ số đo các lượt chạy trước; upper_bound: số đo của cấu hình nặng hơn; configured_preview: ước lượng theo cấu hình. */
+  estimate_scope: "configured_preview" | "measured" | "upper_bound";
   /** Chưa có số đo cho cấu hình này: job phải chạy một mình trên GPU. */
   needs_exclusive_gpu?: boolean;
   /** Thiếu ở observation do bản worker cũ ghi. */
@@ -546,7 +546,7 @@ export function parseJobProgress(value: unknown): JobProgress {
     const wait = value.resource_wait;
     if (!isRecord(wait) || typeof wait.checked_at !== "string" || typeof wait.job_manifest_checksum !== "string" ||
         !isRecord(wait.required_gb) || !isRecord(wait.available_gb) || !Array.isArray(wait.waiting_on) ||
-        (wait.estimate_scope !== "configured_preview" && wait.estimate_scope !== "measured") ||
+        !["configured_preview", "measured", "upper_bound"].includes(String(wait.estimate_scope)) ||
         (wait.needs_exclusive_gpu !== undefined && typeof wait.needs_exclusive_gpu !== "boolean") ||
         !["vram", "ram", "disk"].every((key) => isFiniteNumber((wait.required_gb as Record<string, unknown>)[key]) &&
           ((wait.available_gb as Record<string, unknown>)[key] === null || isFiniteNumber((wait.available_gb as Record<string, unknown>)[key]))) ||

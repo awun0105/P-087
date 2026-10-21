@@ -11,16 +11,24 @@ const REASON: Record<ResourceWaitReason, string> = {
   gate_error: "Bước kiểm tra tài nguyên bị lỗi trên máy xử lý nên chưa chạy. Nếu kéo dài quá 30 phút, việc sẽ dừng để bạn thử lại; báo quản trị viên kiểm tra máy xử lý.",
 };
 
+/** Số "cần" của VRAM/RAM lấy từ đâu; đĩa luôn là ước lượng. */
+const SOURCE: Record<ResourceWaitView["estimate_scope"], string> = {
+  measured: "các lượt chạy trước đã dùng tới",
+  upper_bound: "theo số đo của cấu hình nặng hơn, cần tối đa",
+  configured_preview: "cần khoảng",
+};
+
 function gigabytes(value: number | null | undefined): string {
   return value === null || value === undefined ? "chưa đo được" : `${value.toFixed(1)} GB`;
 }
 
 /**
  * Chi tiết lần đo gần nhất của worker khi job chờ tài nguyên: thiếu gì, cần bao nhiêu, đang có bao nhiêu.
- * Số "cần" là số đo của các lượt chạy trước (`measured`) hoặc ước lượng theo cấu hình; UI nói rõ là loại nào.
+ * Số "cần" là số đo của các lượt chạy trước (`measured`), số đo của cấu hình nặng hơn (`upper_bound`) hoặc ước
+ * lượng theo cấu hình; UI nói rõ là loại nào.
  */
 export function ResourceWaitDetail({ wait }: { wait: ResourceWaitView }) {
-  const measured = wait.estimate_scope === "measured";
+  const source = SOURCE[wait.estimate_scope];
   return (
     <div className="rounded-lg bg-paper-sunken p-3">
       <ul className="space-y-2">
@@ -39,7 +47,7 @@ export function ResourceWaitDetail({ wait }: { wait: ResourceWaitView }) {
           return (
             <li key={resource}>
               <p className="font-medium text-ink">
-                {LABEL[resource]}: {measured && resource !== "disk" ? "các lượt chạy trước đã dùng tới" : "cần khoảng"} {gigabytes(wait.required_gb[resource])}, đang có {gigabytes(wait.available_gb[resource])}
+                {LABEL[resource]}: {resource !== "disk" ? source : "cần khoảng"} {gigabytes(wait.required_gb[resource])}, đang có {gigabytes(wait.available_gb[resource])}
                 {capacity !== null && capacity !== undefined ? ` (máy có tổng ${gigabytes(capacity)})` : ""}
               </p>
               {reason && <p className="mt-0.5">{REASON[reason]}</p>}

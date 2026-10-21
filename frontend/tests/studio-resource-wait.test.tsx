@@ -48,6 +48,9 @@ describe("đợi tài nguyên với config đã chọn", () => {
     // Có số đo: ghi rõ con số là mức các lượt trước đã dùng.
     rerender(<ProgressTab jobId={progress.job_id} progress={{ ...progress, resource_wait: { ...wait, waiting_on: ["vram"], reasons: { vram: "busy" }, estimate_scope: "measured" } }} info={null} busy={false} canCancel={false} onCancel={vi.fn()} />);
     expect(screen.getByText(/VRAM GPU: các lượt chạy trước đã dùng tới 6\.0 GB, đang có 3\.0 GB/)).toBeInTheDocument();
+    // Cận trên: số đo lấy từ cấu hình nặng hơn, không trình bày như số đo của đúng cấu hình này.
+    rerender(<ProgressTab jobId={progress.job_id} progress={{ ...progress, resource_wait: { ...wait, waiting_on: ["vram"], reasons: { vram: "busy" }, estimate_scope: "upper_bound" } }} info={null} busy={false} canCancel={false} onCancel={vi.fn()} />);
+    expect(screen.getByText(/VRAM GPU: theo số đo của cấu hình nặng hơn, cần tối đa 6\.0 GB, đang có 3\.0 GB/)).toBeInTheDocument();
     // Observation của worker cũ (không có lý do) vẫn hiện số đo.
     rerender(<ProgressTab jobId={progress.job_id} progress={progress} info={null} busy={false} canCancel={false} onCancel={vi.fn()} />);
     expect(screen.getByText(/VRAM GPU: cần khoảng 6\.0 GB, đang có 3\.0 GB/)).toBeInTheDocument();
@@ -75,6 +78,7 @@ describe("đợi tài nguyên với config đã chọn", () => {
     expect(() => parseJobProgress({ ...progress, resource_wait: { ...progress.resource_wait, estimate_scope: "guessed" } })).toThrow();
     expect(() => parseJobProgress({ ...progress, resource_wait: { ...progress.resource_wait, needs_exclusive_gpu: "yes" } })).toThrow();
     expect(parseJobProgress({ ...progress, resource_wait: { ...progress.resource_wait, estimate_scope: "measured", needs_exclusive_gpu: false } }).resource_wait?.estimate_scope).toBe("measured");
+    expect(parseJobProgress({ ...progress, resource_wait: { ...progress.resource_wait, estimate_scope: "upper_bound" } }).resource_wait?.estimate_scope).toBe("upper_bound");
     expect(() => parseJobProgress({ ...progress, resource_wait: { ...progress.resource_wait, capacity_gb: { vram: "big" } } })).toThrow();
     expect(parseJobProgress({ ...progress, resource_wait: { ...progress.resource_wait, reasons: { vram: "external" }, capacity_gb: { vram: 4, ram: 31, disk: null } } }).resource_wait?.reasons?.vram).toBe("external");
     expect(parseJobProgress(progress).waiting_for).toBe("resources");
