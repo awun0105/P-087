@@ -13,7 +13,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict
 
 from src.services.orchestration.gpu.state import db_time, load_control
-from src.services.orchestration.jobs.database import RuntimeDatabase
+from src.services.orchestration.jobs.database import RuntimeDatabase, RuntimeTransaction
 
 #: Used until the deployment has finished at least one cold start (image pull + worker preflight).
 DEFAULT_STARTUP_SECONDS = 900
@@ -40,6 +40,9 @@ class GpuCapacity(BaseModel):
     remaining_seconds: int | None = None
     #: Measured cold starts behind the estimate; 0 means the default is used.
     sample_count: int = 0
+    #: T-073: pipeline steps waiting for (or just claimed by) a worker, by the resource they need.
+    pending_gpu_steps: int = 0
+    pending_cpu_steps: int = 0
 
 
 def expected_startup_seconds(history: list[dict]) -> tuple[int, int]:
@@ -56,10 +59,25 @@ def expected_startup_seconds(history: list[dict]) -> tuple[int, int]:
     return int(round(median(samples))), len(samples)
 
 
+def _step_counts(tx: RuntimeTransaction) -> dict[str, int]:
+    """Bước đang chờ theo loại, đọc trong cùng transaction; lỗi đọc không làm hỏng trạng thái GPU."""
+    from src.services.orchestration.jobs.steps import pending_step_counts_in
+
+    try:
+        counts = pending_step_counts_in(tx)
+    except Exception:  # noqa: BLE001 - chỉ là số phụ trên màn chờ
+        return {}
+    return {"pending_gpu_steps": counts["gpu"], "pending_cpu_steps": counts["cpu"]}
+
+
 def gpu_capacity(database: RuntimeDatabase | None, deployment_id: str) -> GpuCapacity:
     """Current managed-GPU state; `unmanaged` when this API does not run the RunPod controller."""
-    if database is None or not deployment_id or database.scope:
+    if database is None:
         return GpuCapacity(state="unmanaged", expected_startup_seconds=DEFAULT_STARTUP_SECONDS)
+    if not deployment_id or database.scope:
+        with database.transaction() as tx:
+            counts = _step_counts(tx)
+        return GpuCapacity(state="unmanaged", expected_startup_seconds=DEFAULT_STARTUP_SECONDS, **counts)
     with database.transaction() as tx:
         row = tx.execute("SELECT payload FROM r2s_gpu_control WHERE deployment_id=?", (deployment_id,)).fetchone()
         history = [
@@ -69,16 +87,17 @@ def gpu_capacity(database: RuntimeDatabase | None, deployment_id: str) -> GpuCap
             ).fetchall()
         ]
         now = db_time(tx)
+        counts = _step_counts(tx)
     expected, samples = expected_startup_seconds(history)
     if row is None:
-        return GpuCapacity(state="off", expected_startup_seconds=expected, sample_count=samples)
+        return GpuCapacity(state="off", expected_startup_seconds=expected, sample_count=samples, **counts)
     raw = json.loads(row[0])
     control = load_control(raw)
 
     def stamp(value: float) -> datetime | None:
         return datetime.fromtimestamp(value, UTC) if value else None
 
-    common = {"expected_startup_seconds": expected, "sample_count": samples}
+    common = {"expected_startup_seconds": expected, "sample_count": samples, **counts}
     if control.state in _STARTING:
         started = control.created_at or control.phase_since
         elapsed = max(0, int(now - started)) if started else None

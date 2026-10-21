@@ -10,6 +10,7 @@ from src.services.orchestration.gpu.classification import import_gpu, scene_gpu
 from src.services.orchestration.jobs.admission import STALE_AFTER
 from src.services.orchestration.jobs.database import RuntimeDatabase, demo_database_url
 from src.services.orchestration.jobs.queue import waiting_jobs
+from src.services.orchestration.jobs.steps import STEP_KIND, runnable_step
 from src.services.orchestration.projects.registry import ProjectRegistry
 
 
@@ -26,6 +27,10 @@ class Workload:
     pending: list[Demand] = field(default_factory=list)
     active: int = 0
     cpu_pending: int = 0
+    #: T-073: bước pipeline đang chờ worker, theo loại tài nguyên. Bước CPU của pipeline cũng chạy trên máy GPU
+    #: (chủ dự án chốt 2026-10-21: làn CPU trên máy API không nhận bước pipeline), nên cả hai đều là nhu cầu thuê máy.
+    gpu_steps: int = 0
+    cpu_steps: int = 0
     blocked: list[str] = field(default_factory=list)
     complete: bool = True
 
@@ -74,9 +79,15 @@ def scan_scope(
         else:
             result.blocked.append(f"{scope}:{kind}:unsupported_runtime_or_resources")
 
-    # Semantic job queue includes reviewed-preview and finalize, not all RUNNING jobs.
+    # Hàng đợi theo bước (T-073): mỗi job đang chờ có đúng một bước sẵn sàng; thuê máy theo bước đó, không theo job.
     for item in waiting_jobs(registry):
         job = registry.get_job(item.job_id)
+        try:
+            step = runnable_step(job)
+        except Exception:  # noqa: BLE001 - manifest lạ: thuê máy như trước (một job chờ = một nhu cầu GPU)
+            step = "pose_visual"
+        if step is None:
+            continue  # job chờ người dùng (vd duyệt bản đã che) không cần máy
         runtime = job.runtime_manifest_checksum if job.stage_artifacts else None
         with database.transaction() as tx:
             wait = tx.execute("SELECT payload FROM r2s_resource_waits WHERE job_id=?", (item.job_id,)).fetchone()
@@ -85,6 +96,11 @@ def scan_scope(
             payload = json.loads(wait[0])
             if payload.get("job_manifest_checksum") == getattr(job, "job_manifest_checksum", None):
                 required = payload.get("required_gb") or {}
+        if STEP_KIND[step] == "cpu":
+            result.cpu_steps += 1
+            required = {**required, "vram": 0}  # bước CPU chỉ cần RAM/đĩa của máy GPU
+        else:
+            result.gpu_steps += 1
         pending("pipeline", item.job_id, runtime, seed=getattr(job, "seed", None), required=required)
     with database.transaction() as tx:
         for (expires,) in tx.execute("SELECT lease_expires_at FROM r2s_job_leases").fetchall():
@@ -178,6 +194,8 @@ def inventory(settings: Settings, source: ProjectRegistry, catalog: ReleaseCatal
             result.pending.extend(work.pending)
             result.active += work.active
             result.cpu_pending += work.cpu_pending
+            result.gpu_steps += work.gpu_steps
+            result.cpu_steps += work.cpu_steps
             result.blocked.extend(work.blocked)
             result.complete &= work.complete
         except (KeyError, ValueError, OSError, RuntimeError):

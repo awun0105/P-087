@@ -583,13 +583,18 @@ def ready_view_lods(database: RuntimeDatabase, *, now: datetime | None = None) -
 
 def pending_step_counts(database: RuntimeDatabase, *, now: datetime | None = None) -> dict[str, int]:
     """Số bước máy của pipeline (không gồm `view_lod`) đang chờ hoặc vừa được nhận, theo loại tài nguyên."""
+    with database.transaction() as tx:
+        return pending_step_counts_in(tx, now=now)
+
+
+def pending_step_counts_in(tx: RuntimeTransaction, *, now: datetime | None = None) -> dict[str, int]:
+    """Như `pending_step_counts`, trong transaction của người gọi."""
     current = now or datetime.now(UTC)
     counts = {"gpu": 0, "cpu": 0}
-    with database.transaction() as tx:
-        rows = tx.execute(
-            "SELECT kind, state, lease_expires_at FROM r2s_job_steps WHERE step_id<>'view_lod' "
-            "AND state IN ('ready','claimed')"
-        ).fetchall()
+    rows = tx.execute(
+        "SELECT kind, state, lease_expires_at FROM r2s_job_steps WHERE step_id<>'view_lod' "
+        "AND state IN ('ready','claimed')"
+    ).fetchall()
     for kind, state, lease in rows:
         if kind not in counts:
             continue
