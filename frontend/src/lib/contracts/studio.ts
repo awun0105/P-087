@@ -399,6 +399,8 @@ export interface MachineCapability {
   idle_vram_free_gb?: number | null;
   idle_ram_available_gb?: number | null;
   idle_disk_free_gb?: number | null;
+  /** Worker có từ điển khép vòng của COLMAP đúng định dạng; null/thiếu = worker cũ chưa báo. */
+  colmap_vocab_tree_available?: boolean | null;
 }
 
 export type ResourceStatus = "ok" | "warn" | "danger" | "unknown";
@@ -431,17 +433,30 @@ export interface ProcessingOptions {
   anonymize_enforced?: boolean;
 }
 
+/** Sự thật của video đã chuẩn bị (server đo, `observed_video`). Khớp `VideoFacts` backend. */
+export interface VideoFacts {
+  duration_seconds: number;
+  display_width: number;
+  display_height: number;
+  frame_rate: number | null;
+}
+
 export interface ScenarioPreferences {
   input_type: "video_continuous" | "video_loop_360" | "photo_set";
   environment: "indoor" | "outdoor";
   subject_scope: "single_object" | "full_room";
-  target_capacity: "minimum_quality" | "balanced" | "machine_maximum";
+  target_capacity: "standard" | "high_quality";
+  /** Thời lượng/độ phân giải của video trong candidate đang chọn; bộ ảnh gửi null. */
+  video?: VideoFacts | null;
+  photo_count?: number | null;
 }
 
 export interface SuggestResponse {
   preset_name: string;
   params: Record<string, ParamValue>;
   evaluation: ProcessingEvaluation;
+  /** Mỗi quyết định của bộ gợi ý bằng lời thường; server cũ không gửi trường này. */
+  notes: string[];
 }
 
 /** Reject malformed suggestions before applying them to the configuration form. */
@@ -472,7 +487,10 @@ export function parseSuggestResponse(value: unknown): SuggestResponse {
     isRecord(item) && typeof item.key === "string" && Object.hasOwn(value.params as object, item.key) &&
     validStatus(item.status) && (item.message === null || typeof item.message === "string")
   )) throw new Error("Thông số đánh giá của gợi ý không hợp lệ");
-  return value as unknown as SuggestResponse;
+  if (value.notes !== undefined && !(Array.isArray(value.notes) && value.notes.every((note) => typeof note === "string"))) {
+    throw new Error("Ghi chú của gợi ý không hợp lệ");
+  }
+  return { ...(value as unknown as SuggestResponse), notes: (value.notes as string[] | undefined) ?? [] };
 }
 
 export interface SampleSummary {
@@ -723,6 +741,12 @@ export interface StageView {
   cameras: { frame_id: number; center: [number, number, number]; rotation_xyzw: [number, number, number, number] }[];
   /** Khoá của lớp LiDAR đã căn chỉnh chồng lên scene; null/thiếu = scene không có lớp này. */
   lidar_overlay?: string | null;
+  /** Lớp camera: tỉ lệ ảnh COLMAP dựng được vị trí. */
+  registered_ratio?: number | null;
+  /** Lớp camera: số lần COLMAP tự thử lại ghép ảnh. */
+  retry_count?: number;
+  /** Lớp camera: mô hình được nhận dù thiếu ảnh sau khi tự thử lại. */
+  registration_warning?: boolean;
 }
 
 const VIEW_KINDS: readonly StageView["kind"][] = ["frames", "cameras", "gaussian", "mesh"];
@@ -740,7 +764,10 @@ export function parseStageViews(value: unknown): StageView[] {
         !Array.isArray(view.refs) || !Array.isArray(view.cameras) ||
         !view.refs.every((ref) => isRecord(ref) && typeof ref.artifact_uri === "string" && typeof ref.artifact_checksum === "string") ||
         !view.cameras.every((camera) => isRecord(camera) && Array.isArray(camera.center) && camera.center.every(isFiniteNumber)) ||
-        !(view.lidar_overlay === undefined || view.lidar_overlay === null || typeof view.lidar_overlay === "string")) {
+        !(view.lidar_overlay === undefined || view.lidar_overlay === null || typeof view.lidar_overlay === "string") ||
+        !(view.retry_count === undefined || (Number.isInteger(view.retry_count) && Number(view.retry_count) >= 0)) ||
+        !(view.registration_warning === undefined || typeof view.registration_warning === "boolean") ||
+        !(view.registered_ratio === undefined || view.registered_ratio === null || isFiniteNumber(view.registered_ratio))) {
       throw new Error("Một lớp xem không hợp lệ");
     }
   }

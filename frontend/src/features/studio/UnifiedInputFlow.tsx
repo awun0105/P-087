@@ -45,7 +45,7 @@ import { prepareVideoForUpload, type VideoPreparedArtifact, type VideoPreparatio
 import { errorMessage } from "@/lib/ui-error";
 import { formatBytes } from "@/lib/format";
 import { ProcessingSettings, scenarioLabel } from "@/features/studio/ProcessingSettings";
-import { useProcessingForm } from "@/features/studio/useProcessingForm";
+import { useProcessingForm, videoFactsFromObserved } from "@/features/studio/useProcessingForm";
 import { CaptureGuide } from "@/features/studio/CaptureGuide";
 import { FlowStepper } from "@/features/studio/FlowStepper";
 
@@ -392,7 +392,12 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
   const videoProcessing = activeCandidate
     ? activeCandidate.candidate_kind === "video_recipe"
     : intent === "video_reconstruction" || (intent !== "gaussian_view_import" && observedVideos.length > 0 && !hasMixedSceneKinds);
-  const processing = useProcessingForm(videoProcessing);
+  // T-071 D1: mở bước cấu hình với tuyến video thì tự gợi ý theo thời lượng/độ phân giải server đã đo.
+  const videoFacts = useMemo(
+    () => videoFactsFromObserved(snapshot?.video_preparation_verification?.observed_video),
+    [snapshot],
+  );
+  const processing = useProcessingForm(videoProcessing, null, true, { video: videoFacts, suggest: step >= 1 && videoProcessing });
   const visibleDiagnostics = report?.diagnostics.filter((item) =>
     !["ROUTE_AUTO_SELECTED", "ALTERNATIVE_ROUTE_NOT_USED"].includes(item.code)
   ) ?? [];
@@ -1496,7 +1501,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
 
       {step === 1 && videoProcessing && (
         <div className="mt-6 space-y-3">
-          {processing.options && processing.values && <ProcessingSettings parameters={processing.options.parameters} values={processing.values} editable evaluation={processing.evaluation} capability={processing.options.capability} activePreset={processing.activePreset} onPreset={processing.applyPreset} onChange={processing.setValue} onScenario={processing.applyScenario} scenarioPreset={processing.scenarioPreset} scenarioPreferences={processing.scenarioPreferences} suggesting={processing.suggesting} note={processing.options.resource_note} />}
+          {processing.options && processing.values && <ProcessingSettings parameters={processing.options.parameters} values={processing.values} editable evaluation={processing.evaluation} capability={processing.options.capability} activePreset={processing.activePreset} onPreset={processing.applyPreset} onChange={processing.setValue} onScenario={processing.applyScenario} scenarioPreset={processing.scenarioPreset} scenarioPreferences={processing.scenarioPreferences} scenarioNotes={processing.scenarioNotes} suggesting={processing.suggesting} note={processing.options.resource_note} />}
           {!processing.error && (processing.loading || !processing.values) && <Card className="p-5" role="status">Đang tải cấu hình xử lý…</Card>}
           {processing.error && <Notice tone="rust">{processing.options ? "Không kiểm tra được cấu hình xử lý." : "Không tải được cấu hình xử lý."} {processing.error}<Button type="button" size="sm" variant="secondary" onClick={processing.retry}>Thử lại</Button></Notice>}
         </div>

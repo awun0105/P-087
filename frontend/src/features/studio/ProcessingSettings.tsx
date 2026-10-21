@@ -26,6 +26,11 @@ const GROUPS: { key: ParameterSpec["group"]; title: string; hint: string }[] = [
 
 export type PresetKey = "minimum_quality" | "machine_maximum";
 
+/** Kịch bản mặc định khi mở bước "Thông số xử lý" với video (T-071 D1): bốn câu hỏi hiện sẵn lựa chọn này. */
+export const DEFAULT_SCENARIO: ScenarioPreferences = {
+  input_type: "video_continuous", environment: "indoor", subject_scope: "full_room", target_capacity: "standard",
+};
+
 const PRESET_LABEL: Record<PresetKey, { title: string; hint: string }> = {
   minimum_quality: { title: "Tối thiểu · chất lượng tốt", hint: "Khuyến nghị, nhanh và ổn định" },
   machine_maximum: { title: "Tối đa cho máy này", hint: "Cao nhất mà máy xử lý chịu được" },
@@ -63,6 +68,7 @@ export function ProcessingSettings({
   onScenario,
   scenarioPreset,
   scenarioPreferences,
+  scenarioNotes = [],
   suggesting = false,
 }: {
   parameters: ParameterSpec[];
@@ -78,6 +84,8 @@ export function ProcessingSettings({
   onScenario?: (preferences: ScenarioPreferences) => Promise<void>;
   scenarioPreset?: string | null;
   scenarioPreferences?: ScenarioPreferences | null;
+  /** Ghi chú của bộ gợi ý (lấy thưa frame, hạ độ phân giải, máy giới hạn…), hiện dưới dòng "Đã áp dụng". */
+  scenarioNotes?: string[];
   suggesting?: boolean;
 }) {
   const statusOf = (key: string) => evaluation?.parameters.find((item) => item.key === key);
@@ -108,6 +116,12 @@ export function ProcessingSettings({
 
       {editable && onScenario && <ScenarioWizard onChange={onScenario} suggesting={suggesting} initialPreferences={scenarioPreferences} />}
       {scenarioPreset && <p className="mt-3 text-sm" role="status">Đã áp dụng: <Badge tone="neutral">{scenarioLabel(scenarioPreset, scenarioPreferences)}</Badge></p>}
+      {scenarioPreset && scenarioNotes.length > 0 && <ul aria-label="Ghi chú của gợi ý" className="mt-2 space-y-1 text-xs">
+        {scenarioNotes.map((item) => <li key={item} className={cn("flex items-start gap-1.5", isReductionNote(item) ? "text-ochre" : "text-ink-muted")}>
+          {isReductionNote(item) && <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden />}
+          <span>{item}</span>
+        </li>)}
+      </ul>}
       {editable && onPreset && !onScenario && (
         <div role="radiogroup" aria-label="Preset thông số" className="mt-5 grid gap-2 sm:grid-cols-2">
           {(Object.keys(PRESET_LABEL) as PresetKey[]).map((key) => (
@@ -189,9 +203,18 @@ export const SCENARIO_LABELS: Record<string, string> = {
   photo_collection_indoor: "Bộ ảnh trong nhà", photo_collection_outdoor: "Bộ ảnh ngoài trời",
 };
 
+const CAPACITY_LABELS: Record<ScenarioPreferences["target_capacity"], string> = {
+  standard: "Chuẩn", high_quality: "Chất lượng cao hơn",
+};
+
 export function scenarioLabel(preset: string, preferences?: ScenarioPreferences | null): string {
-  const target = preferences ? { minimum_quality: "Tối thiểu cho máy này", balanced: "Cân bằng", machine_maximum: "Tối đa cho máy này" }[preferences.target_capacity] : null;
+  const target = preferences ? CAPACITY_LABELS[preferences.target_capacity] : null;
   return [SCENARIO_LABELS[preset] ?? preset, target].filter(Boolean).join(" · ");
+}
+
+/** Ghi chú báo một thông số bị hạ hoặc một giới hạn của máy/dữ liệu: hiện giọng cảnh báo. */
+function isReductionNote(note: string): boolean {
+  return /giảm|giới hạn|chưa có|mất nhiều giờ/.test(note);
 }
 
 const SCENARIO_QUESTIONS = [
@@ -205,16 +228,19 @@ const SCENARIO_QUESTIONS = [
     { value: "single_object", label: "Một vật thể" }, { value: "full_room", label: "Toàn bộ căn phòng" },
   ] },
   { key: "target_capacity", label: "Mức xử lý", icon: Sparkles, choices: [
-    { value: "minimum_quality", label: "Tối thiểu cho máy này" }, { value: "balanced", label: "Cân bằng" }, { value: "machine_maximum", label: "Tối đa cho máy này" },
+    { value: "standard", label: "Chuẩn (khuyên dùng)" }, { value: "high_quality", label: "Chất lượng cao hơn (lâu hơn, nặng hơn)" },
   ] },
 ] as const;
+type QuestionKey = (typeof SCENARIO_QUESTIONS)[number]["key"];
 
 function ScenarioWizard({ onChange, suggesting, initialPreferences }: { onChange: (preferences: ScenarioPreferences) => Promise<void>; suggesting: boolean; initialPreferences?: ScenarioPreferences | null }) {
   const id = useId();
-  const [preferences, setPreferences] = useState<ScenarioPreferences | null>(initialPreferences ?? null);
-  const choose = (key: keyof ScenarioPreferences, value: ScenarioPreferences[keyof ScenarioPreferences]) => {
-    const next = { ...(preferences ?? { input_type: "video_continuous", environment: "indoor", subject_scope: "full_room", target_capacity: "balanced" } as ScenarioPreferences), [key]: value };
-    setPreferences(next);
+  // Gợi ý tự động khi mở bước (T-071 D1) đến sau lần render đầu: lựa chọn của người dùng thắng, không thì theo hook.
+  const [chosen, setChosen] = useState<ScenarioPreferences | null>(null);
+  const preferences = chosen ?? initialPreferences ?? null;
+  const choose = (key: QuestionKey, value: string) => {
+    const next = { ...(preferences ?? DEFAULT_SCENARIO), [key]: value } as ScenarioPreferences;
+    setChosen(next);
     void onChange(next);
   };
   return <section aria-label="Chọn nhanh kịch bản" className="mt-5 space-y-4">
