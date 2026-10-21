@@ -273,7 +273,7 @@ describe("unified input flow", () => {
     window.sessionStorage.clear();
     mocks.processingOptions.mockReset().mockResolvedValue({ ok: true, data: processingOptions });
     mocks.evaluateProcessing.mockReset().mockResolvedValue({ ok: true, data: processingOptions.default_evaluation });
-    mocks.suggestProcessing.mockReset().mockResolvedValue({ ok: true, data: { preset_name: "video_indoor_walkthrough", params: { "sampling.max_frames": 100 }, evaluation: processingOptions.default_evaluation } });
+    mocks.suggestProcessing.mockReset().mockResolvedValue({ ok: true, data: { preset_name: "video_indoor_walkthrough", params: { "sampling.max_frames": 100 }, evaluation: processingOptions.default_evaluation, notes: [] } });
     mocks.prepareVideo.mockResolvedValue({ dispose: vi.fn(), file: new File(["prepared"], "normalized.mp4", { type: "video/mp4" }), frameMapFile: new File(["map"], "frame-map.jsonl"), manifest: {} });
     let nextUpload = 0;
     mocks.uploadPrepared.mockImplementation((_prepared, options) => {
@@ -318,15 +318,34 @@ describe("unified input flow", () => {
 
   it("shows processing settings for an automatically selected video and sends the chosen preset", async () => {
     mocks.resolve.mockReset().mockResolvedValue({ report: report("ready", [videoCandidate("r1-auto", "file-upload-1", "ready")], "r1-auto") });
+    // Server đã đo video 3 phút 1920×1080: bước cấu hình tự gợi ý theo số đo đó (T-071 D1).
+    const observed = { display_width: 1920, display_height: 1080, duration_ticks: 16_200_000, time_base: { numerator: 1, denominator: 90_000 }, frame_rate: { numerator: 30, denominator: 1 } };
+    const withVideo = (value: ReturnType<typeof snapshot>) => ({ ...value, video_preparation_verification: { observed_video: observed } as never });
+    mocks.create.mockResolvedValue(withVideo(snapshot(1)));
+    mocks.revise.mockImplementation(async (_assemblyId: string, revision: number) => withVideo(snapshot(revision + 1)));
+    mocks.suggestProcessing.mockImplementation(async (preferences: { target_capacity: string }) => ({ ok: true, data: {
+      preset_name: "video_indoor_walkthrough", params: { "sampling.max_frames": preferences.target_capacity === "high_quality" ? 100 : 60 },
+      evaluation: processingOptions.default_evaluation, notes: ["Video 3 phút 0 giây: lấy 1,7 khung hình mỗi giây (tối đa 300 ảnh)"],
+    } }));
     const { container } = render(<UnifiedInputFlow />);
     fireEvent.change(container.querySelector<HTMLInputElement>('input[type="file"]')!, { target: { files: [new File(["video"], "warehouse.mp4", { type: "video/mp4" })] } });
     fireEvent.click(await screen.findByRole("button", { name: "Tải file đã chọn lên" }));
+    expect(mocks.suggestProcessing).not.toHaveBeenCalled();
     await nextStep();
     await screen.findByRole("heading", { name: "Thông số xử lý" });
     expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ requested_intent: null }));
     expect(screen.queryByRole("button", { name: /Tạo scene/ })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("radio", { name: /Tối đa cho máy này/ }));
-    await waitFor(() => expect(mocks.suggestProcessing).toHaveBeenCalledWith(expect.objectContaining({ target_capacity: "machine_maximum" }), expect.any(AbortSignal)));
+    await waitFor(() => expect(mocks.suggestProcessing).toHaveBeenCalledWith({
+      input_type: "video_continuous", environment: "indoor", subject_scope: "full_room", target_capacity: "standard",
+      video: { duration_seconds: 180, display_width: 1920, display_height: 1080, frame_rate: 30 },
+    }, expect.any(AbortSignal)));
+    expect(await screen.findByText("Video 3 phút 0 giây: lấy 1,7 khung hình mỗi giây (tối đa 300 ảnh)")).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Chuẩn (khuyên dùng)" })).toBeChecked();
+    expect(screen.getByRole("radio", { name: "Video đi bộ liên tục" })).toBeChecked();
+    expect(screen.queryByRole("radio", { name: /Tối đa cho máy này/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("radio", { name: /Chất lượng cao hơn/ }));
+    await waitFor(() => expect(mocks.suggestProcessing).toHaveBeenLastCalledWith(expect.objectContaining({ target_capacity: "high_quality", video: expect.objectContaining({ duration_seconds: 180 }) }), expect.any(AbortSignal)));
+    expect(mocks.evaluateProcessing).not.toHaveBeenCalled();
     await nextStep();
     completeVideoAttestation();
     await waitFor(() => expect(screen.getByRole("button", { name: /Tạo scene/ })).toBeEnabled());
@@ -351,11 +370,13 @@ describe("unified input flow", () => {
       },
     });
     mocks.resolve.mockReset().mockResolvedValue({ report: report("ready", [videoCandidate("r1-auto", "file-upload-1", "ready")], "r1-auto") });
+    mocks.suggestProcessing.mockResolvedValue({ ok: true, data: { preset_name: "video_indoor_walkthrough", params: { "sampling.max_frames": 10, "scene.geometry_review": "required" }, evaluation: processingOptions.default_evaluation, notes: [] } });
     const { container } = render(<UnifiedInputFlow />);
     fireEvent.change(container.querySelector<HTMLInputElement>('input[type="file"]')!, { target: { files: [new File(["video"], "warehouse.mp4", { type: "video/mp4" })] } });
     fireEvent.click(await screen.findByRole("button", { name: "Tải file đã chọn lên" }));
     await nextStep();
     await screen.findByRole("heading", { name: "Thông số xử lý" });
+    await screen.findByText("Video trong nhà · Chuẩn");
     fireEvent.click(screen.getByRole("radio", { name: /Tạo mesh ngay, không duyệt/ }));
     await nextStep();
     completeVideoAttestation();
@@ -382,6 +403,7 @@ describe("unified input flow", () => {
       },
     });
     mocks.resolve.mockReset().mockResolvedValue({ report: report("ready", [videoCandidate("r1-summary", "file-upload-1", "ready")], "r1-summary") });
+    mocks.suggestProcessing.mockResolvedValue({ ok: true, data: { preset_name: "video_indoor_walkthrough", params: { "sampling.max_frames": 10, "scene.geometry_method": "shell", "scene.geometry_review": "required" }, evaluation: processingOptions.default_evaluation, notes: [] } });
     const { container } = render(<UnifiedInputFlow />);
     fireEvent.change(container.querySelector<HTMLInputElement>('input[type="file"]')!, { target: { files: [new File(["video"], "warehouse.mp4", { type: "video/mp4" })] } });
     fireEvent.click(await screen.findByRole("button", { name: "Tải file đã chọn lên" }));
@@ -459,16 +481,17 @@ describe("unified input flow", () => {
     await nextStep();
     expect(screen.getByRole("heading", { name: "Cấu hình xử lý" })).toHaveFocus();
     expect(screen.queryByRole("region", { name: "Tập input" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("radio", { name: /Tối đa cho máy này/ }));
+    await waitFor(() => expect(mocks.suggestProcessing).toHaveBeenCalledTimes(1));
+    fireEvent.click(await screen.findByRole("radio", { name: /Chất lượng cao hơn/ }));
     await nextStep();
     expect(screen.queryByRole("heading", { name: "Thông số xử lý" })).not.toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "Tóm tắt lựa chọn" })).toHaveTextContent("Tối đa cho máy này");
+    expect(screen.getByRole("region", { name: "Tóm tắt lựa chọn" })).toHaveTextContent("Video trong nhà · Chất lượng cao hơn");
     fireEvent.change(screen.getByLabelText("Tên scene"), { target: { value: "Kho đã chọn" } });
     completeVideoAttestation();
     const evaluations = mocks.evaluateProcessing.mock.calls.length;
 
     fireEvent.click(screen.getByRole("button", { name: "Quay lại" }));
-    expect(screen.getByRole("radio", { name: /Tối đa cho máy này/ })).toBeChecked();
+    expect(screen.getByRole("radio", { name: /Chất lượng cao hơn/ })).toBeChecked();
     fireEvent.click(screen.getByRole("button", { name: "Quay lại" }));
     expect(screen.getByRole("button", { name: "Bỏ warehouse.mp4" })).toBeInTheDocument();
     await nextStep();
@@ -481,6 +504,7 @@ describe("unified input flow", () => {
     expect(mocks.resolve).toHaveBeenCalledTimes(1);
     expect(mocks.processingOptions).toHaveBeenCalledTimes(1);
     expect(mocks.evaluateProcessing).toHaveBeenCalledTimes(evaluations);
+    expect(mocks.suggestProcessing).toHaveBeenCalledTimes(2);  // tự gợi ý một lần + một lần đổi mức
     expect(mocks.temporaryUploads.mock.calls.some(([action]) => action === "discard")).toBe(false);
     expect(mocks.run).not.toHaveBeenCalled();
     view.unmount();
@@ -569,7 +593,7 @@ describe("unified input flow", () => {
     expect(fileInput!.accept).not.toContain(".mkv");
 
     fireEvent.change(fileInput!, { target: { files: [new File(["x"], "capture.mkv", { type: "video/x-matroska" })] } });
-    expect(await screen.findByText(/Pipeline không đọc được loại file này/)).toBeInTheDocument();
+    expect(await screen.findByText(/Chưa hỗ trợ loại file này/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Tải file đã chọn lên" })).toBeNull();
 
     fireEvent.change(fileInput!, {
@@ -580,7 +604,7 @@ describe("unified input flow", () => {
         ],
       },
     });
-    expect(await screen.findByText(/Đã bỏ qua 1 file pipeline không đọc được: notes\.docx/)).toBeInTheDocument();
+    expect(await screen.findByText(/Đã bỏ qua 1 file không đọc được: notes\.docx/)).toBeInTheDocument();
     expect(screen.getByText("video-a.mp4")).toBeInTheDocument();
     expect(screen.queryByText("notes.docx")).toBeNull();
   });
@@ -594,7 +618,7 @@ describe("unified input flow", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Tải file đã chọn lên" }));
     expect(await screen.findByText("Không dùng được")).toBeInTheDocument();
     expect(screen.queryByText("Đã xác minh")).toBeNull();
-    expect(screen.getByText(/không nhận ra vai trò nào trong file này/)).toBeInTheDocument();
+    expect(screen.getByText(/Không nhận ra loại file này/)).toBeInTheDocument();
   });
 
   it("does not call a Kalibr camera-IMU file verified, because no route can use it", async () => {
@@ -753,7 +777,7 @@ describe("unified input flow", () => {
     fireEvent.change(fileInput!, {
       target: { files: [new File(["x"], "a.mkv", { type: "video/x-matroska" }), new File(["y"], "b.docx")] },
     });
-    const rejected = await screen.findByText(/Pipeline không đọc được loại file này/);
+    const rejected = await screen.findByText(/Chưa hỗ trợ loại file này/);
     expect(rejected).toHaveTextContent("a.mkv");
     expect(rejected).toHaveTextContent("b.docx");
 
@@ -772,7 +796,7 @@ describe("unified input flow", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Tải file đã chọn lên" }));
     expect(await screen.findByText("Đã xác minh")).toBeInTheDocument();
     expect(screen.queryByText("Không dùng được")).toBeNull();
-    expect(screen.getByText(/1\/2 thành phần trong file này không nhận ra vai trò/)).toBeInTheDocument();
+    expect(screen.getByText(/1\/2 file trong gói không nhận ra loại/)).toBeInTheDocument();
   });
 
   it("đổi hướng link cũ của /new sang trang riêng và giữ tham số còn lại", async () => {
@@ -798,7 +822,8 @@ describe("unified input flow", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Tải file đã chọn lên" }));
     expect(await screen.findAllByText("Đã xác minh")).toHaveLength(2);
     expect(mocks.prepareVideo).toHaveBeenCalledTimes(2);
-    expect(mocks.prepareVideo.mock.calls[0][0]).toMatchObject({ preset: "720p", source: first });
+    // T-071 D5: mặc định chuẩn bị video ở 1080p.
+    expect(mocks.prepareVideo.mock.calls[0][0]).toMatchObject({ preset: "1080p", source: first });
     expect(mocks.uploadPrepared).toHaveBeenCalledTimes(2);
     await waitFor(() => expect(JSON.parse(window.sessionStorage.getItem("r2s:input-assembly:v1:user-1") ?? "{}").uploads).toHaveLength(2));
 
@@ -919,8 +944,8 @@ describe("unified input flow", () => {
       expect.arrayContaining([expect.objectContaining({ role: "rgb_frame_times" })]),
     );
 
-    fireEvent.change(screen.getByLabelText("File timestamp của frame RGB"), { target: { value: "file-upload-times" } });
-    fireEvent.change(screen.getByLabelText("Đơn vị timestamp RGB"), { target: { value: "milliseconds" } });
+    fireEvent.change(screen.getByLabelText("File thời điểm của khung hình video"), { target: { value: "file-upload-times" } });
+    fireEvent.change(screen.getByLabelText("Đơn vị thời điểm video"), { target: { value: "milliseconds" } });
 
     await waitFor(() => expect(mocks.revise).toHaveBeenCalledWith("assembly-1", 1, expect.objectContaining({
       bindings: [expect.objectContaining({ role: "rgb_frame_times", file_ids: ["file-upload-times"] })],
@@ -953,7 +978,7 @@ describe("unified input flow", () => {
     await waitFor(() => expect(mocks.resolve).toHaveBeenCalledTimes(1), { timeout: 4000 });
 
     // Đổi ô khai báo khi lần phân tích đầu còn treo (ô này không bị khoá lúc bận).
-    fireEvent.change(screen.getByLabelText("File timestamp của frame RGB"), { target: { value: "file-upload-times" } });
+    fireEvent.change(screen.getByLabelText("File thời điểm của khung hình video"), { target: { value: "file-upload-times" } });
     release({ report: report("ready", [videoCandidate("stale", "file-upload-1", "ready")], "stale") });
 
     // Kết quả cũ không được hiện, kiểm ngay trước khi lần phân tích mới (đợi 700ms) kịp chạy.
@@ -1023,7 +1048,7 @@ describe("unified input flow", () => {
     await nextStep();
     await nextStep();
     expect(screen.getByText("Đã sẵn sàng tạo scene")).toBeInTheDocument();
-    expect(screen.getByText("Import chỉ đưa scene 3DGS vào viewer hiện tại. Chưa có luồng xử lý tiếp scene đã import.")).toBeInTheDocument();
+    expect(screen.getByText("Scene 3DGS chỉ được mở để xem, không xử lý thêm.")).toBeInTheDocument();
     expect(screen.queryByText(/Xử lý tiếp/)).not.toBeInTheDocument();
     expect(mocks.processingOptions).not.toHaveBeenCalled();
     expect(screen.queryByRole("heading", { name: "Thông số xử lý" })).not.toBeInTheDocument();

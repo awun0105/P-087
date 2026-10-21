@@ -53,7 +53,9 @@ def test_job_waiting_for_metric_confirmation_is_intentionally_unleased(tmp_path:
     assert intentionally_unleased(job) is True
 
 
-@pytest.mark.parametrize("wait", ["awaiting_anonymization_review", "awaiting_finalize", "awaiting_reviewed_preview"])
+@pytest.mark.parametrize(
+    "wait", ["awaiting_anonymization_review", "awaiting_finalize", "awaiting_pose_step", "awaiting_scene_extract"]
+)
 def test_jobs_waiting_on_purpose_are_untouched(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, wait: str) -> None:
     registry = _registry(tmp_path)
     job = _running_job(registry)

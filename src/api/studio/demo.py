@@ -7,7 +7,10 @@ Ba thao tác riêng:
   đọc. Thư viện mẫu công khai, nên chỉ xuất khi project đã xác nhận quyền sử dụng và ẩn danh, và Reviewer xác nhận.
 """
 
+import logging
 from collections.abc import Callable
+from threading import Thread
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -20,11 +23,12 @@ from src.services.orchestration.auth import UserRecord, actor_of
 from src.services.orchestration.jobs.database import RuntimeStateConflictError
 from src.services.orchestration.projects import JobNotFoundError
 from src.services.orchestration.projects.registry import ProjectRegistry
-from src.services.orchestration.samples import DemoSource
+from src.services.orchestration.samples import DemoManifest, DemoSource, distributed
 from src.services.orchestration.samples.export import (
-    AlreadyPublishedError,
     SampleExportError,
-    publish_job_bundle,
+    acquire_publish_lock,
+    publication_status,
+    publish_in_background,
     published_sample_id,
 )
 from src.services.orchestration.scene.demo import DemoState, clear_demo, demo_state, mark_demo, reset_demo, restore_root
@@ -35,6 +39,7 @@ from src.services.orchestration.scene.errors import (
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class DemoResetRequest(BaseModel):
@@ -49,6 +54,10 @@ class DemoStateResponse(DemoState):
     """Trạng thái đã lưu và bản gốc kèm mẫu tương ứng trong thư viện mẫu."""
 
     published_sample_id: str | None = None
+    #: Mẫu đang được chép vào thư viện (chạy nền sau `POST …/demo/publish`).
+    publishing: bool = False
+    #: Lỗi của lần chuẩn bị mẫu gần nhất; None khi chưa lỗi hoặc đã chuẩn bị lại.
+    publish_error: str | None = None
 
 
 class DemoPublishRequest(BaseModel):
@@ -68,19 +77,27 @@ class DemoPublishRequest(BaseModel):
 
 
 class DemoPublishResponse(BaseModel):
+    """Mẫu được chuẩn bị ở nền; theo dõi bằng `publishing` / `publish_error` của `GET /jobs/{id}/demo`."""
+
     model_config = ConfigDict(extra="forbid")
 
-    sample_id: str
-    title: str
+    status: Literal["publishing"] = "publishing"
 
 
 def _with_publication(state: DemoState, job_id: str) -> DemoStateResponse:
     """Gắn mẫu đã xuất của job (tra theo `provenance.job_id` của thư viện)."""
+    root = deps.settings().product_demo_dir
     try:
-        sample_id = published_sample_id(deps.settings().product_demo_dir, job_id)
+        sample_id = published_sample_id(root, job_id)
     except OSError:
         sample_id = None
-    return DemoStateResponse(**state.model_dump(), published_sample_id=sample_id)
+    publishing, error = publication_status(root, job_id)
+    return DemoStateResponse(
+        **state.model_dump(),
+        published_sample_id=sample_id,
+        publishing=publishing and sample_id is None,
+        publish_error=None if sample_id is not None or publishing else error,
+    )
 
 
 def _run(job_id: str, action: str, operation: Callable[[ProjectRegistry, str], DemoState]) -> DemoState:
@@ -91,7 +108,7 @@ def _run(job_id: str, action: str, operation: Callable[[ProjectRegistry, str], D
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
     except SceneNotAvailableError as error:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="Scene chưa có SceneIR để làm bản demo"
+            status_code=status.HTTP_409_CONFLICT, detail="Scene chưa dựng xong nên chưa làm bản demo được"
         ) from error
     except (SceneRevisionConflictError, RuntimeStateConflictError) as error:
         raise HTTPException(
@@ -153,7 +170,7 @@ def post_demo_restore_root(
     return _with_publication(state, job_id)
 
 
-@router.post("/jobs/{job_id}/demo/publish", response_model=DemoPublishResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/jobs/{job_id}/demo/publish", response_model=DemoPublishResponse, status_code=status.HTTP_202_ACCEPTED)
 def post_demo_publish(
     job_id: str, request: DemoPublishRequest, user: UserRecord | None = Depends(auth.require_reviewer)
 ) -> DemoPublishResponse:
@@ -191,23 +208,35 @@ def post_demo_publish(
             detail=f"Scene đang bị chặn bởi kiểm tra riêng tư: {privacy.block_reason or 'chưa đạt'}",
         )
     title = request.title or project.name.strip() or "Scene"
+    current = deps.settings()
+    root = current.product_demo_dir
     try:
-        manifest = publish_job_bundle(
-            registry,
-            job_id,
-            deps.settings().product_demo_dir,
-            title=title,
-            description=request.description.strip(),
-            source=DemoSource(dataset="Real2Sim Studio", sequence=project.name[:200], note=""),
-            recording_dir=deps.settings().product_rerun_recording_dir,
-        )
-    except AlreadyPublishedError as error:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
-    except SampleExportError as error:
+        lock = acquire_publish_lock(root, job_id)
+    except SampleExportError as error:  # gồm AlreadyPublishedError và "đang được xuất"
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     except OSError as error:
+        logger.exception("demo publish lock failed for %s", job_id)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Không ghi được vào thư viện mẫu của máy chủ"
         ) from error
-    auth.auth_service().audit(user.user_id, "demo.publish", job_id, {"sample_id": manifest.demo_id})
-    return DemoPublishResponse(sample_id=manifest.demo_id, title=manifest.title)
+
+    def published(manifest: DemoManifest) -> None:
+        if distributed.enabled(current):
+            distributed.republish(current, manifest.demo_id)
+        auth.auth_service().audit(user.user_id, "demo.publish", job_id, {"sample_id": manifest.demo_id})
+
+    # Chép bundle (tới vài GB) lâu hơn thời gian chờ của proxy: chạy nền, giao diện đọc trạng thái qua GET …/demo.
+    Thread(
+        target=publish_in_background,
+        args=(registry, job_id, root, lock),
+        kwargs={
+            "title": title,
+            "description": request.description.strip(),
+            "source": DemoSource(dataset="Real2Sim Studio", sequence=project.name[:200], note=""),
+            "recording_dir": current.product_rerun_recording_dir,
+            "on_published": published,
+        },
+        name=f"demo-publish-{job_id}",
+        daemon=True,
+    ).start()
+    return DemoPublishResponse()

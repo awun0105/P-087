@@ -49,7 +49,7 @@ async def test_options_return_complete_scenario_catalog(client: AsyncClient, stu
             ["video_continuous", "video_loop_360", "photo_set"],
             ["indoor", "outdoor"],
             ["single_object", "full_room"],
-            ["minimum_quality", "balanced", "machine_maximum"],
+            ["standard", "high_quality"],
         )
     ),
 )
@@ -69,14 +69,16 @@ async def test_suggestion_preserves_scenario_intent_and_evaluation(
     assert response.status_code == 200, response.text
     body = response.json()
     params = body["params"]
+    continuous = "sequential_vocab_tree" if environment == "indoor" and scope == "full_room" else "sequential"
     assert (
         params["colmap.matching_mode"]
         == {
-            "video_continuous": "sequential",
+            "video_continuous": continuous,
             "video_loop_360": "sequential_vocab_tree",
             "photo_set": "exhaustive",
         }[input_type]
     )
+    assert body["notes"] == []
     if scope == "single_object":
         assert params["scene.max_objects"] == 1
     assert params["simulation.ground_plane"] == ("enabled" if environment == "indoor" else "disabled")
@@ -89,7 +91,7 @@ async def test_suggestion_preserves_scenario_intent_and_evaluation(
 @pytest.mark.asyncio
 async def test_suggestion_handles_unknown_and_inadequate_worker(client: AsyncClient, studio: SimpleNamespace) -> None:
     request = dict(
-        input_type="video_continuous", environment="indoor", subject_scope="full_room", target_capacity="balanced"
+        input_type="video_continuous", environment="indoor", subject_scope="full_room", target_capacity="standard"
     )
     unknown = await client.post("/api/v1/processing/suggest", json=request)
     assert unknown.status_code == 200
@@ -105,7 +107,7 @@ async def test_suggestion_handles_unknown_and_inadequate_worker(client: AsyncCli
 )
 async def test_invalid_scenario_is_rejected(client: AsyncClient, studio: SimpleNamespace, patch: dict) -> None:
     request = dict(
-        input_type="video_continuous", environment="indoor", subject_scope="full_room", target_capacity="balanced"
+        input_type="video_continuous", environment="indoor", subject_scope="full_room", target_capacity="standard"
     )
     response = await client.post("/api/v1/processing/suggest", json=request | patch)
     assert response.status_code == 422
@@ -120,7 +122,7 @@ async def test_suggested_controls_are_saved_when_creating_scene(client: AsyncCli
             "input_type": "video_loop_360",
             "environment": "outdoor",
             "subject_scope": "single_object",
-            "target_capacity": "balanced",
+            "target_capacity": "standard",
         },
     )
     assert suggested.status_code == 200
@@ -145,3 +147,30 @@ async def test_suggested_controls_are_saved_when_creating_scene(client: AsyncCli
             key.split(".", 1)[1]: value for key, value in params.items() if key.startswith(group + ".")
         }
     assert stored["colmap"]["matching_mode"] == "sequential_vocab_tree"
+
+
+@pytest.mark.asyncio
+async def test_suggestion_reads_video_facts_and_worker_vocabulary(client: AsyncClient, studio: SimpleNamespace) -> None:
+    _record_machine(studio, 24, vocab=None)
+    response = await client.post(
+        "/api/v1/processing/suggest",
+        json={
+            "input_type": "video_loop_360",
+            "environment": "indoor",
+            "subject_scope": "full_room",
+            "target_capacity": "standard",
+            "video": {"duration_seconds": 300, "display_width": 1280, "display_height": 720, "frame_rate": 30},
+        },
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["params"]["colmap.matching_mode"] == "sequential"
+    assert body["params"]["sampling.max_frames"] == 600
+    assert body["params"]["brush.max_resolution"] == 1280
+    assert body["notes"] == [
+        "Máy xử lý chưa có từ điển khép vòng; dùng ghép liên tiếp, thang thử lại sẽ dùng ghép mọi cặp nếu đứt chuỗi",
+        "Video 5 phút 0 giây: lấy 2,0 khung hình mỗi giây (tối đa 600 ảnh)",
+        "Video 1280×720: độ phân giải huấn luyện 1.280 px",
+    ]
+    evaluated = await client.post("/api/v1/processing/evaluate", json={"params": body["params"]})
+    assert body["evaluation"] == evaluated.json()

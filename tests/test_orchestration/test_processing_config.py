@@ -19,7 +19,7 @@ from src.services.orchestration.processing import (
 )
 from src.services.orchestration.processing.capability import latest, record
 from src.services.orchestration.processing.models import MachineCapability
-from src.services.orchestration.processing.resources import estimate_gb
+from src.services.orchestration.processing.resources import RESOURCE_KEYS, estimate_gb
 
 ROOT = Path(__file__).resolve().parents[2]
 PRESETS = ROOT / "configs/product/processing_presets_v1.json"
@@ -168,16 +168,23 @@ def test_shortage_that_persists_when_idle_is_explained_differently() -> None:
     assert "lúc máy xử lý rảnh cũng không đủ" in gpu.message and not evaluate(presets, params, machine).blocking
 
 
-@pytest.mark.parametrize(
-    "machine",
-    [_machine(), _machine(vram=4, ram=31, disk=12), _machine(vram=2, ram=8, disk=3, cpu=4)],
-)
+@pytest.mark.parametrize("machine", [_machine(), _machine(vram=4, ram=31, disk=12), _machine(vram=24, ram=32, disk=20)])
 def test_maximum_for_machine_stays_below_warning_and_valid(machine: MachineCapability) -> None:
     presets, _ = load_presets(PRESETS)
     best = maximum_for_machine(presets, machine)
     presets.validate_params(best)
     statuses = {item.resource: item.status for item in evaluate(presets, best, machine).resources}
     assert set(statuses.values()) <= {"ok"}, statuses
+    minimum = preset_values(presets, "minimum_quality")
+    assert all(float(best[key]) >= float(minimum[key]) for key in RESOURCE_KEYS)
+
+
+def test_maximum_for_machine_returns_minimum_when_even_the_floor_does_not_fit() -> None:
+    """Sàn là preset tối thiểu, không phải `spec.min`: máy quá nhỏ nhận preset tối thiểu và bảng tô đỏ."""
+    presets, _ = load_presets(PRESETS)
+    tiny = _machine(vram=2, ram=8, disk=3, cpu=4)
+    assert maximum_for_machine(presets, tiny) == preset_values(presets, "minimum_quality")
+    assert evaluate(presets, maximum_for_machine(presets, tiny), tiny).blocking
 
 
 def test_resource_driver_groups_do_not_include_downstream_controls() -> None:
@@ -198,98 +205,29 @@ def test_resource_driver_groups_do_not_include_downstream_controls() -> None:
         "scene",
         "simulation",
     }
+    # Chỉ đúng các khóa của công thức tài nguyên được thu nhỏ theo máy.
+    assert set(RESOURCE_KEYS) == {
+        "sampling.max_frames",
+        "colmap.max_image_size",
+        "colmap.max_num_features",
+        "brush.max_resolution",
+        "brush.max_splats",
+    }
 
 
 @pytest.mark.parametrize(
     ("vram", "ram", "expected"),
     [
-        (
-            4,
-            16,
-            {
-                "sampling.max_frames": 1200,
-                "colmap.max_image_size": 3200,
-                "colmap.max_num_features": 16384,
-                "brush.max_resolution": 1280,
-                "brush.max_splats": 1_200_000,
-                "brush.total_train_iters": 31000,
-            },
-        ),
-        (
-            6,
-            16,
-            {
-                "sampling.max_frames": 1200,
-                "colmap.max_image_size": 3200,
-                "colmap.max_num_features": 16384,
-                "brush.max_resolution": 1920,
-                "brush.max_splats": 2_200_000,
-                "brush.total_train_iters": 37000,
-            },
-        ),
-        (
-            8,
-            16,
-            {
-                "sampling.max_frames": 1200,
-                "colmap.max_image_size": 3200,
-                "colmap.max_num_features": 16384,
-                "brush.max_resolution": 2400,
-                "brush.max_splats": 3_200_000,
-                "brush.total_train_iters": 43000,
-            },
-        ),
-        (
-            12,
-            32,
-            {
-                "sampling.max_frames": 1200,
-                "colmap.max_image_size": 3200,
-                "colmap.max_num_features": 16384,
-                "brush.max_resolution": 3360,
-                "brush.max_splats": 5_000_000,
-                "brush.total_train_iters": 54000,
-            },
-        ),
-        (
-            24,
-            16,
-            {
-                "sampling.max_frames": 1200,
-                "colmap.max_image_size": 3200,
-                "colmap.max_num_features": 16384,
-                "brush.max_resolution": 3840,
-                "brush.max_splats": 6_000_000,
-                "brush.total_train_iters": 60000,
-            },
-        ),
-        (
-            24,
-            8,
-            {
-                "sampling.max_frames": 880,
-                "colmap.max_image_size": 2560,
-                "colmap.max_num_features": 13312,
-                "brush.max_resolution": 3840,
-                "brush.max_splats": 6_000_000,
-                "brush.total_train_iters": 60000,
-            },
-        ),
-        (
-            4,
-            4,
-            {
-                "sampling.max_frames": 500,
-                "colmap.max_image_size": 1920,
-                "colmap.max_num_features": 9216,
-                "brush.max_resolution": 1280,
-                "brush.max_splats": 1_200_000,
-                "brush.total_train_iters": 31000,
-            },
-        ),
+        (4, 16, {"sampling.max_frames": 410, "colmap.max_image_size": 1280, "brush.max_splats": 1_200_000}),
+        (6, 16, {"sampling.max_frames": 890, "colmap.max_image_size": 1440, "brush.max_splats": 2_400_000}),
+        (8, 16, {"sampling.max_frames": 1410, "colmap.max_image_size": 1760, "brush.max_splats": 3_700_000}),
+        (12, 32, {"sampling.max_frames": 1500, "colmap.max_image_size": 1920, "brush.max_splats": 4_000_000}),
+        (24, 16, {"sampling.max_frames": 1500, "colmap.max_image_size": 1920, "brush.max_splats": 4_000_000}),
+        (24, 8, {"sampling.max_frames": 950, "colmap.max_image_size": 1600, "brush.max_splats": 2_600_000}),
+        (4, 4, {"sampling.max_frames": 410, "colmap.max_image_size": 1280, "brush.max_splats": 1_200_000}),
     ],
 )
-def test_maximum_for_machine_two_axis_matrix(vram: float, ram: float, expected: dict[str, int]) -> None:
+def test_maximum_for_machine_shared_bisection_matrix(vram: float, ram: float, expected: dict[str, int]) -> None:
     presets, _ = load_presets(PRESETS)
     machine = _machine(vram=vram, ram=ram, disk=500)
     best = maximum_for_machine(presets, machine)
@@ -297,35 +235,62 @@ def test_maximum_for_machine_two_axis_matrix(vram: float, ram: float, expected: 
 
     for key, value in expected.items():
         assert best[key] == value, f"Lệch {key} trên máy VRAM {vram} / RAM {ram}: {best[key]} != {value}"
-
+    # Thông số không có trong công thức tài nguyên giữ đúng giá trị của preset maximum.
+    maximum = preset_values(presets, "maximum")
+    for key in ("sampling.sample_fps", "colmap.sequential_overlap", "brush.total_train_iters", "brush.sog_iterations"):
+        assert best[key] == maximum[key]
     statuses = {item.resource: item.status for item in evaluate(presets, best, machine).resources}
     assert set(statuses.values()) <= {"ok"}, statuses
 
 
-def test_maximum_for_machine_decoupled_properties() -> None:
+def test_maximum_for_machine_grows_with_vram_and_ram() -> None:
     presets, _ = load_presets(PRESETS)
-
-    # Cùng RAM 16, VRAM tăng dần (4 -> 6 -> 8 -> 24):
-    # Nhóm SFM bằng nhau ở mọi máy; brush.max_splats và brush.max_resolution không giảm
-    results_16 = [maximum_for_machine(presets, _machine(vram=v, ram=16, disk=500)) for v in (4, 6, 8, 24)]
-    base_sfm = {k: results_16[0][k] for k in SFM_KEYS}
-    for res in results_16[1:]:
-        sfm = {k: res[k] for k in SFM_KEYS}
-        assert sfm == base_sfm
-    for prev, nxt in zip(results_16[:-1], results_16[1:], strict=True):
-        assert float(nxt["brush.max_splats"]) >= float(prev["brush.max_splats"])
-        assert float(nxt["brush.max_resolution"]) >= float(prev["brush.max_resolution"])
-
-    # Cùng VRAM 24, RAM 8 so với 16:
-    # Nhóm SPLAT bằng nhau; nhóm SFM của máy 8 GB thấp hơn
+    results = [maximum_for_machine(presets, _machine(vram=v, ram=16, disk=500)) for v in (4, 6, 8, 24)]
+    for prev, nxt in zip(results[:-1], results[1:], strict=True):
+        for key in RESOURCE_KEYS:
+            assert float(nxt[key]) >= float(prev[key])
     m_16 = maximum_for_machine(presets, _machine(vram=24, ram=16, disk=500))
     m_8 = maximum_for_machine(presets, _machine(vram=24, ram=8, disk=500))
-    splat_16 = {k: m_16[k] for k in SPLAT_KEYS}
-    splat_8 = {k: m_8[k] for k in SPLAT_KEYS}
-    assert splat_16 == splat_8
     assert int(m_8["sampling.max_frames"]) < int(m_16["sampling.max_frames"])
-    assert int(m_8["colmap.max_image_size"]) < int(m_16["colmap.max_image_size"])
     assert int(m_8["colmap.max_num_features"]) < int(m_16["colmap.max_num_features"])
+
+
+def test_vocab_tree_flag_round_trips_and_old_payloads_stay_unknown() -> None:
+    worker = _machine().model_copy(update={"colmap_vocab_tree_available": True})
+    assert MachineCapability.model_validate_json(worker.model_dump_json()).colmap_vocab_tree_available is True
+    old = _machine().model_dump(mode="json")
+    old.pop("colmap_vocab_tree_available")
+    assert MachineCapability.model_validate(old).colmap_vocab_tree_available is None
+
+
+def test_probe_reports_vocab_tree_for_the_runtime_colmap_format(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import struct
+
+    from src.services.orchestration.processing import capability
+
+    tree = tmp_path / "tree.bin"
+    tree.write_bytes(struct.pack("<i", 1) + b"faiss fixture")
+    asked: list[str] = []
+
+    def find(*, format: str) -> Path:
+        asked.append(format)
+        return tree
+
+    monkeypatch.setenv("R2S_COLMAP_COMMAND", '["colmap-fixture"]')
+    monkeypatch.setattr(capability, "_colmap_version", lambda command: "COLMAP 4.0.1 (Commit abc)")
+    monkeypatch.setattr(capability, "get_vocab_tree_path", find)
+    assert capability.colmap_vocab_tree_available() is True
+    monkeypatch.setattr(capability, "_colmap_version", lambda command: "COLMAP 3.9.1")
+    assert capability.colmap_vocab_tree_available() is False  # cây FAISS cho COLMAP cũ cần FLANN
+    assert asked == ["faiss", "flann"]
+    monkeypatch.setattr(capability, "get_vocab_tree_path", lambda *, format: None)
+    assert capability.colmap_vocab_tree_available() is False
+    monkeypatch.setattr(capability, "_colmap_version", lambda command: None)
+    assert capability.colmap_vocab_tree_available() is None
+    monkeypatch.setenv("R2S_COLMAP_COMMAND", "not json")
+    assert capability.colmap_vocab_tree_available() is None
 
 
 def test_capability_record_and_latest_ignore_stale_workers(tmp_path: Path) -> None:

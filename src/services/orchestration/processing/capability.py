@@ -4,6 +4,7 @@ Xử lý chạy trên máy worker (GPU server) nên cần số đo của chính 
 phải của máy người dùng đang mở trình duyệt.
 """
 
+import json
 import logging
 import math
 import os
@@ -12,8 +13,10 @@ import socket
 import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from functools import lru_cache
 from pathlib import Path
 
+from src.runtime_env import runtime_env
 from src.services.orchestration.jobs.database import RuntimeDatabase
 from src.services.orchestration.processing.container_limits import (
     effective_cpu_count,
@@ -22,6 +25,7 @@ from src.services.orchestration.processing.container_limits import (
     memory_usage_gb,
 )
 from src.services.orchestration.processing.models import MachineCapability
+from src.services.reconstruction.adapters.vocab_tree import file_format, get_vocab_tree_path, vocabulary_format
 
 #: Số đo cũ hơn mức này coi như worker không còn chạy.
 CAPABILITY_TTL = timedelta(minutes=15)
@@ -191,6 +195,41 @@ def _ram_gb(cgroup_root: Path | None = None) -> float:
     return host_ram
 
 
+@lru_cache(maxsize=4)
+def _colmap_version(command: tuple[str, ...]) -> str | None:
+    """Dòng `COLMAP x.y` trong help của binary (cùng cách REC-03 đọc phiên bản); đọc một lần mỗi tiến trình."""
+    try:
+        done = subprocess.run([*command, "-h"], capture_output=True, text=True, timeout=60, check=False)
+    except (OSError, subprocess.SubprocessError) as error:
+        logger.info("Không đọc được phiên bản COLMAP cause=%s", type(error).__name__)
+        return None
+    return next((line.strip() for line in (done.stdout + done.stderr).splitlines() if line.startswith("COLMAP ")), None)
+
+
+def colmap_vocab_tree_available() -> bool | None:
+    """Có từ điển khép vòng đúng định dạng với COLMAP của worker và đúng checksum ghim hay không.
+
+    None khi không biết (không chạy được COLMAP, không đọc được phiên bản): bộ gợi ý coi như không có.
+    """
+    raw = runtime_env(os.environ, "R2S_COLMAP_COMMAND")
+    try:
+        command = tuple(str(item) for item in json.loads(raw)) if raw else ("colmap",)
+    except (TypeError, ValueError):
+        return None
+    if not command:
+        return None
+    version = _colmap_version(command)
+    runtime_format = vocabulary_format(version) if version else None
+    if runtime_format is None:
+        return None
+    try:
+        path = get_vocab_tree_path(format=runtime_format)
+        return path is not None and file_format(path) == runtime_format
+    except (OSError, ValueError) as error:
+        logger.warning("Không kiểm được từ điển COLMAP cause=%s", type(error).__name__)
+        return None
+
+
 def worker_identity() -> tuple[str, str, int]:
     """(worker_id, host, pid) của tiến trình worker này; cùng định danh cho số đo và giữ chỗ."""
     host, pid = socket.gethostname(), os.getpid()
@@ -238,6 +277,7 @@ def probe(worker_root: Path, *, idle: bool = False, previous: MachineCapability 
         headroom_measured=True,
         vram_free_gb=live["vram_free_gb"],
         ram_available_gb=live["ram_available_gb"],
+        colmap_vocab_tree_available=colmap_vocab_tree_available(),
         **baseline,
     )
 

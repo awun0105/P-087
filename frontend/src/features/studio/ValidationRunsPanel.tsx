@@ -26,9 +26,9 @@ const ACTIVE = new Set<ValidationOperationStatus>([
 ]);
 
 const STATUS: Record<ValidationOperationStatus, { label: string; tone: "neutral" | "ochre" | "sage" | "rust" | "ember" }> = {
-  QUEUED: { label: "Đang chờ worker", tone: "ochre" },
+  QUEUED: { label: "Đang xếp hàng", tone: "ochre" },
   WAITING_RESOURCES: { label: "Chờ tài nguyên", tone: "ochre" },
-  CLAIMED: { label: "Worker đã nhận", tone: "ember" },
+  CLAIMED: { label: "Đang bắt đầu", tone: "ember" },
   RUNNING: { label: "Đang chạy", tone: "ember" },
   CANCEL_REQUESTED: { label: "Đang yêu cầu hủy", tone: "ochre" },
   COMPLETED: { label: "Hoàn tất", tone: "sage" },
@@ -88,7 +88,7 @@ export function ValidationRunsPanel({
         setSnapshot((previous) => ({
           queryKey,
           runs: previous?.queryKey === queryKey ? previous.runs : [],
-          error: errorMessage(cause, "Không đọc được lịch sử Isaac validation"),
+          error: errorMessage(cause, "Không đọc được lịch sử kiểm tra"),
         }));
       }
     }
@@ -109,7 +109,7 @@ export function ValidationRunsPanel({
         setSnapshot((previous) => ({
           queryKey: `${actionScope}\u0000${reload}`,
           runs: previous?.queryKey === `${actionScope}\u0000${reload}` ? previous.runs : [],
-          error: errorMessage(cause, "Không thực hiện được thao tác validation"),
+          error: errorMessage(cause, "Không thực hiện được thao tác"),
         }));
       }
     } finally {
@@ -122,11 +122,11 @@ export function ValidationRunsPanel({
   const activeCurrentRun = currentRuns.some((run) => ACTIVE.has(run.status));
 
   return (
-    <section className="space-y-3 p-5 text-sm" aria-label="Lịch sử Isaac validation">
+    <section className="space-y-3 p-5 text-sm" aria-label="Lịch sử kiểm tra Isaac Sim">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h3 className="font-bold text-ink">Chạy kiểm tra bằng Isaac Sim</h3>
-          <p className="mt-1 text-ink-muted">Mỗi lần chạy gắn với candidate và policy bất biến; kết quả chỉ được dùng sau khi chọn đúng run.</p>
+          <p className="mt-1 text-ink-muted">Chọn một lần chạy để dùng kết quả của nó khi duyệt.</p>
         </div>
         {canMutateJob && candidateChecksum && (
           <Button
@@ -135,12 +135,12 @@ export function ValidationRunsPanel({
             onClick={() => void mutate("submit", () => submitValidationRun(jobId, candidateChecksum))}
           >
             {busyKey === "submit" && <span aria-hidden className="size-3 animate-spin rounded-full border-2 border-current border-r-transparent motion-reduce:animate-none" />}
-            Chạy validation
+            Chạy kiểm tra
           </Button>
         )}
       </div>
 
-      {!candidateChecksum && <Notice tone="ochre">Tạo gói mô phỏng hợp lệ cho revision hiện tại trước khi chạy validation.</Notice>}
+      {!candidateChecksum && <Notice tone="ochre">Tạo gói mô phỏng trước khi chạy kiểm tra.</Notice>}
       {visibleError && (
         <div role="alert">
           <Notice tone="rust">
@@ -151,11 +151,11 @@ export function ValidationRunsPanel({
           </Notice>
         </div>
       )}
-      {loading && <p role="status" className="text-ink-muted">Đang tải lịch sử validation…</p>}
-      {!loading && !visibleError && visibleRuns.length === 0 && <p className="text-ink-muted">Chưa có lần chạy validation nào.</p>}
+      {loading && <p role="status" className="text-ink-muted">Đang tải lịch sử kiểm tra…</p>}
+      {!loading && !visibleError && visibleRuns.length === 0 && <p className="text-ink-muted">Chưa có lần kiểm tra nào.</p>}
 
       {visibleRuns.length > 0 && (
-        <ol className="space-y-2" aria-label="Các lần chạy validation">
+        <ol className="space-y-2" aria-label="Các lần kiểm tra">
           {visibleRuns.map((run) => {
             const isCurrent = run.candidate_checksum === candidateChecksum;
             const status = STATUS[run.status];
@@ -168,7 +168,7 @@ export function ValidationRunsPanel({
                     <Badge tone={status.tone}>{status.label}</Badge>
                     <span className="text-ink-muted">Lần {run.attempt}</span>
                     {run.selected && <Badge tone="sage">Đang được dùng</Badge>}
-                    {!isCurrent && <Badge tone="neutral">Candidate cũ</Badge>}
+                    {!isCurrent && <Badge tone="neutral">Gói cũ</Badge>}
                   </div>
                   <time className="text-xs text-ink-subtle" dateTime={run.requested_at}>
                     {new Date(run.requested_at).toLocaleString("vi-VN")}
@@ -176,8 +176,8 @@ export function ValidationRunsPanel({
                 </div>
                 <p className="break-all font-mono text-xs text-ink-muted">{run.run_id} · {run.candidate_checksum.slice(0, 19)}</p>
                 {run.error_code && <p className="text-rust">Mã lỗi: <code>{run.error_code}</code></p>}
-                {run.status === "WAITING_RESOURCES" && <p className="text-ink-muted">Worker chưa chạy; đang chờ profile tài nguyên phù hợp.</p>}
-                {run.status === "CANCEL_REQUESTED" && <p role="status" className="text-ink-muted">Đang chờ worker dừng tiến trình và xác nhận hủy.</p>}
+                {run.status === "WAITING_RESOURCES" && <p className="text-ink-muted">Đang chờ máy xử lý đủ tài nguyên.</p>}
+                {run.status === "CANCEL_REQUESTED" && <p role="status" className="text-ink-muted">Đang dừng…</p>}
 
                 {completed && (
                   <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
@@ -193,7 +193,7 @@ export function ValidationRunsPanel({
                   <div className="flex flex-wrap gap-2">
                     {ACTIVE.has(run.status) && run.status !== "CANCEL_REQUESTED" && (
                       <Button size="sm" variant="secondary" disabled={busyKey !== null} onClick={() => void mutate(run.run_id, () => cancelValidationRun(jobId, run.run_id))}>
-                        {busyThisRun ? "Đang cập nhật…" : "Hủy run"}
+                        {busyThisRun ? "Đang cập nhật…" : "Hủy"}
                       </Button>
                     )}
                     {run.status === "FAILED" && run.retryable && (
@@ -212,7 +212,7 @@ export function ValidationRunsPanel({
                           true,
                         )}
                       >
-                        {busyThisRun ? "Đang chọn…" : "Dùng report này cho review"}
+                        {busyThisRun ? "Đang chọn…" : "Dùng kết quả này để duyệt"}
                       </Button>
                     )}
                   </div>

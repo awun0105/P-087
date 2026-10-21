@@ -61,7 +61,7 @@ export function ResultsTab({ jobId, preview, revision, onOpenGaussian, onOpenRev
     <div className="mx-auto max-w-5xl space-y-4 px-4 py-6 sm:px-6">
       <div>
         <h2 className="text-xl font-bold tracking-tight">Kết quả của scene</h2>
-        <p className="mt-1 text-sm text-ink-muted">Chọn đúng loại file cho công việc tiếp theo.{currentRevision && ` Scene hiện tại: ${currentRevision}.`}</p>
+        <p className="mt-1 text-sm text-ink-muted">Chọn đúng loại file cho công việc tiếp theo.</p>
       </div>
       {loading && <p role="status" className="text-sm text-ink-muted">Đang đọc gói và trạng thái phát hành…</p>}
       {!loading && result && result.errors.length > 0 && <Notice tone="rust">
@@ -71,7 +71,7 @@ export function ResultsTab({ jobId, preview, revision, onOpenGaussian, onOpenRev
         icon={<Pencil aria-hidden />}
         title="Bản làm việc 3DGS"
         badge={<Badge tone="neutral">Chưa quy đổi mét · chưa duyệt</Badge>}
-        body={onOpenGaussian ? "Bản xem Brush (SOG) dùng để xem/chỉnh. Muốn xuất PLY/SOG đã chỉnh, mở Studio › Chỉnh Gaussian › File › Export." : "Bản xem Brush (SOG) của scene. Tải file để dùng ở công cụ khác."}
+        body={onOpenGaussian ? "Bản 3D để xem và chỉnh. Muốn xuất bản đã chỉnh, mở Chỉnh Gaussian › File › Export." : "Bản 3D của scene, tải về để dùng ở công cụ khác."}
         action={<>
           {onOpenGaussian && <Button size="sm" variant="secondary" onClick={onOpenGaussian}>Chỉnh Gaussian</Button>}
           <a href={preview.url} download={preview.filename} className={buttonVariants({ variant: "secondary", size: "sm" })}>
@@ -81,10 +81,10 @@ export function ResultsTab({ jobId, preview, revision, onOpenGaussian, onOpenRev
       />
       <ResultCard
         icon={<ClipboardCheck aria-hidden />}
-        title="Gói mô phỏng (candidate)"
-        badge={pkg?.package_ref ? <Badge tone={packageCurrent ? "ochre" : "rust"}>{pkg.scene_revision} · {packageCurrent ? `preflight ${pkg.preflight.blocking_result}` : currentRevision ? "revision cũ" : "chưa đối chiếu revision"}</Badge> : <Badge tone="neutral">{loading ? "Đang kiểm tra" : result?.packageError ? "Chưa đọc được gói" : "Chưa có"}</Badge>}
-        body="OpenUSD của đúng revision hiện tại cho Isaac Sim ≥ 5.0: hình bằng Gaussian (nền đã vá + từng vật đã xác nhận), collider, khối lượng và nhãn. Scene dựng bằng đường cũ chỉ có collider. Không phải bản phát hành."
-        detail={pkg ? `Tạo lúc ${new Date(pkg.created_at).toLocaleString("vi-VN")}${packageCurrent ? "" : currentRevision ? " · Scene đã đổi; cần tạo lại gói." : " · Cần đọc revision scene trước khi tải."}` : "Tạo gói trong Kiểm tra & duyệt sau khi xác nhận vật thể."}
+        title="Gói mô phỏng"
+        badge={pkg?.package_ref ? <Badge tone={packageCurrent ? "ochre" : "rust"}>{packageCurrent ? (pkg.preflight.blocking_result === "FAIL" ? "chưa đạt kiểm tra" : "đạt kiểm tra") : currentRevision ? "phiên bản cũ" : "chưa đối chiếu phiên bản"}</Badge> : <Badge tone="neutral">{loading ? "Đang kiểm tra" : result?.packageError ? "Chưa đọc được gói" : "Chưa có"}</Badge>}
+        body="Gói OpenUSD cho Isaac Sim 5.0 trở lên: hình, va chạm, khối lượng và nhãn của từng vật. Chưa phải bản phát hành."
+        detail={pkg ? `Tạo lúc ${new Date(pkg.created_at).toLocaleString("vi-VN")}${packageCurrent ? "" : currentRevision ? " · Scene đã đổi; cần tạo lại gói." : " · Tải lại trang trước khi tải gói."}` : "Tạo gói trong Kiểm tra & duyệt sau khi xác nhận vật thể."}
         action={
           pkg?.package_ref && packageCurrent ? (
             <a href={simulationPackageDownloadUrl(jobId)} className={buttonVariants({ variant: "secondary", size: "sm" })}>
@@ -96,12 +96,12 @@ export function ResultsTab({ jobId, preview, revision, onOpenGaussian, onOpenRev
       <ResultCard
         icon={<ShieldCheck aria-hidden />}
         title="Bản phát hành"
-        badge={released ? <Badge tone="sage">{review.record.scene_revision} · đã phát hành</Badge> : <Badge tone="neutral">{loading ? "Đang kiểm tra" : result?.reviewError ? "Chưa đọc được trạng thái" : "Chưa phát hành"}</Badge>}
+        badge={released ? <Badge tone="sage">Đã phát hành</Badge> : <Badge tone="neutral">{loading ? "Đang kiểm tra" : result?.reviewError ? "Chưa đọc được trạng thái" : "Chưa phát hành"}</Badge>}
         body={
           released
-            ? "Gói đã validation và được Reviewer duyệt, kèm release manifest, báo cáo validation và bản ghi duyệt."
-            : review && !reviewCurrent ? currentRevision ? "Scene đã đổi revision; kết quả duyệt cũ không áp dụng." : "Chưa đối chiếu được revision scene; thử lại trước khi tải bản phát hành."
-              : review?.blockers[0] ?? "Chỉ có sau khi gói qua validation Isaac và được Reviewer duyệt."
+            ? "Gói đã qua kiểm tra và được duyệt, kèm báo cáo kiểm tra và bản ghi duyệt."
+            : review && !reviewCurrent ? currentRevision ? "Scene đã có phiên bản mới; kết quả duyệt cũ không áp dụng." : "Chưa đối chiếu được phiên bản scene. Thử lại."
+              : review?.blockers[0] ?? "Có sau khi gói qua kiểm tra Isaac Sim và được duyệt."
         }
         detail={released ? `Phát hành lúc ${new Date(review.release!.release_timestamp).toLocaleString("vi-VN")}${review.approval ? ` · duyệt bởi ${review.reviewer_name ?? review.approval.reviewer_id}` : ""}` : undefined}
         extra={released ? (
@@ -111,9 +111,9 @@ export function ResultsTab({ jobId, preview, revision, onOpenGaussian, onOpenRev
               <TraceList
                 rows={[
                   { label: "Revision scene", value: review.record.scene_revision },
-                  { label: "Checksum gói (candidate)", value: review.release!.candidate_checksum ?? review.record.candidate_checksum },
-                  { label: "Checksum báo cáo validation", value: review.release!.validation_report_checksum ?? review.record.validation_report_checksum },
-                  { label: "Checksum release manifest", value: review.release!.release_manifest_checksum },
+                  { label: "Mã gói", value: review.release!.candidate_checksum ?? review.record.candidate_checksum },
+                  { label: "Mã báo cáo kiểm tra", value: review.release!.validation_report_checksum ?? review.record.validation_report_checksum },
+                  { label: "Mã bản phát hành", value: review.release!.release_manifest_checksum },
                 ]}
               />
             </div>

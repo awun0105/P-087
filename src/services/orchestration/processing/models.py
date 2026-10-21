@@ -16,6 +16,17 @@ ParamValue = int | float | str
 PresetName = str
 
 
+class VideoFacts(BaseModel):
+    """Sự thật của video đã chuẩn bị (`observed_video` do server đo), không phải câu trả lời của người dùng."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    duration_seconds: float = Field(gt=0, allow_inf_nan=False)
+    display_width: int = Field(ge=16)
+    display_height: int = Field(ge=16)
+    frame_rate: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+
+
 class ScenarioPreferences(BaseModel):
     """User-declared capture scenario and desired worker capacity."""
 
@@ -24,7 +35,12 @@ class ScenarioPreferences(BaseModel):
     input_type: Literal["video_continuous", "video_loop_360", "photo_set"]
     environment: Literal["indoor", "outdoor"]
     subject_scope: Literal["single_object", "full_room"]
-    target_capacity: Literal["minimum_quality", "balanced", "machine_maximum"]
+    #: Hai mức: chuẩn (khuyên dùng) và chất lượng cao hơn; máy yếu vẫn bị thu nhỏ theo tài nguyên đã đo.
+    target_capacity: Literal["standard", "high_quality"]
+    #: Thời lượng/độ phân giải của video trong candidate đang chọn; None khi chưa có (hoặc bộ ảnh).
+    video: VideoFacts | None = None
+    #: Số ảnh của bộ ảnh rời; None khi không biết.
+    photo_count: int | None = Field(default=None, ge=1)
 
 
 class ParameterChoice(BaseModel):
@@ -111,6 +127,19 @@ class FixedSettings(BaseModel):
     brush: dict[str, ParamValue | bool]
     colmap_max_threads: int = Field(ge=1, le=256)
 
+    @model_validator(mode="after")
+    def _retry_acceptance(self) -> Self:
+        """Ngưỡng nhận mô hình thiếu ảnh sau thang thử lại (T-071 C3) phải nằm trong (0, min_registered_ratio]."""
+        accept = self.colmap.get("accept_registered_ratio_after_retry")
+        if accept is None:
+            return self
+        gate = self.colmap.get("min_registered_ratio")
+        if isinstance(accept, bool) or not isinstance(accept, int | float) or not isinstance(gate, int | float):
+            raise ValueError("accept_registered_ratio_after_retry và min_registered_ratio phải là số")
+        if not 0 < accept <= gate:
+            raise ValueError("accept_registered_ratio_after_retry phải trong khoảng (0, min_registered_ratio]")
+        return self
+
 
 class ProcessingPresets(BaseModel):
     """Nội dung file cấu hình chung."""
@@ -173,6 +202,9 @@ class MachineCapability(BaseModel):
     idle_vram_free_gb: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     idle_ram_available_gb: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     idle_disk_free_gb: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    #: Từ điển khép vòng của COLMAP có trên worker, đúng định dạng với phiên bản COLMAP của runtime và khớp checksum.
+    #: None = worker cũ chưa báo (bộ gợi ý coi như không có).
+    colmap_vocab_tree_available: bool | None = None
 
 
 class JobProcessingConfig(BaseModel):

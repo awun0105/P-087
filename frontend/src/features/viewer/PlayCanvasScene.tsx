@@ -124,10 +124,10 @@ const serverCapability = (): PlayCanvasCapability => "unknown";
 
 export function playCanvasErrorMessage(capability: PlayCanvasCapability): string | null {
   if (capability === "unavailable") {
-    return "Trình duyệt không render được 3DGS (cần WebGL2/WebGPU).";
+    return "Trình duyệt không hiện được bản 3D (cần WebGL2 hoặc WebGPU).";
   }
   if (capability === "failed") {
-    return "Không thể tải hoặc hiển thị mô hình 3DGS (lỗi tải file hoặc dữ liệu không hợp lệ).";
+    return "Không tải được bản 3D. Tải lại trang để thử lại.";
   }
   return null;
 }
@@ -559,7 +559,7 @@ export function PlayCanvasScene({
             inspection = new SplatInspection(viewer, onInspectionState, inspectionMaxPoints);
             onInspectionReady?.(inspection);
           } catch (error: unknown) {
-            if (!disposed) onInspectionState({ ...EMPTY_INSPECTION, error: "Không khởi tạo được công cụ inspection; viewer vẫn dùng được." });
+            if (!disposed) onInspectionState({ ...EMPTY_INSPECTION, error: "Không mở được công cụ chọn điểm; vẫn xem được scene." });
             console.error("Inspection initialization failed", error);
           }
         }

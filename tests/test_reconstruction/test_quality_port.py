@@ -88,6 +88,29 @@ def test_pose_quality_reads_registration_and_sparse_statistics(store: _Store) ->
     assert result.mean_track_length == pytest.approx(3.0)  # điểm 1 có 2 quan sát, điểm 2 có 4
 
 
+def test_pose_quality_and_registration_read_the_retry_ladder(store: _Store) -> None:
+    from src.services.reconstruction.views import pose_registration
+
+    plain = _poses(store, with_points=False)
+    assert quality.pose_quality(plain, store.resolve).retry_steps == 0
+    assert not quality.pose_quality(plain, store.resolve).registration_warning
+    assert pose_registration(plain, store.resolve).model_dump() == {
+        "registered_ratio": 0.75,
+        "retry_count": 0,
+        "registration_warning": False,
+    }
+    document = json.loads(store.resolve(plain).read_bytes())
+    document |= {
+        "retry_ladder": [{"step": 1}, {"step": 2}],
+        "registration_warning": True,
+        "config": {"min_registered_ratio": 0.8, "accept_registered_ratio_after_retry": 0.35},
+    }
+    warned = store.put("camera_poses_warned.json", document)
+    result = quality.pose_quality(warned, store.resolve)
+    assert (result.retry_steps, result.registration_warning, result.accept_registered_ratio) == (2, True, 0.35)
+    assert pose_registration(warned, store.resolve).retry_count == 2
+
+
 def test_pose_quality_without_sparse_file_reports_unknown_not_zero(store: _Store) -> None:
     result = quality.pose_quality(_poses(store, with_points=False), store.resolve)
     assert result.mean_reprojection_error_px is None and result.mean_track_length is None

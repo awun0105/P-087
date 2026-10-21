@@ -5,6 +5,7 @@ approval vô danh không phải quyết định của con người có quyền (
 không nhận từ payload.
 """
 
+import logging
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
@@ -37,6 +38,8 @@ from src.services.orchestration.review.validation_queue import (
 )
 from src.services.orchestration.review.workflow import ReviewError, ReviewState, decide, review_state, seal_release
 from src.services.orchestration.scene.errors import SceneHeadNotReadyError, SceneNotAvailableError
+
+_LOGGER = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -134,9 +137,12 @@ def _validation_policy() -> tuple[ValidationConfig, IsaacValidationRuntimeProfil
             detail=f"Cấu hình Isaac validation không hợp lệ: {error}",
         ) from error
     if config.runtime_profile_ref is not None:
+        _LOGGER.warning(
+            "PRODUCT_ISAAC_VALIDATION_CONFIG là policy template; profile được bind riêng từ server setting"
+        )
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="PRODUCT_ISAAC_VALIDATION_CONFIG là policy template; profile được bind riêng từ server setting",
+            detail="Cấu hình kiểm tra Isaac Sim trên máy chủ chưa đúng. Báo quản trị viên.",
         )
     return config, profile
 
@@ -148,7 +154,7 @@ def _validation_job_access(job_id: str, user: UserRecord | None, *, mutation: bo
         if mutation:
             authorize_job_mutation(user, registry, job_id, operation="quản lý Isaac validation của")
         elif user is not None and not owner_mutation_allowed(user, registry.get_job_owner_user_id(job_id)):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Guest chỉ được xem job do mình tạo")
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tài khoản khách chỉ thao tác được trên scene mình tạo")
     except JobNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
     return registry
@@ -166,7 +172,7 @@ def _current_validation_candidate(
     if package is None or package.candidate is None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Cần tạo SimulationPackage hợp lệ cho scene revision hiện tại trước khi chạy Isaac validation",
+            detail="Cần tạo gói mô phỏng cho phiên bản scene hiện tại trước khi chạy kiểm tra Isaac Sim",
         )
     candidate = package.candidate
     try:
@@ -300,7 +306,7 @@ def select_validation_run(
         bound_config = queue.bind_profile(job_id, policy, profile)
         current = queue.get(job_id, run_id)
         if current.candidate_checksum != snapshot.candidate_checksum:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Run thuộc candidate cũ")
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Lần kiểm tra này thuộc gói cũ")
         if current.validation_config_checksum != bound_config.config_checksum:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Run thuộc policy validation cũ")
         if current.run_status != ValidationRunStatus.COMPLETED or current.status != ValidationOperationStatus.COMPLETED:

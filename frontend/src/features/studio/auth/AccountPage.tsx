@@ -20,7 +20,7 @@ export function AccountPage() {
   }
   return <main className="mx-auto max-w-3xl space-y-6 px-4 py-8 sm:px-6">
     <PageHeader title="Tài khoản" description="Thông tin và quyền truy cập của phiên đăng nhập hiện tại." />
-    {!me ? <p role="status">Đang đọc tài khoản…</p> : !me.auth_required ? <EmptyState icon={<UserRound aria-hidden />} title="Chế độ local — không có tài khoản">Môi trường hiện tại không bật đăng nhập. Thông tin tài khoản chỉ có khi backend bật xác thực.</EmptyState> : !me.user ? <EmptyState icon={<LogIn aria-hidden />} title="Đăng nhập để xem tài khoản" action={<Link href="/login?next=/account" className={buttonVariants({})}>Đăng nhập</Link>} /> : <>
+    {!me ? <p role="status">Đang đọc tài khoản…</p> : !me.auth_required ? <EmptyState icon={<UserRound aria-hidden />} title="Chế độ local — không có tài khoản">Bản cài đặt này không bật đăng nhập nên không có thông tin tài khoản.</EmptyState> : !me.user ? <EmptyState icon={<LogIn aria-hidden />} title="Đăng nhập để xem tài khoản" action={<Link href="/login?next=/account" className={buttonVariants({})}>Đăng nhập</Link>} /> : <>
       <Card className="p-5">
         <div className="flex items-center gap-3"><span className="grid size-12 place-items-center rounded-full bg-ember-soft text-xl font-semibold">{me.user.display_name.slice(0, 1).toUpperCase()}</span><div><h2 className="font-bold">{me.user.display_name}</h2><Badge tone="neutral">{me.user.role === "reviewer" ? "Reviewer" : me.user.role === "guest" ? "Guest" : "Editor"}</Badge></div></div>
         <dl className="mt-5 divide-y divide-line">
@@ -28,7 +28,7 @@ export function AccountPage() {
         </dl>
       </Card>
       {me.user.role === "guest" && <GuestQuotaStatus quota={me.quota} />}
-      <HelpDetails title="Quyền của tài khoản">{me.user.role === "reviewer" ? "Reviewer có quyền của Editor và thêm quyền quản lý nhóm, quyết định duyệt trên đúng gói đã validation." : me.user.role === "guest" ? `Guest xem được mọi scene trong hệ thống. Guest có thể tạo job và thao tác trên job mình tạo; không được chỉnh sửa hoặc xóa job của người khác. Mỗi ngày có tối đa 3 lượt tạo scene/job hoặc Retry thủ công.${isTrialGuest(me.user.email) ? " Đây là tài khoản dùng thử gắn với trình duyệt này: xóa dữ liệu trình duyệt hoặc dùng trình duyệt khác sẽ không vào lại được tài khoản này." : ""}` : "Editor tải dữ liệu, tạo job, xác nhận tỉ lệ và chỉnh scene. Quyết định phát hành thuộc Reviewer."}<p>Thay đổi vật thể tạo revision mới; gói và kết quả duyệt trước đó phải được đối chiếu lại.</p></HelpDetails>
+      <HelpDetails title="Quyền của tài khoản">{me.user.role === "reviewer" ? "Reviewer làm được mọi việc của Editor, thêm quản lý nhóm và duyệt gói." : me.user.role === "guest" ? `Khách xem được mọi scene và chỉ sửa scene mình tạo. Mỗi ngày có tối đa 3 lượt tạo scene hoặc thử lại.${isTrialGuest(me.user.email) ? " Tài khoản dùng thử này gắn với trình duyệt hiện tại; xoá dữ liệu trình duyệt sẽ mất tài khoản." : ""}` : "Editor tải dữ liệu, tạo và chỉnh scene. Reviewer quyết định phát hành."}<p>Sửa vật thể sẽ tạo phiên bản scene mới; gói và kết quả duyệt cũ cần làm lại.</p></HelpDetails>
       {error && <ErrorFeedback message={error} />}
       <Button variant="secondary" disabled={busy} onClick={() => void navigate(() => { void signOut(); }, undefined, true)}><LogOut aria-hidden />{busy ? "Đang đăng xuất…" : "Đăng xuất"}</Button>
     </>}

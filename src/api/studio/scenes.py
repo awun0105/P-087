@@ -1,6 +1,7 @@
 """Scene Studio: tạo scene từ video đã upload, liệt kê scene, tiến trình job."""
 
 import hashlib
+import logging
 from datetime import UTC, datetime
 from typing import Annotated
 
@@ -37,14 +38,15 @@ from src.services.orchestration.jobs.lidar_overlay import lidar_overlay_file
 from src.services.orchestration.jobs.progress import (
     JobProgress,
     awaiting_anonymization_review,
-    awaiting_finalize,
     awaiting_metric_confirmation,
+    awaiting_worker,
     job_progress,
 )
 from src.services.orchestration.jobs.queue import job_requester_actors, job_requesters, queue_position
 from src.services.orchestration.jobs.stage_results import stage_notes
 from src.services.orchestration.jobs.stage_views import StageViewList, stage_views
 from src.services.orchestration.jobs.step_marks import list_marks
+from src.services.orchestration.jobs.steps import job_step_views
 from src.services.orchestration.jobs.thumbnails import scene_thumbnail
 from src.services.orchestration.jobs.worker_runtimes import has_live_runtime
 from src.services.orchestration.pipeline.models import PipelineView, PipelineWait
@@ -75,6 +77,8 @@ from src.services.orchestration.scene.objectify import AWAITING_CHOICE
 from src.services.orchestration.uploads import UploadNotFoundError
 from src.services.scene.geometry_state import object_geometry_view
 
+_LOGGER = logging.getLogger(__name__)
+
 router = APIRouter()
 
 
@@ -89,7 +93,7 @@ def get_project_display_video(project_id: str) -> FileResponse:
             raise HTTPException(status_code=404, detail="Project không có video xem lại")
         path = registry.runtime_resolver.require(reference)
         if sha256_file(path) != reference.artifact_checksum:
-            raise HTTPException(status_code=409, detail="Video xem lại sai checksum")
+            raise HTTPException(status_code=409, detail="Video xem lại bị hỏng. Hãy tải lại trang.")
     except ProjectNotFoundError as error:
         raise HTTPException(status_code=404, detail="Không tìm thấy project") from error
     except ArtifactStoreError as error:
@@ -229,10 +233,13 @@ def create_scene_from_upload(
     # `qa_verified`: mọi video phải qua bộ che và được người upload chấp nhận; thiếu bộ che thì từ chối ngay.
     deps.require_anonymize(request.anonymize)
     if registry.job_profile() is None:
+        _LOGGER.warning(
+            "Chưa có runtime cho job: cần PRODUCT_PROCESSING_CONFIG và PRODUCT_RUNTIME_MANIFEST, "
+            "hoặc GPU worker đã công bố runtime (PRODUCT_RUNTIME_FROM_WORKERS=true)"
+        )
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Chưa có runtime cho job: cần PRODUCT_PROCESSING_CONFIG và PRODUCT_RUNTIME_MANIFEST, "
-            "hoặc GPU worker đã công bố runtime (PRODUCT_RUNTIME_FROM_WORKERS=true)",
+            detail="Máy chủ chưa sẵn sàng xử lý scene. Báo quản trị viên.",
         )
     processing = None
     if settings.product_processing_config is not None and is_presets_file(settings.product_processing_config):
@@ -529,7 +536,7 @@ def _job_progress_response(
     reservation = job_reservation(registry.persistence.database, job_id) if registry.persistence is not None else None
     heartbeat_at = reservation.heartbeat_at if reservation is not None else None
     # Vị trí hàng đợi chỉ tính cho job đang chờ worker (đọc journal của mọi job): job đang chạy không cần.
-    position = queue_position(registry, job_id) if job.status == JobStatus.QUEUED or awaiting_finalize(job) else None
+    position = queue_position(registry, job_id) if awaiting_worker(job) else None
     # T-040: không worker nào đang sống chạy được runtime của job thì UI báo "đang chờ GPU" thay vì im lặng.
     runtime_wait = registry.persistence is not None and not has_live_runtime(
         registry.persistence.database, job.runtime_manifest_checksum
@@ -543,6 +550,10 @@ def _job_progress_response(
         heartbeat_at=heartbeat_at,
         runtime_wait=runtime_wait,
         notes=stage_notes(registry, job),
+    )
+    # T-073: các bước xếp lịch (bước CPU / GPU / chờ bạn) kèm trạng thái chờ của bước đang sẵn sàng.
+    progress = progress.model_copy(
+        update={"steps": job_step_views(registry.persistence.database if registry.persistence else None, job)}
     )
     progress = filter_job_progress_errors(progress, user)
     allowed = owner_mutation_allowed(

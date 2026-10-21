@@ -63,6 +63,68 @@ def lod_ready(artifact_root: Path, remote: object | None, job_id: str, checksum:
     return head is not None and head(relative) is not None
 
 
+def copy_lod_bundle(source_root: Path, remote: object | None, target_root: Path, job_id: str, checksum: str) -> bool:
+    """Chép một bộ LOD đã đủ sang kho artifact khác (bản chụp workspace mẫu, phiên demo) bằng hard link.
+
+    Chỉ chép file mục lục và các khối nó trỏ tới (lần tạo thua cuộc bị bỏ). Bộ chỉ có trong kho file thì tải về cache
+    nguồn trước. Trả False khi SOG chưa có bộ LOD đủ; giao diện khi đó mở SOG gốc như trước.
+    """
+    relative = lod_relative_dir(job_id, checksum)
+    source = source_root / relative
+    index = source / INDEX
+    if not index.is_file():
+        head = getattr(remote, "head", None)
+        if head is None or head(f"{relative}/{INDEX}") is None:
+            return False
+        remote.fetch(f"{relative}/{INDEX}", index)  # type: ignore[union-attr]
+    names = json.loads(index.read_text(encoding="utf-8")).get("filenames")
+    if not isinstance(names, list) or not names:
+        raise LodBuildError("lod-meta.json lists no chunks")
+    chunks: dict[str, None] = {}
+    for name in names:
+        if not isinstance(name, str) or not valid_bundle_path(name) or "/" not in name:
+            raise LodBuildError(f"unexpected bundle file {name!r}")
+        chunks[name.rsplit("/", 1)[0]] = None
+    files: list[Path] = []
+    for chunk in chunks:
+        folder = source / chunk
+        if not (folder / "meta.json").is_file() and remote is not None:
+            remote.pull_tree(f"{relative}/{chunk}", folder)  # type: ignore[attr-defined]
+        found = sorted(path for path in folder.rglob("*") if path.is_file() and not path.name.startswith("."))
+        if not any(path.name == "meta.json" for path in found):
+            raise LodBuildError(f"chunk {chunk} is missing")
+        for path in found:
+            if not valid_bundle_path(path.relative_to(source).as_posix()):
+                raise LodBuildError(f"unexpected bundle file {path.relative_to(source).as_posix()}")
+        files.extend(found)
+    files.append(index)  # mục lục chép sau cùng: có nó nghĩa là bộ đã đủ
+    target = target_root / relative
+    for path in files:
+        destination = target / path.relative_to(source)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if destination.exists():
+            continue
+        try:
+            os.link(path, destination)
+        except OSError:
+            shutil.copyfile(path, destination)
+    return True
+
+
+def copy_view_lods(
+    source_root: Path, remote: object | None, target_root: Path, job_id: str, references: list[dict]
+) -> int:
+    """Bộ LOD của mọi SOG trong danh sách artifact (`artifact_uri`, `artifact_checksum`) đã chép; trả số bộ đã chép.
+
+    Bộ LOD là bản dẫn xuất ngoài đồ thị artifact, nên bản chụp workspace mẫu và phiên demo phải chép riêng; thiếu nó
+    thì scene lớn của mẫu luôn mở SOG gốc (không có LOD).
+    """
+    checksums = dict.fromkeys(
+        str(item["artifact_checksum"]) for item in references if str(item.get("artifact_uri", "")).endswith(".sog")
+    )
+    return sum(copy_lod_bundle(source_root, remote, target_root, job_id, checksum) for checksum in checksums)
+
+
 def _run(cli: Path, *arguments: str, gpu: bool = False) -> None:
     device = () if gpu else ("-g", "cpu")
     try:

@@ -28,12 +28,15 @@ def test_image_entrypoint_and_example_env_use_the_new_hard_limits() -> None:
     assert "R2S_BRUSH_TIMEOUT_SECONDS=21600" in example
 
 
-def test_preview_outer_limit_covers_colmap_then_brush_in_one_tool_run() -> None:
-    """Round 2 (review mục 1): bước preview chạy COLMAP rồi Brush trong một `_run_tool`; giới hạn bao ngoài phải lớn hơn tổng."""
+def test_preview_outer_limit_is_the_real_four_hour_limit() -> None:
+    """T-071 C5: bước preview (COLMAP rồi Brush trong một `_run_tool`) dừng sau 4 giờ, thay cho 10 giờ của T-043.
+
+    Giới hạn riêng của từng lệnh vẫn là lưới cuối: không lệnh COLMAP nào được chạy lâu hơn cả bước preview.
+    """
     preview = Settings.model_fields["product_preview_timeout_seconds"].default
     colmap = ColmapRuntimeSettings.model_fields["timeout_seconds"].default
-    brush = BrushRuntimeSettings.model_fields["timeout_seconds"].default
-    assert preview >= colmap + brush
+    assert preview == 14400
+    assert colmap <= preview
 
 
 def test_finalize_outer_limit_covers_brush_splat_and_voxel_calls() -> None:
@@ -47,5 +50,5 @@ def test_finalize_outer_limit_covers_brush_splat_and_voxel_calls() -> None:
 def test_image_entrypoint_and_example_env_match_the_preview_outer_limit() -> None:
     entrypoint = (ROOT / "scripts/gpu/docker_entrypoint.sh").read_text(encoding="utf-8")
     example = (ROOT / "scripts/gpu/studio.env.example").read_text(encoding="utf-8")
-    assert "PRODUCT_PREVIEW_TIMEOUT_SECONDS:-36000" in entrypoint
-    assert "PRODUCT_PREVIEW_TIMEOUT_SECONDS=36000" in example
+    assert "PRODUCT_PREVIEW_TIMEOUT_SECONDS:-14400" in entrypoint
+    assert "PRODUCT_PREVIEW_TIMEOUT_SECONDS=14400" in example

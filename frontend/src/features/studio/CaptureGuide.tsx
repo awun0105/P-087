@@ -8,7 +8,7 @@ import { Button } from "@/components/studio/primitives";
 const CAMERA_SETTINGS = [
   ["Định dạng", ".mp4 hoặc .mov", "Dùng video MP4 hoặc QuickTime để tải lên."],
   ["Tỉ lệ khung", "16:9, cầm điện thoại nằm ngang", "Hệ thống giữ nguyên tỉ lệ, không cắt khung. Khung ngang bao được nhiều tường và đồ đạc hơn trong mỗi frame."],
-  ["Độ phân giải", "1080p hoặc 4K đều được", "Trình duyệt mặc định thu về tối đa 720p trước khi tải lên; có thể chọn 1080p. Hệ thống không phóng to, nên quay dưới 720p sẽ mất chi tiết."],
+  ["Độ phân giải", "1080p hoặc 4K đều được", "Trình duyệt mặc định thu về tối đa 1080p trước khi tải lên; có thể chọn 720p để file nhẹ hơn. Hệ thống không phóng to, nên quay dưới 1080p sẽ mất chi tiết."],
   ["Tốc độ khung", "30 fps", "Khi chuẩn bị video trên trình duyệt, tốc độ được giới hạn ở 30 fps. Quay 60 fps không tăng số frame được giữ lại ở bước này."],
   ["HDR", "Tắt", "Video HDR chưa được hỗ trợ ở bước chuẩn bị trên trình duyệt. Nếu iPhone đang quay HDR / Dolby Vision, vào Cài đặt → Camera → Quay video và tắt Video HDR."],
   ["Ống kính", "Dùng một ống 1x suốt video", "Không zoom, không đổi sang 0.5x giữa chừng. Giữ cùng một ống kính giúp hệ thống tính camera nhất quán."],

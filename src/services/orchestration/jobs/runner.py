@@ -97,7 +97,8 @@ from src.services.orchestration.jobs.profile import machine_runtime_checksum
 from src.services.orchestration.jobs.progress import (
     awaiting_anonymization_review,
     awaiting_finalize,
-    awaiting_reviewed_preview,
+    awaiting_pose_step,
+    awaiting_scene_extract,
     metric_confirmation_stage,
 )
 from src.services.orchestration.jobs.step_marks import MarkWrite, record_marks
@@ -1695,9 +1696,39 @@ def run_video_job(job_id: str, *, expected_checksum: str | None = None) -> JobMa
             raise
 
 
-def run_reviewed_preview_job(job_id: str, *, expected_checksum: str | None = None) -> JobManifest:
-    """Sau khi người dùng chấp nhận bản frame đã che: LiDAR ingest (nếu có) → preview, trên cùng job.
+def run_prepare_step(job_id: str, *, expected_checksum: str | None = None) -> JobManifest:
+    """Bước `prepare` (CPU) của hàng đợi theo bước (T-073): kiểm video → che (nếu bật) → tách frame, rồi dừng.
 
+    Job giữ RUNNING ở bước tách frame, không worker nào giữ: bước dựng camera do worker có GPU nhận sau (hoặc sau khi
+    người dùng duyệt bản đã che). Không frame nào bị che thì ghi chấp nhận tự động ngay, như đường một mạch.
+    """
+    attempt, profile = _start_attempt(job_id, expected_checksum, StageId.INPUT_VALIDATE)
+    with job_log_context(attempt.job.job_id, _attempt_log_id(attempt.registry, attempt.job.job_id)):
+        try:
+            with attempt_lease(attempt.workspace):
+                attempt.job = _execute_prepare(attempt, profile)
+                if attempt.job.status != JobStatus.RUNNING:
+                    return attempt.job  # `_execute_prepare` đã ghi benchmark cho job dừng ở bước chuẩn bị
+                if prepared_frame_reference(attempt.job) is None:
+                    raise ValueError("Prepare thành công nhưng thiếu frame set")
+                if awaiting_anonymization_review(attempt.job):
+                    accepted = accept_when_nothing_redacted(attempt.registry, attempt.job.job_id, claim_stage=None)
+                    if accepted is None:
+                        _record_benchmark(attempt)  # dừng chờ người dùng duyệt bản đã che
+                    else:
+                        attempt.job = accepted
+                # `prepare` ghi thẳng vào kho artifact; workspace chỉ có log và hạn của tool, giữ lại như mọi attempt.
+            return _requeue_if_exhausted(attempt) or attempt.job
+        except BaseException as error:
+            _record_runner_failure(attempt, error)
+            _requeue_if_exhausted(attempt)
+            raise
+
+
+def run_reviewed_preview_job(job_id: str, *, expected_checksum: str | None = None) -> JobManifest:
+    """Bước `pose_visual` của job đã chuẩn bị xong (T-073): LiDAR ingest/odometry (nếu có) → preview, trên cùng job.
+
+    Job dừng ở bước tách frame sau bước `prepare` (và sau khi người dùng chấp nhận bản đã che, nếu có frame bị che).
     Claim bằng CAS chuyển stage FRAME_EXTRACT → CAMERA_POSE nên hai worker không cùng chạy.
     """
     settings = get_settings()
@@ -1707,8 +1738,8 @@ def run_reviewed_preview_job(job_id: str, *, expected_checksum: str | None = Non
         raise RuntimeStateConflictError("Queue candidate đã thay đổi trước dispatch")
     if re.fullmatch(_JOB_ID_PATTERN, job_id) is None:
         raise ValueError("Job ID không thể dùng làm worker namespace")
-    if not awaiting_reviewed_preview(job):
-        raise RuntimeStateConflictError("Job không chờ dựng preview sau khi chấp nhận bản đã che")
+    if not awaiting_pose_step(job):
+        raise RuntimeStateConflictError("Job không chờ bước dựng camera + 3DGS")
     profile_path = settings.product_processing_config
     execution = registry.execution_profile
     if profile_path is None or execution is None:
@@ -1832,11 +1863,10 @@ def _build_view_lods(attempt: _Attempt) -> None:
         mark(MarkWrite("finish", step, datetime.now(UTC), outcome))
 
 
-def run_finalize_job(job_id: str, *, expected_checksum: str | None = None) -> JobManifest:
-    """Sau xác nhận tỉ lệ: REC-06 canonical → REC-05 geometry → REC-10 bundle; job kết thúc.
-
-    Claim bằng CAS chuyển stage METRIC → RGB_GEOMETRY nên hai worker không cùng chạy.
-    """
+def _claim_finalize(
+    job_id: str, expected_checksum: str | None
+) -> tuple[_Attempt, ProductArtifactRef, str, object, str]:
+    """Kiểm job chờ bước hình học rồi CAS claim stage METRIC/QUEUED → RGB_GEOMETRY; trả attempt + đầu vào REC."""
     settings = get_settings()
     registry = get_project_registry()
     job = registry.get_job(job_id)
@@ -1865,55 +1895,74 @@ def run_finalize_job(job_id: str, *, expected_checksum: str | None = None) -> Jo
         job = registry.record_stage_progress(job, StageId.RGB_GEOMETRY)
     attempt_id = f"finalize-{uuid4().hex}"
     workspace = settings.product_worker_root.expanduser().resolve() / job_id / attempt_id
-    attempt = _Attempt(registry, settings, job, workspace)
+    return _Attempt(registry, settings, job, workspace), confirmation, decision_checksum, profile, attempt_id
+
+
+def _run_finalize_tool(
+    attempt: _Attempt, confirmation: ProductArtifactRef, decision_checksum: str, profile: object, attempt_id: str
+) -> tuple[ProductArtifactRef, object]:
+    """REC-06 canonical → REC-05 geometry → REC-10 bundle qua `finalize_cli`; trả ref + kết quả đã qua consumer REC."""
+    registry, settings, job_id, workspace = attempt.registry, attempt.settings, attempt.job.job_id, attempt.workspace
+    request = {
+        "schema_version": "1.0",
+        "execution_scope": "product_finalize",
+        "job_id": job_id,
+        "attempt_id": attempt_id,
+        "confirmation_ref": confirmation.model_dump(mode="json"),
+        "authorized_decision_checksum": decision_checksum,
+        "geometry": profile.model_dump(mode="json"),  # type: ignore[attr-defined]
+    }
+    # Job có gói LiDAR (ADR 0009): bước hoàn tất gắn đám mây LiDAR vào bundle bằng căn chỉnh đã xác nhận.
+    lidar = _lidar_package_ref(registry.get_job(job_id))
+    if lidar is not None:
+        request["lidar_package_ref"] = lidar.model_dump(mode="json")
+    request_path = workspace / "finalize.request.json"
+    with request_path.open("x", encoding="utf-8") as stream:
+        json.dump(request, stream)
+    command = [
+        sys.executable,
+        "-m",
+        "src.services.reconstruction.finalize_cli",
+        "--request",
+        str(request_path),
+        "--store-root",
+        str(registry.runtime_resolver.artifact_root),
+        "--workspace",
+        str(workspace / "rec"),
+        "--progress-file",
+        str(workspace / "finalize.progress.jsonl"),
+    ]
+    exit_code, payload = _run_tool(attempt, "finalize", command, settings.product_finalize_timeout_seconds)
+    registry.runtime_resolver.sync_up(job_id)
+    if exit_code not in {0, 1}:
+        raise RuntimeError("Finalize worker không trả result hợp lệ")
+    reference = ProductArtifactRef.model_validate(payload.get("result_ref"))
+    result = load_finalize_result(reference, registry.runtime_resolver.require)
+    if result.attempt_id != attempt_id or (result.error is None) != (exit_code == 0):
+        raise ValueError("Finalize result khác attempt/exit status")
+    return reference, result
+
+
+def run_finalize_job(job_id: str, *, expected_checksum: str | None = None) -> JobManifest:
+    """Đường một mạch sau xác nhận tỉ lệ: REC-06 canonical → REC-05 geometry → REC-10 bundle → tách vật; job kết thúc.
+
+    Hàng đợi theo bước (T-073) không gọi hàm này mà chạy `run_geometry_step` rồi `run_scene_step`; hàm giữ lại cho
+    chạy tay và test. Claim bằng CAS chuyển stage METRIC → RGB_GEOMETRY nên hai worker không cùng chạy.
+    """
+    attempt, confirmation, decision_checksum, profile, attempt_id = _claim_finalize(job_id, expected_checksum)
+    registry, workspace = attempt.registry, attempt.workspace
     log_id = _prepare_claimed_attempt(attempt)
     with job_log_context(job_id, log_id):
         try:
             with attempt_lease(workspace):
-                request = {
-                    "schema_version": "1.0",
-                    "execution_scope": "product_finalize",
-                    "job_id": job_id,
-                    "attempt_id": attempt_id,
-                    "confirmation_ref": confirmation.model_dump(mode="json"),
-                    "authorized_decision_checksum": decision_checksum,
-                    "geometry": profile.model_dump(mode="json"),
-                }
-                # Job có gói LiDAR (ADR 0009): bước hoàn tất gắn đám mây LiDAR vào bundle bằng căn chỉnh đã xác nhận.
-                lidar = _lidar_package_ref(registry.get_job(job_id))
-                if lidar is not None:
-                    request["lidar_package_ref"] = lidar.model_dump(mode="json")
-                request_path = workspace / "finalize.request.json"
-                with request_path.open("x", encoding="utf-8") as stream:
-                    json.dump(request, stream)
-                command = [
-                    sys.executable,
-                    "-m",
-                    "src.services.reconstruction.finalize_cli",
-                    "--request",
-                    str(request_path),
-                    "--store-root",
-                    str(registry.runtime_resolver.artifact_root),
-                    "--workspace",
-                    str(workspace / "rec"),
-                    "--progress-file",
-                    str(workspace / "finalize.progress.jsonl"),
-                ]
-                exit_code, payload = _run_tool(attempt, "finalize", command, settings.product_finalize_timeout_seconds)
-                registry.runtime_resolver.sync_up(job_id)
-                if exit_code not in {0, 1}:
-                    raise RuntimeError("Finalize worker không trả result hợp lệ")
-                reference = ProductArtifactRef.model_validate(payload.get("result_ref"))
-                result = load_finalize_result(reference, registry.runtime_resolver.require)
-                if result.attempt_id != attempt_id or (result.error is None) != (exit_code == 0):
-                    raise ValueError("Finalize result khác attempt/exit status")
+                reference, result = _run_finalize_tool(attempt, confirmation, decision_checksum, profile, attempt_id)
                 extra: list[StageArtifact] = []
-                if result.error is None:
-                    extra = _extract_scene_stage(attempt, workspace, result.bundle_ref)
-                completed = registry.record_finalize(attempt.job, result, reference, extra)
+                if result.error is None:  # type: ignore[attr-defined]
+                    extra = _extract_scene_stage(attempt, workspace, result.bundle_ref)  # type: ignore[attr-defined]
+                completed = registry.record_finalize(attempt.job, result, reference, extra)  # type: ignore[arg-type]
                 _record_benchmark(attempt)
                 # Scene consumer đã chạy xong trước durable commit; lỗi extraction vẫn giữ scratch để debug.
-                if result.error is None and extra:
+                if result.error is None and extra:  # type: ignore[attr-defined]
                     _cleanup_attempt_workspace(attempt)
                 if completed.status == JobStatus.SUCCEEDED:
                     # T-070: scene đã xem được; tạo bộ LOD trong cùng lượt (vẫn giữ lease nên máy GPU không bị tắt).
@@ -1924,6 +1973,125 @@ def run_finalize_job(job_id: str, *, expected_checksum: str | None = None) -> Jo
             _record_runner_failure(attempt, error)
             _requeue_if_exhausted(attempt)
             raise
+
+
+def run_geometry_step(job_id: str, *, expected_checksum: str | None = None) -> JobManifest:
+    """Bước `canonical_geometry` (T-073): REC-06 canonical → REC-05 geometry → REC-10 bundle, rồi dừng.
+
+    Thành công: job RUNNING ở `ST-RGB-GEOMETRY` kèm bundle, chờ worker có GPU nhận bước tách vật. Lỗi: FAILED như cũ.
+    Bước này chỉ dùng CPU, trừ khi máy đặt `product_geometry_gpu_index` (bộ dò lúc nhận ghi bước là GPU).
+    """
+    attempt, confirmation, decision_checksum, profile, attempt_id = _claim_finalize(job_id, expected_checksum)
+    registry = attempt.registry
+    log_id = _prepare_claimed_attempt(attempt)
+    with job_log_context(job_id, log_id):
+        try:
+            with attempt_lease(attempt.workspace):
+                reference, result = _run_finalize_tool(attempt, confirmation, decision_checksum, profile, attempt_id)
+                if result.error is None:  # type: ignore[attr-defined]
+                    completed = registry.record_geometry(attempt.job, result, reference)  # type: ignore[arg-type]
+                    attempt.job = completed
+                    _cleanup_attempt_workspace(attempt)
+                else:
+                    completed = registry.record_finalize(attempt.job, result, reference, [])  # type: ignore[arg-type]
+                    attempt.job = completed
+                    _record_benchmark(attempt)
+            return _requeue_if_exhausted(attempt) or completed
+        except BaseException as error:
+            _record_runner_failure(attempt, error)
+            _requeue_if_exhausted(attempt)
+            raise
+
+
+def _bundle_ref(job: JobManifest) -> ProductArtifactRef:
+    """Ref của bundle bước hình học đã ghi vào job (đọc lại qua checksum, không tin đường dẫn khác)."""
+    stage = next(
+        (
+            item
+            for item in reversed(job.stage_artifacts)
+            if item.artifact_type == "ReconstructionBundle"
+            and item.status == StageStatus.SUCCEEDED
+            and item.artifact_uri
+            and item.artifact_checksum
+        ),
+        None,
+    )
+    if stage is None or stage.artifact_uri is None or stage.artifact_checksum is None:
+        raise ValueError("Job chưa có bundle để tách vật")
+    return ProductArtifactRef(
+        artifact_type="ReconstructionBundle",
+        schema_version="1.0",
+        artifact_uri=stage.artifact_uri,
+        artifact_checksum=stage.artifact_checksum,
+        data_class=stage.data_class,
+        producer_stage=stage.stage_id,
+        job_id=job.job_id,
+    )
+
+
+def run_scene_step(job_id: str, *, expected_checksum: str | None = None) -> JobManifest:
+    """Bước `scene_extract` (GPU, T-073): tách vật từ bundle đã ghi rồi kết thúc job; lỗi tách vật không làm hỏng job.
+
+    Claim bằng CAS: RUNNING `ST-RGB-GEOMETRY` → `ST-OBJECT-EXTRACT` (hoặc QUEUED → RUNNING khi retry).
+    """
+    settings = get_settings()
+    registry = get_project_registry()
+    job = registry.get_job(job_id)
+    if expected_checksum is not None and job.job_manifest_checksum != expected_checksum:
+        raise RuntimeStateConflictError("Queue candidate đã thay đổi trước dispatch")
+    if re.fullmatch(_JOB_ID_PATTERN, job_id) is None:
+        raise ValueError("Job ID không thể dùng làm worker namespace")
+    if not awaiting_scene_extract(job):
+        raise RuntimeStateConflictError("Job không chờ bước tách vật")
+    registry.runtime_resolver.sync_down(job_id)
+    bundle_ref = _bundle_ref(job)
+    if job.status == JobStatus.QUEUED:
+        job = registry.transition_job(
+            job_id,
+            TransitionRequest(target_status=JobStatus.RUNNING, current_stage=StageId.OBJECT_EXTRACT),
+            expected_checksum=job.job_manifest_checksum,
+        )
+    else:
+        job = registry.record_stage_progress(job, StageId.OBJECT_EXTRACT)
+    workspace = settings.product_worker_root.expanduser().resolve() / job_id / f"scene-{uuid4().hex}"
+    attempt = _Attempt(registry, settings, job, workspace)
+    log_id = _prepare_claimed_attempt(attempt)
+    with job_log_context(job_id, log_id):
+        try:
+            with attempt_lease(workspace):
+                extra = _extract_scene_stage(attempt, workspace, bundle_ref)
+                completed = registry.record_scene_extract(attempt.job, extra)
+                attempt.job = completed
+                _record_benchmark(attempt)
+                if extra:
+                    _cleanup_attempt_workspace(attempt)  # lỗi tách vật giữ scratch để debug
+                if completed.status == JobStatus.SUCCEEDED:
+                    if registry.persistence is not None:
+                        from src.services.orchestration.jobs.steps import enqueue_view_lod
+
+                        try:
+                            enqueue_view_lod(registry.persistence.database, completed)
+                        except Exception as error:  # noqa: BLE001 - bộ dựng LOD lúc rảnh vẫn bù cho job này
+                            logger.warning("Không xếp được bước LOD cause=%s", type(error).__name__)
+                    _cleanup_finished_job(attempt)
+            return _requeue_if_exhausted(attempt) or completed
+        except BaseException as error:
+            _record_runner_failure(attempt, error)
+            _requeue_if_exhausted(attempt)
+            raise
+
+
+def run_view_lod_step(job_id: str, *, expected_checksum: str | None = None) -> JobManifest:
+    """Bước `view_lod` (GPU, ưu tiên thấp, T-073): bộ LOD cho các SOG lớn của job đã xong; lỗi không làm hỏng job."""
+    settings = get_settings()
+    registry = get_project_registry()
+    job = registry.get_job(job_id)
+    if job.status != JobStatus.SUCCEEDED:
+        raise RuntimeStateConflictError("Bộ LOD chỉ dựng cho job đã xong")
+    registry.runtime_resolver.sync_down(job_id)
+    workspace = settings.product_worker_root.expanduser().resolve() / job_id / f"lod-{uuid4().hex}"
+    _build_view_lods(_Attempt(registry, settings, job, workspace))
+    return job
 
 
 def main(argv: list[str] | None = None) -> int:

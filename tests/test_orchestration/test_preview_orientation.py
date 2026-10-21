@@ -69,7 +69,12 @@ def test_preview_orientation_uses_only_matching_confirmation(
     views = module.stage_views(registry, "input").views
     gaussian = next(view for view in views if view.kind == "gaussian")
     assert gaussian.unit == "arbitrary" and gaussian.refs == [preview.delivery_ref]
-    assert gaussian.cameras == next(view for view in views if view.kind == "cameras").cameras
+    cameras = next(view for view in views if view.kind == "cameras")
+    assert gaussian.cameras == cameras.cameras
+    # Pose cũ không có thang thử lại: lớp camera báo 0 lần, không cảnh báo (T-071 D6).
+    assert cameras.retry_count == 0 and cameras.registration_warning is False
+    assert cameras.registered_ratio is not None and 0 < cameras.registered_ratio <= 1
+    assert gaussian.registered_ratio is None
     rotation = gaussian.display_rotation_xyzw
     if confirmation_state == "matching":
         assert rotation is not None

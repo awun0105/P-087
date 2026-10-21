@@ -131,8 +131,8 @@ describe("hàng Tách vật thể không chạy lại vì việc dựng", () => 
 describe("chữ mô tả bước và hàng ảo trên timeline", () => {
   it("bước Collision và Tách vật thể mô tả đúng việc từng bước làm; hàng ảo có tên Duyệt vật & Tạo mesh", () => {
     expect(GEOMETRY_STAGE.title).toBe("Collision môi trường");
-    expect(GEOMETRY_STAGE.description).toContain("Lưới được dựng từ ảnh hoặc từ LiDAR");
-    expect(OBJECT_STAGE.description).toContain("Chưa có lưới va chạm riêng cho từng vật");
+    expect(GEOMETRY_STAGE.description).toContain("lưới va chạm");
+    expect(OBJECT_STAGE.description).toContain("vật ứng viên");
     expect(OBJECT_STAGE.description).not.toContain("Máy không có runtime");
     expect(GEOMETRY_REVIEW_STAGE).toMatchObject({ id: "UI-GEOMETRY-REVIEW", title: "Duyệt vật & Tạo mesh", short: "Tạo mesh" });
     expect(GEOMETRY_REVIEW_STAGE.description).toContain("Xong bước này mới đi bộ (Walk) và xuất gói được");

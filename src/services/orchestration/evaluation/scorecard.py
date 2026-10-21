@@ -158,7 +158,24 @@ def _pose_metrics(registry: ProjectRegistry, job: JobManifest) -> list[Metric] |
     ratio = round(100 * quality.registered_ratio, 1)
     gate = quality.min_registered_ratio
     verdict: Verdict | None = None if gate is None else ("ok" if quality.registered_ratio >= gate else "fail")
+    threshold = None if gate is None else f"≥ {gate * 100:.0f}% (cấu hình COLMAP của job)"
+    if quality.registration_warning:
+        # T-071 C3: nhận sau thang thử lại với ngưỡng thấp hơn — cảnh báo, không phải lỗi.
+        verdict = "warn"
+        if quality.accept_registered_ratio is not None and threshold is not None:
+            threshold += f"; sau khi tự thử lại nhận từ {quality.accept_registered_ratio * 100:.0f}%"
     per_frame = round(quality.sparse_points / quality.registered_frames) if quality.sparse_points else None
+    retry: list[Metric] = []
+    if quality.retry_steps:
+        retry.append(
+            Metric(
+                key="pose.retry_steps",
+                label="Tự thử lại ghép ảnh",
+                value=quality.retry_steps,
+                display=f"Đã tự thử lại ghép ảnh ({quality.retry_steps} lần)",
+                meaning="Lần ghép ảnh đầu không đủ ảnh có vị trí; COLMAP tự ghép thêm cặp ảnh trên cùng dữ liệu.",
+            )
+        )
     return [
         Metric(
             key="pose.registered_ratio",
@@ -168,8 +185,9 @@ def _pose_metrics(registry: ProjectRegistry, job: JobManifest) -> list[Metric] |
             display=f"{_number(ratio, 1, '%')} ({quality.registered_frames}/{quality.input_frames})",
             meaning="Phần ảnh có vị trí camera. Ảnh không dựng được thì vùng nó nhìn thấy không vào scene.",
             verdict=verdict,
-            threshold=None if gate is None else f"≥ {gate * 100:.0f}% (cấu hình COLMAP của job)",
+            threshold=threshold,
         ),
+        *retry,
         Metric(
             key="pose.mean_reprojection_error",
             label="Sai số reprojection trung bình",

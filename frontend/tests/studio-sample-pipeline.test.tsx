@@ -35,7 +35,7 @@ describe("khung phát lại giống tiến trình thật", () => {
   it("dùng cùng tiêu đề 'Tiến trình xử lý' và nói rõ đây là bản phát lại", () => {
     render(<SampleProcessStep sampleId="old" sample={sample} onDone={vi.fn()} />);
     expect(screen.getByRole("heading", { name: "Tiến trình xử lý" })).toBeInTheDocument();
-    expect(screen.getByText(/Đây là bản phát lại, không phải job đang chạy/)).toBeInTheDocument();
+    expect(screen.getByText(/Đây là bản phát lại kết quả đã xử lý sẵn/)).toBeInTheDocument();
   });
 
   it("bundle có bước LiDAR thì dòng thời gian có bước LiDAR như scene thật", () => {

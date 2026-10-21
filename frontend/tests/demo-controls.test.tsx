@@ -129,7 +129,7 @@ describe("DemoControls: Đặt làm bản demo = xuất vào thư viện mẫu",
   it("Reviewer phải xác nhận công khai mới xuất được, và gửi tên + mô tả", async () => {
     auth.me = { auth_required: true, user: { user_id: "u1", display_name: "Reviewer", role: "reviewer" } };
     vi.mocked(getDemoState).mockResolvedValue(demo("rev-002", false, false));
-    vi.mocked(publishDemo).mockResolvedValue({ sample_id: "kho-a-1234", title: "Kho A" });
+    vi.mocked(publishDemo).mockResolvedValue({ status: "publishing" });
     render(<DemoControls jobId="job-a" revision="rev-002" sceneReady defaultTitle="Kho A" onRestored={vi.fn()} />);
     fireEvent.click(await screen.findByRole("button", { name: "Đặt làm bản demo" }));
 
@@ -143,9 +143,20 @@ describe("DemoControls: Đặt làm bản demo = xuất vào thư viện mẫu",
     fireEvent.click(submit);
 
     await waitFor(() => expect(publishDemo).toHaveBeenCalledWith("job-a", { title: "Kho A", description: "Lối đi chính", confirm_public: true }));
-    const link = await screen.findByRole("link", { name: "Đã có trong thư viện mẫu" });
+    // Mẫu được chép ở nền: nút báo đang chuẩn bị, rồi tự đổi sang đường dẫn khi máy chủ báo xong.
+    expect(await screen.findByRole("button", { name: "Đang chuẩn bị mẫu…" })).toBeDisabled();
+    vi.mocked(getDemoState).mockResolvedValue(demo("rev-002", false, false, "kho-a-1234"));
+    const link = await screen.findByRole("link", { name: "Đã có trong thư viện mẫu" }, { timeout: 5000 });
     expect(link).toHaveAttribute("href", "/new/try-demo?sample=kho-a-1234");
     expect(screen.queryByRole("button", { name: "Đặt làm bản demo" })).toBeNull();
+  });
+
+  it("lần chuẩn bị mẫu lỗi thì báo lỗi và cho bấm lại", async () => {
+    auth.me = { auth_required: true, user: { user_id: "u1", display_name: "Reviewer", role: "reviewer" } };
+    vi.mocked(getDemoState).mockResolvedValue({ ...demo("rev-002", false, false), publish_error: "Không ghi được vào thư viện mẫu" });
+    render(<DemoControls jobId="job-a" revision="rev-002" sceneReady defaultTitle="Kho A" onRestored={vi.fn()} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Chưa thêm được vào thư viện mẫu: Không ghi được vào thư viện mẫu");
+    expect(screen.getByRole("button", { name: "Đặt làm bản demo" })).toBeEnabled();
   });
 
   it("lỗi từ máy chủ hiện ngay trong hộp thoại và không đánh dấu đã xuất", async () => {

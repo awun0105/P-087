@@ -31,7 +31,7 @@ import { RegionOverlay, type RegionOverlayHandlers } from "@/features/viewer/reg
 import { ShellGlowLayer, decodeShellGlb, type ShellSpec } from "@/features/viewer/shell-glow";
 import { SceneOverlay, type GizmoMode, type OverlayBox, type OverlayObject } from "@/features/viewer/scene-overlay";
 import { ThirdPersonRig } from "@/features/viewer/third-person";
-import { browserPhysicsBlocker, usePhysicsPlay, type PhysicsObjectInput } from "@/features/viewer/usePhysicsPlay";
+import { browserPhysicsBlocker, readyPhysicsHint, usePhysicsPlay, type PhysicsObjectInput } from "@/features/viewer/usePhysicsPlay";
 import {
   objectViewPose,
   recordingCameraPose,
@@ -979,9 +979,9 @@ export function MetricSceneView({
         {walking && physics.status.state !== "off" && (
           <div className="pointer-events-auto flex flex-wrap items-center gap-2 rounded-md border border-line-dark bg-viewport-deep/85 px-3 py-1.5 text-xs text-on-dark/90 backdrop-blur-md shadow-lg" role="status">
             {physics.status.state === "loading" && "Đang nạp collider vật thể…"}
-            {physics.status.state === "ready" && `Đi vào vật để đẩy · ${physics.status.objects} vật có collision`}
+            {physics.status.state === "ready" && readyPhysicsHint(physics.status.objects, physics.status.movable)}
             {physics.status.state === "failed" && `Không bật được vật lý: ${physics.status.message}`}
-            {physics.status.state === "ready" && (
+            {physics.status.state === "ready" && physics.status.movable > 0 && (
               <button type="button" onClick={physics.reset} className="rounded px-2 py-0.5 hover:bg-on-dark/10">Đặt lại vị trí vật</button>
             )}
           </div>

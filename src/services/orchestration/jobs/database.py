@@ -507,6 +507,34 @@ MIGRATIONS += (
         ),
     ),
 )
+MIGRATIONS += (
+    (
+        27,
+        (
+            # T-073: hàng đợi theo từng bước. Chỉ thêm bảng mới (không sửa/xoá dữ liệu cũ); `IF NOT EXISTS` để chạy lại
+            # an toàn. Job đang chạy dở chưa có dòng nào: dòng được tạo ở revision kế tiếp của job hoặc khi worker quét.
+            """CREATE TABLE IF NOT EXISTS r2s_job_steps (
+                job_id TEXT NOT NULL,
+                step_id TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                tool TEXT,
+                state TEXT NOT NULL,
+                depends_on TEXT NOT NULL,
+                required_gb TEXT,
+                attempt INTEGER NOT NULL,
+                worker_id TEXT,
+                lease_expires_at TEXT,
+                job_manifest_checksum TEXT NOT NULL,
+                started_at TEXT,
+                finished_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (job_id, step_id)
+            )""",
+            "CREATE INDEX IF NOT EXISTS r2s_job_steps_by_state ON r2s_job_steps(state, kind)",
+        ),
+    ),
+)
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
 

@@ -2032,7 +2032,7 @@ def test_object_choice_is_cached_per_scene_revision_and_never_guessed(
     assert scenes._awaiting_object_choice(broken, job) is False  # scene chưa đọc được: không đoán
 
 
-def _record_machine(studio: SimpleNamespace, vram: float) -> None:
+def _record_machine(studio: SimpleNamespace, vram: float, vocab: bool | None = True) -> None:
     from datetime import UTC, datetime
 
     from src.services.orchestration.processing.capability import record
@@ -2048,6 +2048,7 @@ def _record_machine(studio: SimpleNamespace, vram: float) -> None:
             cpu_count=8,
             ram_total_gb=32,
             disk_free_gb=200,
+            colmap_vocab_tree_available=vocab,
         ),
     )
 

@@ -95,6 +95,27 @@ class StageProgress(BaseModel):
     note: str | None = None
 
 
+StepKindView = Literal["cpu", "gpu", "user"]
+StepStateView = Literal["pending", "ready", "claimed", "running", "done", "failed", "waiting_user", "skipped"]
+
+
+class JobStepView(BaseModel):
+    """Một bước xếp lịch của job (T-073): bước chạy trên CPU, trên GPU, hoặc chờ người dùng.
+
+    `waiting_on` chỉ có khi bước đang chờ: `gpu`/`cpu` = chờ máy có tài nguyên đó trống, `user` = chờ bạn thao tác.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    step_id: str
+    kind: StepKindView
+    state: StepStateView
+    waiting_on: Literal["gpu", "cpu", "user"] | None = None
+    attempt: int = 1
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+
+
 class JobProgress(BaseModel):
     """Tiến trình job cho UI; `preview_ready` khi 3DGS preview đã được commit."""
 
@@ -114,6 +135,8 @@ class JobProgress(BaseModel):
     #: Vị trí trong hàng đợi khi job đang chờ worker; None khi job đang chạy, đã xong hoặc chờ người dùng.
     queue: QueuePosition | None = None
     error: ExecutionError | None = None
+    #: Các bước xếp lịch của job (T-073); rỗng khi server cũ chưa có bảng bước.
+    steps: list[JobStepView] = []
 
 
 #: Loại artifact ghi nhận người dùng đã xem và chấp nhận bản frame đã che (AUD-18).
@@ -169,6 +192,31 @@ def awaiting_reviewed_preview(job: JobManifest) -> bool:
         and job.current_stage == StageId.FRAME_EXTRACT
         and sanitized_frame_stage(job) is not None
         and anonymization_acceptance_stage(job) is not None
+    )
+
+
+def prepared_frame_stage(job: JobManifest) -> StageArtifact | None:
+    """Stage tách frame đã thành công (frame set đã publish) của job, nếu có."""
+    return next(
+        (
+            stage
+            for stage in reversed(job.stage_artifacts)
+            if stage.stage_id == StageId.FRAME_EXTRACT
+            and stage.status == StageStatus.SUCCEEDED
+            and stage.artifact_type == "NormalizedRGBFrameSet"
+        ),
+        None,
+    )
+
+
+def awaiting_pose_step(job: JobManifest) -> bool:
+    """Bước chuẩn bị đã xong (và bản đã che đã được chấp nhận nếu có): job RUNNING ở bước tách frame, không worker
+    nào giữ, chờ một worker nhận bước dựng camera + 3DGS (T-073). Gồm cả `awaiting_reviewed_preview`."""
+    return (
+        job.status == JobStatus.RUNNING
+        and job.current_stage == StageId.FRAME_EXTRACT
+        and prepared_frame_stage(job) is not None
+        and not awaiting_anonymization_review(job)
     )
 
 
@@ -256,17 +304,11 @@ def job_progress(
         if resource_wait is not None
         and resource_wait.job_manifest_checksum == job.job_manifest_checksum
         and not reviewing
-        and (job.status == JobStatus.QUEUED or awaiting_finalize(job) or awaiting_reviewed_preview(job))
+        and awaiting_worker(job)
         else None
     )
     # Snapshot chờ tài nguyên chỉ do worker đang sống ghi, nên job đó đã có máy xét và không thiếu runtime.
-    runtime_pending = (
-        runtime_wait
-        and resources is None
-        and not waiting
-        and not reviewing
-        and (job.status == JobStatus.QUEUED or awaiting_finalize(job) or awaiting_reviewed_preview(job))
-    )
+    runtime_pending = runtime_wait and resources is None and not waiting and not reviewing and awaiting_worker(job)
     stages: list[StageProgress] = []
     for stage_id in pipeline:
         record = records.get(stage_id)
@@ -332,12 +374,7 @@ def job_progress(
             )
         ),
         resource_wait=resources,
-        queue=(
-            queue
-            if not reviewing
-            and (job.status == JobStatus.QUEUED or awaiting_finalize(job) or awaiting_reviewed_preview(job))
-            else None
-        ),
+        queue=(queue if not reviewing and awaiting_worker(job) else None),
         error=failure if job.status == JobStatus.FAILED else None,
     )
 
@@ -358,6 +395,31 @@ def metric_confirmation_stage(job: JobManifest) -> StageArtifact | None:
 
 def _has_bundle(job: JobManifest) -> bool:
     return any(stage.artifact_type == "ReconstructionBundle" for stage in job.stage_artifacts)
+
+
+def awaiting_scene_extract(job: JobManifest) -> bool:
+    """Bước hình học đã ghi bundle, job chờ một worker nhận bước tách vật (T-073).
+
+    - RUNNING ở `ST-RGB-GEOMETRY` có bundle: bước hình học vừa xong, chưa worker nào nhận bước tách vật.
+    - QUEUED có bundle (retry sau khi bước tách vật bị gián đoạn): chỉ chạy lại bước tách vật.
+    """
+    if metric_confirmation_stage(job) is None or not _has_bundle(job):
+        return False
+    return job.status == JobStatus.QUEUED or (
+        job.status == JobStatus.RUNNING and job.current_stage == StageId.RGB_GEOMETRY
+    )
+
+
+def awaiting_worker(job: JobManifest) -> bool:
+    """Job đang chờ một worker nhận bước kế tiếp (không phải đang chạy, không chờ người dùng)."""
+    if awaiting_anonymization_review(job):
+        return False
+    return (
+        job.status == JobStatus.QUEUED
+        or awaiting_pose_step(job)
+        or awaiting_finalize(job)
+        or awaiting_scene_extract(job)
+    )
 
 
 def awaiting_finalize(job: JobManifest) -> bool:

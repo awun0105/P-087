@@ -44,7 +44,7 @@ export function SamplePicker({
           <Clapperboard className="size-4 text-ember-strong" aria-hidden />
           Chọn video mẫu
         </h2>
-        <p className="text-sm text-ink-muted">Kết quả đã được pipeline xử lý sẵn — tiến trình phát lại nhanh.</p>
+        <p className="text-sm text-ink-muted">Kết quả đã xử lý sẵn, tiến trình phát lại nhanh.</p>
       </div>
       <ul className="mt-4 grid gap-4 sm:grid-cols-2">
         {samples.map((sample) => {
@@ -234,7 +234,7 @@ export function SampleProcessStep({
           </Notice>
         ) : (
           <Notice icon={<Info aria-hidden />}>
-            Đây là bản phát lại, không phải job đang chạy: kết quả đã xử lý sẵn, đang phát lại {recorded.length} bước đã ghi trong pipeline {stageList.length} bước.
+            Đây là bản phát lại kết quả đã xử lý sẵn ({recorded.length}/{stageList.length} bước).
           </Notice>
         )}
         {missing.length > 0 && <Notice tone="ochre">Mẫu cũ chưa ghi kết quả: {missing.map((meta) => meta.title).join(", ")}.

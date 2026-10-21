@@ -18,6 +18,7 @@ from src.services.orchestration.jobs.queue import (
     queue_position,
     waiting_jobs,
 )
+from src.services.orchestration.jobs.steps import step_candidates
 from src.services.orchestration.jobs.worker_cli import dispatch_next
 from src.services.orchestration.projects.models import JobCreateInput
 from src.services.orchestration.projects.registry import ProjectRegistry
@@ -182,8 +183,11 @@ def test_finalize_wait_needs_finalize_measurements(tmp_path: Path) -> None:
     confirmed = registry.transition_job(_job(registry, "a").job_id, TransitionRequest(target_status=JobStatus.RUNNING))
     confirmed = registry.record_stage_progress(confirmed, StageId.METRIC_CANONICALIZE)
     confirmed = registry.record_metric_confirmation(confirmed, _confirmation(registry, confirmed.job_id))
-    behind = _job(registry, "b")
-    order = [item.job_id for item in fair_order(waiting_jobs(registry))]
+    # T-073: vị trí theo thứ tự worker nhận bước. Job phía sau chờ bước chuẩn bị (CPU, chưa có frame) để cùng làn
+    # với bước hình học của job đã xác nhận; bước hình học (người dùng vừa xác nhận) đi trước.
+    behind = registry.create_job(JobCreateInput(project_id="project-fixture-001"))
+    order = [item.job.job_id for item in step_candidates(registry)]
+    assert order == [confirmed.job_id, behind.job_id]
     target = queue_position(registry, order[-1])
     assert target is not None and target.position == 2
     assert target.estimated_wait_seconds is None  # job phía trước là bước hoàn tất, chưa có số đo cho pha đó

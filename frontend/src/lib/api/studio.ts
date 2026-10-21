@@ -402,7 +402,7 @@ export function uploadPreparedVideo(
   const promise = (async () => {
     if (prepared.file.size !== prepared.manifest.prepared_file.size_bytes ||
         prepared.frameMapFile.size !== prepared.manifest.frame_map.size_bytes) {
-      throw new ApiError(422, "Bản video hoặc frame map không khớp kích thước trong manifest.");
+      throw new ApiError(422, "Video đã chuẩn bị không khớp với bản gốc. Hãy tải lại video.");
     }
     await verifyVideoPreparationChecksum(prepared.manifest);
     let record = options.existingRecord && matchesPreparedUpload(options.existingRecord, options.accountId, prepared)

@@ -81,7 +81,7 @@ export function GaussianMembershipEditor({ jobId, scene, objectId, onClose, onPu
   useEffect(() => {
     if (!busy || !pending.current) return;
     const timer = setTimeout(() => {
-      if (pending.current) { pending.current = null; setBusy(false); setError("Editor chưa trả vùng chọn. Kiểm tra WebGPU và chờ PLY nguồn tải xong."); }
+      if (pending.current) { pending.current = null; setBusy(false); setError("Chưa nhận được vùng chọn. Chờ scene tải xong rồi thử lại."); }
     }, 15000);
     return () => clearTimeout(timer);
   }, [busy]);
@@ -110,8 +110,8 @@ export function GaussianMembershipEditor({ jobId, scene, objectId, onClose, onPu
         {draft && <Button size="sm" disabled={busy || active || operation?.status === "done"} onClick={() => void apply()}>Apply và tái tạo</Button>}
         {active && <Button size="sm" variant="secondary" onClick={() => { void cancelObjectify(jobId, operation?.operation_id).then(setOperation).catch(cause => setError(errorMessage(cause, "Không hủy được"))); }}>Hủy tái tạo</Button>}
       </div>
-      {draft && <p role="status">{draft.preview.gaussian_count} Gaussian: {source ?? "Nền"} → {target ?? "Nền"}. Vật bị ảnh hưởng: {draft.preview.affected_object_ids.join(", ")}. Bỏ qua {draft.preview.wrong_owner_count} hàng khác chủ; bảo vệ {draft.preview.protected_count} hàng sàn. Chưa Apply thì scene không đổi.</p>}
-      {operation && <p role="status">{operation.status} · {operation.phase ?? ""} · {operation.result_revision ?? operation.base_revision}. {active ? "Scene hiện tại được giữ đến khi tái tạo thành công." : operation.error}</p>}
+      {draft && <p role="status">{draft.preview.gaussian_count} Gaussian: {source ?? "Nền"} → {target ?? "Nền"}. Vật bị ảnh hưởng: {draft.preview.affected_object_ids.join(", ")}. Bỏ qua {draft.preview.wrong_owner_count} điểm thuộc vật khác; giữ {draft.preview.protected_count} điểm sàn. Chưa áp dụng thì scene không đổi.</p>}
+      {operation && <p role="status">{operation.status} · {operation.phase ?? ""} · {operation.result_revision ?? operation.base_revision}. {active ? "Scene hiện tại được giữ đến khi dựng lại xong." : operation.error}</p>}
       {error && <p role="alert" className="text-rust">{error}</p>}
     </div>
     <iframe inert={Boolean(draft || active)} tabIndex={draft || active ? -1 : 0} ref={frame} src={src} title="SuperSplat chọn Gaussian nguồn" className="min-h-0 flex-1 border-0" style={{ pointerEvents: draft || active ? "none" : "auto" }} allow="fullscreen; clipboard-write" />

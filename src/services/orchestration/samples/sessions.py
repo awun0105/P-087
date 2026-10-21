@@ -15,7 +15,7 @@ from uuid import uuid4
 from pydantic import AwareDatetime, BaseModel, ConfigDict
 
 from src.config import Settings
-from src.services.orchestration.artifacts import ArtifactResolver
+from src.services.orchestration.artifacts import ArtifactResolver, lod
 from src.services.orchestration.auth import AuthService
 from src.services.orchestration.jobs.database import RuntimeDatabase, demo_database_url
 from src.services.orchestration.jobs.models import JobAttemptRecord
@@ -132,6 +132,7 @@ def _create_session(
         private = _registry(private_settings, registry)
         assert private.persistence is not None
         copy_artifact_graph(resolver, private.runtime_resolver, snapshot.files)
+        lod.copy_view_lods(resolver.artifact_root, None, private.runtime_resolver.artifact_root, job_id, snapshot.files)
         recording = bundle.root / "workspace" / "recordings" / f"{job_id}.rrd"
         if recording.is_file():
             private_settings.product_rerun_recording_dir.mkdir(parents=True, exist_ok=True)

@@ -4,6 +4,7 @@ Route gọi hàm trong module này (không import thẳng `get_settings`) nên t
 `deps.get_settings` / `deps.get_project_registry` là đủ cho mọi route.
 """
 
+import logging
 import os
 from typing import Literal
 
@@ -29,6 +30,8 @@ from src.services.orchestration.samples.session_context import demo_runtime
 from src.services.orchestration.storage import runtime_resolver
 from src.services.orchestration.uploads import DirectUploadService, VideoUploadService
 from src.services.orchestration.uploads.scene_imports import ImportService
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def settings() -> Settings:
@@ -79,9 +82,10 @@ def direct_uploads() -> DirectUploadService:
     current = settings()
     resolver = runtime_resolver(current)
     if resolver.remote is None:
+        _LOGGER.warning("Deployment chưa cấu hình kho file (ARTIFACT_S3_*); dùng upload qua API")
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Deployment chưa cấu hình kho file (ARTIFACT_S3_*); dùng upload qua API",
+            detail="Máy chủ chưa bật tải lên trực tiếp. Báo quản trị viên.",
         )
     return DirectUploadService(RuntimeDatabase(current.database_url), resolver, current.product_upload_max_bytes)
 
@@ -95,9 +99,12 @@ def presets() -> tuple[ProcessingPresets, str]:
     """File cấu hình chung đang dùng (PRODUCT_PROCESSING_CONFIG) và checksum của nó."""
     path = settings().product_processing_config
     if path is None or not is_presets_file(path):
+        _LOGGER.warning(
+            "Chưa cấu hình file thông số chung: đặt PRODUCT_PROCESSING_CONFIG=configs/product/processing_presets_v1.json"
+        )
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Chưa cấu hình file thông số chung: đặt PRODUCT_PROCESSING_CONFIG=configs/product/processing_presets_v1.json",
+            detail="Máy chủ chưa có bộ thông số xử lý. Báo quản trị viên.",
         )
     try:
         return load_presets(path)

@@ -54,3 +54,26 @@ describe("object splat loading (T-067)", () => {
     expect(loadedNames(app)).not.toContain("r2s-object-o4");
   });
 });
+
+describe("object splat sorting under on-demand rendering", () => {
+  it("asks for a frame when an object's first sort arrives, so the object is drawn without a camera move", async () => {
+    const { EventHandler } = await import("playcanvas");
+    const app = fakeApp();
+    const sorter = new EventHandler();
+    app.systems.gsplat.addComponent.mockImplementation((entity: { gsplat?: unknown }) => {
+      // PlayCanvas draws a non-unified splat only after its worker sort is applied in a rendered frame.
+      entity.gsplat = { instance: { sorter } };
+      return entity.gsplat;
+    });
+    const overlay = new SceneOverlay(app as unknown as ViewerAppLike);
+    overlay.setObjects([item("o0")]);
+    (app.assets.load.mock.calls[0][0] as Asset).fire("load");
+    app.renderNextFrame = false;
+    sorter.fire("updated");
+    expect(app.renderNextFrame).toBe(true);
+    overlay.destroy();
+    app.renderNextFrame = false;
+    sorter.fire("updated");
+    expect(app.renderNextFrame).toBe(false);
+  });
+});

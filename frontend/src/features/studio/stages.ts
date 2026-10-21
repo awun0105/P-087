@@ -18,31 +18,31 @@ export const MVP_STAGES: readonly StageMeta[] = [
     id: "ST-INPUT-VALIDATE",
     title: "Kiểm tra video",
     short: "Kiểm tra",
-    description: "Đọc toàn bộ video và gói LiDAR, quỹ đạo nếu có, đo độ nét và độ rung trước khi chạy các bước nặng.",
+    description: "Đọc video và dữ liệu đi kèm, đo độ nét và độ rung.",
   },
   {
     id: "ST-PRIVACY-GATE",
     title: "Quyền riêng tư",
     short: "Riêng tư",
-    description: "Ghi nhận cam kết của người tải lên. Nếu bạn bật che mặt và biển số, hệ thống làm mờ ở bước tách khung hình.",
+    description: "Ghi nhận cam kết của người tải lên về dữ liệu.",
   },
   {
     id: "ST-FRAME-EXTRACT",
     title: "Tách khung hình",
     short: "Tách ảnh",
-    description: "Tách video thành ảnh, giữ ảnh đủ nét. Nếu bật che mặt và biển số, hệ thống làm mờ các ảnh rồi dừng chờ bạn duyệt bản đã che trước khi dựng 3D.",
+    description: "Tách video thành ảnh và giữ ảnh đủ nét. Nếu bật che mặt và biển số, hệ thống che rồi chờ bạn xem lại.",
   },
   {
     id: "ST-CAMERA-POSE",
     title: "Ước lượng camera",
     short: "Camera",
-    description: "Tìm vị trí và hướng máy quay ở từng ảnh bằng COLMAP. Có quỹ đạo hoặc LiDAR thì dùng làm điểm tựa.",
+    description: "Tìm vị trí và hướng máy quay ở từng ảnh.",
   },
   {
     id: "ST-VISUAL-RECON",
     title: "Dựng 3D Gaussian Splatting",
     short: "Dựng 3DGS",
-    description: "Dựng cảnh 3D xem được từ mọi góc bằng 3D Gaussian Splatting trên bộ xử lý đồ họa (GPU).",
+    description: "Dựng cảnh 3D xem được từ mọi góc.",
   },
 ] as const;
 
@@ -51,7 +51,7 @@ export const METRIC_STAGE: StageMeta = {
   id: "ST-METRIC-CANONICALIZE",
   title: "Xác nhận tỉ lệ mét",
   short: "Tỉ lệ mét",
-  description: "Hệ thống đề xuất tỉ lệ thật từ ảnh hoặc LiDAR. Bạn chấp nhận đề xuất hoặc tự đo một khoảng cách thật, rồi chọn mặt sàn.",
+  description: "Chấp nhận tỉ lệ hệ thống đề xuất hoặc tự nhập một khoảng cách thật, rồi chọn mặt sàn.",
 };
 
 /** REC-06 canonical + REC-05 + REC-10: chạy tự động sau khi xác nhận tỉ lệ. */
@@ -59,7 +59,7 @@ export const GEOMETRY_STAGE: StageMeta = {
   id: "ST-RGB-GEOMETRY",
   title: "Collision môi trường",
   short: "Collision",
-  description: "Dựng lưới va chạm cho cả không gian để robot không đi xuyên tường, sàn. Lưới được dựng từ ảnh hoặc từ LiDAR khi có dữ liệu phù hợp.",
+  description: "Dựng lưới va chạm để robot không đi xuyên tường và sàn.",
 };
 
 /** ADR 0007 (v2): tách scene thành nền đã vá + từng vật có Gaussian/collider riêng; lỗi 3 lần thì người dùng chọn
@@ -68,7 +68,7 @@ export const OBJECT_STAGE: StageMeta = {
   id: "ST-OBJECT-EXTRACT",
   title: "Tách vật thể",
   short: "Vật thể",
-  description: "Tách cảnh thành từng vật ứng viên để bạn duyệt. Chưa có lưới va chạm riêng cho từng vật ở bước này.",
+  description: "Tách cảnh thành từng vật ứng viên để bạn duyệt.",
 };
 
 /** Id chỉ có ở giao diện (không có trong contracts/StageId): hàng ảo "Duyệt vật & Tạo mesh" (T-021). */
@@ -86,7 +86,7 @@ export const GEOMETRY_REVIEW_STAGE: TimelineStageMeta = {
   id: GEOMETRY_REVIEW_STAGE_ID,
   title: "Duyệt vật & Tạo mesh",
   short: "Tạo mesh",
-  description: "Bạn xác nhận vật, sửa vùng nếu cần, rồi bấm Tạo mesh để dựng bề mặt, lưới va chạm từng vật và vá nền; nếu bật ObjectGS thì dùng bề mặt từ ObjectGS, vật nào không đạt sẽ dùng vỏ Gaussian theo cách cũ. Xong bước này mới đi bộ (Walk) và xuất gói được.",
+  description: "Xác nhận vật, sửa vùng nếu cần, rồi bấm Tạo mesh. Xong bước này mới đi bộ (Walk) và xuất gói được.",
 };
 
 export const STUDIO_STAGES: readonly StageMeta[] = [...MVP_STAGES, METRIC_STAGE, GEOMETRY_STAGE, OBJECT_STAGE];
@@ -96,21 +96,21 @@ export const LIDAR_STAGE: StageMeta = {
   id: "ST-LIDAR-INGEST",
   title: "Nhận dữ liệu LiDAR",
   short: "LiDAR",
-  description: "Đọc gói LiDAR và ghép các lượt quét theo quỹ đạo nếu bạn nộp dữ liệu thô. Hệ thống kiểm tra quỹ đạo, thông số căn chỉnh cảm biến và tìm mặt sàn.",
+  description: "Đọc gói LiDAR, ghép các lượt quét và tìm mặt sàn.",
 };
 
 export const LIDAR_ODOMETRY_STAGE: StageMeta = {
   id: "ST-LIDAR-ODOMETRY",
   title: "Ước lượng quỹ đạo LiDAR",
   short: "Quỹ đạo",
-  description: "Ước lượng đường đi của cảm biến từ các lượt quét LiDAR đã chọn. Bạn vẫn cần xác nhận hệ tọa độ, mặt sàn và cách căn với cảnh.",
+  description: "Ước lượng đường đi của cảm biến từ các lượt quét LiDAR.",
 };
 
 export const LIDAR_CALIBRATION_QA_STAGE: StageMeta = {
   id: "ST-LIDAR-CALIBRATION-QA",
   title: "Kiểm tra căn chỉnh LiDAR",
   short: "Khớp LiDAR",
-  description: "So vị trí các lượt quét LiDAR với đường nét trong ảnh màu và lưu ảnh chồng để kiểm tra độ khớp. Kết quả kiểm tra này chưa đủ để xác nhận dữ liệu dùng được cho lưới va chạm.",
+  description: "Chồng điểm LiDAR lên ảnh màu để xem hai nguồn có khớp nhau không.",
 };
 
 /** Danh sách stage của một job theo các stage API trả: job có gói LiDAR có thêm bước LiDAR sau bước tách frame. */
@@ -132,7 +132,7 @@ export const ANONYMIZATION_REVIEW_STAGE: StageMeta = {
   id: "ST-ANONYMIZATION-REVIEW",
   title: "Xem bản đã che",
   short: "Xem bản che",
-  description: "Khuôn mặt và biển số phát hiện được đã bị che. Bạn xem lại rồi xác nhận để hệ thống dựng 3D từ bản đã che.",
+  description: "Xem lại ảnh đã che khuôn mặt và biển số rồi xác nhận để dựng 3D.",
 };
 
 /** Bước người dùng duyệt vật trước khi Tạo mesh (T-061). */
@@ -140,7 +140,7 @@ export const OBJECT_CONFIRM_STAGE: StageMeta = {
   id: "ST-OBJECT-CONFIRM",
   title: "Duyệt vật",
   short: "Duyệt vật",
-  description: "Bạn xác nhận hoặc bỏ qua từng vật, sửa vùng bằng box nếu cần, rồi bấm Tạo mesh.",
+  description: "Xác nhận hoặc bỏ qua từng vật, sửa vùng nếu cần, rồi bấm Tạo mesh.",
 };
 
 /** Bước hệ thống Tạo mesh và lưới va chạm từng vật (T-061). */
@@ -156,7 +156,7 @@ export const VIEW_LOD_STAGE: StageMeta = {
   id: "ST-VIEW-LOD",
   title: "Chuẩn bị xem 3D mượt",
   short: "Chuẩn bị xem",
-  description: "Tạo các mức chi tiết cho bản 3D lớn để lần mở sau hiện ngay rồi mịn dần, xoay không giật. Scene đã xem được trong lúc này.",
+  description: "Chuẩn bị bản 3D lớn để lần sau mở nhanh và xoay mượt. Vẫn xem được scene trong lúc này.",
 };
 
 const EXTRA_STAGES: readonly StageMeta[] = [

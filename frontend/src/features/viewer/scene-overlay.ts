@@ -777,7 +777,10 @@ export class SceneOverlay {
             if (this.destroyed || this.objects.get(item.id)?.asset !== asset) return;
             // GLB giữ màu đỉnh của asset; entity con bị huỷ cùng entity của vật khi gỡ.
             if (model) entity.addChild((asset.resource as ContainerResource).instantiateRenderEntity());
-            else entity.addComponent("gsplat", { asset });
+            else {
+              entity.addComponent("gsplat", { asset });
+              this.redrawWhenSorted(entity);
+            }
             this.redraw();
           });
           asset.once("error", () => this.finishObjectLoad(asset));
@@ -790,6 +793,17 @@ export class SceneOverlay {
     }
     this.pumpObjectLoads();
     this.redraw();
+  }
+
+  /**
+   * Splat riêng của vật (không unified) chỉ được vẽ sau khi thứ tự sắp xếp từ worker về và được áp ở một frame;
+   * trước đó PlayCanvas vẽ 0 điểm. Viewer vẽ theo yêu cầu nên không tự xin frame khi thứ tự về: vật nạp xong lúc
+   * camera đứng yên sẽ vắng mặt (lộ nền đã khoét, thành mảng tối) tới lần xoay camera kế tiếp. Xin một frame mỗi khi
+   * thứ tự mới về; frame đó không sắp xếp lại khi camera không đổi nên không lặp.
+   */
+  private redrawWhenSorted(entity: Entity): void {
+    const component = (entity as unknown as { gsplat?: { instance?: { sorter?: { on(name: string, callback: () => void): unknown } | null } | null } }).gsplat;
+    component?.instance?.sorter?.on("updated", () => this.redraw());
   }
 
   /** Đưa vật lên đầu hàng đợi tải (vd. vật người dùng vừa chọn); vật đã tải hoặc đang tải thì không đổi gì. */

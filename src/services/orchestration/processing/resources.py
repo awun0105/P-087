@@ -36,6 +36,15 @@ SFM_KEYS: tuple[str, ...] = (
     "colmap.sequential_overlap",
     "colmap.camera_model",
 )
+#: Đúng các khóa `estimate_gb` dùng: chỉ những thông số này được thu nhỏ theo máy. Thông số quyết định độ ổn định
+#: (fps lấy mẫu, số ảnh lân cận, số bước huấn luyện, số vòng nén) không bao giờ bị hạ thầm.
+RESOURCE_KEYS: tuple[str, ...] = (
+    "sampling.max_frames",
+    "colmap.max_image_size",
+    "colmap.max_num_features",
+    "brush.max_resolution",
+    "brush.max_splats",
+)
 #: Nhóm thông số huấn luyện 3D Gaussian Splatting (chủ yếu quyết định VRAM).
 SPLAT_KEYS: tuple[str, ...] = (
     "brush.total_train_iters",
@@ -255,71 +264,68 @@ def _fits(
     return all(available.get(name) is None or required[name] < available[name] * model.warn_ratio for name in checked)
 
 
+def resource_budget(capability: MachineCapability) -> dict[Resource, float | None] | None:
+    """Ngân sách để thu nhỏ cấu hình: mốc "máy rảnh" nếu worker đã đo, không thì tổng năng lực máy.
+
+    Không theo phần trống tức thời: lúc worker đang chạy job khác, phần trống đã bị chính job đó chiếm và sẽ được
+    trả lại trước khi job mới chạy (job mới chờ trong hàng đợi với nguyên cấu hình). Mốc rảnh thiếu số đo RAM/VRAM
+    → None: không suy ngân sách từ số đo thiếu.
+    """
+    idle = _idle(capability)
+    if idle is not None:
+        return None if any(value is None for value in idle.values()) else idle
+    return {"vram": capability.vram_total_gb, "ram": capability.ram_total_gb, "disk": capability.disk_free_gb}
+
+
+def fit_to_budget(
+    presets: ProcessingPresets,
+    floor: dict[str, ParamValue],
+    target: dict[str, ParamValue],
+    available: dict[Resource, float | None],
+) -> tuple[dict[str, ParamValue], float] | None:
+    """Một lần chia đôi chung cho cả năm khóa tài nguyên với cùng `t` giữa sàn và mục tiêu.
+
+    Chỉ `RESOURCE_KEYS` đổi; mọi khóa khác giữ nguyên giá trị mục tiêu. Trả (bộ thông số, t) với t = 1 khi mục tiêu
+    vừa máy; None khi ngay cả sàn cũng không vừa (dưới ngưỡng vàng của mọi tài nguyên đã đo).
+    """
+    model = presets.resource_model
+
+    def candidate(t: float) -> dict[str, ParamValue]:
+        interp = interpolate(presets, floor, target, t)
+        values = dict(target)
+        for key in RESOURCE_KEYS:
+            values[key] = interp[key]
+        return values
+
+    if _fits(model, target, available):
+        return dict(target), 1.0
+    best = candidate(0.0)
+    if not _fits(model, best, available):
+        return None
+    lo, hi = 0.0, 1.0
+    for _ in range(24):
+        mid = (lo + hi) / 2
+        values = candidate(mid)
+        if _fits(model, values, available):
+            best, lo = values, mid
+        else:
+            hi = mid
+    return best, lo
+
+
 def maximum_for_machine(presets: ProcessingPresets, capability: MachineCapability | None) -> dict[str, ParamValue]:
-    """Bộ thông số cao nhất giữa preset tối thiểu và tối đa mà mọi tài nguyên dưới ngưỡng vàng.
+    """Preset `maximum` thu nhỏ theo máy bằng cùng bộ chia đôi của bộ gợi ý (sàn = preset tối thiểu).
 
-    Tìm riêng hai nhóm nối tiếp: nhóm SFM (theo RAM và đĩa) trước, sau đó giữ nguyên kết quả
-    đó và tìm nhóm SPLAT (theo cả VRAM, RAM và đĩa). Cách tách hai trục này giúp VRAM lớn
-    không bị kéo tụt thông số train chỉ vì RAM máy thấp.
-
-    Tính theo mốc "máy rảnh" worker ghi lại, không theo phần đang trống tức thời: lúc
-    worker đang chạy job khác, phần trống đã bị chính job đó chiếm và sẽ được trả lại
-    trước khi job mới chạy (job mới chờ trong hàng đợi với nguyên cấu hình). Worker chưa
-    từng đo lúc rảnh thì dùng tổng năng lực máy.
-
-    Không có số đo máy → preset tối thiểu (không đoán).
+    Không có số đo máy, mốc rảnh thiếu số đo, hoặc ngay cả sàn cũng không vừa → preset tối thiểu (không đoán);
+    bảng thông số sẽ tô đỏ theo ước lượng.
     """
     minimum = dict(presets.presets["minimum_quality"])
     if capability is None:
         return minimum
-    maximum = dict(presets.presets["maximum"])
-    model = presets.resource_model
-    idle = _idle(capability)
-    available: dict[Resource, float | None] = idle or {
-        "vram": capability.vram_total_gb,
-        "ram": capability.ram_total_gb,
-        "disk": capability.disk_free_gb,
-    }
-    if idle is not None and any(value is None for value in idle.values()):
-        return minimum  # Không suy maximum từ mốc rảnh thiếu số đo RAM/VRAM.
-    floor = {spec.key: (spec.min if spec.kind != "choice" else minimum[spec.key]) for spec in presets.parameters}
-
-    def _search(
-        keys: tuple[str, ...],
-        fixed: dict[str, ParamValue],
-        resources: tuple[Resource, ...],
-    ) -> dict[str, ParamValue]:
-        def _candidate(
-            low_cand: dict[str, ParamValue], high_cand: dict[str, ParamValue], t: float
-        ) -> dict[str, ParamValue]:
-            interp = interpolate(presets, low_cand, high_cand, t)
-            res = dict(fixed)
-            for k in keys:
-                res[k] = interp[k]
-            return res
-
-        for low_range, high_range in ((minimum, maximum), (floor, minimum)):
-            c0 = _candidate(low_range, high_range, 0.0)
-            if not _fits(model, c0, available, resources):
-                continue
-            c1 = _candidate(low_range, high_range, 1.0)
-            if _fits(model, c1, available, resources):
-                return c1
-            best_cand, lo, hi = c0, 0.0, 1.0
-            for _ in range(24):
-                mid = (lo + hi) / 2
-                cmid = _candidate(low_range, high_range, mid)
-                if _fits(model, cmid, available, resources):
-                    best_cand, lo = cmid, mid
-                else:
-                    hi = mid
-            return best_cand
-
-        floor_result = dict(fixed)
-        for k in keys:
-            floor_result[k] = floor[k]
-        return floor_result
-
-    sfm = _search(SFM_KEYS, fixed=minimum, resources=("ram", "disk"))
-    best = _search(SPLAT_KEYS, fixed=sfm, resources=("vram", "ram", "disk"))
-    return presets.validate_params(best)
+    available = resource_budget(capability)
+    if available is None:
+        return minimum
+    target = dict(presets.presets["maximum"])
+    floor = dict(target) | {key: min(minimum[key], target[key], key=float) for key in RESOURCE_KEYS}
+    fitted = fit_to_budget(presets, floor, target, available)
+    return presets.validate_params(fitted[0]) if fitted is not None else minimum

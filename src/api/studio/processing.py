@@ -51,6 +51,8 @@ class ProcessingSuggestion(BaseModel):
     preset_name: str
     params: dict[str, ParamValue]
     evaluation: Evaluation
+    #: Mỗi quyết định của bộ gợi ý (lấy thưa frame, hạ độ phân giải, thiếu từ điển, máy giới hạn) bằng lời thường.
+    notes: list[str] = []
 
 
 @router.get("/processing/options", response_model=ProcessingOptions)
@@ -107,10 +109,11 @@ def suggest_processing(request: ScenarioPreferences) -> ProcessingSuggestion:
     presets, _ = deps.presets()
     capability = deps.capability()
     try:
-        name, params = recommend_preset(request, capability, presets)
+        recommendation = recommend_preset(request, capability, presets)
     except RecommendationUnavailableError as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     settings = deps.settings()
+    params = recommendation.params
     observed = deps.observed_resource_budget(
         deps.registry(),
         params,
@@ -118,5 +121,8 @@ def suggest_processing(request: ScenarioPreferences) -> ProcessingSuggestion:
         colmap_use_gpu=getattr(settings, "product_colmap_use_gpu", False),
     )
     return ProcessingSuggestion(
-        preset_name=name, params=params, evaluation=evaluate(presets, params, capability, observed=observed)
+        preset_name=recommendation.name,
+        params=params,
+        evaluation=evaluate(presets, params, capability, observed=observed),
+        notes=recommendation.notes,
     )

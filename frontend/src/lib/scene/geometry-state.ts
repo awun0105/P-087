@@ -27,11 +27,11 @@ const GEOMETRY_PHASE_LABELS: Record<ObjectifyPhase, string> = {
   observations: "Tách vật theo nhiều góc nhìn",
   collider_and_background: "Dựng collider và vá nền",
   shell: "Dựng vỏ vật",
-  objectgs: "Chạy ObjectGS",
+  objectgs: "Dựng bề mặt vật",
   quality: "Kiểm tra chất lượng",
-  collider: "Tạo collider (CoACD)",
+  collider: "Tạo collider",
   environment: "Dựng nền và collision môi trường",
-  publish: "Lưu revision",
+  publish: "Lưu kết quả",
   done: "Đã xong",
 };
 

@@ -81,3 +81,23 @@ def test_unknown_vulkan_mapping_pins_torch_only() -> None:
     gpus = with_wgpu_indices(parse_nvidia_smi(SMI_T4X2), [])
     _, environment = _plan(gpus)[0]
     assert environment == {"CUDA_DEVICE_ORDER": "PCI_BUS_ID", "CUDA_VISIBLE_DEVICES": "0"}
+
+
+def test_run_workers_adds_cpu_lane_workers_pinned_like_the_first_slot() -> None:
+    """T-073: worker làn CPU dùng môi trường slot đầu, chỉ nhận bước CPU; mọi worker biết số worker GPU."""
+    from scripts.gpu.run_workers import CPU_WORKER_COMMAND, WORKER_COMMAND, commands, cpu_worker_count
+
+    gpus = _t4x2()
+    layout = plan(gpus, 2.2, jobs=64, ram_gb=256.0, job_ram_gb=7.0, cores=64)
+    started = commands(layout, 1)
+    assert [command for command, _ in started] == [WORKER_COMMAND] * len(layout.slots) + [CPU_WORKER_COMMAND]
+    gpu_env = [env for _, env in started[:-1]]
+    cpu_env = started[-1][1]
+    assert all(env["R2S_GPU_WORKERS"] == str(len(layout.slots)) for env in [*gpu_env, cpu_env])
+    assert (
+        cpu_env["R2S_WORKER_LANES"] == "cpu" and cpu_env["CUDA_VISIBLE_DEVICES"] == gpu_env[0]["CUDA_VISIBLE_DEVICES"]
+    )
+    assert CPU_WORKER_COMMAND[-2:] == ["--lanes", "cpu"]
+    assert len(commands(layout, 0)) == len(layout.slots)
+    assert cpu_worker_count(None) == 1 and cpu_worker_count("") == 1 and cpu_worker_count("0") == 0
+    assert cpu_worker_count("3") == 3 and cpu_worker_count("x") == 1 and cpu_worker_count("-2") == 0

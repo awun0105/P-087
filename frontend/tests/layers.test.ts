@@ -190,7 +190,7 @@ describe("composeColliderTransform", () => {
   it("từ chối collider parent sai frame", () => {
     // parent_frame = "world" nhưng object.local_frame = "object-a"
     const owner = object({ collider: colliderOf("world") });
-    expect(() => composeColliderTransform(owner, owner.collider!)).toThrow(/contract/);
+    expect(() => composeColliderTransform(owner, owner.collider!)).toThrow(/không gắn đúng vào vật/);
   });
 });
 

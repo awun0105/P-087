@@ -211,8 +211,8 @@ export function MetricConfirmView({
           {capability === "failed" || capability === "unavailable" ? (
             <p className="grid size-full place-items-center p-6 text-center text-sm text-on-dark/80" role="alert">
               {capability === "unavailable"
-                ? "Không render được 3DGS: trình duyệt cần WebGL2 hoặc WebGPU. Bạn vẫn xác nhận được tỉ lệ ở bên cạnh."
-                : "Không thể tải mô hình 3DGS (lỗi tải file). Bạn vẫn xác nhận được tỉ lệ ở bên cạnh."}
+                ? "Trình duyệt không hiện được bản 3D (cần WebGL2 hoặc WebGPU). Bạn vẫn xác nhận được tỉ lệ ở bên cạnh."
+                : "Không tải được bản 3D. Bạn vẫn xác nhận được tỉ lệ ở bên cạnh."}
             </p>
           ) : (
             jobCameras.settled ? (
@@ -253,8 +253,8 @@ export function MetricConfirmView({
         {capability === "failed" || capability === "unavailable" ? (
           <p className="grid size-full place-items-center p-6 text-center text-sm text-on-dark/80" role="alert">
             {capability === "unavailable"
-              ? "Không render được 3DGS để chọn điểm: trình duyệt cần WebGL2 hoặc WebGPU."
-              : "Không thể tải mô hình 3DGS để chọn điểm (lỗi tải file hoặc dữ liệu không hợp lệ)."}
+              ? "Trình duyệt không hiện được bản 3D để chọn điểm (cần WebGL2 hoặc WebGPU)."
+              : "Không tải được bản 3D để chọn điểm. Tải lại trang để thử lại."}
           </p>
         ) : (
           jobCameras.settled ? (
@@ -306,8 +306,7 @@ export function MetricConfirmView({
         </HelpDetails>
         {lidarAvailable && (
           <Notice tone="ochre" icon={<Radar aria-hidden />}>
-            Scene từ dataset mẫu có LiDAR: khoảng cách lấy từ LiDAR để mô phỏng số đo ngoài đời. Video của bạn sẽ cần nhập
-            số đo thật.
+            Scene mẫu này lấy khoảng cách từ LiDAR thay cho số đo thật. Với video của bạn, hãy nhập số đo thật.
           </Notice>
         )}
 
@@ -322,7 +321,7 @@ export function MetricConfirmView({
               {proposal.floor ? " Có đề xuất mặt sàn." : " Không tìm được mặt sàn: bạn tự chọn điểm."}
             </p>
             <p className="text-xs text-ink-subtle">
-              Đây là ước lượng của mô hình đoán độ sâu, không phải số đo. Cần chính xác thì đo thật một đoạn và nhập tay.
+              Đây là ước lượng, không phải số đo. Cần chính xác thì đo thật một đoạn và nhập tay.
             </p>
             {useEstimate ? (
               <Button variant="secondary" size="sm" disabled={busy} onClick={() => { setUseEstimate(false); setPreview(null); }}>
@@ -401,7 +400,7 @@ export function MetricConfirmView({
                   "trajectory_alignment",
                 ) && (
                   <p className="text-xs text-ochre">
-                    Một số điểm nằm ngoài vùng LiDAR phủ: dùng vị trí quy đổi mét theo căn chỉnh quỹ đạo (sai lệch ~7 cm).
+                    Một số điểm nằm ngoài vùng LiDAR quét được nên dùng vị trí ước lượng (sai lệch khoảng 7 cm).
                   </p>
                 )}
                 <p className="text-xs text-ink-subtle">

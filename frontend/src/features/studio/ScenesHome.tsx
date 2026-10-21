@@ -119,7 +119,7 @@ export function ScenesHome() {
       <section aria-labelledby="scenes-heading" className="mt-12">
         <div className="mb-4 flex items-center justify-between">
           <h2 id="scenes-heading" className="label-tech text-ink-muted">
-            Scene từ video · job
+            Scene từ video
           </h2>
           {signedIn && scenes && scenes.length > 0 && (
             <span className="text-sm text-ink-subtle">{scenes.length} scene</span>

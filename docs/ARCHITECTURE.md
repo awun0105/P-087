@@ -106,6 +106,8 @@ API có cả lệnh nhanh và lời gọi có chi phí tính toán. Reconstructi
 
 [Worker CLI](../src/services/orchestration/jobs/worker_cli.py) đọc công việc bền vững từ DB, chọn việc phù hợp runtime rồi gọi runner. Các thao tác như import, registration, objectify/geometry và validation có hàng đợi/worker tương ứng; đây không chỉ là một background thread của FastAPI.
 
+Pipeline job được xếp lịch theo **bước** (T-073, [steps.py](../src/services/orchestration/jobs/steps.py)): bảng `r2s_job_steps` (migration v27) chiếu đúng revision mới nhất của JobManifest, mỗi bước có loại `cpu`/`gpu`/`user`. Worker có làn (`--lanes gpu,cpu` mặc định, ưu tiên bước GPU; worker `--lanes cpu` do `run_workers.py` khởi động theo `STUDIO_CPU_WORKERS` chỉ nhận bước CPU). Làn CPU trên máy API không nhận bước pipeline. Admission xét từng bước theo số đo của đúng tool, bước CPU giữ RAM/đĩa và số luồng CPU nhưng không giữ GPU.
+
 Trước công việc cần tài nguyên, admission kiểm khả năng xử lý. Lease/heartbeat và identity của attempt ngăn hai worker cùng nhận kết quả hợp lệ cho một lượt công việc. Khi hủy, mất lease hoặc revision đã đổi, caller phải dừng/không commit output cũ. Vòng poll có cơ chế lùi sau lỗi; recovery xử lý job bị gián đoạn và lease hết hạn.
 
 Các thao tác không có cùng một state machine. Job reconstruction, operation chỉnh scene, import và validation có bản ghi riêng; UI phải tổng hợp chúng thay vì coi tất cả là trạng thái của một job.

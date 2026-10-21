@@ -3,7 +3,8 @@ import { suggestProcessingPreset } from "@/lib/api/studio";
 import { parseSuggestResponse, type ParameterSpec, type ScenarioPreferences } from "@/lib/contracts/studio";
 
 const preferences: ScenarioPreferences = {
-  input_type: "video_loop_360", environment: "outdoor", subject_scope: "single_object", target_capacity: "balanced",
+  input_type: "video_loop_360", environment: "outdoor", subject_scope: "single_object", target_capacity: "standard",
+  video: { duration_seconds: 180, display_width: 1920, display_height: 1080, frame_rate: 30 },
 };
 const params = { "colmap.matching_mode": "sequential_vocab_tree", "geometry.collision_mesh": "faces", "scene.max_objects": 1, "simulation.ground_plane": "disabled" };
 const suggestion = {
@@ -12,6 +13,7 @@ const suggestion = {
     resources: ["vram", "ram", "disk"].map((resource) => ({ resource, required_gb: 1, available_gb: 32, status: "ok", message: "Đã đo" })),
     parameters: Object.keys(params).map((key) => ({ key, status: "ok", message: null })), blocking: false, note: "Ước lượng",
   },
+  notes: ["Video 3 phút 0 giây: lấy 1,7 khung hình mỗi giây (tối đa 300 ảnh)"],
 };
 
 afterEach(() => vi.unstubAllGlobals());
@@ -21,6 +23,9 @@ describe("scenario processing contract", () => {
     const groups: ParameterSpec["group"][] = ["sampling", "colmap", "brush", "geometry", "scene", "simulation"];
     expect(groups).toHaveLength(6);
     expect(parseSuggestResponse(suggestion)).toEqual(suggestion);
+    // Server cũ chưa gửi ghi chú: coi như không có ghi chú.
+    const older = Object.fromEntries(Object.entries(suggestion).filter(([key]) => key !== "notes"));
+    expect(parseSuggestResponse(older).notes).toEqual([]);
   });
 
   it.each([
@@ -30,6 +35,8 @@ describe("scenario processing contract", () => {
     { ...suggestion, evaluation: null },
     { ...suggestion, evaluation: { ...suggestion.evaluation, resources: [] } },
     { ...suggestion, evaluation: { ...suggestion.evaluation, parameters: [{ key: "unknown", status: "ok", message: null }] } },
+    { ...suggestion, notes: "một chuỗi" },
+    { ...suggestion, notes: [1] },
   ])("rejects malformed recommendations before updating form values", (payload) => {
     expect(() => parseSuggestResponse(payload)).toThrow();
   });

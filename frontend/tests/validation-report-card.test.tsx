@@ -51,7 +51,7 @@ describe("ValidationReportCard", () => {
 
   it("báo cáo không có bằng chứng Isaac: hiện cảnh báo kèm môi trường, check, Start–Goal và bằng chứng", async () => {
     render(<ValidationReportCard state={await parsed(PASSED)} />);
-    const card = screen.getByRole("region", { name: "Báo cáo validation" });
+    const card = screen.getByRole("region", { name: "Báo cáo kiểm tra" });
     expect(within(card).getByText("Chưa có bằng chứng chạy Isaac Sim thật.")).toBeInTheDocument();
     expect(within(card).getByText("isaac_sim=UNVERIFIED, gpu=UNVERIFIED")).toBeInTheDocument();
     expect(within(card).getByText("ISAAC_LOAD")).toBeInTheDocument();
@@ -71,7 +71,7 @@ describe("ValidationReportCard", () => {
     expect(screen.getByText("rev-004")).toBeInTheDocument();
     expect(screen.getByText(PASSED.candidate_checksum)).toBeInTheDocument();
     expect(screen.getByText(PASSED.report_checksum)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Chép checksum báo cáo" }));
+    fireEvent.click(screen.getByRole("button", { name: "Chép mã báo cáo" }));
     expect(await screen.findByText("Đã chép")).toBeInTheDocument();
     expect(writeText).toHaveBeenCalledWith(PASSED.report_checksum);
   });
@@ -79,7 +79,7 @@ describe("ValidationReportCard", () => {
   it("không chép được thì báo lỗi thay vì im lặng", async () => {
     Object.defineProperty(navigator, "clipboard", { value: { writeText: vi.fn().mockRejectedValue(new Error("denied")) }, configurable: true });
     render(<ValidationReportCard state={await parsed(PASSED)} />);
-    fireEvent.click(screen.getByRole("button", { name: "Chép checksum báo cáo" }));
+    fireEvent.click(screen.getByRole("button", { name: "Chép mã báo cáo" }));
     expect(await screen.findByText("Không chép được")).toBeInTheDocument();
   });
 
@@ -95,7 +95,7 @@ describe("ValidationReportCard", () => {
     render(<ValidationReportCard state={await parsed(FAILED)} />);
     expect(screen.getAllByText("Không đạt · FAIL").length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText("ROBOT_SPAWN")).toBeInTheDocument();
-    expect(screen.queryByText("Cần Reviewer chấp nhận")).toBeNull();
+    expect(screen.queryByText("Cần người duyệt chấp nhận")).toBeNull();
     expect(screen.getByText("Lỗi · ERROR")).toBeInTheDocument();
   });
 
@@ -104,7 +104,7 @@ describe("ValidationReportCard", () => {
     render(<ValidationReportCard state={state} />);
     const row = screen.getByText("fixture-pair-001").closest("li");
     expect(row).not.toBeNull();
-    expect(within(row as HTMLElement).getByText("Cần Reviewer chấp nhận")).toBeInTheDocument();
+    expect(within(row as HTMLElement).getByText("Cần người duyệt chấp nhận")).toBeInTheDocument();
   });
 
   it("CLEAR without source-bound collision coverage is shown as an unverified claim", async () => {
@@ -116,8 +116,8 @@ describe("ValidationReportCard", () => {
 
     const row = screen.getByText("fixture-pair-001").closest("li");
     expect(row).not.toBeNull();
-    expect(within(row as HTMLElement).getByText(/CLEAR chỉ là kết quả quan sát của candidate/)).toBeInTheDocument();
-    expect(within(row as HTMLElement).getByText("Cần Reviewer chấp nhận")).toBeInTheDocument();
+    expect(within(row as HTMLElement).getByText(/CLEAR chỉ là kết quả quan sát/)).toBeInTheDocument();
+    expect(within(row as HTMLElement).getByText("Cần người duyệt chấp nhận")).toBeInTheDocument();
   });
 
   it("shows motion-suspected path coverage in clear Vietnamese", async () => {

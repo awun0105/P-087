@@ -122,11 +122,14 @@ export interface DemoState {
   at_root?: boolean;
   /** ID mẫu trong thư viện mẫu đã được xuất từ job này; null/vắng = chưa xuất (API cũ không gửi). */
   published_sample_id?: string | null;
+  /** Mẫu đang được chép vào thư viện ở nền (API cũ không gửi). */
+  publishing?: boolean;
+  /** Lỗi của lần chuẩn bị mẫu gần nhất; null/vắng = không lỗi. */
+  publish_error?: string | null;
 }
 
 export interface DemoPublishResult {
-  sample_id: string;
-  title: string;
+  status: "publishing";
 }
 
 /** Kiểm trạng thái bản demo ở biên API: thiếu field là lỗi, không đoán. */
@@ -138,11 +141,13 @@ export function parseDemoState(value: unknown): DemoState {
   if (baseline !== null && !(isRecord(baseline) && typeof baseline.scene_revision === "string" && typeof baseline.job_id === "string")) throw invalid();
   if (value.at_root !== undefined && typeof value.at_root !== "boolean") throw invalid();
   if (value.published_sample_id !== undefined && !(value.published_sample_id === null || typeof value.published_sample_id === "string")) throw invalid();
+  if (value.publishing !== undefined && typeof value.publishing !== "boolean") throw invalid();
+  if (value.publish_error !== undefined && !(value.publish_error === null || typeof value.publish_error === "string")) throw invalid();
   return value as unknown as DemoState;
 }
 
 export function parseDemoPublishResult(value: unknown): DemoPublishResult {
-  if (!isRecord(value) || typeof value.sample_id !== "string" || typeof value.title !== "string") {
+  if (!isRecord(value) || value.status !== "publishing") {
     throw new Error("Kết quả xuất bản demo không hợp lệ");
   }
   return value as unknown as DemoPublishResult;
@@ -203,8 +208,8 @@ export interface ResourceWaitView {
   required_gb: Record<ResourceName, number>;
   available_gb: Record<ResourceName, number | null>;
   waiting_on: ResourceName[];
-  /** measured: số "cần" lấy từ số đo các lượt chạy trước; configured_preview: ước lượng theo cấu hình. */
-  estimate_scope: "configured_preview" | "measured";
+  /** measured: số "cần" lấy từ số đo các lượt chạy trước; upper_bound: số đo của cấu hình nặng hơn; configured_preview: ước lượng theo cấu hình. */
+  estimate_scope: "configured_preview" | "measured" | "upper_bound";
   /** Chưa có số đo cho cấu hình này: job phải chạy một mình trên GPU. */
   needs_exclusive_gpu?: boolean;
   /** Thiếu ở observation do bản worker cũ ghi. */
@@ -222,6 +227,23 @@ export interface QueuePositionView {
   /** Ước tính từ thời lượng đã đo của các lượt chạy trước; null khi chưa có số đo. */
   estimated_wait_seconds: number | null;
   estimate_samples: number;
+}
+
+/** Một bước xếp lịch của job (T-073), khớp `JobStepView` backend: bước CPU, bước GPU, hoặc bước chờ người dùng. */
+export type JobStepId =
+  | "prepare" | "anonymization_review" | "pose_visual" | "metric_confirm" | "canonical_geometry" | "scene_extract" | "view_lod";
+export type JobStepKind = "cpu" | "gpu" | "user";
+export type JobStepState = "pending" | "ready" | "claimed" | "running" | "done" | "failed" | "waiting_user" | "skipped";
+
+export interface JobStepView {
+  step_id: JobStepId;
+  kind: JobStepKind;
+  state: JobStepState;
+  /** Chỉ có khi bước đang chờ: máy có GPU/CPU trống, hoặc bạn thao tác. */
+  waiting_on: "gpu" | "cpu" | "user" | null;
+  attempt: number;
+  started_at: string | null;
+  finished_at: string | null;
 }
 
 export interface JobProgress {
@@ -242,6 +264,8 @@ export interface JobProgress {
   error: ExecutionErrorView | null;
   /** Per-job permissions supplied by the server; quota remains a separate policy. */
   capabilities?: { can_mutate: boolean; can_cancel: boolean; can_retry: boolean };
+  /** Các bước xếp lịch (T-073); server cũ không gửi trường này. */
+  steps?: JobStepView[];
 }
 
 /** Nguồn số đo: người dùng đo ngoài đời, hoặc LiDAR của dataset mẫu (ADR 0004 §6). */
@@ -399,6 +423,8 @@ export interface MachineCapability {
   idle_vram_free_gb?: number | null;
   idle_ram_available_gb?: number | null;
   idle_disk_free_gb?: number | null;
+  /** Worker có từ điển khép vòng của COLMAP đúng định dạng; null/thiếu = worker cũ chưa báo. */
+  colmap_vocab_tree_available?: boolean | null;
 }
 
 export type ResourceStatus = "ok" | "warn" | "danger" | "unknown";
@@ -431,17 +457,30 @@ export interface ProcessingOptions {
   anonymize_enforced?: boolean;
 }
 
+/** Sự thật của video đã chuẩn bị (server đo, `observed_video`). Khớp `VideoFacts` backend. */
+export interface VideoFacts {
+  duration_seconds: number;
+  display_width: number;
+  display_height: number;
+  frame_rate: number | null;
+}
+
 export interface ScenarioPreferences {
   input_type: "video_continuous" | "video_loop_360" | "photo_set";
   environment: "indoor" | "outdoor";
   subject_scope: "single_object" | "full_room";
-  target_capacity: "minimum_quality" | "balanced" | "machine_maximum";
+  target_capacity: "standard" | "high_quality";
+  /** Thời lượng/độ phân giải của video trong candidate đang chọn; bộ ảnh gửi null. */
+  video?: VideoFacts | null;
+  photo_count?: number | null;
 }
 
 export interface SuggestResponse {
   preset_name: string;
   params: Record<string, ParamValue>;
   evaluation: ProcessingEvaluation;
+  /** Mỗi quyết định của bộ gợi ý bằng lời thường; server cũ không gửi trường này. */
+  notes: string[];
 }
 
 /** Reject malformed suggestions before applying them to the configuration form. */
@@ -450,7 +489,7 @@ export function parseSuggestResponse(value: unknown): SuggestResponse {
   if (!isRecord(value) || typeof value.preset_name !== "string" || !value.preset_name.trim() ||
       !isRecord(value.params) || Object.keys(value.params).length === 0 ||
       !Object.values(value.params).every((item) => typeof item === "string" || isFiniteNumber(item))) {
-    throw new Error("Gợi ý cấu hình từ backend không hợp lệ");
+    throw new Error("Gợi ý cấu hình từ máy chủ không hợp lệ");
   }
   const evaluation = value.evaluation;
   if (!isRecord(evaluation) || typeof evaluation.blocking !== "boolean" || typeof evaluation.note !== "string" ||
@@ -472,7 +511,10 @@ export function parseSuggestResponse(value: unknown): SuggestResponse {
     isRecord(item) && typeof item.key === "string" && Object.hasOwn(value.params as object, item.key) &&
     validStatus(item.status) && (item.message === null || typeof item.message === "string")
   )) throw new Error("Thông số đánh giá của gợi ý không hợp lệ");
-  return value as unknown as SuggestResponse;
+  if (value.notes !== undefined && !(Array.isArray(value.notes) && value.notes.every((note) => typeof note === "string"))) {
+    throw new Error("Ghi chú của gợi ý không hợp lệ");
+  }
+  return { ...(value as unknown as SuggestResponse), notes: (value.notes as string[] | undefined) ?? [] };
 }
 
 export interface SampleSummary {
@@ -530,28 +572,28 @@ const SAFE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 export function parseJobProgress(value: unknown): JobProgress {
   if (!isRecord(value) || typeof value.job_id !== "string" || !Array.isArray(value.stages) ||
       typeof value.preview_ready !== "boolean" || typeof value.status !== "string") {
-    throw new Error("Tiến trình job từ backend không hợp lệ");
+    throw new Error("Tiến trình từ máy chủ không hợp lệ");
   }
   for (const stage of value.stages) {
     if (!isRecord(stage) || typeof stage.stage_id !== "string" ||
         !STAGE_STATES.includes(stage.state as StageState) ||
         (stage.note !== undefined && stage.note !== null && typeof stage.note !== "string")) {
-      throw new Error("Stage trong tiến trình không hợp lệ");
+      throw new Error("Bước trong tiến trình không hợp lệ");
     }
   }
   if (value.waiting_for !== undefined && value.waiting_for !== null && value.waiting_for !== "metric_confirmation" && value.waiting_for !== "resources" && value.waiting_for !== "anonymization_review" && value.waiting_for !== "runtime") {
-    throw new Error("Lý do chờ của job không hợp lệ");
+    throw new Error("Lý do chờ không hợp lệ");
   }
   if (value.resource_wait !== undefined && value.resource_wait !== null) {
     const wait = value.resource_wait;
     if (!isRecord(wait) || typeof wait.checked_at !== "string" || typeof wait.job_manifest_checksum !== "string" ||
         !isRecord(wait.required_gb) || !isRecord(wait.available_gb) || !Array.isArray(wait.waiting_on) ||
-        (wait.estimate_scope !== "configured_preview" && wait.estimate_scope !== "measured") ||
+        !["configured_preview", "measured", "upper_bound"].includes(String(wait.estimate_scope)) ||
         (wait.needs_exclusive_gpu !== undefined && typeof wait.needs_exclusive_gpu !== "boolean") ||
         !["vram", "ram", "disk"].every((key) => isFiniteNumber((wait.required_gb as Record<string, unknown>)[key]) &&
           ((wait.available_gb as Record<string, unknown>)[key] === null || isFiniteNumber((wait.available_gb as Record<string, unknown>)[key]))) ||
         !wait.waiting_on.every((key) => typeof key === "string" && ["vram", "ram", "disk"].includes(key))) {
-      throw new Error("Snapshot tài nguyên chờ không hợp lệ");
+      throw new Error("Số đo tài nguyên chờ không hợp lệ");
     }
     const reasons = wait.reasons ?? {};
     const capacity = wait.capacity_gb ?? {};
@@ -568,16 +610,31 @@ export function parseJobProgress(value: unknown): JobProgress {
     if (!isRecord(queue) || !["position", "waiting", "running", "workers", "estimate_samples"].every((key) => Number.isInteger(queue[key]) && (queue[key] as number) >= 0) ||
         (queue.position as number) < 1 || (queue.workers as number) < 1 ||
         (queue.estimated_wait_seconds !== null && !(isFiniteNumber(queue.estimated_wait_seconds) && queue.estimated_wait_seconds >= 0))) {
-      throw new Error("Vị trí hàng đợi từ backend không hợp lệ");
+      throw new Error("Vị trí hàng đợi từ máy chủ không hợp lệ");
     }
   }
   if (value.capabilities !== undefined && value.capabilities !== null) {
     const capabilities = value.capabilities;
     if (!isRecord(capabilities) || !["can_mutate", "can_cancel", "can_retry"].every((key) => typeof capabilities[key] === "boolean")) {
-      throw new Error("Quyền thao tác job từ backend không hợp lệ");
+      throw new Error("Quyền thao tác từ máy chủ không hợp lệ");
     }
   }
+  if (value.steps !== undefined) {
+    // Bước lạ (backend mới hơn) bị bỏ từng dòng, không làm hỏng cả màn tiến trình.
+    value.steps = Array.isArray(value.steps) ? value.steps.filter(isJobStepView) : [];
+  }
   return value as unknown as JobProgress;
+}
+
+const JOB_STEP_IDS: readonly string[] = ["prepare", "anonymization_review", "pose_visual", "metric_confirm", "canonical_geometry", "scene_extract", "view_lod"];
+const JOB_STEP_STATES: readonly string[] = ["pending", "ready", "claimed", "running", "done", "failed", "waiting_user", "skipped"];
+
+function isJobStepView(step: unknown): step is JobStepView {
+  const optionalTime = (time: unknown) => time === null || time === undefined || (typeof time === "string" && !Number.isNaN(Date.parse(time)));
+  return isRecord(step) && JOB_STEP_IDS.includes(String(step.step_id)) && ["cpu", "gpu", "user"].includes(String(step.kind)) &&
+    JOB_STEP_STATES.includes(String(step.state)) &&
+    (step.waiting_on === null || step.waiting_on === undefined || ["gpu", "cpu", "user"].includes(String(step.waiting_on))) &&
+    optionalTime(step.started_at) && optionalTime(step.finished_at);
 }
 
 /** Loại thẻ frontend biết vẽ; loại lạ (backend mới hơn) bị bỏ qua từng thẻ chứ không làm hỏng cả mẫu. */
@@ -597,7 +654,7 @@ export function parseDemoManifest(value: unknown): DemoManifest {
   if (!isRecord(value) || value.schema_version !== "1.0" || !isRecord(value.splat) ||
       !Array.isArray(value.frames) || !Array.isArray(value.stages) ||
       (value.origin !== "pipeline_job" && value.origin !== "smoke_run")) {
-    throw new Error("Demo bundle không hợp lệ");
+    throw new Error("Bản demo không hợp lệ");
   }
   const rotation = value.display_rotation_xyzw;
   if (rotation != null && !(Array.isArray(rotation) && rotation.length === 4 &&
@@ -629,7 +686,7 @@ export function parseDemoManifest(value: unknown): DemoManifest {
     if (!isRecord(stage) || typeof stage.stage_id !== "string" || ids.has(stage.stage_id) ||
         (stage.state !== undefined && !["succeeded", "pending", "failed"].includes(String(stage.state))) ||
         (stage.duration_seconds !== null && (!isFiniteNumber(stage.duration_seconds) || stage.duration_seconds < 0))) {
-      throw new Error("Stage demo từ backend không hợp lệ");
+      throw new Error("Bước của bản demo không hợp lệ");
     }
     ids.add(stage.stage_id);
     if (stage.assets !== undefined && !(Array.isArray(stage.assets) && stage.assets.every(isDemoAsset))) {
@@ -660,7 +717,7 @@ export function parseMetricPreview(value: unknown): MetricPreview {
       typeof value.check_passed !== "boolean" ||
       !["user_measured", "lidar_demo", "ai_estimated", "lidar_trajectory"].includes(String(value.distance_source)) ||
       !METRIC_NUMBERS.every((key) => isFiniteNumber(value[key]))) {
-    throw new Error("Bản xem trước tỉ lệ từ backend không hợp lệ");
+    throw new Error("Bản xem trước tỉ lệ từ máy chủ không hợp lệ");
   }
   return value as unknown as MetricPreview;
 }
@@ -673,7 +730,7 @@ function isLidarDistance(value: unknown): value is LidarDistance {
 /** Số đo LiDAR phải dương, hữu hạn trước khi điền vào ô khoảng cách. */
 export function parseLidarMeasurements(value: unknown): LidarMeasurements {
   if (!isRecord(value) || !isLidarDistance(value.anchor) || !isLidarDistance(value.check)) {
-    throw new Error("Số đo LiDAR từ backend không hợp lệ");
+    throw new Error("Số đo LiDAR từ máy chủ không hợp lệ");
   }
   return value as unknown as LidarMeasurements;
 }
@@ -695,7 +752,7 @@ export function parseMetricProposal(value: unknown): MetricProposal {
         floor.points.every(isMetricPoint) && isFiniteNumber(floor.residual_m))) ||
       (pairs !== null && !(isRecord(pairs) && [pairs.point_a, pairs.point_b, pairs.check_a, pairs.check_b].every(isMetricPoint) &&
         positive(pairs.distance_m) && positive(pairs.check_distance_m)))) {
-    throw new Error("Đề xuất tỉ lệ tự động từ backend không hợp lệ");
+    throw new Error("Đề xuất tỉ lệ tự động từ máy chủ không hợp lệ");
   }
   return value as unknown as MetricProposal;
 }
@@ -704,7 +761,7 @@ export function parseMetricProposal(value: unknown): MetricProposal {
 export function parseDemoSelection(value: unknown): DemoSelection {
   if (!isRecord(value) || !Array.isArray(value.points) || value.points.length !== 7 ||
       !value.points.every((point) => Array.isArray(point) && point.length === 3 && point.every(isFiniteNumber))) {
-    throw new Error("Bộ điểm demo từ backend không hợp lệ");
+    throw new Error("Bộ điểm demo từ máy chủ không hợp lệ");
   }
   parseLidarMeasurements(value.measurements);
   return value as unknown as DemoSelection;
@@ -723,6 +780,12 @@ export interface StageView {
   cameras: { frame_id: number; center: [number, number, number]; rotation_xyzw: [number, number, number, number] }[];
   /** Khoá của lớp LiDAR đã căn chỉnh chồng lên scene; null/thiếu = scene không có lớp này. */
   lidar_overlay?: string | null;
+  /** Lớp camera: tỉ lệ ảnh COLMAP dựng được vị trí. */
+  registered_ratio?: number | null;
+  /** Lớp camera: số lần COLMAP tự thử lại ghép ảnh. */
+  retry_count?: number;
+  /** Lớp camera: mô hình được nhận dù thiếu ảnh sau khi tự thử lại. */
+  registration_warning?: boolean;
 }
 
 const VIEW_KINDS: readonly StageView["kind"][] = ["frames", "cameras", "gaussian", "mesh"];
@@ -740,7 +803,10 @@ export function parseStageViews(value: unknown): StageView[] {
         !Array.isArray(view.refs) || !Array.isArray(view.cameras) ||
         !view.refs.every((ref) => isRecord(ref) && typeof ref.artifact_uri === "string" && typeof ref.artifact_checksum === "string") ||
         !view.cameras.every((camera) => isRecord(camera) && Array.isArray(camera.center) && camera.center.every(isFiniteNumber)) ||
-        !(view.lidar_overlay === undefined || view.lidar_overlay === null || typeof view.lidar_overlay === "string")) {
+        !(view.lidar_overlay === undefined || view.lidar_overlay === null || typeof view.lidar_overlay === "string") ||
+        !(view.retry_count === undefined || (Number.isInteger(view.retry_count) && Number(view.retry_count) >= 0)) ||
+        !(view.registration_warning === undefined || typeof view.registration_warning === "boolean") ||
+        !(view.registered_ratio === undefined || view.registered_ratio === null || isFiniteNumber(view.registered_ratio))) {
       throw new Error("Một lớp xem không hợp lệ");
     }
   }
@@ -778,7 +844,7 @@ export interface ModeComparison {
 /** Chỉ trạng thái có kết quả thật mới được mang tỉ lệ; `mock` còn nhận từ API cũ. */
 export function parseModeComparison(value: unknown): ModeComparison {
   if (!isRecord(value) || !Array.isArray(value.modes) || value.modes.length !== 3) {
-    throw new Error("So sánh 3 hướng từ backend không hợp lệ");
+    throw new Error("So sánh 3 hướng từ máy chủ không hợp lệ");
   }
   for (const mode of value.modes) {
     if (!isRecord(mode) || typeof mode.title !== "string" || !["mock", "estimated", "confirmed", "measured", "missing"].includes(String(mode.status))) {

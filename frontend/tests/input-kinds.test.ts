@@ -17,14 +17,14 @@ const BASE: UploadRecord = {
 describe("input kinds", () => {
   it("filters the 3DGS branch early but leaves real detection to the server", () => {
     for (const ok of ["a.PLY", "b.sog", "c.zip"]) expect(rejectGaussianFileName(ok)).toBeNull();
-    for (const bad of ["d.mp4", "e.splat", "f.txt", "g"]) expect(rejectGaussianFileName(bad)).toMatch(/Mở 3DGS chỉ nhận/);
+    for (const bad of ["d.mp4", "e.splat", "f.txt", "g"]) expect(rejectGaussianFileName(bad)).toMatch(/Chỉ nhận \.ply, \.sog hoặc \.zip có PLY/);
   });
 
   it("accepts every extension the pipeline consumes and rejects the rest", () => {
     const usable = ["kho.MP4", "kho.mov", "map.ply", "scan.pcd", "scene.sog", "goi.zip", "calib.json", "tf.yaml", "tf.YML", "times.txt", "traj.tum", "rows.csv"];
     for (const name of usable) expect(rejectAssemblyFileName(name)).toBeNull();
     for (const name of ["capture.mkv", "notes.docx", "sheet.xlsx", "model.splat", "khong-duoi"]) {
-      expect(rejectAssemblyFileName(name)).toMatch(/Pipeline không đọc được/);
+      expect(rejectAssemblyFileName(name)).toMatch(/Chưa hỗ trợ loại file này/);
     }
   });
 

@@ -105,8 +105,8 @@ describe("interiorFallbackPose", () => {
 
 describe("playCanvasErrorMessage", () => {
   it("phân biệt rõ lỗi thiếu WebGL2/WebGPU và lỗi tải file/dữ liệu hỏng", () => {
-    expect(playCanvasErrorMessage("unavailable")).toBe("Trình duyệt không render được 3DGS (cần WebGL2/WebGPU).");
-    expect(playCanvasErrorMessage("failed")).toBe("Không thể tải hoặc hiển thị mô hình 3DGS (lỗi tải file hoặc dữ liệu không hợp lệ).");
+    expect(playCanvasErrorMessage("unavailable")).toBe("Trình duyệt không hiện được bản 3D (cần WebGL2 hoặc WebGPU).");
+    expect(playCanvasErrorMessage("failed")).toBe("Không tải được bản 3D. Tải lại trang để thử lại.");
     expect(playCanvasErrorMessage("ready")).toBeNull();
     expect(playCanvasErrorMessage("unknown")).toBeNull();
   });

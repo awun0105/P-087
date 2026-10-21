@@ -12,6 +12,10 @@ _RULES: dict[tuple[str, Verdict], str] = {
         "fail",
     ): "COLMAP chỉ dựng được vị trí cho {display} ảnh, dưới ngưỡng {threshold}. Quay chậm hơn và để các khung hình liên tiếp chồng lấn nhiều hơn.",
     (
+        "pose.registered_ratio",
+        "warn",
+    ): "COLMAP chỉ dựng được vị trí cho {display} ảnh sau khi tự thử lại: vùng thiếu ảnh có thể bị mờ hoặc thủng. Lần quay sau hãy đi chậm hơn và quay lại các chỗ đã bỏ sót.",
+    (
         "visual.nonfinite_values",
         "fail",
     ): "File 3DGS có giá trị hỏng. Chạy lại bước dựng hình; không duyệt scene này.",

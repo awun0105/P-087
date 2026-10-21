@@ -70,6 +70,19 @@ RUN uv venv --python 3.12.14 .venv \
 RUN scripts/gpu/install.sh /opt/real2sim --colmap=binary --skip-gpu-check --no-doctor \
     && uv cache clean
 
+# Từ điển khép vòng của COLMAP (T-071 B1), bake vào image tại vị trí chuẩn mà vocab_tree.py đọc
+# (<repo>/data/checkpoints/colmap/). Định dạng theo COLMAP_VOCAB_FORMAT trong pins.env; script tải chỉ công bố file
+# khi đúng kích thước và sha256 ghim trong vocab_tree.py, sai là build lỗi. `data/` không nằm trong build context
+# (.dockerignore) nên `COPY . .` phía sau không đè lên file này. Không tải lúc khởi động: file cố định theo COLMAP
+# của image.
+COPY src/services/reconstruction/adapters/vocab_tree.py src/services/reconstruction/adapters/vocab_tree.py
+COPY scripts/assets/download_vocab_tree.py scripts/assets/download_vocab_tree.py
+RUN format="$(sed -n 's/^COLMAP_VOCAB_FORMAT=//p' configs/runtime/pins.env)" \
+    && test -n "$format" \
+    && .venv/bin/python scripts/assets/download_vocab_tree.py --format "$format" --timeout 120 \
+    && .venv/bin/python scripts/assets/download_vocab_tree.py --format "$format" --check-only \
+    && rm -f data/checkpoints/colmap/*.lock
+
 # Quyền chạy lấy từ git (100755), không cần RUN chmod: lớp code là lớp duy nhất đổi giữa hai lần build, nên
 # build có cache chỉ đóng lớp này mà không phải tải các lớp runtime nặng phía trước về để chạy lệnh.
 COPY . .

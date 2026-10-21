@@ -165,13 +165,13 @@ async def upload_video_frame_map(
     if current.video_preparation_manifest is None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Cần gửi video preparation manifest trước frame map",
+            detail="Video chưa được chuẩn bị xong. Hãy tải lại video.",
         )
     limit = default_video_normalization_profile().max_frame_map_bytes
     length = request.headers.get("content-length")
     if length and length.isdecimal() and int(length) > limit:
         raise HTTPException(
-            status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail="Video frame map vượt giới hạn 32 MiB"
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail="Dữ liệu khung hình của video vượt giới hạn 32 MiB"
         )
 
     path: Path | None = None
@@ -186,7 +186,7 @@ async def upload_video_frame_map(
                 if size > limit:
                     raise HTTPException(
                         status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-                        detail="Video frame map vượt giới hạn 32 MiB",
+                        detail="Dữ liệu khung hình của video vượt giới hạn 32 MiB",
                     )
                 await run_in_threadpool(frame_map.write, chunk)
         verification = await run_in_threadpool(

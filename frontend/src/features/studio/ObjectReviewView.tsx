@@ -209,14 +209,14 @@ const ROI_FIELDS: { key: keyof ROIForm; label: string }[] = [
 ];
 
 function correctionUnavailableReason(scene: SceneIR, object: SceneObject): string | null {
-  if (scene.environment.object_aware_collision_ref) return "Hiệu chỉnh cần dựng lại ObjectGS; đường xử lý này chưa sẵn sàng.";
+  if (scene.environment.object_aware_collision_ref) return "Scene này chưa hỗ trợ hiệu chỉnh vùng.";
   const membership = scene.environment.membership;
-  if (!membership) return "Scene này chưa lưu Gaussian membership.";
-  if (!Object.values(membership.label_to_object_id).includes(object.id)) return "Vật không có trong membership hiện tại.";
+  if (!membership) return "Scene này chưa lưu vùng Gaussian của từng vật.";
+  if (!Object.values(membership.label_to_object_id).includes(object.id)) return "Vật này không có vùng Gaussian riêng.";
   if (object.state !== "CANDIDATE") return "Chỉ hỗ trợ ứng viên chưa xác nhận.";
-  if (object.origin !== "reconstructed" || object.asset_ref) return "Asset hoặc vật thêm tay không được hỗ trợ.";
+  if (object.origin !== "reconstructed" || object.asset_ref) return "Không áp dụng cho vật thêm tay hoặc từ thư viện.";
   const ownership = object.source_collision;
-  if (!ownership) return "Thiếu ownership collision nguồn.";
+  if (!ownership) return "Thiếu thông tin va chạm gốc của vật.";
   if (
     ownership.object_id !== object.id ||
     ownership.source_geometry_ref.artifact_checksum !== scene.environment.geometry_ref.artifact_checksum ||
@@ -224,7 +224,7 @@ function correctionUnavailableReason(scene: SceneIR, object: SceneObject): strin
     ownership.extraction_revision !== membership.extraction_revision ||
     JSON.stringify(ownership.source_transform) !== JSON.stringify(object.transform)
   ) {
-    return "Pose hoặc ownership collision không còn khớp dữ liệu nguồn.";
+    return "Vị trí vật đã đổi so với dữ liệu gốc.";
   }
   const rotation = object.transform.rotation_quaternion_xyzw;
   if (Math.abs(rotation[0]) > 1e-6 || Math.abs(rotation[1]) > 1e-6 || Math.abs(rotation[2]) > 1e-6 || Math.abs(rotation[3] - 1) > 1e-6) {
@@ -1005,7 +1005,7 @@ export function ObjectReviewView({
                       size="sm"
                       variant="ghost"
                       disabled={busy}
-                      title={`Hoàn tác: quay về ${previous} (ghi thành revision mới)`}
+                      title={`Hoàn tác về ${previous}`}
                       aria-label="Hoàn tác"
                       onClick={() => run((revision) => restoreSceneRevision(jobId, revision, previous))}
                       className="size-7 p-0 text-on-dark/70 hover:text-on-dark hover:bg-on-dark/10"
@@ -1092,10 +1092,10 @@ export function ObjectReviewView({
               {collisionSourcePanelOpen && (
                 <div id="lidar-collision-source-panel" className="mt-2 space-y-2 rounded-md border border-line-dark bg-viewport-deep/60 p-2 text-xs">
                   <p className="text-on-dark/70">
-                    Chỉ manifest đã publish trong job mới xuất hiện. Server sẽ kiểm tra lại QA, mesh, ownership và revision trước khi đổi source.
+                    Chọn lưới va chạm dựng từ LiDAR thay cho lưới dựng từ ảnh. Hệ thống kiểm tra lại trước khi đổi.
                   </p>
                   {error && <p className="text-rust" role="alert">{error}</p>}
-                  {collisionCandidatesLoading && <p role="status" className="text-on-dark/70">Đang tải candidate đã publish…</p>}
+                  {collisionCandidatesLoading && <p role="status" className="text-on-dark/70">Đang tải lưới LiDAR…</p>}
                   {collisionCandidatesError && (
                     <div className="space-y-2" role="alert">
                       <p className="text-rust">{collisionCandidatesError}</p>
@@ -1113,7 +1113,7 @@ export function ObjectReviewView({
                   )}
                   {!collisionCandidatesLoading && !collisionCandidatesError && collisionCandidatesLoadedFor === jobId && visibleCollisionCandidates.length === 0 && (
                     <p role="status" className="text-on-dark/60">
-                      Job chưa publish candidate LiDAR. Candidate thiếu QA hoặc ownership vẫn sẽ bị backend chặn.
+                      Scene này chưa có lưới va chạm từ LiDAR.
                     </p>
                   )}
                   {visibleCollisionCandidates.map((candidate) => (
@@ -1145,7 +1145,7 @@ export function ObjectReviewView({
                 className="flex w-full items-center justify-between rounded px-1 py-1 text-left text-xs font-semibold text-on-dark hover:bg-on-dark/10 disabled:opacity-50"
               >
                 <span>Gộp ứng viên / Sửa nhóm Gaussian</span>
-                <span className="font-normal text-on-dark/60">{membership ? `${eligibleCorrections.length} ứng viên khả dụng` : "chưa có membership"}</span>
+                <span className="font-normal text-on-dark/60">{membership ? `${eligibleCorrections.length} ứng viên khả dụng` : "chưa có vùng"}</span>
               </button>
               {selected && membership && Object.values(membership.label_to_object_id).includes(selected) && (
                 "object_geometry" in scene.provenance ? (
@@ -1172,15 +1172,15 @@ export function ObjectReviewView({
                 <div id="membership-correction-panel" className="mt-2 max-h-80 space-y-3 overflow-y-auto rounded-md border border-line-dark bg-viewport-deep/60 p-2 text-xs">
                   {!membership ? (
                     <p className="text-on-dark/70" role="status">
-                      Scene này chưa lưu Gaussian membership; hãy chạy tách vật để tạo membership trước khi hiệu chỉnh.
+                      Scene này chưa lưu vùng Gaussian của từng vật. Chạy tách vật trước khi hiệu chỉnh.
                     </p>
                   ) : (
                     <>
                       <p className="text-on-dark/70">
-                        Gộp dùng khi một vật bị tách nhầm thành nhiều ứng viên. Chọn từ hai phần trở lên: Gaussian và ownership được hợp nhất, giữ ID của ứng viên chính.
+                        Dùng khi một vật bị tách nhầm thành nhiều ứng viên. Chọn từ hai phần trở lên; vật gộp giữ tên của ứng viên chính.
                       </p>
                       <p className="text-on-dark/70">
-                        Lệnh gắn với revision {scene.scene_revision}. Vùng nhập theo tọa độ canonical world, đơn vị mét.
+                        Áp dụng cho bản {scene.scene_revision}. Tọa độ theo scene, đơn vị mét.
                       </p>
                       <fieldset className="space-y-1.5" disabled={busy}>
                         <legend className="font-semibold text-on-dark">Ứng viên để gộp</legend>
@@ -1261,7 +1261,7 @@ export function ObjectReviewView({
                       <form onSubmit={submitReassignment} className="space-y-2 border-t border-line-dark pt-3">
                         <h3 className="font-semibold text-on-dark">Chuyển vùng giữa các chủ sở hữu</h3>
                         <p className="text-[11px] leading-relaxed text-on-dark/60">
-                          Nhập hộp giới hạn theo dữ liệu nguồn. Pose đã chỉnh trong viewer không được dùng để chọn Gaussian.
+                          Nhập hộp giới hạn theo tọa độ gốc của scene, không theo vị trí đã kéo trong khung 3D.
                         </p>
                         <div className="grid grid-cols-2 gap-1.5">
                           <label className="space-y-1 text-on-dark/70">
@@ -1296,7 +1296,7 @@ export function ObjectReviewView({
                           ))}
                         </div>
                         {!parsedROI && <p className="text-[11px] text-on-dark/55">Nhập đủ 6 giới hạn; mỗi giới hạn nhỏ phải thấp hơn giới hạn lớn.</p>}
-                        {busy && <p className="text-on-dark/70" role="status">Đang dựng và lưu artifact mới…</p>}
+                        {busy && <p className="text-on-dark/70" role="status">Đang dựng và lưu…</p>}
                         <Button size="sm" variant="secondary" type="submit" disabled={!canReassign}>
                           Chuyển vùng Gaussian
                         </Button>
@@ -1456,13 +1456,14 @@ export function ObjectReviewView({
               <TabsContent value="details" forceMount hidden={detailTab !== "details"} className="min-h-0 overflow-y-auto">
 
               <ObjectifyNotice jobId={jobId} revision={scene.scene_revision} onRevision={() => setReload((value) => value + 1)} />
-              {missingSourcePolicies.length > 0 && <Notice tone="rust" className="m-3">SOURCE_POLICY_MISSING: Không có metadata nguồn để đặt Gaussian của {missingSourcePolicies.map((item) => item.id).join(", ")}. Hãy tải lại scene.</Notice>}
+              {missingSourcePolicies.length > 0 && <Notice tone="rust" className="m-3">Thiếu dữ liệu để đặt Gaussian của {missingSourcePolicies.map((item) => item.id).join(", ")}. Hãy tải lại scene.</Notice>}
               {representations.some((item) => item.readiness_blockers.length) && (
                 <Notice tone="rust" className="m-3">
-                  Representation chưa đầy đủ: {representations.flatMap((item) => item.readiness_blockers.map((code) => `${item.object_id}: ${code}`)).join(", ")}
+                  Một số vật chưa đủ dữ liệu để hiển thị.
+                  <details className="mt-1 text-xs"><summary className="cursor-pointer">Chi tiết kỹ thuật</summary>{representations.flatMap((item) => item.readiness_blockers.map((code) => `${item.object_id}: ${code}`)).join(", ")}</details>
                   {scene.objects.filter((object) => object.state === "CANDIDATE" && object.active && !isIgnored(object)).map((object) => (
                     <div key={object.id} className="mt-2 space-y-1">
-                      <p>{object.name} đã bị bật mô phỏng từ phiên bản cũ. Khôi phục để đưa về ứng viên chờ xác nhận, giữ nguyên hình học và vị trí.</p>
+                      <p>{object.name} đang bật mô phỏng dù chưa xác nhận. Khôi phục để đưa về ứng viên, giữ nguyên hình và vị trí.</p>
                       <Button size="sm" variant="secondary" disabled={busy} onClick={() => void restoreListedObject(object)}>Khôi phục trạng thái {object.id}</Button>
                     </div>
                   ))}
@@ -1927,12 +1928,12 @@ function ColliderEditor({
     <form className="space-y-3 rounded-md border border-line-dark bg-viewport-deep/50 p-3" onSubmit={submit} aria-label="Chỉnh collider">
       <div>
         <p className="text-xs font-semibold text-on-dark">Collider box</p>
-        <p className="mt-0.5 text-[11px] text-on-dark/60">Kích thước và pose trong frame local của vật · mét, Z-up.</p>
+        <p className="mt-0.5 text-[11px] text-on-dark/60">Kích thước và vị trí so với vật · mét, trục Z hướng lên.</p>
       </div>
       {!collider && <p className="text-xs text-on-dark/70">Vật này chưa có collider để chỉnh sửa.</p>}
       {collider && !supported && (
         <p className="text-xs text-on-dark/70">
-          Hiện chỉ chỉnh được AABB/OBB có kích thước. Collider {collider.collider_type} cần công cụ hình học riêng.
+          Chỉ chỉnh được collider dạng hộp. Loại {collider.collider_type} chưa chỉnh được ở đây.
         </p>
       )}
       {supported && removed && <p className="text-xs text-on-dark/70">Khôi phục vật trước khi chỉnh collider.</p>}
@@ -2039,7 +2040,7 @@ function CatalogForm({
         <p className="text-xs text-on-dark/70">
           {entry.size_xyz_m.map((value) => value.toFixed(2)).join(" × ")} m ·{" "}
           {entry.dynamic ? (entry.default_mass_kg ? `${entry.default_mass_kg} kg (mặc định)` : "khối lượng theo mật độ giả định") : "vật cố định"}. Trên
-          web vật hiện bằng hộp; trong Isaac là asset thật.
+          web vật hiện bằng hộp; trong Isaac Sim là mô hình thật.
         </p>
       )}
       <div className="grid grid-cols-2 gap-2">

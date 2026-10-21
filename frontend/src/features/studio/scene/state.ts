@@ -68,6 +68,8 @@ export function isJobStale(progress: JobProgress | null, now: number, thresholdM
   if (!progress || progress.status !== "RUNNING") return false;
   // Nếu đang chờ tương tác của người dùng thì không phải stale
   if (progress.waiting_for === "metric_confirmation" || progress.waiting_for === "anonymization_review") return false;
+  // T-073: job dừng giữa hai bước chờ máy xử lý nhận bước sau (không worker nào giữ nên không có heartbeat).
+  if (progress.queue || progress.steps?.some((step) => step.waiting_on === "gpu" || step.waiting_on === "cpu")) return false;
   const updated = Date.parse(progress.updated_at);
   if (Number.isNaN(updated)) return false;
   return now - updated > thresholdMs;

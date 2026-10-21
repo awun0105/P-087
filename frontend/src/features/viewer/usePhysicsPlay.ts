@@ -43,8 +43,14 @@ export interface PhysicsObjectInput {
 export type PhysicsStatus =
   | { state: "off" }
   | { state: "loading" }
-  | { state: "ready"; objects: number }
+  /** `movable`: vật có khối lượng (đẩy được); còn lại chỉ chặn đường. */
+  | { state: "ready"; objects: number; movable: number }
   | { state: "failed"; message: string };
+
+/** Dòng trạng thái khi đi bộ: chỉ mời đẩy khi scene thật sự có vật đẩy được. */
+export function readyPhysicsHint(objects: number, movable: number): string {
+  return movable > 0 ? `Đi vào vật để đẩy · ${movable} vật đẩy được` : `${objects} vật chặn đường, chưa có vật nào đẩy được`;
+}
 
 export function browserPhysicsBlocker(objects: readonly PhysicsObjectInput[]): string | null {
   for (const item of objects) {
@@ -55,8 +61,8 @@ export function browserPhysicsBlocker(objects: readonly PhysicsObjectInput[]): s
     if (item.dynamic !== false && (item.mass_kg === null || !Number.isFinite(item.mass_kg) || item.mass_kg <= 0)) return `${item.id}: dynamic body requires positive authored mass`;
     if (item.dynamic !== false && type === "SIMPLIFIED_MESH") return `${item.id}: dynamic concave triangle mesh is unsupported`;
     if (["AABB", "OBB"].includes(type)) {
-      if (!item.dimensions || item.dimensions.some(value => !Number.isFinite(value) || value <= 0)) return `${item.id}: thiếu kích thước box collider`;
-    } else if (!item.colliderUrl) return `${item.id}: thiếu collider artifact`;
+      if (!item.dimensions || item.dimensions.some(value => !Number.isFinite(value) || value <= 0)) return `${item.id}: thiếu kích thước hộp va chạm`;
+    } else if (!item.colliderUrl) return `${item.id}: thiếu lưới va chạm`;
   }
   return null;
 }
@@ -257,7 +263,7 @@ export function usePhysicsPlay({ app, overlay, walking, collisionUrl, objects, o
     for (const item of data?.objects ?? []) data!.camera.setPose(item.id,{position:item.position,rotation_xyzw:item.rotation_xyzw});
   }, [overlay, data]);
   const status: PhysicsStatus = !enabled ? { state: "off" } : failure?.identity === identity
-    ? { state: "failed", message: failure.message } : data ? { state: "ready", objects: data.objects.length } : { state: "loading" };
+    ? { state: "failed", message: failure.message } : data ? { state: "ready", objects: data.objects.length, movable: data.objects.filter((item) => item.mass_kg > 0).length } : { state: "loading" };
   const setPose = useCallback((id: string, position: Vec3, rotation: [number, number, number, number]) => {
     data?.camera.setPose(id, {position, rotation_xyzw: rotation});
   }, [data]);

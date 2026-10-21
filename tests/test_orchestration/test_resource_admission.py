@@ -264,7 +264,7 @@ def _measure(
 
 
 def test_unmeasured_job_runs_alone_and_blocks_sharing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Chưa có số đo cho cấu hình: job đầu chạy một mình trên GPU, job sau chờ dù VRAM còn trống."""
+    """GPU 4 GB, chưa có số đo: ước lượng 2,67 GB > 50% của 3,8 GB trống nên job đầu chạy một mình, job sau chờ."""
     registry, first, gate = _queued(tmp_path)
     second = _second_job(registry)
     _machine(monkeypatch)
@@ -289,29 +289,116 @@ def test_job_alone_on_gpu_is_not_held_back_by_a_wrong_estimate(tmp_path: Path, m
         assert gate(job) and resource_wait(gate.database, job) is None
 
 
-@pytest.mark.parametrize("phase", ["preview", "finalize"])
-def test_heavier_config_measurement_does_not_block_first_exclusive_run(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, phase: Phase
-) -> None:
-    """A larger run is an upper bound, not a measurement permitting the new config to share a GPU."""
-    registry, job, gate = _queued(tmp_path)
-    second = _second_job(registry)
-    _machine(monkeypatch, {**LIVE, "vram_free_gb": 3.62})
+A5000 = GpuReading(index=0, uuid="GPU-a5000", name="RTX A5000", total_gb=24.0, free_gb=23.5, used_gb=0.5)
+LIVE_24 = {"vram_free_gb": 23.5, "ram_available_gb": 60.0, "disk_free_gb": 400.0}
+CAPACITY_24 = {"vram": 24.0, "ram": 64.0, "disk": 500.0}
+
+
+def _machine_24(monkeypatch: pytest.MonkeyPatch, estimate_vram: float | None = None) -> None:
+    """Máy giả lập một GPU 24 GB; `estimate_vram` thay ước lượng VRAM của cấu hình (giữ RAM/đĩa thật)."""
+    monkeypatch.setattr(admission, "measure_live_headroom", lambda path: dict(LIVE_24))
+    monkeypatch.setattr(admission, "measure_capacity", lambda path: CAPACITY_24)
+    monkeypatch.setattr(admission, "bound_gpu", lambda: A5000)
+    if estimate_vram is not None:
+        real = admission.estimate_gb
+        monkeypatch.setattr(
+            admission, "estimate_gb", lambda model, params: real(model, params) | {"vram": estimate_vram}
+        )
+
+
+def _heavier_params() -> dict[str, float]:
     presets, _ = load_presets(PRESETS)
     heavier = numeric_params(preset_values(presets, "minimum_quality"))
     heavier["brush.max_splats"] *= 2
+    return heavier
+
+
+@pytest.mark.parametrize("phase", ["preview", "finalize"])
+def test_heavier_config_measurement_is_an_upper_bound_that_shares_the_gpu(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, phase: Phase
+) -> None:
+    """Cấu hình mới chưa có số đo trùng khớp: số đo của cấu hình nặng hơn là cận trên, đủ để chạy chung GPU."""
+    registry, job, gate = _queued(tmp_path)
+    second = _second_job(registry)
+    _machine_24(monkeypatch, estimate_vram=13.0)  # ước lượng lớn: không có cận trên thì phải chạy một mình
     tools = ("preview",) if phase == "preview" else ("finalize", "scene_extract")
     for tool in tools:
-        _measure(gate, tool, vram=3.62, ram=3.0, params=heavier)
+        _measure(gate, tool, vram=3.62, ram=3.0, params=_heavier_params(), gpu_name=A5000.name)
 
+    demand = gate._demand(job, phase, A5000.name)
+    assert demand is not None and demand.measured_scope == "upper_bound" and demand.measured
     assert gate(job, phase=phase)
-    assert _reservations(gate)[gate.worker_id].exclusive
-    assert resource_wait(gate.database, job) is None
+    mine = _reservations(gate)[gate.worker_id]
+    assert not mine.exclusive and mine.required_gb == {"vram": 3.62, "ram": 3.0, "disk": 5.96}
     other = _second_worker(gate)
-    assert not other(second, phase=phase)
+    assert other(second, phase=phase) and not _reservations(gate)[other.worker_id].exclusive
+
+
+def test_exact_measurement_is_reported_as_exact(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    registry, job, gate = _queued(tmp_path)
+    _machine_24(monkeypatch)
+    _measure(gate, "preview", vram=3.62, ram=3.0, params=_heavier_params(), gpu_name=A5000.name)
+    _measure(gate, "preview", vram=1.5, ram=3.0, gpu_name=A5000.name)
+    demand = gate._demand(job, "preview", A5000.name)
+    assert demand is not None and demand.measured_scope == "exact"
+
+
+def test_upper_bound_wait_says_where_the_number_comes_from(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Chờ theo cận trên: observation ghi `upper_bound` để giao diện nói số đo lấy từ cấu hình nặng hơn."""
+    registry, job, gate = _queued(tmp_path)
+    _machine_24(monkeypatch)
+    _measure(gate, "preview", vram=30.0, ram=3.0, params=_heavier_params(), gpu_name=A5000.name)
+    assert not gate(job)
+    wait = resource_wait(gate.database, job)
+    assert wait is not None and wait.estimate_scope == "upper_bound" and not wait.needs_exclusive_gpu
+    assert wait.reasons == {"vram": "exceeds_machine"}
+
+
+@pytest.mark.parametrize(("estimate_vram", "exclusive"), [(None, False), (13.0, True)])
+def test_unmeasured_small_estimate_shares_the_gpu_large_runs_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, estimate_vram: float | None, exclusive: bool
+) -> None:
+    """Không có lượt đo nào: ước lượng 2,67 GB ≤ 50% của 23,5 GB trống → chạy chung; 13 GB > 50% → chạy một mình."""
+    registry, job, gate = _queued(tmp_path)
+    _machine_24(monkeypatch, estimate_vram)
+    demand = gate._demand(job, "preview", A5000.name)
+    assert demand is not None and demand.measured_scope == "estimate" and not demand.measured
+    assert demand.required_gb["vram"] == (estimate_vram or 2.67)
+    assert gate(job)
+    assert _reservations(gate)[gate.worker_id].exclusive is exclusive
+
+
+def test_job_that_ran_out_of_memory_runs_alone_even_with_a_small_estimate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registry, job, gate = _queued(tmp_path)
+    _machine_24(monkeypatch)
+    _measure(
+        gate, "preview", vram=1.5, ram=3.0, job_id=job.job_id, outcome="failed", exit_code=1, exhausted=True,
+        gpu_name=A5000.name,
+    )  # fmt: skip
+    demand = gate._demand(job, "preview", A5000.name)
+    assert demand is not None and demand.exhausted and demand.measured_scope == "estimate"
+    assert gate(job) and _reservations(gate)[gate.worker_id].exclusive
+
+
+def test_small_unmeasured_job_still_waits_for_an_exclusive_peer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Peer đang chạy một mình để đo: job ước lượng nhỏ vẫn chờ, không chen vào."""
+    registry, first, gate = _queued(tmp_path)
+    second = _second_job(registry)
+    real = admission.estimate_gb
+    _machine_24(monkeypatch, estimate_vram=13.0)
+    assert gate(first) and _reservations(gate)[gate.worker_id].exclusive
+    monkeypatch.setattr(admission, "estimate_gb", real)  # job thứ hai: ước lượng thật 2,67 GB
+    other = _second_worker(gate)
+    assert not other(second)
     wait = resource_wait(gate.database, second)
-    assert wait is not None and wait.needs_exclusive_gpu
-    assert wait.reasons == {"vram": "busy"}
+    assert wait is not None and wait.reasons == {"vram": "busy"} and wait.needs_exclusive_gpu
+    assert wait.available_gb["vram"] == 0.0
+    gate.release()
+    assert other(second) and not _reservations(gate)[other.worker_id].exclusive
 
 
 def test_measured_jobs_share_a_gpu_until_measured_budgets_no_longer_fit(
@@ -926,3 +1013,86 @@ def test_wait_exceeded_needs_a_known_non_busy_reason() -> None:
     assert admission.wait_exceeded({}, since, later, 1800) is False
     assert admission.wait_exceeded({"vram": "unmeasured"}, since, later, 1800) is False
     assert admission.wait_exceeded({"vram": "external"}, since, later, 1800) is True
+
+
+# --- T-073: giữ chỗ theo bước -----------------------------------------------------------------------------------------
+
+
+def test_cpu_step_keeps_ram_and_disk_but_never_the_gpu(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Bước chuẩn bị chạy được khi GPU đang bị job khác dùng hết, và không làm GPU bận với worker khác."""
+    registry, job, gate = _queued(tmp_path)
+    second = _second_job(registry)
+    _machine(monkeypatch, {**LIVE, "vram_free_gb": 0.0})
+    other = _second_worker(gate)
+    assert other(second)  # job khác đang chạy một mình trên GPU
+    assert gate.admit_step(job, "prepare", gpu_required=False, cpu_slots=4)
+    mine = _reservations(gate)[gate.worker_id]
+    assert not mine.gpu_required and mine.gpu_uuid is None and not mine.exclusive
+    assert mine.required_gb is not None and mine.required_gb["vram"] == 0.0
+    assert mine.step == "prepare" and mine.cpu_slots == 4 and mine.phase == "preview"
+
+
+def test_gpu_step_keeps_the_t072_sharing_rules(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Bước dựng camera xin đúng như lượt preview cũ: chưa có số đo, ước lượng lớn → chạy một mình."""
+    registry, first, gate = _queued(tmp_path)
+    second = _second_job(registry)
+    _machine(monkeypatch)
+    other = _second_worker(gate)
+    assert gate.admit_step(first, "pose_visual", gpu_required=True, cpu_slots=2)
+    assert _reservations(gate)[gate.worker_id].exclusive
+    assert not other.admit_step(second, "pose_visual", gpu_required=True, cpu_slots=2)
+    wait = resource_wait(gate.database, second)
+    assert wait is not None and wait.waiting_on == ["vram"] and wait.reasons == {"vram": "busy"}
+    # Bước CPU của job thứ hai vẫn chạy song song.
+    assert other.admit_step(second, "prepare", gpu_required=False, cpu_slots=2)
+
+
+def test_step_demand_uses_measurements_of_its_own_tool(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    registry, job, gate = _queued(tmp_path)
+    _machine(monkeypatch)
+    _measure(gate, "prepare", 0.0, 3.0)
+    demand = gate.step_demand(job, "prepare", gpu_required=False)
+    assert demand is not None and demand.measured_scope == "exact" and demand.required_gb["ram"] == 3.0
+    assert demand.required_gb["vram"] == 0.0 and not demand.gpu_required
+    # Bước dựng camera chưa có số đo của `preview`: vẫn theo ước lượng.
+    pose = gate.step_demand(job, "pose_visual", gpu_required=True)
+    assert pose is not None and pose.measured_scope == "estimate"
+    # Bộ LOD không có số đo theo tool: luôn theo ước lượng, không bao giờ "đo được 0 GB".
+    lod = gate.step_demand(job, "view_lod", gpu_required=True)
+    assert lod is not None and lod.measured_scope == "estimate" and lod.required_gb["vram"] > 0
+
+
+def test_cpu_slots_full_waits_without_a_resource_snapshot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    registry, job, gate = _queued(tmp_path)
+    second = _second_job(registry)
+    _machine_24(monkeypatch)
+    monkeypatch.setattr(admission.os, "cpu_count", lambda: 8)
+    other = _second_worker(gate)
+    assert other.admit_step(second, "pose_visual", gpu_required=True, cpu_slots=6)
+    assert not gate.admit_step(job, "prepare", gpu_required=False, cpu_slots=4)
+    assert resource_wait(gate.database, job) is None and gate.worker_id not in _reservations(gate)
+    assert gate.admit_step(job, "canonical_geometry", gpu_required=False, cpu_slots=2)
+    other.release()
+    gate.release()
+    # Bước khai nhiều luồng hơn cả máy vẫn chạy được khi máy rảnh.
+    assert gate.admit_step(job, "prepare", gpu_required=False, cpu_slots=64)
+
+
+def test_step_reservation_payload_stays_readable_by_the_queue_estimate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registry, job, gate = _queued(tmp_path)
+    _machine(monkeypatch)
+    assert gate(job)
+    payload = json.loads(next(iter(_reservations_raw(gate).values())))
+    assert "step" not in payload and "cpu_slots" not in payload  # lượt cũ: payload giữ nguyên dạng
+    gate.release()
+    assert gate.admit_step(job, "pose_visual", gpu_required=True, cpu_slots=3)
+    payload = json.loads(next(iter(_reservations_raw(gate).values())))
+    assert payload["step"] == "pose_visual" and payload["cpu_slots"] == 3 and payload["phase"] == "preview"
+
+
+def _reservations_raw(gate: ResourceAdmission) -> dict[str, str]:
+    with gate.database.transaction() as tx:
+        rows = tx.execute("SELECT worker_id, payload FROM r2s_resource_reservations").fetchall()
+    return {row[0]: row[1] for row in rows}

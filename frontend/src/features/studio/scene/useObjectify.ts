@@ -96,7 +96,7 @@ export function useObjectifyState({
   const send = useCallback(async (mode: ObjectifyMode, expectedRevision?: string) => {
     const expected = expectedRevision ?? revision ?? state?.scene_revision;
     if (!expected) {
-      setError("Chưa biết revision hiện tại của scene. Tải lại trang rồi thử lại.");
+      setError("Chưa đọc được phiên bản scene. Tải lại trang rồi thử lại.");
       return;
     }
     setSending(true);

@@ -46,12 +46,12 @@
 
 | Mã tham số | Hiện trạng | Kiểu & Đơn vị | Giá trị mặc định | Khoảng hợp lệ | Ý nghĩa & Hướng dẫn sử dụng |
 | :--- | :---: | :---: | :---: | :---: | :--- |
-| **`colmap.matching_mode`** | 🔴 HARDCODED *(Đang gán cứng `sequential`)* | `choice` | **`sequential`** | **`sequential`**<br>**`sequential_vocab_tree`**<br>**`exhaustive`**<br>**`spatial`** | **Phương pháp so khớp ảnh:**<br>• `sequential`: So khớp theo chuỗi thời gian lân cận. Siêu nhanh (1–2 phút), dùng cho video đi bộ quay liên tục.<br>• `sequential_vocab_tree`: So khớp chuỗi kết hợp phát hiện vòng lặp qua từ điển Vocab Tree. Dùng cho video quay vòng tròn 360° hoặc có đoạn nhảy góc máy (chống đứt gãy mô hình).<br>• `exhaustive`: So khớp mọi cặp ảnh $O(N^2)$. Dùng cho tập ảnh tĩnh chụp rời rạc ít ảnh ($<150$ ảnh).<br>• `spatial`: So khớp theo vị trí tọa độ (nếu có GPS/prior). |
+| **`colmap.matching_mode`** | 🟢 UI *(theo kịch bản; worker thiếu từ điển thì tự đổi `sequential_vocab_tree` → `sequential`)* | `choice` | **theo kịch bản** | **`sequential`**<br>**`sequential_vocab_tree`**<br>**`exhaustive`**<br>**`spatial`** | **Phương pháp so khớp ảnh:**<br>• `sequential`: So khớp theo chuỗi thời gian lân cận. Siêu nhanh (1–2 phút), dùng cho video đi bộ quay liên tục.<br>• `sequential_vocab_tree`: So khớp chuỗi kết hợp phát hiện vòng lặp qua từ điển Vocab Tree. Dùng cho video quay vòng tròn 360° hoặc có đoạn nhảy góc máy (chống đứt gãy mô hình).<br>• `exhaustive`: So khớp mọi cặp ảnh $O(N^2)$. Dùng cho tập ảnh tĩnh chụp rời rạc ít ảnh ($<150$ ảnh).<br>• `spatial`: So khớp theo vị trí tọa độ (nếu có GPS/prior). |
 | `colmap.sequential_overlap` | 🟢 UI | `integer` (ảnh) | `10` | `3` – `30` (bước 1) | Kích thước cửa sổ so khớp lân cận trong `sequential_matcher`. Tăng lên 15–20 khi camera di chuyển nhanh hoặc quay góc rộng. |
 | `colmap.camera_model` | 🟢 UI | `choice` | `SIMPLE_RADIAL` | `SIMPLE_RADIAL`<br>`OPENCV`<br>`PINHOLE`<br>`RADIAL`<br>`FULL_OPENCV`<br>`SIMPLE_PINHOLE` | Mô hình hình học camera:<br>• `SIMPLE_RADIAL`: Phù hợp điện thoại, camera tiêu chuẩn.<br>• `OPENCV`: Mô hình méo 8 tham số cho camera góc rộng / fisheye.<br>• `PINHOLE`: Ống kính không méo (ảnh đã khử méo trước). |
-| `colmap.max_image_size` | 🟢 UI | `integer` (px) | `1600` | `640` – `3200` (bước 160) | Cạnh ảnh tối đa khi trích xuất đặc trưng SIFT. Lớn hơn giúp pose chính xác hơn nhưng tốn RAM và chậm hơn. |
+| `colmap.max_image_size` | 🟢 UI | `integer` (px) | `1920` (kịch bản), sàn `1280` | `640` – `1920` (bước 160); không vượt cạnh dài video | Cạnh ảnh tối đa khi trích xuất đặc trưng SIFT. Lớn hơn giúp pose chính xác hơn nhưng tốn RAM và chậm hơn. |
 | `colmap.max_num_features` | 🟢 UI | `integer` (điểm) | `8192` | `1024` – `32768` (bước 1024) | Số điểm đặc trưng tối đa trích xuất trên mỗi ảnh. Tăng lên 16K ở cảnh tường trơn, ít vân hoa. |
-| **`colmap.vocab_tree_path`** | 🔴 HARDCODED | `filepath` | `null` | Đường dẫn file `.bin` | Đường dẫn file từ điển thị giác (`vocab_tree_clustering_flickr100k_words256K.bin`, ~112 MB) dùng cho loop detection. |
+| **`colmap.vocab_tree_path`** | 🟡 PROFILE *(bake trong image GPU)* | `filepath` | `data/checkpoints/colmap/vocab_tree_faiss_flickr100K_words256K.bin` | Ghi đè bằng `PRODUCT_COLMAP_VOCAB_TREE` | Từ điển thị giác cho khép vòng, định dạng ghim ở `configs/runtime/pins.env` (`COLMAP_VOCAB_FORMAT=faiss`, COLMAP ≥ 3.12; ~72 MB). Build image kiểm sha256; preflight kiểm file, checksum và định dạng theo binary thật. |
 | `colmap.loop_detection_period` | 🔴 HARDCODED | `integer` (ảnh) | `10` | `2` – `50` | Chu kỳ truy vấn từ điển: cứ mỗi $N$ frame thì truy vấn Vocab Tree 1 lần để tìm liên kết vòng lặp. |
 | `colmap.loop_detection_num_images`| 🔴 HARDCODED | `integer` (ảnh) | `50` | `10` – `200` | Số ảnh ứng viên tương đồng trích xuất từ từ điển để thử so khớp đóng vòng. |
 | `colmap.loop_detection_min_index_distance`| 🔴 HARDCODED | `integer` (ảnh) | `50` | `10` – `200` | Khoảng cách chỉ số tối thiểu giữa 2 frame để xét là vòng lặp (tránh lãng phí truy vấn vào frame ngay sát cạnh). |
@@ -59,7 +59,8 @@
 | `colmap.use_gpu` | 🟡 PROFILE | `boolean` | `false` | `true` / `false` | Bật tăng tốc SIFT extraction & matching trên GPU (nếu môi trường runtime hỗ trợ CUDA). |
 | `colmap.num_threads` | 🟡 PROFILE | `integer` (luồng) | `16` | `1` – `64` | Giới hạn số luồng CPU tối đa cho COLMAP (tự động kẹp theo số CPU core của máy worker). |
 | `colmap.random_seed` | 🔴 HARDCODED | `integer` | `0` | $\ge 0$ | Hạt giống ngẫu nhiên để đảm bảo tính tái lập kết quả SfM (deterministic mapping). |
-| `colmap.min_registered_ratio` | 🔴 HARDCODED | `float` | `0.5` (50%) | `0.1` – `1.0` | Ngưỡng kiểm tra an toàn: mô hình lớn nhất phải đăng ký được ít nhất 50% tổng số ảnh, nếu không sẽ báo lỗi đứt chuỗi. |
+| `colmap.min_registered_ratio` | 🔴 HARDCODED (`fixed.colmap`) | `float` | `0.5` (50%) | `0.1` – `1.0` | Ngưỡng để không chạy thang thử lại: dưới mức này adapter tự thử lại ghép ảnh trong cùng lượt. |
+| `colmap.accept_registered_ratio_after_retry` | 🔴 HARDCODED (`fixed.colmap`) | `float` | `0.35` (35%) | `(0, min_registered_ratio]` | Sau thang thử lại (overlap ×2 tối đa 30, rồi ghép mọi cặp nếu ≤ 400 ảnh), mô hình đạt mức này vẫn được nhận kèm cảnh báo "vùng thiếu ảnh có thể mờ hoặc thủng"; dưới mức này báo `COLMAP_REGISTRATION_LOW`. Bộ ảnh ghép mọi cặp không có thang. |
 | `colmap.min_registered_frames` | 🔴 HARDCODED | `integer` | `8` (hoặc `10`) | `3` – `100` | Số lượng khung hình tối thiểu cần đăng ký thành công để coi chặng SfM đạt yêu cầu. |
 
 ---
@@ -194,35 +195,20 @@
 
 ---
 
-## 3. Kiến trúc đề xuất các bộ Preset theo Kịch bản sử dụng
+## 3. Kịch bản, mức chất lượng và bộ gợi ý (T-071)
 
-Để người dùng không bị "ngợp" trước hàng chục thông số kỹ thuật, hệ thống sẽ gom thành **3 Preset kịch bản trực quan**:
+Preset nằm ở `configs/product/processing_presets_v1.json`:
 
-### Preset 1: `video_walkthrough` (Đi bộ quay liên tục — Khuyên dùng cho người mới)
-* **Kịch bản:** Người dùng cầm điện thoại đi bộ chậm, quay lia máy liên tục quanh phòng hoặc dọc hành lang.
-* **Cấu hình tự động:**
-  - `colmap.matching_mode` = **`sequential`** (cửa sổ overlap = 10) $\rightarrow$ Chạy siêu nhanh, xong trong 1–2 phút.
-  - `brush.total_train_iters` = `30000`, `brush.max_resolution` = `1280`.
-  - `geometry.collision_mesh` = **`smooth`**, `geometry.external_fill_size_m` = `1.6`.
-  - `scene.max_objects` = `40`.
-
-### Preset 2: `video_orbital_360` (Quay vòng tròn 360° / Nhảy góc máy)
-* **Kịch bản:** Video quét quanh đồ vật hoặc phòng theo vòng tròn 360° (điểm kết thúc trùng điểm xuất phát), hoặc các video có đoạn lia nhanh bị nhảy góc.
-* **Cấu hình tự động:**
-  - `colmap.matching_mode` = **`sequential_vocab_tree`** (kích hoạt loop detection và từ điển Vocab Tree) $\rightarrow$ Tự động khâu các vòng quay xa nhau lại thành 1 mô hình duy nhất, chống gãy mô hình.
-  - `colmap.sequential_overlap` = `15`.
-  - `brush.total_train_iters` = `30000`.
-  - `geometry.collision_mesh` = **`smooth`**, `geometry.external_fill_size_m` = `1.6`.
-  - `scene.max_objects` = `60`.
-
-### Preset 3: `photo_collection` (Tập ảnh tĩnh độc lập / Chụp bằng máy ảnh)
-* **Kịch bản:** Tải lên tập ảnh chụp rời rạc từ máy ảnh DSLR (như dataset Mip-NeRF 360), không có thứ tự quay thời gian mượt mà.
-* **Cấu hình tự động:**
-  - `colmap.matching_mode` = **`exhaustive`** $\rightarrow$ So khớp chéo toàn bộ các cặp ảnh để tìm liên kết không gian toàn cục.
-  - `colmap.max_image_size` = `2000`, `colmap.max_num_features` = `16384`.
-  - `brush.total_train_iters` = `40000`, `brush.max_resolution` = `1920`.
-  - `geometry.collision_mesh` = **`smooth`** (hoặc tùy chọn **`faces`** nếu cần voxel dạng khối).
-  - `scene.max_objects` = `60`.
+* **Kịch bản:** `video_indoor_walkthrough`, `video_indoor_orbital_360`, `video_single_object`, `video_outdoor_forward`, `photo_collection_indoor`, `photo_collection_outdoor`.
+* **Mốc tài nguyên:** `minimum_quality` (sàn khi thu nhỏ theo máy) và `maximum` (đích của "tối đa theo máy").
+* **Hai mức chất lượng:** `standard` (khuyên dùng) và `high_quality`. Mức `high_quality` nhân `sampling.max_frames` ×1,5; `colmap.max_num_features` ×1,5 (trần 16.384); `brush.max_splats` ×1,5 (trần 4 triệu); `brush.total_train_iters` +10.000. Không đổi fps, overlap, độ phân giải. Giá trị cũ `balanced`, `machine_maximum`, `minimum_quality` bị từ chối.
+* **Theo video thật** (`/processing/suggest` nhận `video`):
+  * số frame theo thời lượng (sàn 60, làm tròn lên bội 10);
+  * cửa sổ ghép ảnh tính theo giây, không thấp hơn kịch bản, trần 30;
+  * độ phân giải không vượt cạnh dài video.
+* **Theo máy xử lý:** một lần chia đôi chung (24 vòng) cho năm khóa tài nguyên, sàn là giá trị nhỏ hơn giữa `minimum_quality` và giá trị đã tính. Chưa có số đo thì dùng sàn kèm ghi chú. Mỗi lần giảm có ghi chú trả về trường `notes`.
+* **Giới hạn thời gian bước xem trước:** `PRODUCT_PREVIEW_TIMEOUT_SECONDS` = 14400 (4 giờ), giới hạn COLMAP không vượt giá trị này.
+* **Video tải lên:** mặc định chuẩn bị ở 1080p.
 
 ---
 

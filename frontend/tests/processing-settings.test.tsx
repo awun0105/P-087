@@ -24,7 +24,7 @@ const options: ProcessingOptions = { profile_id: "fixture", parameters, presets:
 
 function Form() {
   const form = useProcessingForm(true);
-  return form.values && <ProcessingSettings parameters={parameters} values={form.values} editable evaluation={form.evaluation} onChange={form.setValue} onScenario={form.applyScenario} scenarioPreset={form.scenarioPreset} suggesting={form.suggesting} activePreset={form.activePreset} />;
+  return form.values && <ProcessingSettings parameters={parameters} values={form.values} editable evaluation={form.evaluation} onChange={form.setValue} onScenario={form.applyScenario} scenarioPreset={form.scenarioPreset} scenarioPreferences={form.scenarioPreferences} scenarioNotes={form.scenarioNotes} suggesting={form.suggesting} activePreset={form.activePreset} />;
 }
 
 beforeEach(() => {
@@ -37,6 +37,9 @@ beforeEach(() => {
       "colmap.matching_mode": preferences.input_type === "video_loop_360" ? "sequential_vocab_tree" : "sequential",
       "simulation.ground_plane": preferences.environment === "outdoor" ? "disabled" : "enabled",
     },
+    notes: preferences.target_capacity === "high_quality"
+      ? ["Máy xử lý giới hạn VRAM GPU: giảm số gaussian tối đa xuống 1.800.000 Gaussian", "Video 1280×720: độ phân giải huấn luyện 1.280 px"]
+      : [],
   } }));
 });
 
@@ -45,7 +48,7 @@ describe("scenario wizard", () => {
     render(<Form />);
     await screen.findByRole("radio", { name: "Ngoài trời" });
     fireEvent.click(screen.getByRole("radio", { name: "Ngoài trời" }));
-    await screen.findByText("Video ngoài trời");
+    await screen.findByText("Video ngoài trời · Chuẩn");
     expect(screen.getByLabelText("Lấp vùng bên ngoài", { selector: "input[type=number]" })).toHaveValue(0);
     fireEvent.click(screen.getByRole("radio", { name: "Video quay vòng 360°" }));
     await waitFor(() => expect(screen.getByLabelText("Cách ghép ảnh")).toHaveValue("sequential_vocab_tree"));
@@ -53,11 +56,30 @@ describe("scenario wizard", () => {
     fireEvent.click(screen.getByText(/Thông số chi tiết/));
     fireEvent.change(screen.getByLabelText("Kiểu lưới"), { target: { value: "faces" } });
     expect(screen.getByLabelText("Kiểu lưới")).toHaveValue("faces");
-    expect(screen.queryByText("Video ngoài trời")).not.toBeInTheDocument();
+    expect(screen.queryByText("Video ngoài trời · Chuẩn")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("radio", { name: "Video quay vòng 360°" }));
     await waitFor(() => expect(screen.getByLabelText("Kiểu lưới")).toHaveValue("smooth"));
-    expect(screen.getByText("Video ngoài trời")).toBeInTheDocument();
+    expect(screen.getByText("Video ngoài trời · Chuẩn")).toBeInTheDocument();
     for (const title of ["Lấy mẫu khung hình", "Ước lượng camera · COLMAP", "Dựng 3D Gaussian Splatting · Brush", "Lưới va chạm Voxel", "Tách vật thể · CoACD", "Mô phỏng · OpenUSD"]) expect(screen.getByText(title)).toBeInTheDocument();
+  });
+
+  it("offers two capacity levels, labels them and lists the recommender notes", async () => {
+    render(<Form />);
+    const level = await screen.findByRole("group", { name: "Mức xử lý" });
+    const labels = within(level).getAllByRole("radio").map((radio) => radio.parentElement?.textContent);
+    expect(labels).toEqual(["Chuẩn (khuyên dùng)", "Chất lượng cao hơn (lâu hơn, nặng hơn)"]);
+    expect(screen.queryByText("Tối đa cho máy này")).not.toBeInTheDocument();
+    fireEvent.click(within(level).getByRole("radio", { name: "Chất lượng cao hơn (lâu hơn, nặng hơn)" }));
+    await screen.findByText("Video ngoài trời · Chất lượng cao hơn");
+    expect(suggestProcessingPreset).toHaveBeenLastCalledWith(expect.objectContaining({ target_capacity: "high_quality", input_type: "video_continuous" }), expect.any(AbortSignal));
+    const notes = screen.getByRole("list", { name: "Ghi chú của gợi ý" });
+    const items = within(notes).getAllByRole("listitem");
+    expect(items.map((item) => item.textContent)).toEqual(["Máy xử lý giới hạn VRAM GPU: giảm số gaussian tối đa xuống 1.800.000 Gaussian", "Video 1280×720: độ phân giải huấn luyện 1.280 px"]);
+    expect(items[0]).toHaveClass("text-ochre");
+    expect(items[1]).not.toHaveClass("text-ochre");
+    fireEvent.click(within(level).getByRole("radio", { name: "Chuẩn (khuyên dùng)" }));
+    await screen.findByText("Video ngoài trời · Chuẩn");
+    expect(screen.queryByRole("list", { name: "Ghi chú của gợi ý" })).not.toBeInTheDocument();
   });
 
   it("preserves full read-only values and disables every parameter control", () => {
@@ -116,7 +138,7 @@ describe("lựa chọn duyệt tách vật", () => {
   it("không bịa lựa chọn khi giá trị đã ghi không có khóa duyệt tách vật", () => {
     const recorded = Object.fromEntries(Object.entries(reviewValues).filter(([key]) => key !== "scene.geometry_review"));
     render(<ProcessingSettings parameters={reviewParameters} values={recorded} editable={false} />);
-    expect(screen.getByText("Job này tạo trước khi có lựa chọn này; dùng hành vi cũ (không dừng duyệt).")).toBeInTheDocument();
+    expect(screen.getByText("Scene này tạo trước khi có lựa chọn này nên không dừng để duyệt.")).toBeInTheDocument();
     expect(screen.queryByRole("radio", { name: AUTO_LABEL })).not.toBeInTheDocument();
     expect(screen.queryByRole("radio", { name: REQUIRED_LABEL })).not.toBeInTheDocument();
   });

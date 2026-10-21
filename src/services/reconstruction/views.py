@@ -25,6 +25,24 @@ class CameraMarker(ContractModel):
     rotation_xyzw: tuple[FiniteFloat, FiniteFloat, FiniteFloat, FiniteFloat]
 
 
+class PoseRegistration(ContractModel):
+    """Kết quả đăng ký ảnh của bước dựng pose để giao diện báo thử lại và vùng thiếu ảnh (T-071 C3, D6)."""
+
+    registered_ratio: FiniteFloat
+    retry_count: int
+    registration_warning: bool
+
+
+def pose_registration(poses: ProductArtifactRef, resolve: Callable[[ProductArtifactRef], Path]) -> PoseRegistration:
+    """Đọc tỉ lệ ảnh đăng ký, số bậc thử lại và cờ cảnh báo từ CameraPoseArtifact; artifact cũ không có thì 0/False."""
+    document = json.loads(resolve(poses).read_bytes())
+    return PoseRegistration(
+        registered_ratio=float(document["registered_ratio"]),
+        retry_count=len(document.get("retry_ladder") or []),
+        registration_warning=document.get("registration_warning") is True,
+    )
+
+
 def frame_images(
     frame_set: ProductArtifactRef, resolve: Callable[[ProductArtifactRef], Path]
 ) -> list[ProductArtifactRef]:

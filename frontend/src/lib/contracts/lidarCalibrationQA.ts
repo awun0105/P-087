@@ -51,20 +51,20 @@ export function parseLidarCalibrationQAReport(value: unknown, jobId: string): Li
       !Number.isInteger(value.observable_frame_count) || !Number.isInteger(value.projected_point_count) ||
       !Number.isInteger(value.overlap_point_count) || typeof value.report_checksum !== "string" ||
       !/^sha256:[a-f0-9]{64}$/.test(value.report_checksum)) {
-    throw new Error("Báo cáo QA LiDAR không đúng contract hoặc thuộc job khác.");
+    throw new Error("Báo cáo căn chỉnh LiDAR không hợp lệ hoặc thuộc scene khác.");
   }
   const findings = value.findings.filter((item): item is LidarCalibrationQAFinding =>
     record(item) && typeof item.code === "string" &&
     (item.severity === "fail" || item.severity === "inconclusive") &&
     typeof item.detail === "string" && typeof item.remediation === "string"
   );
-  if (findings.length !== value.findings.length) throw new Error("Finding QA LiDAR không đúng contract.");
+  if (findings.length !== value.findings.length) throw new Error("Mục phát hiện trong báo cáo căn chỉnh không hợp lệ.");
   const numeric = [value.sampled_frame_count, value.matched_frame_count, value.observable_frame_count,
     value.projected_point_count, value.overlap_point_count];
   if (numeric.some((item) => (item as number) < 0) ||
       (value.overlap_fraction !== null && typeof value.overlap_fraction !== "number") ||
       (value.maximum_timestamp_residual_sec !== null && typeof value.maximum_timestamp_residual_sec !== "number")) {
-    throw new Error("Số liệu QA LiDAR không hợp lệ.");
+    throw new Error("Số liệu căn chỉnh LiDAR không hợp lệ.");
   }
   return value as unknown as LidarCalibrationQAReport;
 }

@@ -88,7 +88,7 @@ export class SplatInspection {
       try {
         await operation();
       } catch (error: unknown) {
-        this.state = { ...this.state, error: error instanceof Error ? error.message : "Inspection không thực hiện được" };
+        this.state = { ...this.state, error: error instanceof Error ? error.message : "Không đo được điểm này" };
       } finally {
         this.state = { ...this.state, busy: false };
         this.publish();
@@ -148,7 +148,7 @@ export class SplatInspection {
       const worldFromSource = this.worldFromSource().clone();
       const m = worldFromSource.data;
       const determinant = m[0] * (m[5] * m[10] - m[6] * m[9]) - m[4] * (m[1] * m[10] - m[2] * m[9]) + m[8] * (m[1] * m[6] - m[2] * m[5]);
-      if (!Number.isFinite(determinant) || Math.abs(determinant) < 1e-12) throw new Error("Gaussian transform không khả nghịch");
+      if (!Number.isFinite(determinant) || Math.abs(determinant) < 1e-12) throw new Error("Không đọc được khung tọa độ của scene");
       const sourceFromWorld = new Mat4().invert(worldFromSource);
       this.picker.resize(this.canvas.width, this.canvas.height);
       this.picker.prepare(camera, this.viewer.app.scene);
@@ -157,7 +157,7 @@ export class SplatInspection {
       if (!point) throw new Error("Không có điểm ở vị trí này; chọn lại trên bề mặt rõ nét");
       const source = sourceFromWorld.transformPoint(point);
       const value: InspectionPoint = [source.x, source.y, source.z];
-      if (!value.every(Number.isFinite)) throw new Error("GPU trả tọa độ không hữu hạn");
+      if (!value.every(Number.isFinite)) throw new Error("Không đọc được tọa độ điểm này; chọn lại");
       // Đủ điểm thì click mới bắt đầu bộ mới; history vẫn giữ bộ cũ để undo.
       this.history.commit(this.history.current.length >= this.maxPoints ? [value] : [...this.history.current, value]);
     });
@@ -190,7 +190,7 @@ export class SplatInspection {
     } catch (error: unknown) {
       // Asset có thể đang unload; báo lỗi tool một lần, không làm hỏng viewport.
       if (!this.state.error) {
-        this.state = { ...this.state, error: error instanceof Error ? error.message : "Không render được điểm inspection" };
+        this.state = { ...this.state, error: error instanceof Error ? error.message : "Không hiện được điểm đã chọn" };
         this.publish();
       }
     }

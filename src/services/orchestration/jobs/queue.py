@@ -127,17 +127,20 @@ def _job_requester_data(database: RuntimeDatabase) -> tuple[dict[str, str], dict
 
 
 def waiting_jobs(registry: ProjectRegistry) -> list[WaitingJob]:
-    """Mọi job đang chờ worker, chưa xếp thứ tự.
+    """Mọi job đang chờ worker nhận bước kế tiếp, chưa xếp thứ tự.
 
-    Ứng viên lấy từ event mới nhất của từng job trong journal (một truy vấn), rồi chỉ job RUNNING ở bước tỉ lệ
-    mới phải mở manifest để phân biệt "chờ người xác nhận" với "đã xác nhận, chờ worker".
+    Ứng viên lấy từ event mới nhất của từng job trong journal (một truy vấn); chỉ job RUNNING ở một điểm dừng giữa
+    hai bước (tách frame, tỉ lệ, hình học — T-073) mới phải mở manifest để phân biệt "chờ người dùng" / "đang chạy"
+    với "chờ worker nhận bước sau".
     """
     from src.services.orchestration.jobs.progress import (
         anonymization_acceptance_stage,
         awaiting_anonymization_review,
         awaiting_finalize,
-        awaiting_reviewed_preview,
+        awaiting_pose_step,
+        awaiting_scene_extract,
         metric_confirmation_stage,
+        prepared_frame_stage,
     )
 
     if registry.persistence is None:
@@ -152,33 +155,36 @@ def waiting_jobs(registry: ProjectRegistry) -> list[WaitingJob]:
     waiting: list[WaitingJob] = []
     #: Job đã rời hàng đợi (đang chạy hoặc đã kết thúc) và thời điểm hoạt động gần nhất của nó.
     served: dict[str, datetime] = {}
+    pause_stages = {StageId.FRAME_EXTRACT, StageId.METRIC_CANONICALIZE, StageId.RGB_GEOMETRY}
     for job_id, payload in rows:
         event = JobAttemptRecord.model_validate_json(payload)
         if event.status != JobStatus.QUEUED:
             served[job_id] = event.recorded_at
         if event.status == JobStatus.QUEUED:
             waiting.append(WaitingJob(job_id=job_id, phase="preview", queued_at=event.recorded_at))
-        elif event.status == JobStatus.RUNNING and event.current_stage == StageId.FRAME_EXTRACT:
-            # Job chọn che frame dừng ở đây: chỉ vào hàng đợi sau khi người dùng chấp nhận bản đã che.
-            try:
-                job = registry.get_job(job_id)
-            except Exception:  # noqa: BLE001, S112 - một manifest hỏng không được chặn hàng đợi của job khác
-                continue
-            if awaiting_anonymization_review(job) or not awaiting_reviewed_preview(job):
-                continue
+            continue
+        if event.status != JobStatus.RUNNING or event.current_stage not in pause_stages:
+            continue
+        try:
+            job = registry.get_job(job_id)
+        except Exception:  # noqa: BLE001, S112 - một manifest hỏng không được chặn hàng đợi của job khác
+            continue
+        if awaiting_pose_step(job):
+            # Bước chuẩn bị xong (job chọn che frame: sau khi người dùng chấp nhận bản đã che).
             accepted = anonymization_acceptance_stage(job)
-            accepted_at = accepted.completed_at if accepted is not None else None
-            waiting.append(WaitingJob(job_id=job_id, phase="preview", queued_at=accepted_at or event.recorded_at))
-        elif event.status == JobStatus.RUNNING and event.current_stage == StageId.METRIC_CANONICALIZE:
-            try:
-                job = registry.get_job(job_id)
-            except Exception:  # noqa: BLE001, S112 - một manifest hỏng không được chặn hàng đợi của job khác
-                continue
-            if not awaiting_finalize(job):
-                continue
+            frames = prepared_frame_stage(job)
+            since = (accepted.completed_at if accepted is not None else None) or (
+                frames.completed_at if frames is not None else None
+            )
+            waiting.append(WaitingJob(job_id=job_id, phase="preview", queued_at=since or event.recorded_at))
+        elif awaiting_finalize(job):
             stage = metric_confirmation_stage(job)
             confirmed = stage.completed_at if stage is not None and stage.completed_at is not None else None
             waiting.append(WaitingJob(job_id=job_id, phase="finalize", queued_at=confirmed or event.recorded_at))
+        elif awaiting_scene_extract(job):
+            waiting.append(WaitingJob(job_id=job_id, phase="finalize", queued_at=event.recorded_at))
+        elif awaiting_anonymization_review(job):
+            continue  # chờ người dùng xem bản đã che
     if not waiting:
         return []
     owners = job_requesters(database)
@@ -276,9 +282,17 @@ def queue_position(registry: ProjectRegistry, job_id: str, now: datetime | None 
     """Vị trí của `job_id` theo đúng thứ tự worker sẽ nhận; None khi job không ở trong hàng đợi."""
     if registry.persistence is None:
         return None
+    from src.services.orchestration.jobs.steps import step_candidates
+
     database = registry.persistence.database
     now = now or datetime.now(UTC)
-    ordered = fair_order(waiting_jobs(registry))
+    waiting = {item.job_id: item for item in waiting_jobs(registry)}
+    # T-073: cùng thứ tự worker GPU nhận bước (bước GPU trước, rồi hạng ưu tiên, rồi xoay vòng theo người yêu cầu).
+    ordered = [
+        waiting[candidate.job.job_id]
+        for candidate in step_candidates(registry)
+        if candidate.step != "view_lod" and candidate.job.job_id in waiting
+    ]
     index = next((position for position, item in enumerate(ordered) if item.job_id == job_id), None)
     if index is None:
         return None
