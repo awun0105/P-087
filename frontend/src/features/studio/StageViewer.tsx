@@ -62,6 +62,8 @@ export function StageViewer({ jobId, stageId, fallbackStageId }: { jobId: string
   const view = available[selectedIndex];
   return (
     <div className="flex size-full flex-col">
+      {view.registration_warning && <Notice tone="ochre" className="shrink-0 rounded-none">Vùng thiếu ảnh có thể bị mờ hoặc thủng{typeof view.registered_ratio === "number" ? ` (COLMAP dựng được vị trí cho ${Math.round(view.registered_ratio * 100)}% ảnh)` : ""}.</Notice>}
+      {(view.retry_count ?? 0) > 0 && <p role="status" className="shrink-0 border-b border-line bg-paper-raised px-3 py-1.5 text-xs text-ink-muted">{retryLabel(view.retry_count ?? 0)}</p>}
       {fallback.length > 0 && <Notice tone="ochre" className="shrink-0 rounded-none">Bản xác nhận tỉ lệ đã có, nhưng API chưa cung cấp 3DGS hệ mét (bản dẫn xuất xuất hiện khi worker hoàn tất hình học). Đang xem lại Gaussian gốc, đơn vị SfM; số đo đã xác nhận xem trong “Xem số đo & so sánh”.</Notice>}
       {available.length > 1 && <div className="flex flex-wrap gap-1 border-b border-line bg-paper-raised px-3 py-2" role="tablist" aria-label="Kết quả từng bước">
         {available.map((item, index) => (
@@ -86,6 +88,11 @@ export function StageViewer({ jobId, stageId, fallbackStageId }: { jobId: string
       </div>
     </div>
   );
+}
+
+/** T-071 D6: bước COLMAP đã tự thử lại ghép ảnh trong cùng lượt chạy. */
+export function retryLabel(count: number): string {
+  return `Đã tự thử lại ghép ảnh (${count} lần)`;
 }
 
 function StageLayer({ jobId, view, views }: { jobId: string; view: StageView; views: StageView[] }) {

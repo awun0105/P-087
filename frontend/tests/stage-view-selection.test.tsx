@@ -18,6 +18,21 @@ const gaussian: StageView = { stage_id: "ST-VISUAL-RECON", kind: "gaussian", tit
 beforeEach(() => { vi.clearAllMocks(); vi.mocked(getStageViews).mockResolvedValue([cameras, gaussian]); });
 
 describe("stage viewer selection", () => {
+  it("bước COLMAP báo số lần tự thử lại và vùng thiếu ảnh khi mô hình được nhận kèm cảnh báo (T-071)", async () => {
+    vi.mocked(getStageViews).mockResolvedValue([{ ...cameras, retry_count: 2, registration_warning: true, registered_ratio: 0.41 }, gaussian]);
+    render(<StageViewer jobId="job-a" stageId="ST-CAMERA-POSE" />);
+    expect(await screen.findByText("Đã tự thử lại ghép ảnh (2 lần)")).toBeInTheDocument();
+    expect(screen.getByText("Vùng thiếu ảnh có thể bị mờ hoặc thủng (COLMAP dựng được vị trí cho 41% ảnh).")).toBeInTheDocument();
+  });
+
+  it("không báo thử lại khi lần ghép đầu đã đạt", async () => {
+    vi.mocked(getStageViews).mockResolvedValue([{ ...cameras, retry_count: 0, registration_warning: false, registered_ratio: 0.9 }, gaussian]);
+    render(<StageViewer jobId="job-a" stageId="ST-CAMERA-POSE" />);
+    expect(await screen.findByRole("img", { name: "Quỹ đạo camera nhìn từ trên xuống" })).toBeInTheDocument();
+    expect(screen.queryByText(/Đã tự thử lại ghép ảnh/)).toBeNull();
+    expect(screen.queryByText(/Vùng thiếu ảnh/)).toBeNull();
+  });
+
   it("lọc đúng stage và ẩn thanh chọn khi chỉ có một kết quả", async () => {
     render(<StageViewer jobId="job-a" stageId="ST-CAMERA-POSE" />);
     expect(await screen.findByRole("img", { name: "Quỹ đạo camera nhìn từ trên xuống" })).toBeInTheDocument();

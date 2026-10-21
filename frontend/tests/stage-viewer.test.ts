@@ -28,6 +28,11 @@ describe("stage viewer", () => {
     expect(parseStageViews({ job_id: "j", views: [view] })).toHaveLength(1);
     expect(() => parseStageViews({ job_id: "j", views: [{ ...view, kind: "video" }] })).toThrow();
     expect(() => parseStageViews({ job_id: "j", views: [{ ...view, cameras: [{ center: [0, Number.NaN, 0] }] }] })).toThrow();
+    // Trường thử lại COLMAP (T-071): tuỳ chọn, nhưng có thì phải đúng kiểu.
+    expect(parseStageViews({ job_id: "j", views: [{ ...view, retry_count: 2, registration_warning: true, registered_ratio: 0.4 }] })).toHaveLength(1);
+    for (const patch of [{ retry_count: -1 }, { retry_count: 1.5 }, { registration_warning: "yes" }, { registered_ratio: Number.NaN }]) {
+      expect(() => parseStageViews({ job_id: "j", views: [{ ...view, ...patch }] })).toThrow();
+    }
   });
 });
 
