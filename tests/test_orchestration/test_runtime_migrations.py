@@ -203,7 +203,7 @@ def test_v11_database_adds_scene_head_tables_without_losing_release_rows(tmp_pat
 
     database = RuntimeDatabase(f"sqlite:///{path}")
 
-    assert database.schema_version() == LATEST_SCHEMA_VERSION == 26
+    assert database.schema_version() == LATEST_SCHEMA_VERSION == 27
     assert {
         "r2s_scene_heads",
         "r2s_scene_head_repairs",
@@ -239,7 +239,7 @@ def test_v12_database_adds_nullable_job_owner_without_backfill(tmp_path: Path) -
 
     database = RuntimeDatabase(f"sqlite:///{path}")
 
-    assert database.schema_version() == LATEST_SCHEMA_VERSION == 26
+    assert database.schema_version() == LATEST_SCHEMA_VERSION == 27
     with database.transaction() as tx:
         assert tx.execute("SELECT owner_user_id FROM r2s_jobs WHERE job_id='job-v12'").fetchone() == (None,)
     assert {"r2s_guest_quota_windows", "r2s_quota_intents"} <= _tables(database)

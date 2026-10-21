@@ -392,6 +392,10 @@ class ProjectPersistence:
                 apply_marks(
                     tx, manifest.job_id, "pipeline", str(event.attempt), marks_for_revision(expected, manifest, event)
                 )
+                # T-073: bảng bước luôn chiếu đúng revision vừa ghi (cùng transaction).
+                from src.services.orchestration.jobs.steps import sync_in_commit
+
+                sync_in_commit(tx, manifest)
                 if input_assembly_run is not None:
                     if verified_input_chain is None:
                         raise AssertionError("validated input chain missing")
@@ -710,6 +714,10 @@ class ProjectPersistence:
         if job.job_id != job_id:
             raise ArtifactChecksumError("Job key khác manifest identity")
         return job
+
+    def job_from_pointer(self, payload: str) -> JobManifest:
+        """Manifest mà một giá trị `r2s_jobs.manifest_ref` trỏ tới (đọc trong transaction của người gọi)."""
+        return self._job(payload)
 
     def _job(self, payload: str) -> JobManifest:
         reference = ArtifactRef.model_validate_json(payload)
