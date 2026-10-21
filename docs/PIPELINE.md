@@ -24,7 +24,7 @@ Trong mỗi chặng dưới đây, “output” là dữ liệu/code có thể t
 
 ### 1.1 Chuẩn bị video trên thiết bị
 
-[Video normalization](../frontend/src/lib/media/video-normalization-core.ts) dùng Mediabunny/WebCodecs để chuẩn bị media trước upload. Người dùng chọn 1080p/720p/480p, mặc định 720p. Profile giới hạn tối đa 30 FPS theo presentation timeline; giữ hướng, tỷ lệ và mapping về frame/time nguồn thay vì tạo frame lặp để ép CFR.
+[Video normalization](../frontend/src/lib/media/video-normalization-core.ts) dùng Mediabunny/WebCodecs để chuẩn bị media trước upload. Người dùng chọn 1080p/720p/480p, mặc định 1080p. Profile giới hạn tối đa 30 FPS theo presentation timeline; giữ hướng, tỷ lệ và mapping về frame/time nguồn thay vì tạo frame lặp để ép CFR.
 
 Hashing, probing, encoding và verifying là các pha trên thiết bị, chưa phải COLMAP hoặc Brush. Codec/HDR/audio/storage không phù hợp phải trả lỗi/remediation. Tải bản gốc là lựa chọn có điều kiện của người dùng, không phải fallback âm thầm. Server chỉ xác minh bytes và metadata đã nhận; file gốc còn trên thiết bị không tự là server artifact.
 
@@ -41,6 +41,8 @@ Khi có một route phù hợp nhất, resolver có thể tự chọn. Nếu rou
 API chấp nhận run với input assembly/resolution, recipe, config và runtime registry tương ứng. Identity của request được giữ để yêu cầu lặp không tạo thêm công việc/tính quota sai. Worker kiểm lại các tham chiếu, phiên bản resolver/runtime và bytes nguồn trước khi nhận xử lý; không chỉ tin kết quả từng được UI hiển thị.
 
 Các lựa chọn và giới hạn xử lý lấy từ [processing presets](../configs/product/processing_presets_v1.json) cùng cấu hình đã khóa cho job. Thay preset mặc định về sau không tự thay cấu hình của job đang tồn tại.
+
+Bộ gợi ý ([recommender](../src/services/orchestration/processing/recommender.py)) chọn thông số từ kịch bản, video thật do server đo (thời lượng, cạnh ảnh, FPS) và số đo của máy xử lý. Chỉ có hai mức: `standard` và `high_quality` (số frame, điểm đặc trưng và số Gaussian ×1,5, thêm 10.000 bước train). Cửa sổ ghép ảnh tính theo giây video, không thấp hơn kịch bản. Độ phân giải không vượt cạnh dài của video. Máy không đủ thì một lần chia đôi chung thu nhỏ năm khóa tài nguyên, kèm ghi chú cho người dùng. Worker chưa có từ điển COLMAP thì đổi `sequential_vocab_tree` thành `sequential`.
 
 ## 2. Các nhánh đầu vào
 
@@ -152,6 +154,8 @@ R6 bổ sung calibration và thời điểm RGB để consumer tạo camera guid
 [PreparedPreviewWorker](../src/services/reconstruction/preview_worker.py) kiểm frame set/source, materialize ảnh rồi chạy COLMAP trước Brush. Adapter tạo/kiểm intrinsics, camera poses, sparse reconstruction và mức đăng ký frame theo cấu hình. Matching/model/guidance được chọn theo profile, không cố định một cách matching cho mọi job.
 
 Khi có gói/guidance phù hợp, camera priors phải ghép đúng source-frame IDs và calibration sau chuẩn bị video. Partial hoặc sai frame map bị từ chối; không lấy frame thứ tự sau nén làm frame nguồn một cách mặc định.
+
+Nếu lần `mapper` đầu không ra mô hình hoặc mô hình dưới `min_registered_ratio`, adapter chạy thang thử lại trong cùng lượt, dùng lại `database.db` (không trích đặc trưng lại): bậc 1 ghép liên tiếp với overlap gấp đôi (tối đa 30), bật khép vòng khi worker có từ điển; bậc 2 ghép mọi cặp khi không quá 400 ảnh. Dừng ở bậc đầu tiên đạt ngưỡng. Sau thang, mô hình có ít nhất `accept_registered_ratio_after_retry` (0,35) số ảnh vẫn được nhận kèm `registration_warning`; giao diện báo vùng thiếu ảnh có thể mờ hoặc thủng. Bộ ảnh (ghép mọi cặp) không có thang. Từ điển FAISS được bake sẵn trong image GPU và kiểm checksum ở preflight.
 
 Nếu pose stage thất bại, không tiếp tục train như đã có camera hợp lệ. Thông tin lỗi/receipt phải được ghi theo stage; giới hạn chất lượng lấy từ cấu hình chứ không viết lại trong UI.
 
