@@ -115,7 +115,7 @@ export function uploadAssemblyFile(
         }
         reject(new ApiError(xhr.status, detail));
       };
-      xhr.onerror = () => reject(new ApiError(0, "Mất kết nối khi đang tải input lên"));
+      xhr.onerror = () => reject(new ApiError(0, "Mất kết nối khi đang tải file lên"));
       xhr.onabort = () => reject(new ApiError(499, "Đã hủy tải lên"));
       xhr.send(file);
     });

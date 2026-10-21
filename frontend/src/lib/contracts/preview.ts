@@ -31,7 +31,7 @@ export function parsePreview(value: unknown, jobId: string): ReconstructionPrevi
       value.format !== "gaussian_sog" || value.producer !== "brush" || typeof value.producer_version !== "string" ||
       value.metric_status !== "UNCONFIRMED" || value.coordinate_frame !== "sfm_world" || value.unit !== "arbitrary" ||
       typeof value.source_input_checksum !== "string" || !checksum.test(value.source_input_checksum)) {
-    throw new Error("Preview schema/identity không hợp lệ");
+    throw new Error("Bản xem trước không hợp lệ");
   }
   const prefix = `artifact://jobs/${jobId}/attempts/${value.attempt_id}/`;
   for (const field of ["source_visual_ref", "camera_pose_ref", "delivery_ref"] as const) {
@@ -41,7 +41,7 @@ export function parsePreview(value: unknown, jobId: string): ReconstructionPrevi
         typeof ref.artifact_checksum !== "string" || !checksum.test(ref.artifact_checksum) ||
         !["derived", "product_input"].includes(String(ref.data_class)) || ref.schema_version !== "1.0" ||
         typeof ref.artifact_type !== "string" || typeof ref.producer_stage !== "string") {
-      throw new Error("Preview artifact reference không hợp lệ");
+      throw new Error("Bản xem trước không hợp lệ");
     }
   }
   const delivery = value.delivery_ref as ProductArtifactRef;
@@ -50,7 +50,7 @@ export function parsePreview(value: unknown, jobId: string): ReconstructionPrevi
   if (delivery.artifact_type !== "GaussianSOG" || !delivery.artifact_uri.endsWith(".sog") ||
       delivery.producer_stage !== "ST-VISUAL-RECON" || source.artifact_type !== "BrushVisualArtifact" ||
       source.producer_stage !== "ST-VISUAL-RECON" || poses.artifact_type !== "CameraPoseArtifact" || poses.producer_stage !== "ST-CAMERA-POSE") {
-    throw new Error("Preview cần SOG đóng gói một file");
+    throw new Error("Bản xem trước không đúng định dạng");
   }
   return value as unknown as ReconstructionPreview;
 }

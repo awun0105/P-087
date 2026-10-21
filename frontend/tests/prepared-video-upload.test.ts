@@ -94,7 +94,7 @@ describe("uploadPreparedVideo", () => {
     await expect(uploadPreparedVideo(invalid, {
       accountId: "user-7",
       onProgress: vi.fn(),
-    }, { upload, api, storage: () => storage.storage }).promise).rejects.toThrow(/kích thước/);
+    }, { upload, api, storage: () => storage.storage }).promise).rejects.toThrow(/không khớp với bản gốc/);
     expect(upload).not.toHaveBeenCalled();
     expect(api).not.toHaveBeenCalled();
   });

@@ -450,7 +450,7 @@ export function parseSuggestResponse(value: unknown): SuggestResponse {
   if (!isRecord(value) || typeof value.preset_name !== "string" || !value.preset_name.trim() ||
       !isRecord(value.params) || Object.keys(value.params).length === 0 ||
       !Object.values(value.params).every((item) => typeof item === "string" || isFiniteNumber(item))) {
-    throw new Error("Gợi ý cấu hình từ backend không hợp lệ");
+    throw new Error("Gợi ý cấu hình từ máy chủ không hợp lệ");
   }
   const evaluation = value.evaluation;
   if (!isRecord(evaluation) || typeof evaluation.blocking !== "boolean" || typeof evaluation.note !== "string" ||
@@ -530,17 +530,17 @@ const SAFE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 export function parseJobProgress(value: unknown): JobProgress {
   if (!isRecord(value) || typeof value.job_id !== "string" || !Array.isArray(value.stages) ||
       typeof value.preview_ready !== "boolean" || typeof value.status !== "string") {
-    throw new Error("Tiến trình job từ backend không hợp lệ");
+    throw new Error("Tiến trình từ máy chủ không hợp lệ");
   }
   for (const stage of value.stages) {
     if (!isRecord(stage) || typeof stage.stage_id !== "string" ||
         !STAGE_STATES.includes(stage.state as StageState) ||
         (stage.note !== undefined && stage.note !== null && typeof stage.note !== "string")) {
-      throw new Error("Stage trong tiến trình không hợp lệ");
+      throw new Error("Bước trong tiến trình không hợp lệ");
     }
   }
   if (value.waiting_for !== undefined && value.waiting_for !== null && value.waiting_for !== "metric_confirmation" && value.waiting_for !== "resources" && value.waiting_for !== "anonymization_review" && value.waiting_for !== "runtime") {
-    throw new Error("Lý do chờ của job không hợp lệ");
+    throw new Error("Lý do chờ không hợp lệ");
   }
   if (value.resource_wait !== undefined && value.resource_wait !== null) {
     const wait = value.resource_wait;
@@ -551,7 +551,7 @@ export function parseJobProgress(value: unknown): JobProgress {
         !["vram", "ram", "disk"].every((key) => isFiniteNumber((wait.required_gb as Record<string, unknown>)[key]) &&
           ((wait.available_gb as Record<string, unknown>)[key] === null || isFiniteNumber((wait.available_gb as Record<string, unknown>)[key]))) ||
         !wait.waiting_on.every((key) => typeof key === "string" && ["vram", "ram", "disk"].includes(key))) {
-      throw new Error("Snapshot tài nguyên chờ không hợp lệ");
+      throw new Error("Số đo tài nguyên chờ không hợp lệ");
     }
     const reasons = wait.reasons ?? {};
     const capacity = wait.capacity_gb ?? {};
@@ -568,13 +568,13 @@ export function parseJobProgress(value: unknown): JobProgress {
     if (!isRecord(queue) || !["position", "waiting", "running", "workers", "estimate_samples"].every((key) => Number.isInteger(queue[key]) && (queue[key] as number) >= 0) ||
         (queue.position as number) < 1 || (queue.workers as number) < 1 ||
         (queue.estimated_wait_seconds !== null && !(isFiniteNumber(queue.estimated_wait_seconds) && queue.estimated_wait_seconds >= 0))) {
-      throw new Error("Vị trí hàng đợi từ backend không hợp lệ");
+      throw new Error("Vị trí hàng đợi từ máy chủ không hợp lệ");
     }
   }
   if (value.capabilities !== undefined && value.capabilities !== null) {
     const capabilities = value.capabilities;
     if (!isRecord(capabilities) || !["can_mutate", "can_cancel", "can_retry"].every((key) => typeof capabilities[key] === "boolean")) {
-      throw new Error("Quyền thao tác job từ backend không hợp lệ");
+      throw new Error("Quyền thao tác từ máy chủ không hợp lệ");
     }
   }
   return value as unknown as JobProgress;
@@ -597,7 +597,7 @@ export function parseDemoManifest(value: unknown): DemoManifest {
   if (!isRecord(value) || value.schema_version !== "1.0" || !isRecord(value.splat) ||
       !Array.isArray(value.frames) || !Array.isArray(value.stages) ||
       (value.origin !== "pipeline_job" && value.origin !== "smoke_run")) {
-    throw new Error("Demo bundle không hợp lệ");
+    throw new Error("Bản demo không hợp lệ");
   }
   const rotation = value.display_rotation_xyzw;
   if (rotation != null && !(Array.isArray(rotation) && rotation.length === 4 &&
@@ -629,7 +629,7 @@ export function parseDemoManifest(value: unknown): DemoManifest {
     if (!isRecord(stage) || typeof stage.stage_id !== "string" || ids.has(stage.stage_id) ||
         (stage.state !== undefined && !["succeeded", "pending", "failed"].includes(String(stage.state))) ||
         (stage.duration_seconds !== null && (!isFiniteNumber(stage.duration_seconds) || stage.duration_seconds < 0))) {
-      throw new Error("Stage demo từ backend không hợp lệ");
+      throw new Error("Bước của bản demo không hợp lệ");
     }
     ids.add(stage.stage_id);
     if (stage.assets !== undefined && !(Array.isArray(stage.assets) && stage.assets.every(isDemoAsset))) {
@@ -660,7 +660,7 @@ export function parseMetricPreview(value: unknown): MetricPreview {
       typeof value.check_passed !== "boolean" ||
       !["user_measured", "lidar_demo", "ai_estimated", "lidar_trajectory"].includes(String(value.distance_source)) ||
       !METRIC_NUMBERS.every((key) => isFiniteNumber(value[key]))) {
-    throw new Error("Bản xem trước tỉ lệ từ backend không hợp lệ");
+    throw new Error("Bản xem trước tỉ lệ từ máy chủ không hợp lệ");
   }
   return value as unknown as MetricPreview;
 }
@@ -673,7 +673,7 @@ function isLidarDistance(value: unknown): value is LidarDistance {
 /** Số đo LiDAR phải dương, hữu hạn trước khi điền vào ô khoảng cách. */
 export function parseLidarMeasurements(value: unknown): LidarMeasurements {
   if (!isRecord(value) || !isLidarDistance(value.anchor) || !isLidarDistance(value.check)) {
-    throw new Error("Số đo LiDAR từ backend không hợp lệ");
+    throw new Error("Số đo LiDAR từ máy chủ không hợp lệ");
   }
   return value as unknown as LidarMeasurements;
 }
@@ -695,7 +695,7 @@ export function parseMetricProposal(value: unknown): MetricProposal {
         floor.points.every(isMetricPoint) && isFiniteNumber(floor.residual_m))) ||
       (pairs !== null && !(isRecord(pairs) && [pairs.point_a, pairs.point_b, pairs.check_a, pairs.check_b].every(isMetricPoint) &&
         positive(pairs.distance_m) && positive(pairs.check_distance_m)))) {
-    throw new Error("Đề xuất tỉ lệ tự động từ backend không hợp lệ");
+    throw new Error("Đề xuất tỉ lệ tự động từ máy chủ không hợp lệ");
   }
   return value as unknown as MetricProposal;
 }
@@ -704,7 +704,7 @@ export function parseMetricProposal(value: unknown): MetricProposal {
 export function parseDemoSelection(value: unknown): DemoSelection {
   if (!isRecord(value) || !Array.isArray(value.points) || value.points.length !== 7 ||
       !value.points.every((point) => Array.isArray(point) && point.length === 3 && point.every(isFiniteNumber))) {
-    throw new Error("Bộ điểm demo từ backend không hợp lệ");
+    throw new Error("Bộ điểm demo từ máy chủ không hợp lệ");
   }
   parseLidarMeasurements(value.measurements);
   return value as unknown as DemoSelection;
@@ -778,7 +778,7 @@ export interface ModeComparison {
 /** Chỉ trạng thái có kết quả thật mới được mang tỉ lệ; `mock` còn nhận từ API cũ. */
 export function parseModeComparison(value: unknown): ModeComparison {
   if (!isRecord(value) || !Array.isArray(value.modes) || value.modes.length !== 3) {
-    throw new Error("So sánh 3 hướng từ backend không hợp lệ");
+    throw new Error("So sánh 3 hướng từ máy chủ không hợp lệ");
   }
   for (const mode of value.modes) {
     if (!isRecord(mode) || typeof mode.title !== "string" || !["mock", "estimated", "confirmed", "measured", "missing"].includes(String(mode.status))) {
