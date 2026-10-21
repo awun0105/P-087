@@ -20,7 +20,7 @@ import { QueueStatus } from "@/features/studio/scene/QueueStatus";
 import { ResourceWaitDetail } from "@/features/studio/scene/ResourceWaitDetail";
 import { ProcessingSteps } from "@/features/studio/scene/ProcessingSteps";
 import type { JobProgress } from "@/lib/contracts/studio";
-import { formatBytes } from "@/lib/format";
+import { formatBytes, formatUpdatedAt } from "@/lib/format";
 import { geometryPhaseLabel } from "@/lib/scene/geometry-state";
 
 const ANONYMIZATION_PANEL_ID = "anonymization-review-panel";
@@ -158,7 +158,7 @@ export function ProgressTab({ jobId, progress, info, busy, canCancel, canAccept 
       {progress?.steps && progress.status !== "SUCCEEDED" && <ProcessingSteps steps={progress.steps} now={now} />}
       {progress ? (
         <>
-          <PipelineTimeline stageActions={shownActions} stages={shownStages} stageList={shownList} jobId={jobId} isStale={stale} timeNote={"Cập nhật lúc " + new Date(progress.updated_at).toLocaleTimeString("vi-VN") + (stale ? " · Tiến trình mất kết nối" : progress.status === "RUNNING" || progress.status === "QUEUED" ? " · Có thể đóng trang, scene vẫn chạy" : "")} />
+          <PipelineTimeline stageActions={shownActions} stages={shownStages} stageList={shownList} jobId={jobId} isStale={stale} timeNote={"Cập nhật lúc " + formatUpdatedAt(progress.updated_at, now) + (stale ? " · Tiến trình mất kết nối" : progress.status === "RUNNING" || progress.status === "QUEUED" ? " · Có thể đóng trang, scene vẫn chạy" : "")} />
         </>
       ) : <p role="status" className="text-sm text-ink-muted">Đang tải tiến trình…</p>}
       {canCancel && <div className="mt-4 flex justify-end gap-3">

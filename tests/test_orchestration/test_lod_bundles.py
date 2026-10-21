@@ -282,7 +282,7 @@ def _bundle(root: Path, job_id: str, checksum: str, build: str = "b0123456789ab"
     folder = root / lod.lod_relative_dir(job_id, checksum)
     for chunk in ("0_0", "1_0"):
         (folder / build / chunk).mkdir(parents=True)
-        (folder / build / chunk / "meta.json").write_text("{}")
+        (folder / build / chunk / "meta.json").write_text(json.dumps({"means": {"files": ["means_l.webp"]}}))
         (folder / build / chunk / "means_l.webp").write_bytes(chunk.encode())
     (folder / "bdeadbeef0000" / "0_0").mkdir(parents=True)  # lần tạo thua cuộc: mục lục không trỏ tới
     (folder / "bdeadbeef0000" / "0_0" / "meta.json").write_text("{}")
@@ -345,6 +345,37 @@ def test_copy_lod_bundle_pulls_a_bundle_kept_only_in_the_object_store(tmp_path) 
     assert (target / lod.lod_relative_dir("job-a", _CHECKSUM) / "b0123456789ab/1_0/means_l.webp").read_bytes() == b"1_0"
 
 
+def test_copy_lod_bundle_fetches_chunk_files_missing_from_a_partial_local_cache(tmp_path) -> None:
+    """Trình xem tải lẻ từng file qua API, nên cache có thể chỉ có `meta.json` của khối: phải tải nốt file dữ liệu."""
+    store, cache, target = tmp_path / "store", tmp_path / "cache", tmp_path / "target"
+    _bundle(store, "job-a", _CHECKSUM)
+    _bundle(cache, "job-a", _CHECKSUM)
+    for webp in (cache / lod.lod_relative_dir("job-a", _CHECKSUM)).rglob("*.webp"):
+        webp.unlink()
+    fetched: list[str] = []
+
+    class Remote:
+        def fetch(self, relative, destination, expected_checksum=None):  # noqa: ANN001, ANN202
+            fetched.append(relative)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes((store / relative).read_bytes())
+
+    assert lod.copy_lod_bundle(cache, Remote(), target, "job-a", _CHECKSUM) is True
+    copied = target / lod.lod_relative_dir("job-a", _CHECKSUM)
+    assert (copied / "b0123456789ab/0_0/means_l.webp").read_bytes() == b"0_0"
+    assert (copied / "b0123456789ab/1_0/means_l.webp").read_bytes() == b"1_0"
+    assert len(fetched) == 2
+
+
+def test_copy_lod_bundle_refuses_a_chunk_whose_files_are_gone(tmp_path) -> None:
+    source, target = tmp_path / "source", tmp_path / "target"
+    folder = _bundle(source, "job-a", _CHECKSUM)
+    (folder / "b0123456789ab/1_0/means_l.webp").unlink()
+    with pytest.raises(lod.LodBuildError):
+        lod.copy_lod_bundle(source, None, target, "job-a", _CHECKSUM)
+    assert not (target / lod.lod_relative_dir("job-a", _CHECKSUM) / lod.INDEX).exists()
+
+
 def test_copy_view_lods_copies_each_sog_bundle_once_and_skips_sogs_without_one(tmp_path) -> None:
     source, target = tmp_path / "source", tmp_path / "target"
     other = "sha256:" + "b" * 64
@@ -358,3 +389,14 @@ def test_copy_view_lods_copies_each_sog_bundle_once_and_skips_sogs_without_one(t
     assert lod.copy_view_lods(source, None, target, "job-a", references) == 1
     assert lod.lod_ready(target, None, "job-a", _CHECKSUM)
     assert not (target / lod.lod_relative_dir("job-a", other)).exists()
+
+
+def test_copy_view_lods_skips_a_broken_bundle_so_the_viewer_falls_back_to_the_sog(tmp_path) -> None:
+    source, target = tmp_path / "source", tmp_path / "target"
+    folder = _bundle(source, "job-a", _CHECKSUM)
+    (folder / "b0123456789ab/1_0/means_l.webp").unlink()
+    references = [
+        {"artifact_uri": "artifact://jobs/job-a/scene/environment/x/background.sog", "artifact_checksum": _CHECKSUM}
+    ]
+    assert lod.copy_view_lods(source, None, target, "job-a", references) == 0
+    assert not (target / lod.lod_relative_dir("job-a", _CHECKSUM)).exists()

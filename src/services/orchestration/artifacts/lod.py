@@ -22,6 +22,7 @@ from typing import Protocol
 from uuid import uuid4
 
 from src.runtime_env import runtime_env
+from src.services.orchestration.artifacts.errors import ArtifactStoreError
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +64,19 @@ def lod_ready(artifact_root: Path, remote: object | None, job_id: str, checksum:
     return head is not None and head(relative) is not None
 
 
+def _chunk_files(meta: Path) -> list[str]:
+    """Tên các file dữ liệu mà `meta.json` của một khối khai (means, scales, quats, sh0, shN…)."""
+    document = json.loads(meta.read_text(encoding="utf-8"))
+    names: list[str] = []
+    for value in document.values():
+        listed = value.get("files") if isinstance(value, dict) else None
+        if isinstance(listed, list):
+            names.extend(name for name in listed if isinstance(name, str))
+    if not names:
+        raise LodBuildError(f"{meta.parent.name}/meta.json lists no files")
+    return names
+
+
 def copy_lod_bundle(source_root: Path, remote: object | None, target_root: Path, job_id: str, checksum: str) -> bool:
     """Chép một bộ LOD đã đủ sang kho artifact khác (bản chụp workspace mẫu, phiên demo) bằng hard link.
 
@@ -88,15 +102,23 @@ def copy_lod_bundle(source_root: Path, remote: object | None, target_root: Path,
     files: list[Path] = []
     for chunk in chunks:
         folder = source / chunk
-        if not (folder / "meta.json").is_file() and remote is not None:
+        meta = folder / "meta.json"
+        if not meta.is_file() and remote is not None:
             remote.pull_tree(f"{relative}/{chunk}", folder)  # type: ignore[attr-defined]
-        found = sorted(path for path in folder.rglob("*") if path.is_file() and not path.name.startswith("."))
-        if not any(path.name == "meta.json" for path in found):
+        if not meta.is_file():
             raise LodBuildError(f"chunk {chunk} is missing")
-        for path in found:
+        # Cache cục bộ có thể chỉ có vài file của khối (trình xem tải lẻ từng file): đủ theo meta.json mới chép.
+        needed = [meta]
+        for name in _chunk_files(meta):
+            path = folder / name
             if not valid_bundle_path(path.relative_to(source).as_posix()):
                 raise LodBuildError(f"unexpected bundle file {path.relative_to(source).as_posix()}")
-        files.extend(found)
+            if not path.is_file() and remote is not None:
+                remote.fetch(f"{relative}/{chunk}/{name}", path)  # type: ignore[attr-defined]
+            if not path.is_file():
+                raise LodBuildError(f"chunk {chunk} is missing {name}")
+            needed.append(path)
+        files.extend(needed)
     files.append(index)  # mục lục chép sau cùng: có nó nghĩa là bộ đã đủ
     target = target_root / relative
     for path in files:
@@ -122,7 +144,15 @@ def copy_view_lods(
     checksums = dict.fromkeys(
         str(item["artifact_checksum"]) for item in references if str(item.get("artifact_uri", "")).endswith(".sog")
     )
-    return sum(copy_lod_bundle(source_root, remote, target_root, job_id, checksum) for checksum in checksums)
+    copied = 0
+    for checksum in checksums:
+        try:
+            copied += copy_lod_bundle(source_root, remote, target_root, job_id, checksum)
+        except (LodBuildError, OSError, ArtifactStoreError) as error:
+            # Bộ LOD hỏng hoặc thiếu khối: bỏ qua để giao diện mở SOG gốc, không làm hỏng mẫu hay phiên demo.
+            logger.warning("skip LOD bundle %s of %s: %s", checksum, job_id, error)
+            shutil.rmtree(target_root / lod_relative_dir(job_id, checksum), ignore_errors=True)
+    return copied
 
 
 def _run(cli: Path, *arguments: str, gpu: bool = False) -> None:
