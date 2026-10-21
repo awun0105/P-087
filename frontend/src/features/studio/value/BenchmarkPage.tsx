@@ -76,7 +76,7 @@ export function BenchmarkPage() {
         <div>
           <h1 className="text-xl font-bold tracking-tight">Benchmark giá trị</h1>
           <p className="mt-1 max-w-2xl text-sm text-ink-muted">
-            Mỗi dòng là job mới nhất của một project được đưa vào benchmark. Số chưa đo được được ghi rõ, không phải 0.
+            Mỗi dòng là lần chạy mới nhất của một scene trong benchmark. Số chưa đo được ghi là chưa có, không phải 0.
           </p>
         </div>
         {data && (

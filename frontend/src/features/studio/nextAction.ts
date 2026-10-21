@@ -69,19 +69,19 @@ function systemWait(action: NextAction, ctx: NextActionContext): NextActionView 
     const left = minutesLeft(ctx.gpu, ctx.now);
     return {
       title: "Đang khởi động máy GPU",
-      description: left !== null ? `Máy GPU đang được bật, còn khoảng ${left} phút. Job tự chạy khi máy sẵn sàng.` : "Máy GPU đang được bật. Job tự chạy khi máy sẵn sàng.",
+      description: left !== null ? `Còn khoảng ${left} phút. Scene tự chạy khi máy sẵn sàng.` : "Scene tự chạy khi máy sẵn sàng.",
       target: { tab: "progress", label: "Xem tiến trình" },
       status: RUNNING("Đang khởi động máy GPU", "ochre"),
     };
   }
   if (ctx.waitingFor === "resources") {
-    return { title: "Đang chờ tài nguyên", description: "Giữ nguyên cấu hình đã chọn. Máy xử lý tự chạy tiếp khi đủ tài nguyên; có thể rời trang hoặc huỷ job.", target: null, status: RUNNING("Đang chờ tài nguyên", "ochre") };
+    return { title: "Đang chờ tài nguyên", description: "Scene tự chạy khi máy đủ tài nguyên. Bạn có thể rời trang.", target: null, status: RUNNING("Đang chờ tài nguyên", "ochre") };
   }
   if (ctx.waitingFor === "runtime") {
-    return { title: "Đang chờ GPU", description: "Chưa có máy xử lý đúng phiên bản công cụ của job. Job tự chạy khi máy đó lên.", target: null, status: RUNNING("Đang chờ GPU", "ochre") };
+    return { title: "Đang chờ GPU", description: "Chưa có máy xử lý phù hợp. Scene tự chạy khi có máy.", target: null, status: RUNNING("Đang chờ GPU", "ochre") };
   }
   if (ctx.wait?.kind === "queue" || action.step_id === null && !ctx.currentStepShort) {
-    return { title: "Đang chờ worker", description: "Job đã vào hàng đợi. Theo dõi các giai đoạn ở tab Tiến trình.", target: null, status: RUNNING("Đang chờ worker", "ochre") };
+    return { title: "Đang xếp hàng", description: "Scene sẽ tự chạy khi đến lượt.", target: null, status: RUNNING("Đang xếp hàng", "ochre") };
   }
   // Máy chỉ đang chạy bình thường: không có gì cần người dùng chú ý (chuông trống), nhãn đầu trang vẫn nói đang chạy.
   const label = ctx.currentStepShort ? `Đang chạy · ${ctx.currentStepShort}` : "Đang xử lý";
@@ -91,31 +91,31 @@ function systemWait(action: NextAction, ctx: NextActionContext): NextActionView 
 const ROWS: Record<Exclude<NextActionKind, "wait_system">, Row> = {
   review_anonymization: () => ({
     title: "Cần bạn xem bản đã che",
-    description: "Khuôn mặt và biển số phát hiện được đã bị che. Xem lại rồi xác nhận để pipeline dựng 3D, hoặc huỷ job.",
+    description: "Khuôn mặt và biển số đã được che. Xem lại rồi xác nhận để dựng 3D.",
     target: { tab: "progress", label: "Xem bản đã che" },
     status: ACTION("Cần xem bản đã che"),
   }),
   confirm_metric: () => ({
     title: "Cần bạn xác nhận tỉ lệ mét",
-    description: "Chọn điểm và nhập kích thước thật để pipeline tiếp tục.",
+    description: "Chọn điểm và nhập kích thước thật để tiếp tục.",
     target: { tab: "studio", mode: "metric", label: "Xác nhận tỉ lệ mét" },
     status: ACTION("Cần xác nhận tỉ lệ"),
   }),
   retry_job: () => ({
     title: "Xử lý chưa hoàn tất",
-    description: "Xem nguyên nhân ở giai đoạn lỗi. Sau khi xử lý được nguyên nhân, có thể chạy lại.",
+    description: "Xem nguyên nhân ở bước lỗi rồi chạy lại.",
     target: { tab: "progress", label: "Xem bước lỗi" },
     status: { label: "Lỗi · có thể thử lại", tone: "rust", active: false, group: "failed" },
   }),
   job_failed: () => ({
     title: "Xử lý chưa hoàn tất",
-    description: "Lỗi của lần chạy này cần được khắc phục trước; chưa thể chạy lại.",
+    description: "Cần sửa lỗi trước khi chạy lại.",
     target: { tab: "progress", label: "Xem bước lỗi" },
     status: { label: "Lỗi", tone: "rust", active: false, group: "failed" },
   }),
   job_cancelled: () => ({
     title: "Đã huỷ xử lý",
-    description: "Kết quả đã có vẫn được giữ; mở giai đoạn hoàn tất để xem.",
+    description: "Kết quả đã có vẫn được giữ.",
     target: null,
     status: { label: "Đã huỷ", tone: "neutral", active: false, group: "idle" },
   }),
@@ -135,7 +135,7 @@ const ROWS: Record<Exclude<NextActionKind, "wait_system">, Row> = {
   }),
   choose_object_method: () => ({
     title: "Tách theo vật chưa thành công",
-    description: "Chạy lại tách theo vật hoặc dùng hộp ứng viên ngay tại bước “Tách vật thể”.",
+    description: "Chạy lại hoặc dùng hộp ứng viên ở bước “Tách vật thể”.",
     target: { tab: "progress", label: "Xem bước tách vật thể" },
     status: ACTION("Cần chọn cách tách vật thể"),
   }),
@@ -147,7 +147,7 @@ const ROWS: Record<Exclude<NextActionKind, "wait_system">, Row> = {
   }),
   scene_ready: () => ({
     title: "Scene đã dựng xong",
-    description: "Xác nhận vật, tạo gói mô phỏng và gửi duyệt ở các tab Studio và Kiểm tra & duyệt.",
+    description: "Tiếp theo: xác nhận vật, tạo gói mô phỏng và gửi duyệt.",
     target: null,
     status: { label: "Đã dựng scene", tone: "sage", active: false, group: "done" },
   }),
@@ -159,25 +159,25 @@ const ROWS: Record<Exclude<NextActionKind, "wait_system">, Row> = {
   }),
   await_review: (_action, ctx) => ({
     title: "Đạt kiểm tra — chờ duyệt",
-    description: ctx.isReviewer ? "Kiểm tra bằng chứng trước khi quyết định." : "Reviewer sẽ quyết định trên đúng gói của revision này.",
+    description: ctx.isReviewer ? "Kiểm tra bằng chứng trước khi quyết định." : "Đang chờ người duyệt.",
     target: { tab: "review", label: "Xem kiểm tra & duyệt" },
     status: ACTION("Chờ duyệt", "ochre"),
   }),
   review_package: () => ({
     title: "Đã có gói mô phỏng",
-    description: "Gói candidate có thể tải; bản phát hành cần kiểm định và Reviewer duyệt.",
+    description: "Đã tải được gói. Để phát hành, gói cần qua kiểm tra và được duyệt.",
     target: { tab: "review", label: "Xem kiểm tra & duyệt" },
     status: { label: "Đã có gói", tone: "sage", active: false, group: "done" },
   }),
   fix_preflight: () => ({
-    title: "Cần sửa theo preflight",
-    description: "Tạo gói và đọc preflight ở Kiểm tra & duyệt.",
+    title: "Gói chưa đạt kiểm tra",
+    description: "Xem mục cần sửa ở tab Kiểm tra & duyệt.",
     target: { tab: "review", label: "Mở tạo gói mô phỏng" },
-    status: ACTION("Cần sửa preflight"),
+    status: ACTION("Cần sửa gói"),
   }),
   create_package: () => ({
     title: "Sẵn sàng tạo gói",
-    description: "Tạo gói và đọc preflight ở Kiểm tra & duyệt.",
+    description: "Tạo gói ở tab Kiểm tra & duyệt.",
     target: { tab: "review", label: "Mở tạo gói mô phỏng" },
     status: { label: "Đã dựng scene", tone: "sage", active: false, group: "done" },
   }),

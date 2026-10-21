@@ -194,7 +194,7 @@ describe("workflow scene", () => {
     const props = { jobId: "job-1", current: "progress" as const, mode: "scene" as const, sceneReady: false, revision: null, busy: false, onOpen: vi.fn(), onRetry: vi.fn() };
     const failed = failedProgress(true);
     render(<NextAction {...props} progress={failed} />);
-    expect(screen.getByText("Retry thủ công dùng 1 lượt Guest khi máy chủ chấp nhận.")).toBeInTheDocument();
+    expect(screen.getByText("Mỗi lần thử lại dùng 1 lượt chạy của khách.")).toBeInTheDocument();
     expect(screen.getByText("Guest còn 0/3 lượt hôm nay.")).toBeInTheDocument();
     const reset = screen.getByText(/Đã dùng 3\/3; đặt lại lúc/);
     expect(reset).toHaveTextContent("00:00");
@@ -250,7 +250,7 @@ describe("workflow scene", () => {
     const props = { jobId: "job-1", current: "progress" as const, mode: "scene" as const, sceneReady: false, revision: null, busy: false, onOpen: vi.fn(), onRetry: vi.fn() };
     const stale: JobProgress = { ...progress, status: "RUNNING", waiting_for: null, updated_at: "2000-01-01T00:00:00Z", error: null };
     render(<NextAction {...props} progress={stale} />);
-    expect(screen.getByText("Worker chưa cập nhật tiến trình")).toBeInTheDocument();
+    expect(screen.getByText("Đang cập nhật trạng thái")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Thử lại" })).toBeNull();
   });
   it("đồng bộ retry nếu POST lỗi sau khi backend đã tạo attempt mới", async () => {
@@ -264,7 +264,7 @@ describe("workflow scene", () => {
     await waitFor(() => expect(vi.mocked(retryJob)).toHaveBeenCalledOnce());
     await waitFor(() => expect(screen.queryByRole("button", { name: "Thử lại" })).toBeNull());
     await openBell();
-    expect(await screen.findAllByText("Đang chờ worker")).toHaveLength(2);
+    expect(await screen.findAllByText("Đang xếp hàng")).toHaveLength(2);
     expect(screen.queryByRole("alert")).toBeNull();
   });
   it("bỏ qua poll FAILED cũ nếu nó trả về sau khi attempt mới đã được xác nhận", async () => {
@@ -283,7 +283,7 @@ describe("workflow scene", () => {
     retryReceipt.resolve({ job_id: "job-1", status: "QUEUED", job_manifest_checksum: "sha256:" + "c".repeat(64) });
     await waitFor(() => expect(vi.mocked(getJobPipeline)).toHaveBeenCalledTimes(3));
     await openBell();
-    expect(await screen.findAllByText("Đang chờ worker")).toHaveLength(2);
+    expect(await screen.findAllByText("Đang xếp hàng")).toHaveLength(2);
     oldPoll.resolve(pipelineOf(failed));
     await waitFor(() => expect(screen.getByText("Lần chạy 2")).toBeInTheDocument());
     expect(screen.queryByRole("button", { name: "Thử lại" })).toBeNull();

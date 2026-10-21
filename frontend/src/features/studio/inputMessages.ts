@@ -18,13 +18,13 @@ export const INPUT_MESSAGES: Record<string, string> = {
   GAUSSIAN_SCENE_REQUIRED: "Thiếu file scene 3DGS (.ply hoặc .sog).",
   GAUSSIAN_MASTER_SELECTION_REQUIRED: "Có nhiều file 3DGS. Chọn đúng một file chính.",
   WORKFLOW_INTENT_REQUIRED: "Bộ file có cả video và scene 3DGS. Chọn dựng từ video hay chỉ xem 3DGS.",
-  CLOUD_STATE_REQUIRED: "Cho biết đám mây LiDAR là map đã ghép, một lần quét tĩnh hay chuỗi scan thô.",
-  MAP_FILE_SELECTION_REQUIRED: "Có nhiều đám mây. Chọn đúng file dùng làm map.",
-  CLOUD_CHOICES_TRUNCATED: "Có quá nhiều đám mây nên chỉ hiện một phần. Hãy chọn đúng file dùng làm map.",
+  CLOUD_STATE_REQUIRED: "Chọn loại đám mây điểm LiDAR.",
+  MAP_FILE_SELECTION_REQUIRED: "Có nhiều đám mây điểm. Chọn một file làm bản đồ.",
+  CLOUD_CHOICES_TRUNCATED: "Có quá nhiều đám mây điểm nên chỉ hiện một phần. Chọn một file làm bản đồ.",
   SAME_SCENE_REQUIRED: "Xác nhận video và LiDAR quay cùng một cảnh.",
   COORDINATE_UNIT_REQUIRED: "Khai đơn vị toạ độ của LiDAR (m, cm hoặc mm).",
   LIDAR_FRAME_REQUIRED: "Khai tên hệ toạ độ (frame) của LiDAR.",
-  CAMERA_FRAME_REQUIRED: "Khai tên frame của camera trong file calibration ROS để kiểm đúng hai đầu của file.",
+  CAMERA_FRAME_REQUIRED: "Khai tên frame của camera trong file hiệu chuẩn ROS.",
   SENSOR_TRAJECTORY_CONVENTION_REQUIRED: "Xác nhận quỹ đạo là pose của cảm biến LiDAR (world_from_sensor).",
   SCAN_SEQUENCE_NEEDS_MULTIPLE_FILES: "Chuỗi scan cần ít nhất hai file.",
   SCAN_SEQUENCE_ORDER_REQUIRED: "Kiểm tra và xác nhận thứ tự scan theo thời gian.",
@@ -41,7 +41,7 @@ export const INPUT_MESSAGES: Record<string, string> = {
   LIDAR_TIMESTAMP_UNIT_REQUIRED: "Khai đơn vị thời gian của thời điểm scan LiDAR.",
   CLOCK_RELATION_REQUIRED: "Cho biết đồng hồ camera và LiDAR cùng nguồn, lệch đã biết hay không rõ.",
   CLOCK_OFFSET_REQUIRED: "Nhập độ lệch đồng hồ giữa camera và LiDAR (giây).",
-  VERIFIED_RGB_FRAME_MAP_REQUIRED: "Cần video đã chuẩn bị ở trình duyệt và được máy chủ xác minh khung hình.",
+  VERIFIED_RGB_FRAME_MAP_REQUIRED: "Video cần được chuẩn bị và kiểm tra xong trước.",
   ROUTE_SELECTION_REQUIRED: "Có nhiều cách xử lý ngang nhau. Chọn một cách.",
 
   // Mâu thuẫn hoặc dữ liệu sai
@@ -64,11 +64,11 @@ export const INPUT_MESSAGES: Record<string, string> = {
 
   // Thông tin về lựa chọn của hệ thống
   ROUTE_AUTO_SELECTED: "Hệ thống đã tự chọn cách xử lý phù hợp nhất với dữ liệu bạn đưa vào.",
-  ALTERNATIVE_ROUTE_NOT_USED: "Còn một cách xử lý khác cũng chạy được; hệ thống ưu tiên cách có ràng buộc hình học mạnh hơn.",
-  HIGHER_ROUTE_NEEDS_MORE_FACTS: "Bổ sung thêm thông tin còn thiếu sẽ cho phép dùng cách xử lý chính xác hơn.",
-  HIGHER_ROUTE_UNAVAILABLE: "Cách xử lý tốt hơn chưa chạy được trên máy này nên đang dùng cách đơn giản hơn.",
+  ALTERNATIVE_ROUTE_NOT_USED: "Còn cách xử lý khác, nhưng hệ thống chọn cách chính xác hơn.",
+  HIGHER_ROUTE_NEEDS_MORE_FACTS: "Bổ sung thông tin còn thiếu để dùng cách chính xác hơn.",
+  HIGHER_ROUTE_UNAVAILABLE: "Máy này chưa chạy được cách tốt hơn nên dùng cách đơn giản hơn.",
   UNUSED_INPUTS_EXCLUDED: "Một số file không có chỗ dùng trong cách xử lý này nên được bỏ qua.",
-  TIMESTAMP_ROLE_INFERRED: "Vai trò file thời điểm được suy theo số dòng khớp số pose hoặc số scan.",
+  TIMESTAMP_ROLE_INFERRED: "File thời điểm được tự gán theo số dòng.",
 
   // Chẩn đoán lúc đọc file
   ambiguous_calibration_direction: "File calibration khai cả hai chiều. Chỉ giữ một chiều.",

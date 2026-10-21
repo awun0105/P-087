@@ -38,7 +38,7 @@ describe("ImportedScenesHome", () => {
   it("hiển thị tiêu đề và trạng thái rỗng khi chưa có scene import", async () => {
     render(<ImportedScenesHome />);
     expect(screen.getByRole("heading", { level: 1, name: "Scenes đã import" })).toBeInTheDocument();
-    expect(await screen.findByText("Chưa có scene import nào")).toBeInTheDocument();
+    expect(await screen.findByText("Chưa có scene 3DGS nào")).toBeInTheDocument();
   });
 
   it("scene import hiển thị creator và role dưới dạng text thuần (chống XSS)", async () => {

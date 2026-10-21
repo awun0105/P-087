@@ -213,7 +213,7 @@ async def test_create_job_on_new_project_blocked_409(client) -> None:
     pid = cr.json()["project_id"]
     r = await client.post(f"/api/v1/projects/{pid}/jobs", json={})
     assert r.status_code == 409
-    assert "không thể tạo job" in r.json()["detail"]
+    assert "Chưa tạo được scene" in r.json()["detail"]
 
 
 # ── not-found ─────────────────────────────────────────────────────────────────

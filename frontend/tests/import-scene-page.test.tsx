@@ -184,9 +184,9 @@ describe("ImportScenePage durable lifecycle", () => {
 
     expect(await screen.findByText("Chưa lưu được bản xem scene.")).toBeInTheDocument();
     expect(screen.getByText(/Lịch sử xử lý · 1 lượt/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Thử lại scene import" }));
+    fireEvent.click(screen.getByRole("button", { name: "Thử lại" }));
 
-    expect(await screen.findByText("Đang chờ worker nhận scene…")).toBeInTheDocument();
+    expect(await screen.findByText("Đang xếp hàng…")).toBeInTheDocument();
     expect(retryImport).toHaveBeenCalledWith("import-1");
   });
 
@@ -205,7 +205,7 @@ describe("ImportScenePage durable lifecycle", () => {
     await act(async () => {
       await pollAgain!(new AbortController().signal);
     });
-    expect(await screen.findByText("Đang chờ worker nhận scene…")).toBeInTheDocument();
+    expect(await screen.findByText("Đang xếp hàng…")).toBeInTheDocument();
 
     await act(async () => {
       resolveOlder(ok(importedScene("FAILED", "FAILED", {
@@ -214,7 +214,7 @@ describe("ImportScenePage durable lifecycle", () => {
         retryable: false,
       })));
     });
-    expect(screen.getByText("Đang chờ worker nhận scene…")).toBeInTheDocument();
+    expect(screen.getByText("Đang xếp hàng…")).toBeInTheDocument();
     expect(screen.queryByText("stale failure")).toBeNull();
   });
 
@@ -228,7 +228,7 @@ describe("ImportScenePage durable lifecycle", () => {
 
     render(<ImportScenePage importId="import-1" />);
     expect(await screen.findByText("temporary failure")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Thử lại scene import" }));
+    fireEvent.click(screen.getByRole("button", { name: "Thử lại" }));
 
     expect(await screen.findByText("Worker chưa sẵn sàng")).toBeInTheDocument();
     expect(screen.getByText("temporary failure")).toBeInTheDocument();
@@ -243,7 +243,7 @@ describe("ImportScenePage durable lifecycle", () => {
     render(<ImportScenePage importId="import-1" />);
 
     expect(await screen.findByTestId("scene-workspace")).toBeInTheDocument();
-    expect(screen.getByText("Scene import · SOG tải lên · giữ nguyên bytes")).toBeInTheDocument();
+    expect(screen.getByText("Scene 3DGS · SOG tải lên · giữ nguyên")).toBeInTheDocument();
   });
 
   it("passes default camera and allows saving current camera pose", async () => {

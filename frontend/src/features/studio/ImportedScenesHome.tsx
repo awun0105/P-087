@@ -66,9 +66,9 @@ function importStatusView(item: ImportedScene): { label: string; tone: "sage" | 
     return { label: "Đang chờ tài nguyên", tone: "ochre", active: true };
   }
   if (opStatus === "QUEUED") {
-    return { label: "Đang chờ worker", tone: "ochre", active: true };
+    return { label: "Đang xếp hàng", tone: "ochre", active: true };
   }
-  return { label: "Đang nén SOG…", tone: "ochre", active: true };
+  return { label: "Đang chuẩn bị…", tone: "ochre", active: true };
 }
 
 export function ImportedScenesHome() {
@@ -112,7 +112,7 @@ export function ImportedScenesHome() {
         <div>
           <h1 className="text-3xl font-extrabold tracking-tight text-ink">Scenes đã import</h1>
           <p className="mt-1.5 max-w-xl text-[15px] leading-relaxed text-ink-muted">
-            Quản lý các scene 3DGS nạp từ file PLY hoặc SOG (chỉ xem và chỉnh sửa, không chạy pipeline reconstruction).
+            Các scene 3DGS mở từ file PLY hoặc SOG, chỉ để xem và chỉnh.
           </p>
         </div>
         <div>
@@ -131,7 +131,7 @@ export function ImportedScenesHome() {
 
       {signedIn && error && (
         <Notice tone="rust" icon={<RefreshCw aria-hidden />} className="mt-8">
-          Không tải được danh sách scene import: {error}. Trang sẽ tự thử lại.
+          Không tải được danh sách scene: {error}. Trang sẽ tự thử lại.
         </Notice>
       )}
 
@@ -165,7 +165,7 @@ export function ImportedScenesHome() {
         <div className="mt-8">
           <EmptyState
             icon={<FolderDown className="size-8 text-ink-muted" aria-hidden />}
-            title="Chưa có scene import nào"
+            title="Chưa có scene 3DGS nào"
             action={
               <Link href="/new" className={buttonVariants({})}>
                 <Plus className="size-4" aria-hidden />
@@ -173,7 +173,7 @@ export function ImportedScenesHome() {
               </Link>
             }
           >
-            Tải lên file PLY hoặc SOG để xem bản 3DGS trực tiếp trong trình xem thời gian thực.
+            Tải file PLY hoặc SOG lên để xem.
           </EmptyState>
         </div>
       )}
@@ -215,7 +215,7 @@ export function ImportedScenesHome() {
           </div>
 
           {shown.length === 0 ? (
-            <p className="mt-8 text-sm text-ink-muted">Không tìm thấy scene import nào khớp với từ khóa tìm kiếm.</p>
+            <p className="mt-8 text-sm text-ink-muted">Không có scene nào khớp từ khóa.</p>
           ) : view === "grid" ? (
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {pagination.items.map((item) => (

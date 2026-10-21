@@ -45,7 +45,7 @@ describe("hai cửa vào dữ liệu đã dựng sẵn", () => {
       "accept",
       ".ply,.sog,.zip,application/zip,application/x-sog",
     );
-    expect(screen.getByText(/PLY\/SOG hoặc ZIP gồm PLY \+ COLMAP/)).toBeInTheDocument();
+    expect(screen.getByText(/PLY, SOG hoặc ZIP có PLY/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Về trang tạo scene/ })).toHaveAttribute("href", "/new/import-video");
   });
 
@@ -60,18 +60,18 @@ describe("hai cửa vào dữ liệu đã dựng sẵn", () => {
   it("import chỉ chọn 3DGS; lỗi giữ tên và gọi đúng API", async () => {
     vi.mocked(createImport).mockRejectedValue(new Error("Không chuyển đổi được"));
     render(<ImportSetupStep preselect="video-1" onBack={vi.fn()} />);
-    const name = await screen.findByLabelText("Tên scene import");
+    const name = await screen.findByLabelText("Tên scene");
     expect(screen.getAllByRole("radio")).toHaveLength(1);
     expect(screen.getByRole("radio")).toHaveAttribute("value", "ply-1");
     expect(screen.getByRole("radio")).toBeChecked();
     fireEvent.change(name, { target: { value: "Kho import" } });
-    fireEvent.click(screen.getByRole("button", { name: "Mở scene import" }));
+    fireEvent.click(screen.getByRole("button", { name: "Mở scene" }));
     expect(await screen.findByText("Không chuyển đổi được")).toBeInTheDocument();
     expect(name).toHaveValue("Kho import");
     const firstCall = vi.mocked(createImport).mock.calls[0];
     expect(firstCall?.slice(0, 2)).toEqual(["ply-1", "Kho import"]);
     expect(firstCall?.[2]).toEqual(expect.any(String));
-    fireEvent.click(screen.getByRole("button", { name: "Mở scene import" }));
+    fireEvent.click(screen.getByRole("button", { name: "Mở scene" }));
     await waitFor(() => expect(createImport).toHaveBeenCalledTimes(2));
     expect(vi.mocked(createImport).mock.calls[1]?.[2]).toBe(firstCall?.[2]);
     expect(navigation.push).not.toHaveBeenCalled();
@@ -83,7 +83,7 @@ describe("hai cửa vào dữ liệu đã dựng sẵn", () => {
     expect(await screen.findByRole("radio", { name: /external\.sog/ })).toBeInTheDocument();
     expect(screen.getByRole("radio")).toBeChecked();
     expect(screen.getByRole("radio")).toHaveAttribute("value", "sog-1");
-    expect(screen.getByRole("button", { name: "Mở scene import" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Mở scene" })).toBeEnabled();
   });
 });
 
@@ -103,7 +103,7 @@ describe("upload 3DGS", () => {
     render(<UploadDropzone onUploaded={vi.fn()} />);
     const input = screen.getByLabelText(/Kéo file 3DGS/) as HTMLInputElement;
     fireEvent.change(input, { target: { files: [new File(["x"], "kho.mp4", { type: "video/mp4" })] } });
-    expect(screen.getByText(/Mở 3DGS chỉ nhận/)).toBeInTheDocument();
+    expect(screen.getByText(/Chỉ nhận \.ply, \.sog hoặc \.zip có PLY/)).toBeInTheDocument();
     expect(uploadVideo).not.toHaveBeenCalled();
   });
 

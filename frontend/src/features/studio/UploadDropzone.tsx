@@ -97,7 +97,7 @@ export function UploadDropzone({ onUploaded }: { onUploaded: (record: UploadReco
         </span>
         <span className="mt-4 text-base font-semibold text-ink">Kéo file 3DGS vào đây, hoặc bấm để chọn</span>
         <span className="mt-1 text-sm text-ink-muted">
-          PLY/SOG hoặc ZIP gồm PLY + COLMAP · chỉ xem/chỉnh Gaussian và xuất file; không dựng collision hay phát hành
+          PLY, SOG hoặc ZIP có PLY · chỉ để xem và chỉnh
         </span>
         <input
           id={inputId}

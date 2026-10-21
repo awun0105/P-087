@@ -113,7 +113,7 @@ describe("ReviewPanel", () => {
     expect(screen.getByText("Chưa có báo cáo validation Isaac")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Phê duyệt để phát hành" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Yêu cầu sửa" })).toBeNull();
-    expect(screen.getByText("Có gói cho revision này")).toBeInTheDocument();
+    expect(screen.getByText("Đã có gói")).toBeInTheDocument();
   });
 
   it("fail closed nếu API trả READY_FOR_REVIEW nhưng report không có trusted proof", async () => {
@@ -122,7 +122,7 @@ describe("ReviewPanel", () => {
     );
     render(<ReviewPanel jobId="job-a" sceneRevision="rev-004" />);
     expect(await screen.findByText("Legacy report không được tin cậy")).toBeInTheDocument();
-    expect(screen.getByText(/chỉ dùng để xem thông tin/)).toBeInTheDocument();
+    expect(screen.getByText(/chỉ để tham khảo/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Phê duyệt để phát hành" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Yêu cầu sửa" })).toBeNull();
   });
@@ -131,7 +131,7 @@ describe("ReviewPanel", () => {
     auth.me = { auth_required: false, user: null };
     vi.mocked(global.fetch).mockResolvedValueOnce(reply(state("READY_FOR_REVIEW")));
     render(<ReviewPanel jobId="job-1" sceneRevision="rev-004" />);
-    expect(await screen.findByText(/chưa bật đăng nhập nên không thể duyệt/)).toBeInTheDocument();
+    expect(await screen.findByText(/chưa bật đăng nhập nên không duyệt được/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Phê duyệt để phát hành" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Yêu cầu sửa" })).toBeNull();
   });
@@ -140,7 +140,7 @@ describe("ReviewPanel", () => {
     auth.me = { auth_required: true, user: { user_id: "editor-1", email: "editor@example.com", display_name: "Editor", role: "editor", active: true, daily_job_quota: 10 } };
     vi.mocked(global.fetch).mockResolvedValueOnce(reply(state("READY_FOR_REVIEW")));
     render(<ReviewPanel jobId="job-a" sceneRevision="rev-004" />);
-    expect(await screen.findByText(/Chỉ Reviewer có quyền/)).toBeInTheDocument();
+    expect(await screen.findByText(/Chỉ người duyệt/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Phê duyệt để phát hành" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Yêu cầu sửa" })).toBeNull();
     expect(global.fetch).toHaveBeenCalledTimes(1);
@@ -149,7 +149,7 @@ describe("ReviewPanel", () => {
   it("không cho quyết định trên trạng thái của revision cũ", async () => {
     vi.mocked(global.fetch).mockResolvedValueOnce(reply(state("READY_FOR_REVIEW")));
     render(<ReviewPanel jobId="job-a" sceneRevision="rev-005" />);
-    expect(await screen.findByText(/Trạng thái duyệt đang thuộc rev-004/)).toBeInTheDocument();
+    expect(await screen.findByText(/Scene đã có phiên bản mới/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Phê duyệt để phát hành" })).toBeNull();
   });
 
@@ -159,7 +159,7 @@ describe("ReviewPanel", () => {
     render(<ReviewPanel jobId="job-a" sceneRevision="rev-004" onState={onState} />);
     const checkbox = await screen.findByLabelText("path:pair-1");
     expect(checkbox).toHaveAccessibleDescription("Lối đi có vật cản tùy chọn. · không kèm bằng chứng");
-    expect(screen.queryByText(/chưa gắn với validation run worker/)).toBeNull();
+    expect(screen.queryByText(/chưa đến từ một lần chạy Isaac Sim đã xác minh/)).toBeNull();
     // Màn cha nhận đúng trạng thái đã chuẩn hoá để vẽ thẻ báo cáo.
     await waitFor(() => expect(onState).toHaveBeenLastCalledWith(expect.objectContaining({ isaac_runtime_proof: true, warning_ids: ["path:pair-1"] })));
   });

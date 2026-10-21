@@ -73,9 +73,9 @@ describe("trạng thái hình học của scene", () => {
 
   it("phase tạo mesh hiện bằng tiếng Việt, phase lạ giữ nguyên mã", () => {
     expect(geometryPhaseLabel("shell")).toBe("Dựng vỏ vật");
-    expect(geometryPhaseLabel("collider")).toBe("Tạo collider (CoACD)");
+    expect(geometryPhaseLabel("collider")).toBe("Tạo collider");
     expect(geometryPhaseLabel("environment")).toBe("Dựng nền và collision môi trường");
-    expect(geometryPhaseLabel("publish")).toBe("Lưu revision");
+    expect(geometryPhaseLabel("publish")).toBe("Lưu kết quả");
     expect(geometryPhaseLabel("new_phase")).toBe("new_phase");
     expect(geometryPhaseLabel(null)).toBeNull();
   });

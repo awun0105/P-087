@@ -39,7 +39,7 @@ def test_block_reason_is_none_for_cleared() -> None:
 
 
 def test_require_raises_for_quarantined() -> None:
-    with pytest.raises(PrivacyGateBlockedError, match="không thể tạo job"):
+    with pytest.raises(PrivacyGateBlockedError, match="Chưa tạo được scene"):
         require_dispatch_allowed(PrivacyResult.QUARANTINED)
 
 

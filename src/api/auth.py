@@ -360,7 +360,7 @@ def create_invite(request: InviteRequest, actor: UserRecord | None = Depends(req
     """Reviewer phát mã mời một lần cho Editor hoặc Reviewer."""
     if actor is None:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="Deployment chưa bật đăng nhập (AUTH_REQUIRED)"
+            status_code=status.HTTP_409_CONFLICT, detail="Bản cài đặt này chưa bật đăng nhập"
         )
     code, invite = auth_service().create_invite(actor, request.role)
     return InviteResponse(code=code, role=invite.role, expires_at=invite.expires_at.isoformat())
@@ -377,7 +377,7 @@ def update_user(user_id: str, request: UserUpdate, actor: UserRecord | None = De
     """Reviewer đổi role/khóa/hạn mức; không tự hạ quyền hay tự khóa."""
     if actor is None:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="Deployment chưa bật đăng nhập (AUTH_REQUIRED)"
+            status_code=status.HTTP_409_CONFLICT, detail="Bản cài đặt này chưa bật đăng nhập"
         )
     try:
         user = auth_service().update_user(

@@ -226,13 +226,13 @@ describe("registration panel", () => {
 
     render(<RegistrationPanel jobId="job-1" sceneRevision="rev-001" canMutateJob />);
     fireEvent.click(screen.getByRole("button", { name: "Kiểm tra dữ liệu" }));
-    expect(await screen.findByText(/đạt preflight/)).toBeInTheDocument();
+    expect(await screen.findByText(/đạt kiểm tra ban đầu/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Bắt đầu căn chỉnh" }));
 
     await screen.findByText("Có đề xuất cần kiểm tra");
     expect(prepareRegistration).toHaveBeenCalledWith("job-1", "rev-001");
     expect(enqueueRegistration).toHaveBeenCalledWith("job-1", request);
-    expect(screen.getByText(/chưa có transform nào được áp dụng/i)).toBeInTheDocument();
+    expect(screen.getByText(/Chưa áp dụng gì/)).toBeInTheDocument();
     expect(window.sessionStorage.getItem("real2sim:rgb-lidar-registration:v1:guest-1:job-1")).toContain(request.request_id);
     expect(await screen.findByText("INCONCLUSIVE")).toBeInTheDocument();
     expect(screen.getByText(/candidate-1.*điểm xếp hạng 0\.950/)).toBeInTheDocument();
@@ -240,10 +240,10 @@ describe("registration panel", () => {
     expect(screen.getByText(/Giả thuyết scale RGB: 1\.250×/)).toBeInTheDocument();
     expect(screen.getByText(/aisle-1: phủ nguồn 80\.0%, phủ đích 70\.0%,\s*28 correspondence, P95 0\.030 m/)).toBeInTheDocument();
     expect(screen.getByText(/Dịch chuyển xyz \(m\): 1\.000, 2\.000, 0\.000/)).toBeInTheDocument();
-    expect(screen.getByText(/Proposal thuộc revision rev-001; scene hiện tại là rev-002/)).toBeInTheDocument();
+    expect(screen.getByText(/Đề xuất này thuộc phiên bản scene cũ/)).toBeInTheDocument();
     const firstOverlay = await screen.findByRole("img", { name: /candidate-1/ });
     expect(firstOverlay.querySelectorAll("circle")).toHaveLength(2);
-    expect(screen.getByText(/không thay thế QA hoặc kiểm chứng thực địa/)).toBeInTheDocument();
+    expect(screen.getByText(/không thay cho kiểm tra/)).toBeInTheDocument();
     fireEvent.change(screen.getByRole("combobox", { name: "Phương án chồng chiếu" }), { target: { value: "candidate-2" } });
     expect(await screen.findByRole("img", { name: /candidate-2/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Xác nhận alignment candidate QA" })).toBeDisabled();
@@ -281,7 +281,7 @@ describe("registration panel", () => {
       expected_scene_revision: "rev-001",
       candidate_id: "candidate-1",
     });
-    expect(screen.getByText(/đang công bố bản bundle đã căn chỉnh/)).toBeInTheDocument();
+    expect(screen.getByText(/đang lưu kết quả căn chỉnh/)).toBeInTheDocument();
   });
 
   it("does not enqueue when the server reports insufficient preflight", async () => {
@@ -293,7 +293,7 @@ describe("registration panel", () => {
     render(<RegistrationPanel jobId="job-1" sceneRevision="rev-001" canMutateJob />);
     fireEvent.click(screen.getByRole("button", { name: "Kiểm tra dữ liệu" }));
 
-    expect(await screen.findByText("Chưa thể chạy registration.")).toBeInTheDocument();
+    expect(await screen.findByText("Chưa thể căn chỉnh.")).toBeInTheDocument();
     expect(screen.getByText("Bằng chứng mặt sàn chưa chắc chắn.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Bắt đầu căn chỉnh" })).not.toBeInTheDocument();
     expect(enqueueRegistration).not.toHaveBeenCalled();
@@ -322,7 +322,7 @@ describe("registration panel", () => {
 
     const first = render(<RegistrationPanel jobId="job-1" sceneRevision="rev-001" canMutateJob />);
     fireEvent.click(screen.getByRole("button", { name: "Kiểm tra dữ liệu" }));
-    await screen.findByText(/đạt preflight/);
+    await screen.findByText(/đạt kiểm tra ban đầu/);
     fireEvent.click(screen.getByRole("button", { name: "Bắt đầu căn chỉnh" }));
     await screen.findByRole("button", { name: "Gửi lại cùng yêu cầu" });
     first.unmount();
@@ -341,14 +341,14 @@ describe("registration panel", () => {
     await screen.findByRole("button", { name: "Bắt đầu căn chỉnh" });
 
     view.rerender(<RegistrationPanel jobId="job-1" sceneRevision="rev-002" canMutateJob />);
-    expect(screen.getByText(/revision rev-001.*revision hiện tại là rev-002/)).toBeInTheDocument();
+    expect(screen.getByText(/Scene đã có phiên bản mới. Hãy kiểm tra lại trước khi chạy/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Bắt đầu căn chỉnh" })).not.toBeInTheDocument();
     expect(enqueueRegistration).not.toHaveBeenCalled();
   });
 
   it("keeps read-only users from starting or cancelling registration", () => {
     render(<RegistrationPanel jobId="job-1" sceneRevision="rev-001" canMutateJob={false} />);
-    expect(screen.getByText(/chế độ chỉ xem/)).toBeInTheDocument();
+    expect(screen.getByText(/chỉ có quyền xem/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Kiểm tra dữ liệu" })).not.toBeInTheDocument();
     expect(prepareRegistration).not.toHaveBeenCalled();
   });
@@ -367,7 +367,7 @@ describe("registration panel", () => {
 
     await screen.findByRole("button", { name: "Đang chờ xác nhận hủy" });
     expect(cancelRegistrationOperation).toHaveBeenCalledWith("job-1", request.request_id);
-    expect(screen.getByText(/Worker sẽ dừng an toàn/)).toBeInTheDocument();
+    expect(screen.getByText(/^Đang dừng…$/)).toBeInTheDocument();
   });
 
   it("aborts an in-flight status read when the panel unmounts", async () => {

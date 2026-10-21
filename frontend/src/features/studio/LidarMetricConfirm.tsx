@@ -69,8 +69,7 @@ export function LidarMetricConfirm({ jobId, proposal, onConfirmed }: { jobId: st
   return (
     <div className="space-y-4" data-testid="lidar-metric-confirm">
       <Notice tone="ochre" icon={<Radar aria-hidden />}>
-        Scene này có gói LiDAR nên tỉ lệ mét và mặt sàn lấy từ quỹ đạo LiDAR. Bạn không cần chọn điểm; xem các số dưới
-        đây rồi xác nhận.
+        Tỉ lệ mét và mặt sàn lấy từ LiDAR, bạn không cần chọn điểm. Xem các số dưới đây rồi xác nhận.
       </Notice>
       {alignment && (
         <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 rounded-xl border border-line p-3 text-sm">
@@ -86,7 +85,7 @@ export function LidarMetricConfirm({ jobId, proposal, onConfirmed }: { jobId: st
           <dd className="font-sans">{alignment.trajectory_origin === "ground_truth" ? "Quỹ đạo chuẩn của dataset" : "Người nộp tự tính"}</dd>
         </dl>
       )}
-      {!input && <Notice tone="rust">Gói LiDAR không cho ra mặt sàn hoặc đoạn kiểm; không xác nhận tự động được.</Notice>}
+      {!input && <Notice tone="rust">Gói LiDAR không có đủ mặt sàn hoặc đoạn kiểm nên không tự xác nhận được.</Notice>}
       {input && !preview && !error && (
         <p className="flex items-center gap-2 text-sm text-ink-muted" role="status">
           <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden /> Đang tính tỉ lệ từ LiDAR…
@@ -107,8 +106,7 @@ export function LidarMetricConfirm({ jobId, proposal, onConfirmed }: { jobId: st
       )}
       {error && <Notice tone="rust">{error}</Notice>}
       <p className="text-xs text-ink-subtle">
-        Độ lệch pose lớn (vài chục cm trở lên) thường do quỹ đạo, calibration hoặc video không thuộc cùng một lượt quay.
-        Khi đó đừng xác nhận; kiểm lại gói LiDAR rồi tạo scene mới.
+        Nếu độ lệch vài chục cm trở lên, có thể video và LiDAR không cùng một lượt quay. Khi đó đừng xác nhận; kiểm lại gói LiDAR rồi tạo scene mới.
       </p>
     </div>
   );

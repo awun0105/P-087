@@ -17,7 +17,7 @@ describe("scene list labels from the backend next action (T-062)", () => {
     expect(sceneSummaryStatus(summary("review_objects")).label).toBe("Chờ duyệt vật");
     expect(sceneSummaryStatus(summary("confirm_metric", "RUNNING")).label).toBe("Cần xác nhận tỉ lệ");
     expect(sceneSummaryStatus(summary("scene_ready")).label).toBe("Đã dựng scene");
-    expect(sceneSummaryStatus(summary("wait_system", "QUEUED")).label).toBe("Đang chờ worker");
+    expect(sceneSummaryStatus(summary("wait_system", "QUEUED")).label).toBe("Đang xếp hàng");
   });
   it("falls back to the old flags when an older API sends no next action", () => {
     expect(sceneSummaryStatus(summary(undefined)).label).toBe("Đã dựng scene");

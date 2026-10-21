@@ -138,7 +138,7 @@ describe("lựa chọn duyệt tách vật", () => {
   it("không bịa lựa chọn khi giá trị đã ghi không có khóa duyệt tách vật", () => {
     const recorded = Object.fromEntries(Object.entries(reviewValues).filter(([key]) => key !== "scene.geometry_review"));
     render(<ProcessingSettings parameters={reviewParameters} values={recorded} editable={false} />);
-    expect(screen.getByText("Job này tạo trước khi có lựa chọn này; dùng hành vi cũ (không dừng duyệt).")).toBeInTheDocument();
+    expect(screen.getByText("Scene này tạo trước khi có lựa chọn này nên không dừng để duyệt.")).toBeInTheDocument();
     expect(screen.queryByRole("radio", { name: AUTO_LABEL })).not.toBeInTheDocument();
     expect(screen.queryByRole("radio", { name: REQUIRED_LABEL })).not.toBeInTheDocument();
   });

@@ -593,7 +593,7 @@ describe("unified input flow", () => {
     expect(fileInput!.accept).not.toContain(".mkv");
 
     fireEvent.change(fileInput!, { target: { files: [new File(["x"], "capture.mkv", { type: "video/x-matroska" })] } });
-    expect(await screen.findByText(/Pipeline không đọc được loại file này/)).toBeInTheDocument();
+    expect(await screen.findByText(/Chưa hỗ trợ loại file này/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Tải file đã chọn lên" })).toBeNull();
 
     fireEvent.change(fileInput!, {
@@ -604,7 +604,7 @@ describe("unified input flow", () => {
         ],
       },
     });
-    expect(await screen.findByText(/Đã bỏ qua 1 file pipeline không đọc được: notes\.docx/)).toBeInTheDocument();
+    expect(await screen.findByText(/Đã bỏ qua 1 file không đọc được: notes\.docx/)).toBeInTheDocument();
     expect(screen.getByText("video-a.mp4")).toBeInTheDocument();
     expect(screen.queryByText("notes.docx")).toBeNull();
   });
@@ -618,7 +618,7 @@ describe("unified input flow", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Tải file đã chọn lên" }));
     expect(await screen.findByText("Không dùng được")).toBeInTheDocument();
     expect(screen.queryByText("Đã xác minh")).toBeNull();
-    expect(screen.getByText(/không nhận ra vai trò nào trong file này/)).toBeInTheDocument();
+    expect(screen.getByText(/Không nhận ra loại file này/)).toBeInTheDocument();
   });
 
   it("does not call a Kalibr camera-IMU file verified, because no route can use it", async () => {
@@ -777,7 +777,7 @@ describe("unified input flow", () => {
     fireEvent.change(fileInput!, {
       target: { files: [new File(["x"], "a.mkv", { type: "video/x-matroska" }), new File(["y"], "b.docx")] },
     });
-    const rejected = await screen.findByText(/Pipeline không đọc được loại file này/);
+    const rejected = await screen.findByText(/Chưa hỗ trợ loại file này/);
     expect(rejected).toHaveTextContent("a.mkv");
     expect(rejected).toHaveTextContent("b.docx");
 
@@ -796,7 +796,7 @@ describe("unified input flow", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Tải file đã chọn lên" }));
     expect(await screen.findByText("Đã xác minh")).toBeInTheDocument();
     expect(screen.queryByText("Không dùng được")).toBeNull();
-    expect(screen.getByText(/1\/2 thành phần trong file này không nhận ra vai trò/)).toBeInTheDocument();
+    expect(screen.getByText(/1\/2 file trong gói không nhận ra loại/)).toBeInTheDocument();
   });
 
   it("đổi hướng link cũ của /new sang trang riêng và giữ tham số còn lại", async () => {
@@ -944,8 +944,8 @@ describe("unified input flow", () => {
       expect.arrayContaining([expect.objectContaining({ role: "rgb_frame_times" })]),
     );
 
-    fireEvent.change(screen.getByLabelText("File timestamp của frame RGB"), { target: { value: "file-upload-times" } });
-    fireEvent.change(screen.getByLabelText("Đơn vị timestamp RGB"), { target: { value: "milliseconds" } });
+    fireEvent.change(screen.getByLabelText("File thời điểm của khung hình video"), { target: { value: "file-upload-times" } });
+    fireEvent.change(screen.getByLabelText("Đơn vị thời điểm video"), { target: { value: "milliseconds" } });
 
     await waitFor(() => expect(mocks.revise).toHaveBeenCalledWith("assembly-1", 1, expect.objectContaining({
       bindings: [expect.objectContaining({ role: "rgb_frame_times", file_ids: ["file-upload-times"] })],
@@ -978,7 +978,7 @@ describe("unified input flow", () => {
     await waitFor(() => expect(mocks.resolve).toHaveBeenCalledTimes(1), { timeout: 4000 });
 
     // Đổi ô khai báo khi lần phân tích đầu còn treo (ô này không bị khoá lúc bận).
-    fireEvent.change(screen.getByLabelText("File timestamp của frame RGB"), { target: { value: "file-upload-times" } });
+    fireEvent.change(screen.getByLabelText("File thời điểm của khung hình video"), { target: { value: "file-upload-times" } });
     release({ report: report("ready", [videoCandidate("stale", "file-upload-1", "ready")], "stale") });
 
     // Kết quả cũ không được hiện, kiểm ngay trước khi lần phân tích mới (đợi 700ms) kịp chạy.
@@ -1048,7 +1048,7 @@ describe("unified input flow", () => {
     await nextStep();
     await nextStep();
     expect(screen.getByText("Đã sẵn sàng tạo scene")).toBeInTheDocument();
-    expect(screen.getByText("Import chỉ đưa scene 3DGS vào viewer hiện tại. Chưa có luồng xử lý tiếp scene đã import.")).toBeInTheDocument();
+    expect(screen.getByText("Scene 3DGS chỉ được mở để xem, không xử lý thêm.")).toBeInTheDocument();
     expect(screen.queryByText(/Xử lý tiếp/)).not.toBeInTheDocument();
     expect(mocks.processingOptions).not.toHaveBeenCalled();
     expect(screen.queryByRole("heading", { name: "Thông số xử lý" })).not.toBeInTheDocument();

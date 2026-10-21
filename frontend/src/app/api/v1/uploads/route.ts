@@ -46,7 +46,7 @@ export async function POST(request: Request): Promise<Response> {
     } as RequestInit & { duplex: "half" });
     return passthrough(response);
   } catch {
-    return Response.json({ detail: "Không chuyển được video tới backend" }, { status: 502 });
+    return Response.json({ detail: "Không gửi được video tới máy chủ" }, { status: 502 });
   }
 }
 
@@ -54,6 +54,6 @@ export async function GET(request: Request): Promise<Response> {
   try {
     return passthrough(await fetch(`${BACKEND_ORIGIN}/api/v1/uploads`, { cache: "no-store", headers: forwardHeaders(request) }));
   } catch {
-    return Response.json({ detail: "Không gọi được backend" }, { status: 502 });
+    return Response.json({ detail: "Không kết nối được máy chủ" }, { status: 502 });
   }
 }

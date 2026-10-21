@@ -163,13 +163,13 @@ describe("Inspect theo giai đoạn", () => {
       .mockResolvedValueOnce({ ok: true, json: async () => trajectoryArtifact }));
     render(<LidarOdometryStage jobId="job-a" artifacts={[reference]} />);
 
-    expect(await screen.findByText(/local odometry map/)).toBeInTheDocument();
+    expect(await screen.findByText(/quỹ đạo ước lượng, chưa căn với scene/)).toBeInTheDocument();
     expect(screen.getByText("pending_world_from_map_confirmation")).toBeInTheDocument();
     expect(screen.getByText("pending_floor_and_up_axis_evidence")).toBeInTheDocument();
     expect(screen.getByText("not_registered")).toBeInTheDocument();
     expect(screen.getByText(/2\/2/)).toBeInTheDocument();
     expect(screen.getByText("not_measured")).toBeInTheDocument();
-    expect(screen.getByText(/không dùng làm LiDAR canonical hoặc collision source/)).toBeInTheDocument();
+    expect(screen.getByText(/chưa dùng để dựng va chạm/)).toBeInTheDocument();
   });
 
   it("shows the source-bound fused map while keeping canonical consumers pending", async () => {
@@ -236,8 +236,8 @@ describe("Inspect theo giai đoạn", () => {
     expect(screen.getByText("not_registered")).toBeInTheDocument();
     expect(screen.getByText(/1\/2/)).toBeInTheDocument();
     expect(screen.getByText(/ngưỡng 0,5 s · lớn nhất 1,25 s/)).toBeInTheDocument();
-    expect(screen.getByText(/Có khoảng timestamp vượt ngưỡng/)).toBeInTheDocument();
-    expect(screen.getByText(/Một số scan chưa có pose được ước lượng/)).toBeInTheDocument();
+    expect(screen.getByText(/Có khoảng thời gian bị hở quá lớn/)).toBeInTheDocument();
+    expect(screen.getByText(/Một số lượt quét chưa ước lượng được vị trí/)).toBeInTheDocument();
   });
 
   it("does not show diagnostics whose scan count differs from the accepted source binding", async () => {
@@ -280,7 +280,7 @@ describe("Inspect theo giai đoạn", () => {
       }));
     render(<LidarOdometryStage jobId="job-a" artifacts={[reference]} />);
 
-    expect(await screen.findByText(/Không tải được diagnostics trajectory/)).toBeInTheDocument();
+    expect(await screen.findByText(/Không tải được số liệu chất lượng quỹ đạo/)).toBeInTheDocument();
     expect(screen.queryByText("Pose coverage")).not.toBeInTheDocument();
   });
 
@@ -302,7 +302,7 @@ describe("Inspect theo giai đoạn", () => {
     render(<LidarCalibrationQAStage jobId="job-a" artifacts={[reference("LidarCalibrationQAReport", "report.json")]} />);
 
     expect(await screen.findByText("Tóm tắt phép chiếu")).toBeInTheDocument();
-    expect(screen.getByText("Collision eligibility: không")).toBeInTheDocument();
+    expect(screen.getByText("Chưa dùng cho va chạm")).toBeInTheDocument();
     expect(screen.getByAltText("Frame RGB với các điểm chiếu LiDAR màu cyan")).toBeInTheDocument();
     expect(screen.getByText("Thiếu pose ghép được.")).toBeInTheDocument();
   });
@@ -366,10 +366,10 @@ describe("Inspect theo giai đoạn", () => {
     show(stageId);
 
     expect(await screen.findByText("Tóm tắt phép chiếu")).toBeInTheDocument();
-    expect(screen.getByText("QA thất bại")).toBeInTheDocument();
+    expect(screen.getByText("Kiểm tra không đạt")).toBeInTheDocument();
     expect(screen.getByText("Có lỗi cấu trúc")).toBeInTheDocument();
     expect(screen.getByText("Đơn vị tọa độ là mm.")).toBeInTheDocument();
-    expect(screen.getByText("Collision eligibility: không")).toBeInTheDocument();
+    expect(screen.getByText("Chưa dùng cho va chạm")).toBeInTheDocument();
   });
 
   it("từ chối report QA tham chiếu package thuộc job khác", async () => {
@@ -388,8 +388,8 @@ describe("Inspect theo giai đoạn", () => {
     }));
     render(<LidarCalibrationQAStage jobId="job-a" artifacts={[reference("LidarCalibrationQAReport", "job-a")]} />);
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(/không đúng contract hoặc thuộc job khác/);
-    expect(screen.queryByText("Collision eligibility: không")).toBeNull();
+    expect(await screen.findByRole("alert")).toHaveTextContent(/không hợp lệ hoặc thuộc scene khác/);
+    expect(screen.queryByText("Chưa dùng cho va chạm")).toBeNull();
   });
 
   it("tên dự án về chậm không chặn viewer (T-065)", async () => {
@@ -403,7 +403,7 @@ describe("Inspect theo giai đoạn", () => {
   it("link trực tiếp tới bước chưa xong không tải output hoặc mount viewer", async () => {
     vi.mocked(getJobProgress).mockResolvedValue({ ok: true, data: { ...progress, stages: progress.stages.map((stage) => ({ ...stage, state: "pending" })) } });
     show("ST-VISUAL-RECON");
-    expect(await screen.findByText(/chưa hoàn tất trong lần chạy/)).toBeInTheDocument();
+    expect(await screen.findByText(/Bước này chưa xong/)).toBeInTheDocument();
     expect(getJob).not.toHaveBeenCalled();
     expect(listJobArtifacts).not.toHaveBeenCalled();
     expect(screen.queryByText(/Scene: ST-VISUAL/)).toBeNull();

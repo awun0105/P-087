@@ -184,7 +184,7 @@ def select_job_lidar_collision_source(
     if canonical_ref.artifact_type != "LidarCollisionCandidateManifest":
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="Chỉ chọn được LidarCollisionCandidateManifest đã publish cho job này",
+            detail="Chỉ chọn được lưới va chạm LiDAR của chính scene này",
         )
     product_ref = schemas.ProductArtifactRef.model_validate(canonical_ref.model_dump(mode="python"))
     return deps.scene_mutation(
@@ -495,7 +495,7 @@ def _membership_correction(
         if bundle is None or not bundle.camera_pose_refs or not bundle.rgb_frame_refs:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="Thiếu bundle hoặc camera view của reconstruction để dựng lại nền sau khi chuyển vùng",
+                detail="Thiếu dữ liệu camera của scene nên không dựng lại được nền sau khi chuyển vùng",
             )
         try:
             views = camera_views(bundle.camera_pose_refs[0], bundle.rgb_frame_refs, registry.runtime_resolver.require)

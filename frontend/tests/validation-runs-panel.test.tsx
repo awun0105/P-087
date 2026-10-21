@@ -41,9 +41,9 @@ describe("ValidationRunsPanel", () => {
       .mockResolvedValueOnce(reply([queued]));
     render(<ValidationRunsPanel jobId="job-a" sceneRevision="rev-004" candidateChecksum={CANDIDATE} canMutateJob />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Chạy validation" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Chạy kiểm tra" }));
 
-    expect(await screen.findByText("Đang chờ worker")).toBeInTheDocument();
+    expect(await screen.findByText("Đang xếp hàng")).toBeInTheDocument();
     const [, request] = vi.mocked(global.fetch).mock.calls[1]!;
     expect(request?.method).toBe("POST");
     expect(request?.headers).toMatchObject({ "Idempotency-Key": expect.any(String) });
@@ -59,7 +59,7 @@ describe("ValidationRunsPanel", () => {
       .mockResolvedValueOnce(reply([cancelled]));
     render(<ValidationRunsPanel jobId="job-a" sceneRevision="rev-004" candidateChecksum={CANDIDATE} canMutateJob />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Hủy run" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Hủy" }));
 
     expect(await screen.findByText("Đã hủy")).toBeInTheDocument();
     expect(vi.mocked(global.fetch).mock.calls[1]?.[0]).toContain("/cancel");
@@ -76,7 +76,7 @@ describe("ValidationRunsPanel", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Thử lại" }));
 
-    expect(await screen.findByText("Đang chờ worker")).toBeInTheDocument();
+    expect(await screen.findByText("Đang xếp hàng")).toBeInTheDocument();
     expect(vi.mocked(global.fetch).mock.calls[1]?.[0]).toContain("/retry");
     expect(vi.mocked(global.fetch).mock.calls[1]?.[1]?.headers).toMatchObject({ "Idempotency-Key": expect.any(String) });
   });
@@ -95,7 +95,7 @@ describe("ValidationRunsPanel", () => {
       "href",
       "/api/v1/jobs/job-a/validation-runs/validation-run-1/artifacts/execution.log",
     );
-    fireEvent.click(screen.getByRole("button", { name: "Dùng report này cho review" }));
+    fireEvent.click(screen.getByRole("button", { name: "Dùng kết quả này để duyệt" }));
 
     expect(await screen.findByText("Đang được dùng")).toBeInTheDocument();
     expect(onSelected).toHaveBeenCalledTimes(1);
@@ -115,7 +115,7 @@ describe("ValidationRunsPanel", () => {
       .mockResolvedValueOnce(reply([selected, replacedOldPolicy]));
     render(<ValidationRunsPanel jobId="job-a" sceneRevision="rev-004" candidateChecksum={CANDIDATE} canMutateJob />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Dùng report này cho review" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Dùng kết quả này để duyệt" }));
 
     await waitFor(() => expect(screen.getAllByText("Đang được dùng")).toHaveLength(1));
     const [, request] = vi.mocked(global.fetch).mock.calls[1]!;
@@ -130,8 +130,8 @@ describe("ValidationRunsPanel", () => {
     render(<ValidationRunsPanel jobId="job-a" sceneRevision="rev-004" candidateChecksum={CANDIDATE} canMutateJob={false} />);
 
     expect(await screen.findByText("Hoàn tất")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Chạy validation" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Dùng report này cho review" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Chạy kiểm tra" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Dùng kết quả này để duyệt" })).toBeNull();
     await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(1));
   });
 });

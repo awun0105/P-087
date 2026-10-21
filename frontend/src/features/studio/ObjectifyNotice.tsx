@@ -96,7 +96,7 @@ export function ObjectifyNotice({ jobId, revision, onRevision }: { jobId: string
   return (
     <Notice tone={state.awaiting_choice || failed ? "rust" : "ochre"} className="m-3">
       {state.status === "cancelled" ? (
-        <>Yêu cầu đã hủy. Scene vẫn giữ revision hiện tại.</>
+        <>Yêu cầu đã hủy. Scene giữ nguyên.</>
       ) : state.awaiting_choice || failed ? (
         <>
           <strong className="font-medium">Tách theo vật không thành công.</strong>{" "}

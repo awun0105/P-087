@@ -84,8 +84,8 @@ export function sceneSummaryStatus(scene: SceneSummary): SceneStatusView {
 export function runtimeWaitText(progress: JobProgress): string {
   const started = progress.stages.some((stage) => stage.state === "succeeded" || stage.state === "running" || stage.state === "failed");
   return started
-    ? "Chưa có máy đúng phiên bản công cụ của job đang chạy. Nếu phiên bản đã đổi, job này cần chạy lại từ đầu."
-    : "Đang chờ GPU: chưa có máy xử lý nào đang chạy đúng phiên bản công cụ của job này. Job tự chạy khi máy đó lên.";
+    ? "Chưa có máy xử lý phù hợp. Nếu hệ thống vừa cập nhật, scene cần chạy lại từ đầu."
+    : "Đang chờ GPU phù hợp. Scene tự chạy khi có máy.";
 }
 
 /**
@@ -109,7 +109,7 @@ function deriveStatus(status: JobStatus, currentStage: StageId | null, waitingMe
   const stage = currentStage ? stageMeta(currentStage) : undefined;
   switch (status) {
     case "QUEUED":
-      return { label: "Đang chờ worker", tone: "ochre", active: true, group: "running" };
+      return { label: "Đang xếp hàng", tone: "ochre", active: true, group: "running" };
     case "RUNNING": {
       if (waitingMetric) {
         // Preview xong, pipeline dừng chờ người chọn điểm — không phải worker đang chạy.

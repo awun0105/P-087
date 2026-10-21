@@ -12,13 +12,13 @@ export function requireEmbeddedGlb(bytes: ArrayBuffer): void {
   const view = new DataView(bytes);
   if (bytes.byteLength < 20 || view.getUint32(0, true) !== 0x46546c67 || view.getUint32(4, true) !== 2 ||
       view.getUint32(8, true) !== bytes.byteLength || view.getUint32(16, true) !== 0x4e4f534a) {
-    throw new Error("GLB header không hợp lệ");
+    throw new Error("File GLB không hợp lệ");
   }
   const length = view.getUint32(12, true);
-  if (length + 20 > bytes.byteLength) throw new Error("GLB JSON bị cắt ngắn");
+  if (length + 20 > bytes.byteLength) throw new Error("File GLB bị thiếu dữ liệu");
   const json: { buffers?: { uri?: string }[]; images?: { uri?: string }[] } = JSON.parse(new TextDecoder().decode(bytes.slice(20, 20 + length)));
   if ([...(json.buffers ?? []), ...(json.images ?? [])].some((item) => item.uri && !item.uri.startsWith("data:"))) {
-    throw new Error("GLB có external resource chưa nằm trong artifact inventory");
+    throw new Error("File GLB thiếu dữ liệu đi kèm");
   }
 }
 

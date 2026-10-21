@@ -42,7 +42,7 @@ export function GpuStartupNotice({ capacity, now, className }: { capacity: GpuCa
   if (capacity.state === "off") {
     return (
       <Notice tone="neutral" className={className} icon={<Cpu aria-hidden />}>
-        Máy GPU đang tắt để tiết kiệm chi phí. Hệ thống sẽ tự bật máy cho việc này; lần khởi động thường mất {typical}.
+        Máy GPU đang tắt để tiết kiệm. Hệ thống sẽ tự bật, thường mất {typical}.
       </Notice>
     );
   }
@@ -55,7 +55,7 @@ export function GpuStartupNotice({ capacity, now, className }: { capacity: GpuCa
           {remaining > 0
             ? `Còn ${formatWait(remaining)} (đã chờ ${formatWait(elapsed).replace("khoảng ", "")}).`
             : "Sắp xong, máy đang chạy bước tự kiểm cuối."}{" "}
-          Việc của bạn đã vào hàng đợi và sẽ tự chạy ngay khi máy sẵn sàng; không cần giữ trang này mở.
+          Scene tự chạy khi máy sẵn sàng, không cần giữ trang mở.
         </span>
         <span
           role="progressbar"
@@ -73,14 +73,14 @@ export function GpuStartupNotice({ capacity, now, className }: { capacity: GpuCa
   if (capacity.state === "draining") {
     return (
       <Notice tone="neutral" className={className} icon={<Cpu aria-hidden />}>
-        Máy GPU đang hoàn tất việc trước rồi tắt. Việc mới sẽ được nhận ở lần bật kế tiếp, thường mất {typical}.
+        Máy GPU đang tắt sau việc trước. Việc mới chạy ở lần bật sau, thường mất {typical}.
       </Notice>
     );
   }
   if (capacity.state === "blocked") {
     return (
       <Notice tone="rust" className={className} icon={<Cpu aria-hidden />}>
-        Chưa thuê được máy GPU (hết máy phù hợp hoặc chạm giới hạn chi phí). Việc vẫn nằm trong hàng đợi; quản trị viên cần kiểm tra.
+        Chưa có máy GPU. Scene vẫn xếp hàng; báo quản trị viên.
       </Notice>
     );
   }

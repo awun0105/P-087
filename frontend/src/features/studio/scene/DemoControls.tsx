@@ -132,7 +132,7 @@ export function DemoControls({
       </div>}
       {scope !== "publication" && editable && (
         <div className={panel ? "space-y-3 border-t border-line-dark pt-4" : "contents"}>
-        {panel && <><h3 className="label-tech text-on-dark/60">Bản gốc</h3><p className="text-xs text-on-dark/60">Kết quả ban đầu của pipeline. Trạng thái đã lưu vẫn được giữ khi về bản gốc.</p></>}
+        {panel && <><h3 className="label-tech text-on-dark/60">Bản gốc</h3><p className="text-xs text-on-dark/60">Kết quả xử lý ban đầu. Trạng thái đã lưu vẫn được giữ khi về bản gốc.</p></>}
         <Button size="sm" variant="ghost" className={stateButton} disabled={busy || Boolean(state.at_root)} onClick={() => void restoreOriginal()}
           title={state.at_root ? "Scene đang ở bản gốc ban đầu." : "Về bản gốc lúc scene được tạo xong; giữ nguyên trạng thái đã lưu."}>
           <History aria-hidden />

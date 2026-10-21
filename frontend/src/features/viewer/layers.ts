@@ -122,7 +122,7 @@ function toLayerTransform(transform: Transform): LayerTransform {
 export function composeColliderTransform(object: SceneObject, collider: ColliderSpec): LayerTransform {
   if (collider.local_transform.parent_frame !== object.local_frame) {
     throw new Error(
-      `collider ${collider.collider_id} không parent vào ${object.local_frame} như contract yêu cầu`,
+      `lưới va chạm ${collider.collider_id} không gắn đúng vào vật ${object.local_frame}`,
     );
   }
   return {

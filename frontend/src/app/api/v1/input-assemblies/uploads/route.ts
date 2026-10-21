@@ -45,6 +45,6 @@ export async function POST(request: Request): Promise<Response> {
     } as RequestInit & { duplex: "half" });
     return passthrough(response);
   } catch {
-    return Response.json({ detail: "Không chuyển được input upload tới backend" }, { status: 502 });
+    return Response.json({ detail: "Không gửi được file tới máy chủ" }, { status: 502 });
   }
 }

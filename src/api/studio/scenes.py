@@ -1,6 +1,7 @@
 """Scene Studio: tạo scene từ video đã upload, liệt kê scene, tiến trình job."""
 
 import hashlib
+import logging
 from datetime import UTC, datetime
 from typing import Annotated
 
@@ -76,6 +77,8 @@ from src.services.orchestration.scene.objectify import AWAITING_CHOICE
 from src.services.orchestration.uploads import UploadNotFoundError
 from src.services.scene.geometry_state import object_geometry_view
 
+_LOGGER = logging.getLogger(__name__)
+
 router = APIRouter()
 
 
@@ -90,7 +93,7 @@ def get_project_display_video(project_id: str) -> FileResponse:
             raise HTTPException(status_code=404, detail="Project không có video xem lại")
         path = registry.runtime_resolver.require(reference)
         if sha256_file(path) != reference.artifact_checksum:
-            raise HTTPException(status_code=409, detail="Video xem lại sai checksum")
+            raise HTTPException(status_code=409, detail="Video xem lại bị hỏng. Hãy tải lại trang.")
     except ProjectNotFoundError as error:
         raise HTTPException(status_code=404, detail="Không tìm thấy project") from error
     except ArtifactStoreError as error:
@@ -230,10 +233,13 @@ def create_scene_from_upload(
     # `qa_verified`: mọi video phải qua bộ che và được người upload chấp nhận; thiếu bộ che thì từ chối ngay.
     deps.require_anonymize(request.anonymize)
     if registry.job_profile() is None:
+        _LOGGER.warning(
+            "Chưa có runtime cho job: cần PRODUCT_PROCESSING_CONFIG và PRODUCT_RUNTIME_MANIFEST, "
+            "hoặc GPU worker đã công bố runtime (PRODUCT_RUNTIME_FROM_WORKERS=true)"
+        )
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Chưa có runtime cho job: cần PRODUCT_PROCESSING_CONFIG và PRODUCT_RUNTIME_MANIFEST, "
-            "hoặc GPU worker đã công bố runtime (PRODUCT_RUNTIME_FROM_WORKERS=true)",
+            detail="Máy chủ chưa sẵn sàng xử lý scene. Báo quản trị viên.",
         )
     processing = None
     if settings.product_processing_config is not None and is_presets_file(settings.product_processing_config):

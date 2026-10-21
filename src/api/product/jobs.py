@@ -100,7 +100,7 @@ def retry_job(
         if job.status != JobStatus.FAILED:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail="Chỉ job FAILED mới có thể thử lại",
+                detail="Chỉ chạy lại được scene đang lỗi",
             )
         attempts = registry.list_job_attempts(job_id)
         latest_attempt = max((event.attempt for event in attempts), default=None)

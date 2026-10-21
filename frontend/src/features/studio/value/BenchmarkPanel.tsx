@@ -181,7 +181,7 @@ export function BenchmarkPanel({ jobId, sceneRevision, objects, canEdit, picker 
   if (loadError || !draft || !saved) {
     return (
       <Shell onClose={onClose}>
-        <Notice tone="rust">{loadError ?? "Chưa đọc được ground truth của job."}</Notice>
+        <Notice tone="rust">{loadError ?? "Chưa đọc được số đo thật của scene."}</Notice>
       </Shell>
     );
   }

@@ -46,7 +46,7 @@ export function AnonymizationReviewPanel({ jobId, canAccept, onAccepted }: { job
       <div>
         <h3 className="text-base font-semibold">Xem bản đã che trước khi dựng 3D</h3>
         <p className="mt-1 text-sm text-ink-muted">
-          Job đang dừng chờ bạn. Hệ thống chỉ dựng 3D từ các frame đã che sau khi bạn xác nhận; bản gốc của các frame bị che đã được xoá.
+          Xác nhận để dựng 3D từ các ảnh đã che. Ảnh gốc chưa che đã được xoá.
         </p>
       </div>
       {error && <Notice tone="rust">{error}</Notice>}
@@ -59,7 +59,7 @@ export function AnonymizationReviewPanel({ jobId, canAccept, onAccepted }: { job
               : `Đã che ${review.frames.length} trên ${review.frame_count} frame. Vùng bị che được tô kín một màu.`}
           </p>
           <Notice tone="ochre">
-            Bộ phát hiện tự động có thể bỏ sót. Nếu video còn khuôn mặt hoặc biển số chưa được che, hãy huỷ job và quay lại video.
+            Công cụ tự động có thể bỏ sót. Nếu còn khuôn mặt hoặc biển số chưa che, hãy huỷ và quay lại video.
           </Notice>
           {review.frames.length > 0 && (
             <ul className="grid max-h-[28rem] grid-cols-2 gap-3 overflow-y-auto sm:grid-cols-3">

@@ -22,7 +22,7 @@ describe("stage viewer selection", () => {
     vi.mocked(getStageViews).mockResolvedValue([{ ...cameras, retry_count: 2, registration_warning: true, registered_ratio: 0.41 }, gaussian]);
     render(<StageViewer jobId="job-a" stageId="ST-CAMERA-POSE" />);
     expect(await screen.findByText("Đã tự thử lại ghép ảnh (2 lần)")).toBeInTheDocument();
-    expect(screen.getByText("Vùng thiếu ảnh có thể bị mờ hoặc thủng (COLMAP dựng được vị trí cho 41% ảnh).")).toBeInTheDocument();
+    expect(screen.getByText("Vùng thiếu ảnh có thể bị mờ hoặc thủng (dựng được 41% ảnh).")).toBeInTheDocument();
   });
 
   it("không báo thử lại khi lần ghép đầu đã đạt", async () => {
@@ -60,14 +60,14 @@ describe("stage viewer selection", () => {
 
   it("thiếu view cho stage không mount kết quả bước khác", async () => {
     render(<StageViewer jobId="job-a" stageId="ST-RGB-GEOMETRY" />);
-    expect(await screen.findByText(/API chưa cung cấp lớp xem/)).toBeInTheDocument();
+    expect(await screen.findByText(/Bước này không có hình để xem/)).toBeInTheDocument();
     expect(screen.queryByRole("tab")).toBeNull();
     expect(screen.queryByText("Gaussian renderer")).toBeNull();
   });
 
   it("6 chưa có derivative hiển thị cảnh báo và giữ đơn vị SfM", async () => {
     render(<StageViewer jobId="job-a" stageId="ST-METRIC-CANONICALIZE" fallbackStageId="ST-VISUAL-RECON" />);
-    expect(await screen.findByText(/Đang xem lại Gaussian gốc, đơn vị SfM/)).toBeInTheDocument();
+    expect(await screen.findByText(/Đang hiện bản gốc/)).toBeInTheDocument();
     expect(screen.queryByText(/Đơn vị: tùy ý \(SfM\)/)).toBeNull();
     expect(screen.queryByText(/Đơn vị: mét\./)).toBeNull();
   });
