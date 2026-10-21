@@ -46,9 +46,9 @@ export function RegistrationOverlay({
   });
 
   return (
-    <figure className="space-y-2 rounded-lg border border-line p-3" aria-label="Bản xem trước chồng chiếu registration">
+    <figure className="space-y-2 rounded-lg border border-line p-3" aria-label="Bản xem trước chồng chiếu căn chỉnh">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <figcaption className="text-sm font-medium">Chồng chiếu BEV (chỉ để kiểm tra)</figcaption>
+        <figcaption className="text-sm font-medium">Chồng chiếu nhìn từ trên (chỉ để xem)</figcaption>
         {previews.length > 1 && (
           <label className="flex items-center gap-2 text-sm">
             <span>Phương án</span>
@@ -77,7 +77,7 @@ export function RegistrationOverlay({
         className="h-auto max-h-96 w-full rounded-md border border-line bg-paper-sunken"
         preserveAspectRatio="xMidYMid meet"
       >
-        <title>{`Hình chiếu bằng chẩn đoán ${preview.candidate_id}; không phải kết quả QA`}</title>
+        <title>{`Hình chiếu của ${preview.candidate_id}, chỉ để xem`}</title>
         {targetPoints}
         {sourcePoints}
       </svg>
@@ -85,7 +85,7 @@ export function RegistrationOverlay({
         {preview.candidate_id}; scale RGB: {preview.rgb_scale_factor === null ? "1.00×" : `${preview.rgb_scale_factor.toFixed(3)}×`};
         {" "}hiển thị {preview.source_points_xy_world_m.length}/{preview.source_in_roi_point_count} điểm LiDAR và{" "}
         {preview.target_points_xy_world_m.length}/{preview.target_in_roi_point_count} điểm RGB trong vùng {metres(extentX)} × {metres(extentY)}.
-        {" "}Mỗi lớp lấy mẫu tối đa {preview.sample_cap_per_cloud} điểm; hình chiếu này không thay thế QA hoặc kiểm chứng thực địa.
+        {" "}Mỗi lớp lấy tối đa {preview.sample_cap_per_cloud} điểm; chỉ để xem, không thay cho kiểm tra.
       </p>
     </figure>
   );

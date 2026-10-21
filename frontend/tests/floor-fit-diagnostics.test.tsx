@@ -72,7 +72,7 @@ describe("floor fit diagnostics", () => {
     expect(notice).toHaveTextContent("Mặt sàn đang dùng mốc REC-06 đã xác nhận");
     expect(notice).toHaveTextContent("0.090 m");
     expect(screen.getByText("artifact://jobs/job-fixture-001/scene/floor-fit/report.json")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Căn chỉnh map LiDAR với scene RGB" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Căn bản đồ LiDAR với scene" })).toBeInTheDocument();
     await waitFor(() => expect(getJobSceneMock).toHaveBeenCalledWith("job-fixture-001", expect.any(AbortSignal)));
   });
 });

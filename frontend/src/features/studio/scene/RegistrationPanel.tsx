@@ -39,29 +39,29 @@ interface RegistrationSession extends SavedRegistration {
 }
 
 const FINDING_LABELS: Record<RegistrationFinding, string> = {
-  SOURCE_FORMAT_REQUIRED: "Cần file point cloud PCD hoặc PLY đã nhận dạng.",
-  SOURCE_HEADER_REQUIRED: "Không đọc được header point cloud hợp lệ.",
+  SOURCE_FORMAT_REQUIRED: "Cần file đám mây điểm PCD hoặc PLY.",
+  SOURCE_HEADER_REQUIRED: "Không đọc được phần đầu của file đám mây điểm.",
   SOURCE_UNITS_REQUIRED: "Cần khai báo đơn vị tọa độ LiDAR.",
   SOURCE_FRAME_REQUIRED: "Cần khai báo hệ tọa độ của bản đồ LiDAR.",
   SAME_SCENE_CONTEXT_MISSING: "Chưa có khai báo hai nguồn cùng mô tả một scene.",
-  DIFFERENT_SCENE: "Khai báo input cho biết bản đồ LiDAR thuộc scene khác.",
-  EMPTY_CLOUD: "Point cloud không có điểm hợp lệ.",
-  POINT_COUNT_UNAVAILABLE: "Không xác định được số điểm trong point cloud.",
-  POINT_BUDGET_EXCEEDED: "Point cloud vượt giới hạn xử lý hiện tại.",
-  RAW_SCANS_REQUIRE_TRAJECTORY: "Chuỗi scan thô cần quỹ đạo LiDAR; luồng này chỉ nhận map tĩnh.",
-  METRIC_SCALE_UNKNOWN: "Scene RGB chưa có tỉ lệ mét được xác nhận.",
+  DIFFERENT_SCENE: "Bạn đã khai bản đồ LiDAR thuộc scene khác.",
+  EMPTY_CLOUD: "Đám mây điểm không có điểm hợp lệ.",
+  POINT_COUNT_UNAVAILABLE: "Không đếm được số điểm trong đám mây điểm.",
+  POINT_BUDGET_EXCEEDED: "Đám mây điểm quá lớn để xử lý.",
+  RAW_SCANS_REQUIRE_TRAJECTORY: "Chuỗi lượt quét thô cần quỹ đạo LiDAR; ở đây chỉ nhận bản đồ đã ghép.",
+  METRIC_SCALE_UNKNOWN: "Scene chưa xác nhận tỉ lệ mét.",
   FLOOR_UNSUPPORTED: "Chưa có bằng chứng mặt sàn phù hợp.",
   FLOOR_UNCERTAIN: "Bằng chứng mặt sàn chưa chắc chắn.",
-  TARGET_FLOOR_EVIDENCE_REQUIRED: "Cần bằng chứng mặt sàn của scene RGB.",
+  TARGET_FLOOR_EVIDENCE_REQUIRED: "Scene chưa có mặt sàn rõ ràng.",
   LOW_OVERLAP: "Phần chồng lấp giữa hai bản đồ có thể quá nhỏ.",
   LOW_COVERAGE: "Độ phủ hình học có thể chưa đủ.",
   HIGH_RESIDUAL: "Sai số khớp hình học có thể vượt ngưỡng.",
   AMBIGUOUS_CANDIDATES: "Có thể có nhiều phương án căn chỉnh tương đương.",
   UNOBSERVABLE: "Hình học hiện có không xác định được phép căn chỉnh.",
-  SEARCH_BUDGET_EXCEEDED: "Tìm kiếm vượt ngân sách xử lý hiện tại.",
-  ICP_NOT_CONVERGED: "Bước tinh chỉnh ICP chưa hội tụ.",
-  STALE_TARGET: "Scene đã thay đổi; cần kiểm tra lại revision mới nhất.",
-  UNQUALIFIED_PROFILE: "Profile căn chỉnh chưa được qualification trên dữ liệu held-out.",
+  SEARCH_BUDGET_EXCEEDED: "Tìm phương án quá lâu nên đã dừng.",
+  ICP_NOT_CONVERGED: "Bước tinh chỉnh chưa khớp được.",
+  STALE_TARGET: "Scene đã thay đổi. Hãy kiểm tra lại.",
+  UNQUALIFIED_PROFILE: "Cách căn chỉnh này chưa được kiểm định.",
   METRIC_CONFIRMATION_REQUIRED: "Cần xác nhận tỉ lệ mét trước khi kiểm tra chất lượng.",
 };
 
@@ -208,11 +208,11 @@ export function RegistrationPanel({
 
   const submit = useCallback(async (request: RegistrationRequestPayload) => {
     if (!userId || !key || request.target_job_id !== jobId || request.requested_by !== userId) {
-      setError("Yêu cầu căn chỉnh không thuộc user hoặc scene hiện tại.");
+      setError("Yêu cầu căn chỉnh này không thuộc bạn hoặc scene này.");
       return;
     }
     if (request.expected_scene_revision !== sceneRevision) {
-      setError("Scene đã đổi revision. Hãy kiểm tra lại dữ liệu trước khi chạy.");
+      setError("Scene đã có phiên bản mới. Hãy kiểm tra lại dữ liệu trước khi chạy.");
       return;
     }
     setBusy(true);
@@ -296,7 +296,7 @@ export function RegistrationPanel({
           setInspectionState({
             key: inspectionRequestKey,
             loading: false,
-            error: errorMessage(result.error, "Không đọc được proposal và báo cáo QA."),
+            error: errorMessage(result.error, "Không đọc được đề xuất và báo cáo kiểm tra."),
           });
         } else {
           setInspectionState({ key: inspectionRequestKey, loading: false, data: result.data });
@@ -306,7 +306,7 @@ export function RegistrationPanel({
           setInspectionState({
             key: inspectionRequestKey,
             loading: false,
-            error: errorMessage(cause, "Không đọc được proposal và báo cáo QA."),
+            error: errorMessage(cause, "Không đọc được đề xuất và báo cáo kiểm tra."),
           });
         }
       }
@@ -417,20 +417,20 @@ export function RegistrationPanel({
   return (
     <div className="space-y-3 p-4" aria-labelledby="registration-panel-title">
       <div>
-        <h3 id="registration-panel-title" className="text-base font-semibold">Căn chỉnh map LiDAR với scene RGB</h3>
+        <h3 id="registration-panel-title" className="text-base font-semibold">Căn bản đồ LiDAR với scene</h3>
         <p className="mt-1 text-sm text-ink-muted">
-          Kiểm tra dữ liệu đã nhận và tạo một đề xuất căn chỉnh. Thao tác này chưa thay đổi scene hoặc collision mesh.
+          Tạo đề xuất căn chỉnh. Scene và lưới va chạm chưa thay đổi.
         </p>
       </div>
-      {!canMutateJob && <Notice>Scene này ở chế độ chỉ xem; bạn không thể chạy hoặc hủy registration.</Notice>}
-      {canMutateJob && !userId && <Notice>Đăng nhập để chuẩn bị registration bền vững.</Notice>}
-      {stale && <Notice tone="ochre">Yêu cầu gắn với revision {session.expected_scene_revision}; revision hiện tại là {sceneRevision}. Hãy kiểm tra lại trước khi chạy.</Notice>}
-      {storageUnavailable && <Notice tone="ochre">Trình duyệt không lưu được yêu cầu trong phiên. Nếu tải lại trang, cần kiểm tra dữ liệu và tạo yêu cầu mới.</Notice>}
+      {!canMutateJob && <Notice>Bạn chỉ có quyền xem scene này.</Notice>}
+      {canMutateJob && !userId && <Notice>Đăng nhập để căn chỉnh.</Notice>}
+      {stale && <Notice tone="ochre">Scene đã có phiên bản mới. Hãy kiểm tra lại trước khi chạy.</Notice>}
+      {storageUnavailable && <Notice tone="ochre">Trình duyệt không lưu được yêu cầu. Nếu tải lại trang, cần tạo lại yêu cầu.</Notice>}
       {error && <div role="alert"><Notice tone="rust">{error}</Notice></div>}
       {preflight?.state === "INSUFFICIENT" && (
         <div role="status">
           <Notice tone="ochre">
-            <p className="font-medium">Chưa thể chạy registration.</p>
+            <p className="font-medium">Chưa thể căn chỉnh.</p>
             <ul className="mt-2 list-disc space-y-1 pl-5">
               {preflight.findings.map((finding) => <li key={finding}>{FINDING_LABELS[finding]}</li>)}
             </ul>
@@ -438,7 +438,7 @@ export function RegistrationPanel({
         </div>
       )}
       {preflight?.state === "READY" && !operationId && session?.request && (
-        <div role="status"><Notice tone="neutral">Dữ liệu đạt preflight cho profile hiện tại. Kết quả vẫn cần được kiểm tra trước khi áp dụng.</Notice></div>
+        <div role="status"><Notice tone="neutral">Dữ liệu đạt kiểm tra ban đầu. Kết quả vẫn cần được xem lại trước khi áp dụng.</Notice></div>
       )}
       {operation && (
         <div role="status">
@@ -457,30 +457,30 @@ export function RegistrationPanel({
               )}
             </div>
             {operation.state === "PROPOSED" && (
-              <p className="mt-2 text-sm">Đã có proposal{operation.qa_report_ref ? " và báo cáo QA" : ""}. Chưa có transform nào được áp dụng.</p>
+              <p className="mt-2 text-sm">Đã có đề xuất{operation.qa_report_ref ? " và báo cáo kiểm tra" : ""}. Chưa áp dụng gì.</p>
             )}
             {operation.state === "CONFIRMED" && (
               <p className="mt-2 text-sm">
-                Đã xác nhận {operation.confirmed_candidate_id ?? "candidate"}; đang công bố bản bundle đã căn chỉnh.
+                Đã xác nhận {operation.confirmed_candidate_id ?? "phương án"}; đang lưu kết quả căn chỉnh.
               </p>
             )}
             {operation.state === "COMMITTED" && (
               <p className="mt-2 text-sm">
-                Alignment đã được lưu vào ReconstructionBundle. SceneIR và collision mesh chưa thay đổi.
+                Đã lưu kết quả căn chỉnh. Scene và lưới va chạm chưa thay đổi.
               </p>
             )}
             {operation.state === "AMBIGUOUS" && <p className="mt-2 text-sm">Cần xem các phương án và bằng chứng trước khi chọn.</p>}
             {operation.cancellation_requested && operation.state !== "CANCELLED" && (
-              <p className="mt-2 text-sm">Worker sẽ dừng an toàn rồi mới xác nhận hủy.</p>
+              <p className="mt-2 text-sm">Đang dừng…</p>
             )}
-            {stale && <p className="mt-2 text-sm">Kết quả này gắn với revision cũ và không thể áp dụng cho revision hiện tại.</p>}
+            {stale && <p className="mt-2 text-sm">Kết quả này thuộc phiên bản scene cũ nên không áp dụng được.</p>}
           </Notice>
         </div>
       )}
       {operation && hasInspectionOutput && (
-        <section className="space-y-3 border-t border-line pt-3" aria-label="Chi tiết proposal và QA">
-          <h4 className="text-sm font-semibold">Chi tiết proposal và QA</h4>
-          {currentInspectionState?.loading && <p className="text-sm text-ink-muted" role="status">Đang kiểm tra artifact và checksum…</p>}
+        <section className="space-y-3 border-t border-line pt-3" aria-label="Chi tiết đề xuất và kiểm tra">
+          <h4 className="text-sm font-semibold">Chi tiết đề xuất và kiểm tra</h4>
+          {currentInspectionState?.loading && <p className="text-sm text-ink-muted" role="status">Đang tải chi tiết…</p>}
           {currentInspectionState?.error && <div role="alert"><Notice tone="rust">{currentInspectionState.error}</Notice></div>}
           {inspection && (
             <div className="space-y-3">
@@ -488,7 +488,7 @@ export function RegistrationPanel({
                 <Notice tone="ochre">Không xác minh được revision scene hiện tại; chỉ xem kết quả đã lưu.</Notice>
               ) : inspection.current_scene_revision !== inspection.expected_scene_revision ? (
                 <Notice tone="ochre">
-                  Proposal thuộc revision {inspection.expected_scene_revision}; scene hiện tại là {inspection.current_scene_revision}.
+                  Đề xuất này thuộc phiên bản scene cũ.
                 </Notice>
               ) : null}
               {inspection.proposal && (
@@ -584,17 +584,17 @@ export function RegistrationPanel({
                   </Button>
                   {!canConfirm && (
                     <p className="text-xs text-ink-muted">
-                      Chỉ xác nhận được candidate được QA chọn khi QA là PASS, scene còn đúng revision, không đổi scale và bạn đang xem đúng phương án đó.
+                      Chỉ xác nhận được phương án đã đạt kiểm tra, trên đúng phiên bản scene và đang được chọn xem.
                     </p>
                   )}
                 </div>
               )}
               <p className="text-xs text-ink-muted">
                 {operation.state === "COMMITTED"
-                  ? "Đã công bố AlignmentRecord và ReconstructionBundle theo manifest revision mới. SceneIR và collision mesh vẫn giữ nguyên."
+                  ? "Đã lưu kết quả căn chỉnh. Scene và lưới va chạm vẫn giữ nguyên."
                   : operation.state === "CONFIRMED"
-                    ? "Xác nhận đã được lưu bền vững; bundle đang được công bố. SceneIR và collision mesh vẫn giữ nguyên."
-                  : "Thông tin này chỉ để kiểm tra. Chưa xác nhận hoặc áp dụng transform."}
+                    ? "Đã lưu xác nhận; đang lưu kết quả căn chỉnh. Scene và lưới va chạm vẫn giữ nguyên."
+                  : "Thông tin chỉ để xem; scene chưa thay đổi."}
               </p>
             </div>
           )}
@@ -603,14 +603,14 @@ export function RegistrationPanel({
       {canMutateJob && userId && (
         <div className="flex flex-wrap gap-2">
           <Button variant="secondary" disabled={busy || pendingOperation} onClick={() => void prepare()}>
-            {busy && !operationId ? "Đang kiểm tra…" : operationId ? "Kiểm tra revision mới" : "Kiểm tra dữ liệu"}
+            {busy && !operationId ? "Đang kiểm tra…" : operationId ? "Kiểm tra lại" : "Kiểm tra dữ liệu"}
           </Button>
           {canStart && <Button disabled={busy} onClick={() => void submit(session.request!)}>
             {busy ? "Đang gửi…" : error ? "Gửi lại cùng yêu cầu" : "Bắt đầu căn chỉnh"}
           </Button>}
         </div>
       )}
-      {operationId && operationPollable && <p className="text-xs text-ink-muted" role="status">Trạng thái được đọc từ máy chủ; trang sẽ tự cập nhật khi worker hoặc Reviewer thay đổi kết quả.</p>}
+      {operationId && operationPollable && <p className="text-xs text-ink-muted" role="status">Trang tự cập nhật khi có kết quả mới.</p>}
     </div>
   );
 }
