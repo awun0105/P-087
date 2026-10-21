@@ -13,6 +13,8 @@ import { clearDemo, getDemoState, markDemo, publishDemo, resetDemo, restoreRoot,
 import type { DemoState } from "@/lib/contracts/studio";
 import { errorMessage } from "@/lib/ui-error";
 
+const PUBLISH_POLL_MS = 3000;
+
 /**
  * Hai việc khác nhau trên header scene, tách rõ để khỏi nhầm:
  *
@@ -59,6 +61,21 @@ export function DemoControls({
     );
     return () => controller.abort();
   }, [jobId, revision, sceneReady]);
+
+  // Mẫu được chép ở nền: đọc lại trạng thái tới khi xong hoặc lỗi.
+  const preparing = Boolean(state?.publishing);
+  useEffect(() => {
+    if (!preparing) return;
+    const controller = new AbortController();
+    const timer = window.setInterval(() => {
+      getDemoState(jobId, controller.signal).then((next) => {
+        if (controller.signal.aborted || next.publishing) return;
+        setState(next);
+        if (next.published_sample_id) notifySuccess("Đã thêm vào thư viện mẫu.");
+      }, () => undefined);
+    }, PUBLISH_POLL_MS);
+    return () => { controller.abort(); window.clearInterval(timer); };
+  }, [jobId, preparing]);
 
   const run = useCallback(async (action: () => Promise<DemoState>, success: string) => {
     setBusy(true);
@@ -154,12 +171,20 @@ export function DemoControls({
             }, "Đã bỏ khỏi demo.");
           }}>Bỏ khỏi demo</Button>}
         </>
-      ) : canPublish ? (
-        <Button size="sm" variant="ghost" disabled={busy} onClick={() => setPublishing(true)}
-          title="Xuất scene này vào thư viện mẫu để mọi người xem ở Thử mẫu.">
-          <Clapperboard aria-hidden />
-          Đặt làm bản demo
+      ) : state.publishing ? (
+        <Button size="sm" variant="ghost" disabled>
+          <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden />
+          Đang chuẩn bị mẫu…
         </Button>
+      ) : canPublish ? (
+        <>
+          <Button size="sm" variant="ghost" disabled={busy} onClick={() => setPublishing(true)}
+            title="Xuất scene này vào thư viện mẫu để mọi người xem ở Thử mẫu.">
+            <Clapperboard aria-hidden />
+            Đặt làm bản demo
+          </Button>
+          {state.publish_error && <span role="alert" className="text-xs text-rust">Chưa thêm được vào thư viện mẫu: {state.publish_error}</span>}
+        </>
       ) : null)}
       {error && <span role="alert" className="text-xs text-rust">{error}</span>}
       {scope !== "state" && canPublish && (
@@ -168,9 +193,8 @@ export function DemoControls({
           onOpenChange={setPublishing}
           jobId={jobId}
           defaultTitle={defaultTitle}
-          onPublished={(sampleId) => {
-            setState((current) => (current ? { ...current, published_sample_id: sampleId } : current));
-            notifySuccess("Đã xuất vào thư viện mẫu.");
+          onPublished={() => {
+            setState((current) => (current ? { ...current, publishing: true, publish_error: null } : current));
           }}
           // Lỗi "đã có trong thư viện" (người khác vừa xuất): đọc lại trạng thái để nút đổi sang đường dẫn tới mẫu.
           onFailed={() => {
@@ -187,7 +211,7 @@ function PublishDialog({ open, onOpenChange, jobId, defaultTitle, onPublished, o
   onOpenChange: (open: boolean) => void;
   jobId: string;
   defaultTitle: string;
-  onPublished: (sampleId: string) => void;
+  onPublished: () => void;
   onFailed: () => void;
 }) {
   const [submitting, setSubmitting] = useState(false);
@@ -207,7 +231,7 @@ function PublishDialog({ open, onOpenChange, jobId, defaultTitle, onPublished, o
           defaultTitle={defaultTitle}
           onSubmitting={setSubmitting}
           onCancel={() => onOpenChange(false)}
-          onPublished={(sampleId) => { onPublished(sampleId); onOpenChange(false); }}
+          onPublished={() => { onPublished(); onOpenChange(false); }}
           onFailed={onFailed}
         />
       </DialogContent>
@@ -220,7 +244,7 @@ function PublishForm({ jobId, defaultTitle, onSubmitting, onCancel, onPublished,
   defaultTitle: string;
   onSubmitting: (submitting: boolean) => void;
   onCancel: () => void;
-  onPublished: (sampleId: string) => void;
+  onPublished: () => void;
   onFailed: () => void;
 }) {
   const ids = { title: useId(), description: useId() };
@@ -235,8 +259,8 @@ function PublishForm({ jobId, defaultTitle, onSubmitting, onCancel, onPublished,
     onSubmitting(true);
     setError(null);
     try {
-      const result = await publishDemo(jobId, { title: title.trim() || undefined, description: description.trim(), confirm_public: confirmed });
-      onPublished(result.sample_id);
+      await publishDemo(jobId, { title: title.trim() || undefined, description: description.trim(), confirm_public: confirmed });
+      onPublished();
     } catch (cause) {
       setError(errorMessage(cause, "Không xuất được vào thư viện mẫu"));
       onFailed();
@@ -269,7 +293,7 @@ function PublishForm({ jobId, defaultTitle, onSubmitting, onCancel, onPublished,
         <Button variant="ghost" disabled={submitting} onClick={onCancel}>Huỷ</Button>
         <Button disabled={!confirmed || submitting} onClick={() => void submit()}>
           {submitting ? <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden /> : <Clapperboard aria-hidden />}
-          {submitting ? "Đang xuất…" : "Xuất vào thư viện mẫu"}
+          {submitting ? "Đang gửi…" : "Xuất vào thư viện mẫu"}
         </Button>
       </DialogFooter>
     </>

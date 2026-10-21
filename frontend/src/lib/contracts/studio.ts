@@ -122,11 +122,14 @@ export interface DemoState {
   at_root?: boolean;
   /** ID mẫu trong thư viện mẫu đã được xuất từ job này; null/vắng = chưa xuất (API cũ không gửi). */
   published_sample_id?: string | null;
+  /** Mẫu đang được chép vào thư viện ở nền (API cũ không gửi). */
+  publishing?: boolean;
+  /** Lỗi của lần chuẩn bị mẫu gần nhất; null/vắng = không lỗi. */
+  publish_error?: string | null;
 }
 
 export interface DemoPublishResult {
-  sample_id: string;
-  title: string;
+  status: "publishing";
 }
 
 /** Kiểm trạng thái bản demo ở biên API: thiếu field là lỗi, không đoán. */
@@ -138,11 +141,13 @@ export function parseDemoState(value: unknown): DemoState {
   if (baseline !== null && !(isRecord(baseline) && typeof baseline.scene_revision === "string" && typeof baseline.job_id === "string")) throw invalid();
   if (value.at_root !== undefined && typeof value.at_root !== "boolean") throw invalid();
   if (value.published_sample_id !== undefined && !(value.published_sample_id === null || typeof value.published_sample_id === "string")) throw invalid();
+  if (value.publishing !== undefined && typeof value.publishing !== "boolean") throw invalid();
+  if (value.publish_error !== undefined && !(value.publish_error === null || typeof value.publish_error === "string")) throw invalid();
   return value as unknown as DemoState;
 }
 
 export function parseDemoPublishResult(value: unknown): DemoPublishResult {
-  if (!isRecord(value) || typeof value.sample_id !== "string" || typeof value.title !== "string") {
+  if (!isRecord(value) || value.status !== "publishing") {
     throw new Error("Kết quả xuất bản demo không hợp lệ");
   }
   return value as unknown as DemoPublishResult;
