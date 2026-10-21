@@ -364,3 +364,32 @@ def test_parse_lanes() -> None:
     assert worker_cli.parse_lanes("gpu,gpu") is None
     assert worker_cli.parse_lanes("tpu") is None
     assert worker_cli.parse_lanes("") is None
+
+
+def test_step_rows_and_claims_work_on_sqlite_and_postgres(runtime_database_url: str, tmp_path: Path) -> None:
+    """Cùng câu lệnh (upsert nhiều dòng, savepoint, khoá dòng job) chạy được trên cả hai DB."""
+    from src.services.orchestration.jobs.database import RuntimeDatabase
+    from src.services.orchestration.jobs.profile import ExecutionProfile
+
+    probe = ProjectRegistry(runtime_root=tmp_path / "artifacts")
+    registry = ProjectRegistry(
+        runtime_root=tmp_path / "artifacts",
+        database=RuntimeDatabase(runtime_database_url),
+        execution_profile=ExecutionProfile(
+            config_checksum=probe._fixture_config_checksum(),
+            runtime_manifest_checksum=probe._fixture_runtime_checksum(),
+            seed=7,
+        ),
+    )
+    registry.seed_from_fixtures()
+    job = _prepared(registry)
+    assert registry.persistence is not None
+    database, load = registry.persistence.database, registry.persistence.job_from_pointer
+    assert {step_id: row.state for step_id, row in _rows(registry, job.job_id).items()}["pose_visual"] == "ready"
+    claim = claim_step(database, job, "pose_visual", "worker-a", load_job=load, kind="gpu")
+    assert claim is not None and claim_step(database, job, "pose_visual", "worker-b", load_job=load) is None
+    running = registry.record_stage_progress(job, StageId.CAMERA_POSE)
+    row = _rows(registry, job.job_id)["pose_visual"]
+    assert row.state == "running" and row.worker_id == "worker-a"
+    assert row.job_manifest_checksum == running.job_manifest_checksum
+    assert pending_step_counts(database) == {"gpu": 0, "cpu": 0}

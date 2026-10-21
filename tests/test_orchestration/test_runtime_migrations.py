@@ -312,3 +312,33 @@ def test_registry_project_job_lifecycle(runtime_database_url: str, tmp_path: Pat
             expected_checksum=job.job_manifest_checksum,
         )
     assert [item.job_id for item in registry.list_jobs(project.project_id)] == [running.job_id]
+
+
+def test_v26_database_with_jobs_in_flight_gains_the_step_table_without_touching_jobs(tmp_path: Path) -> None:
+    """T-073: v27 chỉ thêm bảng; job đang chạy dở giữ nguyên, chưa có dòng bước (được tạo khi worker quét)."""
+    path = tmp_path / "legacy-v26.db"
+    with sqlite3.connect(path) as legacy:
+        legacy.execute("CREATE TABLE r2s_schema (id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL)")
+        legacy.execute("INSERT INTO r2s_schema VALUES (1, 0)")
+        for version, statements in database_module.MIGRATIONS:
+            if version > 26:
+                continue
+            for statement in statements:
+                legacy.execute(statement)
+            legacy.execute("UPDATE r2s_schema SET version=? WHERE id=1", (version,))
+        legacy.execute("INSERT INTO r2s_projects(project_id,payload) VALUES ('project-v26','{}')")
+        legacy.execute(
+            "INSERT INTO r2s_jobs(job_id,project_id,version,manifest_ref) "
+            "VALUES ('job-v26','project-v26',3,'artifact://jobs/job-v26/manifest.json')"
+        )
+
+    database = RuntimeDatabase(f"sqlite:///{path}")
+
+    assert database.schema_version() == LATEST_SCHEMA_VERSION == 27
+    assert "r2s_job_steps" in _tables(database)
+    with database.transaction(write=True) as tx:
+        assert tx.execute("SELECT job_id, version FROM r2s_jobs").fetchall() == [("job-v26", 3)]
+        assert tx.execute("SELECT COUNT(*) FROM r2s_job_steps").fetchone() == (0,)
+        # Chạy lại câu lệnh của v27 (vd hai tiến trình cùng nâng cấp) không lỗi và không mất dữ liệu.
+        for statement in dict(database_module.MIGRATIONS)[27]:
+            tx.execute(statement)
