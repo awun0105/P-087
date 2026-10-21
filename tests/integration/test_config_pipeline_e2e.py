@@ -34,7 +34,7 @@ async def test_scenario_job_compiles_exact_native_commands(
             "input_type": "video_loop_360",
             "environment": environment,
             "subject_scope": "full_room",
-            "target_capacity": "balanced",
+            "target_capacity": "standard",
         },
     )
     assert recommendation.status_code == 200, recommendation.text
