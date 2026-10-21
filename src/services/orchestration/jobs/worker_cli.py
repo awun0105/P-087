@@ -33,15 +33,30 @@ from src.services.orchestration.jobs.profile import ExecutionProfile
 from src.services.orchestration.jobs.progress import (
     awaiting_anonymization_review,
     awaiting_finalize,
-    awaiting_reviewed_preview,
+    awaiting_pose_step,
+    awaiting_scene_extract,
 )
 from src.services.orchestration.jobs.queue import fair_order, waiting_jobs
 from src.services.orchestration.jobs.registration_worker import RegistrationOperationWorker
 from src.services.orchestration.jobs.runner import (
-    run_finalize_job,
+    run_geometry_step,
+    run_prepare_step,
     run_prepared_job,
     run_reviewed_preview_job,
-    run_video_job,
+    run_scene_step,
+    run_view_lod_step,
+)
+from src.services.orchestration.jobs.steps import (
+    StepId,
+    StepKind,
+    claim_step,
+    finish_claim,
+    ready_view_lods,
+    release_claim,
+    resync,
+    runnable_step,
+    step_cpu_slots,
+    step_rank,
 )
 from src.services.orchestration.jobs.worker_runtimes import has_live_runtime, publisher
 from src.services.orchestration.jobs.workspace import attempt_in_use, job_attempts, job_root
@@ -115,16 +130,18 @@ class PreparedRunner(Protocol):
 
 
 class VideoRunner(Protocol):
-    """Seam cho job của video upload: prepare rồi preview trong một attempt."""
+    """Seam cho một bước chạy trên job đã có (prepare, dựng camera sau prepare, hình học, tách vật, LOD)."""
 
     def __call__(self, job_id: str, *, expected_checksum: str) -> JobManifest: ...
 
 
-def _record_finalize_failure(registry: ProjectRegistry, job: JobManifest, cause: Exception) -> None:
-    """Lỗi trước khi runner hoàn tất claim được job: ghi FAILED ở bước hình học, không lặp vô hạn."""
+def _record_finalize_failure(
+    registry: ProjectRegistry, job: JobManifest, cause: Exception, stage: StageId = StageId.RGB_GEOMETRY
+) -> None:
+    """Lỗi trước khi runner hoàn tất claim được job: ghi FAILED ở bước hình học/tách vật, không lặp vô hạn."""
     details = {"exception_type": type(cause).__name__}
     error = ExecutionError(
-        stage_id=StageId.RGB_GEOMETRY,
+        stage_id=stage,
         error_code="REC_FINALIZE_DISPATCH_FAILED",
         human_message="Không bắt đầu được bước dựng hình học/bundle; kiểm cấu hình geometry và log worker rồi thử lại",
         retryable=classify_retryability("REC_FINALIZE_DISPATCH_FAILED", details),
@@ -140,7 +157,7 @@ def _record_finalize_failure(registry: ProjectRegistry, job: JobManifest, cause:
         if current.status == JobStatus.QUEUED:
             current = registry.transition_job(
                 job.job_id,
-                TransitionRequest(target_status=JobStatus.RUNNING, current_stage=StageId.RGB_GEOMETRY),
+                TransitionRequest(target_status=JobStatus.RUNNING, current_stage=stage),
                 expected_checksum=current.job_manifest_checksum,
             )
         registry.transition_job(
@@ -224,17 +241,8 @@ def recover_interrupted_jobs(registry: ProjectRegistry, settings: Settings) -> i
             continue
         if job.status != JobStatus.RUNNING:
             continue
-        if awaiting_anonymization_review(job) or awaiting_reviewed_preview(job):
-            # Job dừng có chủ ý sau bước che frame, chờ người dùng xem hoặc chờ worker nhận: không phải tiến trình chết.
-            continue
-        if awaiting_finalize(job):
-            # Nếu đang ở REC-06 chờ finalize, kiểm tra xem có workspace finalize đang chạy dở hay chưa
-            # Nếu chỉ đang chờ người dùng xác nhận metric (chưa có confirmation_stage) thì không coi là chết
-            pass
-        elif job.current_stage == StageId.METRIC_CANONICALIZE and not any(
-            s.stage_id == StageId.METRIC_CANONICALIZE for s in job.stage_artifacts
-        ):
-            # Job đang dừng ở REC-06 chờ người dùng xác nhận metric; không phải tiến trình đang chạy dở
+        if intentionally_unleased(job):
+            # Job dừng có chủ ý giữa hai bước (chờ người dùng, hoặc chờ worker nhận bước sau): không phải tiến trình chết.
             continue
 
         root = job_root(job.job_id, worker_root)
@@ -275,18 +283,74 @@ def recover_interrupted_jobs(registry: ProjectRegistry, settings: Settings) -> i
     return recovered
 
 
+#: Làn của worker: bước loại nào worker được nhận, theo thứ tự ưu tiên (T-073). Worker trên máy GPU mặc định nhận
+#: cả hai, ưu tiên GPU; worker chỉ có làn `cpu` nhận bước CPU để bước GPU của job khác chạy song song.
+DEFAULT_LANES: tuple[StepKind, ...] = ("gpu", "cpu")
+
+
+@dataclass(frozen=True)
+class StepCandidate:
+    """Một bước sẵn sàng của một job, kèm thứ tự worker sẽ xét."""
+
+    job: JobManifest
+    step: StepId
+    kind: StepKind
+    rank: int
+    fair_index: int
+
+
+def _step_kind(step: StepId) -> StepKind:
+    """Loại tài nguyên thật của bước trên worker này: hình học chạy GPU khi máy đặt `product_geometry_gpu_index`."""
+    if step == "canonical_geometry":
+        return "gpu" if getattr(get_settings(), "product_geometry_gpu_index", None) is not None else "cpu"
+    return "cpu" if step == "prepare" else "gpu"
+
+
+def step_candidates(registry: ProjectRegistry, lanes: tuple[StepKind, ...] = DEFAULT_LANES) -> list[StepCandidate]:
+    """Bước sẵn sàng mà worker có các làn `lanes` nhận được, theo đúng thứ tự worker sẽ thử.
+
+    Thứ tự: làn của worker (bước GPU trước với worker GPU, để GPU không ngồi không khi còn bước GPU chờ) → hạng ưu tiên
+    của bước (người dùng vừa thao tác → job đã bắt đầu → job mới → bộ LOD) → xoay vòng theo người yêu cầu.
+    """
+    candidates: list[StepCandidate] = []
+    for index, item in enumerate(fair_order(waiting_jobs(registry))):
+        try:
+            job = registry.get_job(item.job_id)
+        except Exception:  # noqa: BLE001, S112 - một manifest hỏng không được chặn hàng đợi của job khác
+            continue
+        step = runnable_step(job)
+        if step is None:
+            continue
+        kind = _step_kind(step)
+        if kind in lanes:
+            candidates.append(StepCandidate(job, step, kind, step_rank(job, step), index))
+    if "gpu" in lanes and registry.persistence is not None:
+        for job_id in ready_view_lods(registry.persistence.database):
+            try:
+                job = registry.get_job(job_id)
+            except Exception:  # noqa: BLE001, S112 - job đã xoá: bỏ qua bước LOD của nó
+                continue
+            candidates.append(StepCandidate(job, "view_lod", "gpu", step_rank(job, "view_lod"), len(candidates)))
+    return sorted(candidates, key=lambda item: (lanes.index(item.kind), item.rank, item.fair_index))
+
+
 def dispatch_next(
     registry: ProjectRegistry,
     runner: PreparedRunner = run_prepared_job,
-    video_runner: VideoRunner = run_video_job,
-    finalize_runner: VideoRunner = run_finalize_job,
+    video_runner: VideoRunner = run_prepare_step,
+    finalize_runner: VideoRunner = run_geometry_step,
     admission: ResourceAdmission | None = None,
     reviewed_runner: VideoRunner = run_reviewed_preview_job,
+    scene_runner: VideoRunner = run_scene_step,
+    lod_runner: VideoRunner = run_view_lod_step,
+    lanes: tuple[StepKind, ...] = DEFAULT_LANES,
 ) -> bool:
-    """Xử lý tối đa một job mỗi lượt; skip input chưa chuẩn bị/profile khác.
+    """Chạy tối đa một **bước** mỗi lượt (T-073); skip input chưa chuẩn bị/profile khác.
 
-    Job có frame set (dataset hoặc retry sau lỗi preview) đi thẳng vào preview; job
-    của video upload chưa có frame set thì chạy prepare trước.
+    Mỗi bước được xét tài nguyên riêng (`admit_step`) và giữ chỗ chỉ trong lúc bước chạy, nên bước CPU của job này
+    không chiếm GPU khi bước GPU của job khác đang chờ. Các runner là seam cho test: `video_runner` = bước chuẩn bị,
+    `runner`/`reviewed_runner` = bước dựng camera (job đã có frame set / vừa chuẩn bị xong), `finalize_runner` = bước
+    hình học, `scene_runner` = bước tách vật, `lod_runner` = bộ LOD.
 
     Một manifest hỏng được log riêng, không làm chết queue của các project khác.
     Exception rộng chỉ tại boundary của mỗi job; cause được log bằng tên type
@@ -295,11 +359,27 @@ def dispatch_next(
     if registry.persistence is None or registry.execution_profile is None:
         raise ValueError("Queue consumer cần durable registry và execution profile")
     try:
-        return _dispatch(registry, runner, video_runner, finalize_runner, admission, reviewed_runner)
+        return _dispatch(
+            registry,
+            runner,
+            video_runner,
+            finalize_runner,
+            admission,
+            reviewed_runner,
+            scene_runner=scene_runner,
+            lod_runner=lod_runner,
+            lanes=lanes,
+        )
     finally:
-        # Giữ chỗ chỉ sống trong lúc worker chạy job; kể cả khi runner ném lỗi hoặc worker bị ngắt.
+        # Giữ chỗ chỉ sống trong lúc worker chạy bước; kể cả khi runner ném lỗi hoặc worker bị ngắt.
         if admission is not None:
             admission.release()
+
+
+def _admitted(admission: ResourceAdmission | None, job: JobManifest, step: StepId, kind: StepKind) -> bool:
+    if admission is None:
+        return True
+    return admission.admit_step(job, step, gpu_required=kind == "gpu", cpu_slots=step_cpu_slots(step, kind))
 
 
 def _dispatch(
@@ -309,78 +389,106 @@ def _dispatch(
     finalize_runner: VideoRunner,
     admission: ResourceAdmission | None,
     reviewed_runner: VideoRunner = run_reviewed_preview_job,
+    *,
+    scene_runner: VideoRunner = run_scene_step,
+    lod_runner: VideoRunner = run_view_lod_step,
+    lanes: tuple[StepKind, ...] = DEFAULT_LANES,
 ) -> bool:
-    """Một lượt quét hàng đợi của `dispatch_next`."""
+    """Một lượt quét hàng đợi bước của `dispatch_next`."""
     if registry.persistence is None or registry.execution_profile is None:
         raise ValueError("Queue consumer cần durable registry và execution profile")
     profile = registry.execution_profile
-    # Thứ tự xoay vòng theo người yêu cầu (jobs/queue.py): cũng là thứ tự UI báo cho người dùng.
-    for job_id in [item.job_id for item in fair_order(waiting_jobs(registry))]:
+    for candidate in step_candidates(registry, lanes):
+        job_id, step, kind = candidate.job.job_id, candidate.step, candidate.kind
         job: JobManifest | None = None
         attempt_context_id = "-"
         try:
-            candidate = registry.get_job(job_id)
             history = registry.list_job_attempts(job_id)
             attempt_context_id = str(history[-1].attempt) if history else "-"
             with job_log_context(job_id, attempt_context_id):
-                if awaiting_finalize(candidate):
-                    # Người dùng đã xác nhận tỉ lệ (job RUNNING, hoặc QUEUED khi retry): chạy
-                    # tiếp REC-05/REC-10 trên cùng job; vẫn qua cổng privacy của project.
-                    require_project_dispatch(registry.get_project(candidate.project_id))
-                    if not _runtime_matches(profile, candidate):
-                        continue  # T-040 Q4: chờ máy đúng runtime; không hoàn tất bằng cấu hình của máy khác
-                    if admission is not None and not admission(candidate, "finalize"):
+                current = candidate.job
+                if step == "view_lod":
+                    if idle_lod_cli() is None:
+                        continue  # máy không tạo được bộ LOD: để worker có GPU nhận
+                    if not _admitted(admission, current, step, kind):
                         continue
+                    if not _run_step(registry, current, step, kind, lambda: lod_runner(job_id, expected_checksum=None)):
+                        continue
+                    return True
+                if step in {"canonical_geometry", "scene_extract"}:
+                    # Người dùng đã xác nhận tỉ lệ: chạy tiếp REC-05/REC-10 hoặc tách vật trên cùng job; vẫn qua cổng
+                    # privacy của project và chờ máy đúng runtime (T-040 Q4).
+                    require_project_dispatch(registry.get_project(current.project_id))
+                    if not _runtime_matches(profile, current):
+                        continue
+                    if not _admitted(admission, current, step, kind):
+                        continue
+                    step_runner = finalize_runner if step == "canonical_geometry" else scene_runner
                     try:
-                        if not _leased_call(
+                        if not _run_step(
                             registry,
-                            job_id,
-                            lambda: finalize_runner(job_id, expected_checksum=candidate.job_manifest_checksum),
+                            current,
+                            step,
+                            kind,
+                            lambda: step_runner(job_id, expected_checksum=current.job_manifest_checksum),
                         ):
                             continue
                     except RuntimeStateConflictError:
                         raise
                     except Exception as error:
-                        logger.error("Finalize dispatch failed job=%s cause=%s", job_id, type(error).__name__)
-                        _record_finalize_failure(registry, candidate, error)
+                        logger.error("%s dispatch failed job=%s cause=%s", step, job_id, type(error).__name__)
+                        _record_finalize_failure(
+                            registry,
+                            current,
+                            error,
+                            StageId.RGB_GEOMETRY if step == "canonical_geometry" else StageId.OBJECT_EXTRACT,
+                        )
                     return True
-                if awaiting_anonymization_review(candidate):
-                    continue  # Bản đã che chưa được người dùng chấp nhận: không dựng 3D từ nó.
-                if awaiting_reviewed_preview(candidate):
-                    # Người dùng đã chấp nhận bản đã che (job RUNNING ở bước tách frame): dựng preview trên cùng job.
-                    require_project_dispatch(registry.get_project(candidate.project_id))
-                    if admission is not None and not admission(candidate):
+                if step == "pose_visual" and awaiting_pose_step(current):
+                    # Bước chuẩn bị đã xong (và bản đã che đã được chấp nhận nếu có): dựng preview trên cùng job.
+                    require_project_dispatch(registry.get_project(current.project_id))
+                    if not _admitted(admission, current, step, kind):
                         continue
-                    if not _leased_call(
+                    if not _run_step(
                         registry,
-                        job_id,
-                        lambda: reviewed_runner(job_id, expected_checksum=candidate.job_manifest_checksum),
+                        current,
+                        step,
+                        kind,
+                        lambda: reviewed_runner(job_id, expected_checksum=current.job_manifest_checksum),
                     ):
                         continue
                     return True
-                if _rebind_orphaned_job(registry, candidate, profile):
+                if _rebind_orphaned_job(registry, current, profile):
                     return True  # Lượt sau dispatch job này trên runtime mới.
-                require_profile(candidate, profile)
-                project = registry.get_project(candidate.project_id)
+                require_profile(current, profile)
+                project = registry.get_project(current.project_id)
                 require_project_dispatch(project)
-                job = candidate
-                frames = prepared_frame_reference(job)
-                if frames is not None:
-                    if admission is not None and not admission(job):
+                job = current
+                if step == "pose_visual":
+                    frames = prepared_frame_reference(job)
+                    if frames is None:
                         continue
-                    if not _leased_call(
+                    if not _admitted(admission, job, step, kind):
+                        continue
+                    if not _run_step(
                         registry,
-                        job_id,
-                        lambda: runner(job_id, frames.artifact_uri, expected_checksum=job.job_manifest_checksum),
+                        job,
+                        step,
+                        kind,
+                        lambda: runner(job_id, frames.artifact_uri, expected_checksum=current.job_manifest_checksum),
                     ):
                         continue
                     return True
                 if project.input_manifest_ref is None:
                     continue  # Chưa có input để chuẩn bị (ví dụ project dataset chưa publish frames).
-                if admission is not None and not admission(job):
+                if not _admitted(admission, job, step, kind):
                     continue
-                if not _leased_call(
-                    registry, job_id, lambda: video_runner(job_id, expected_checksum=job.job_manifest_checksum)
+                if not _run_step(
+                    registry,
+                    job,
+                    step,
+                    kind,
+                    lambda: video_runner(job_id, expected_checksum=current.job_manifest_checksum),
                 ):
                     continue
                 return True
@@ -395,6 +503,51 @@ def _dispatch(
     return False
 
 
+def idle_lod_cli() -> Path | None:
+    """CLI tạo bộ LOD của máy này (None khi không có GPU / runtime); tách ra để test thay được."""
+    from src.services.orchestration.artifacts import lod
+
+    return lod.lod_cli()
+
+
+def _run_step(
+    registry: ProjectRegistry, job: JobManifest, step: StepId, kind: StepKind, call: Callable[[], object]
+) -> bool:
+    """Nhận bước (CAS `ready → claimed`), rồi chạy trong lease của job; False khi worker khác đã nhận bước/job."""
+    assert registry.persistence is not None
+    database = registry.persistence.database
+    claim = claim_step(
+        database,
+        job,
+        step,
+        worker_identity()[0],
+        load_job=registry.persistence.job_from_pointer,
+        kind=kind,
+    )
+    if claim is None:
+        return False
+    ran = False
+    failed = False
+    try:
+        ran = _leased_call(registry, job.job_id, call)
+        return ran
+    except BaseException:
+        failed = True
+        raise
+    finally:
+        try:
+            if step == "view_lod":
+                if ran or failed:
+                    finish_claim(database, claim, "failed" if failed else "done")
+                else:
+                    release_claim(database, claim)
+            else:
+                release_claim(database, claim)  # bước không chạy được (vd mất lease): trả về ready nếu còn của mình
+                resync(database, job.job_id, registry.persistence.job_from_pointer)
+        except Exception as error:  # noqa: BLE001 - dòng bước tự hết hạn claim; không che kết quả/lỗi của bước
+            logger.warning("Không cập nhật được bảng bước job=%s cause=%s", job.job_id, type(error).__name__)
+
+
 def _leased_call(registry: ProjectRegistry, job_id: str, call: Callable[[], object]) -> bool:
     """Chạy một runner trong lease của job (T-040 Q2); False khi worker khác đang giữ job."""
     if registry.persistence is None:
@@ -407,8 +560,14 @@ def _leased_call(registry: ProjectRegistry, job_id: str, call: Callable[[], obje
 
 
 def intentionally_unleased(job: JobManifest) -> bool:
-    """Job RUNNING mà không worker nào giữ lease **có chủ ý**: chờ người hoặc chờ worker nhận bước kế."""
-    if awaiting_anonymization_review(job) or awaiting_reviewed_preview(job) or awaiting_finalize(job):
+    """Job RUNNING mà không worker nào giữ lease **có chủ ý**: chờ người, hoặc dừng giữa hai bước chờ worker nhận bước
+    kế (T-073: sau bước chuẩn bị, sau xác nhận tỉ lệ, sau bước hình học)."""
+    if (
+        awaiting_anonymization_review(job)
+        or awaiting_pose_step(job)
+        or awaiting_finalize(job)
+        or awaiting_scene_extract(job)
+    ):
         return True
     return job.current_stage == StageId.METRIC_CANONICALIZE and not any(
         stage.stage_id == StageId.METRIC_CANONICALIZE for stage in job.stage_artifacts
@@ -566,13 +725,46 @@ def _start_capability_heartbeat(
     return stop
 
 
+def parse_lanes(value: str) -> tuple[StepKind, ...] | None:
+    """`gpu,cpu` → ("gpu", "cpu"); giá trị lạ, rỗng hoặc lặp trả None."""
+    lanes = tuple(item.strip() for item in value.split(",") if item.strip())
+    if not lanes or len(set(lanes)) != len(lanes) or any(item not in {"gpu", "cpu"} for item in lanes):
+        return None
+    return lanes  # type: ignore[return-value]
+
+
+def _start_reservation_heartbeat(admission: ResourceAdmission) -> Event:
+    """Chỉ làm mới giữ chỗ của bước đang chạy (worker làn CPU)."""
+    stop = Event()
+
+    def beat() -> None:
+        while not stop.wait(HEARTBEAT_INTERVAL_SECONDS):
+            try:
+                admission.touch()
+            except Exception as error:  # noqa: BLE001 - luồng nền: lỗi DB không được làm chết heartbeat
+                logger.warning("Không làm mới được giữ chỗ của bước: %s", type(error).__name__)
+
+    Thread(target=beat, name="reservation-heartbeat", daemon=True).start()
+    return stop
+
+
 def main(argv: list[str] | None = None) -> int:
     """Worker cần cùng DB/store/profile với API; không tạo background thread ở HTTP."""
     parser = argparse.ArgumentParser(description="Consume durable prepared RGB jobs")
     parser.add_argument("--once", action="store_true", help="Process at most one eligible job, then exit")
     parser.add_argument("--demo-operation", choices=["pipeline", "registration", "validation", "scene"])
     parser.add_argument("--demo-parent-pid", type=int)
+    parser.add_argument(
+        "--lanes",
+        default=os.environ.get("R2S_WORKER_LANES", ",".join(DEFAULT_LANES)),
+        help="Loại bước pipeline worker nhận, theo thứ tự ưu tiên (gpu,cpu | cpu); worker chỉ có `cpu` chỉ nhận bước "
+        "CPU của pipeline (T-073)",
+    )
     args = parser.parse_args(argv)
+    lanes = parse_lanes(args.lanes)
+    if lanes is None:
+        parser.error("--lanes chỉ nhận gpu và/hoặc cpu, ví dụ gpu,cpu")
+    cpu_only = lanes == ("cpu",)
     configure_worker_logging()
     settings = get_settings()
     if args.demo_operation and not settings.product_demo_session_worker:
@@ -601,7 +793,12 @@ def main(argv: list[str] | None = None) -> int:
         if settings.product_runtime_manifest is not None
         else None
     )
-    heartbeat = _start_capability_heartbeat(registry, settings.product_worker_root, admission, publish_runtime)
+    # Worker chỉ làn CPU không đo/công bố cấu hình máy (worker GPU cùng máy đã làm), chỉ làm mới giữ chỗ của bước.
+    heartbeat = (
+        _start_reservation_heartbeat(admission)
+        if cpu_only
+        else _start_capability_heartbeat(registry, settings.product_worker_root, admission, publish_runtime)
+    )
     managed = ManagedWorker(settings, registry.execution_profile)
     previous = signal.getsignal(signal.SIGTERM)
 
@@ -631,7 +828,7 @@ def main(argv: list[str] | None = None) -> int:
         guard = QueueGuard()
         # Quét job RUNNING không lease đọc cả nhật ký sự kiện; trường hợp này cần ≥ một TTL lease mới xuất hiện,
         # nên quét mỗi nửa TTL là đủ (lần khởi động đã quét ở trên).
-        lod_builder = idle_lod_builder(registry, settings.product_worker_root)
+        lod_builder = None if cpu_only else idle_lod_builder(registry, settings.product_worker_root)
         lod_sweep = Periodic(60.0)
         unwatched_sweep = Periodic(LEASE_TTL.total_seconds() / 2)
         unwatched_sweep.due(time.monotonic())
@@ -644,11 +841,16 @@ def main(argv: list[str] | None = None) -> int:
             handled = False
             with managed.operation() as allowed:
                 if allowed:
-                    if args.demo_operation:
+                    if cpu_only:
+                        handled = guard.run(
+                            "pipeline-cpu",
+                            lambda: supports("pipeline") and dispatch_next(registry, admission=admission, lanes=lanes),
+                        )
+                    elif args.demo_operation:
                         handled = guard.run(
                             args.demo_operation,
                             {
-                                "pipeline": lambda: dispatch_next(registry, admission=admission),
+                                "pipeline": lambda: dispatch_next(registry, admission=admission, lanes=lanes),
                                 "registration": registration_worker.process_next,
                                 "validation": validation_worker.process_next,
                                 "scene": lambda: process_next(registry, settings),
@@ -660,7 +862,10 @@ def main(argv: list[str] | None = None) -> int:
                             [
                                 (
                                     "pipeline",
-                                    lambda: supports("pipeline") and dispatch_next(registry, admission=admission),
+                                    lambda: (
+                                        supports("pipeline")
+                                        and dispatch_next(registry, admission=admission, lanes=lanes)
+                                    ),
                                 ),
                                 (
                                     "registration",
