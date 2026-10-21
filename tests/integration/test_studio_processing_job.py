@@ -95,7 +95,9 @@ def test_job_config_drives_sampling_and_tool_configs(world: SimpleNamespace) -> 
     frames = json.loads(world.registry.runtime_resolver.resolve(frame_set.artifact_uri).read_text())["frames"]
     assert len(frames) == 4  # 40 frame, 3,9 s × 1 fps → 4 frame
     resolved = world.calls[0]["resolved"]
-    assert resolved.brush["total_train_iters"] == 5000 and resolved.colmap["max_image_size"] == 1600
+    assert (
+        resolved.brush["total_train_iters"] == 5000 and resolved.colmap["max_image_size"] == 1280
+    )  # sàn mới của bảng A5 (T-071)
     assert resolved.sample_fps == 1.0 and resolved.max_frames == 30
 
 
