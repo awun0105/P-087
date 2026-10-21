@@ -393,3 +393,29 @@ def test_step_rows_and_claims_work_on_sqlite_and_postgres(runtime_database_url: 
     assert row.state == "running" and row.worker_id == "worker-a"
     assert row.job_manifest_checksum == running.job_manifest_checksum
     assert pending_step_counts(database) == {"gpu": 0, "cpu": 0}
+
+
+@pytest.mark.asyncio
+async def test_progress_api_lists_steps_and_queue_position_between_steps(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from httpx import ASGITransport, AsyncClient
+
+    from src.api.studio import deps
+    from src.main import app
+
+    registry = _registry(tmp_path)
+    job = _prepared(registry)
+    monkeypatch.setattr(deps, "get_project_registry", lambda: registry)
+    monkeypatch.setattr(deps, "preview_ready", lambda registry, job_id: False)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get(f"/api/v1/jobs/{job.job_id}/progress")
+    assert response.status_code == 200
+    payload = response.json()
+    assert [(step["step_id"], step["kind"], step["state"], step["waiting_on"]) for step in payload["steps"]][:3] == [
+        ("prepare", "cpu", "done", None),
+        ("pose_visual", "gpu", "ready", "gpu"),
+        ("metric_confirm", "user", "pending", None),
+    ]
+    # Job RUNNING dừng giữa hai bước vẫn có vị trí hàng đợi (worker GPU sẽ nhận bước dựng camera).
+    assert payload["queue"]["position"] == 1

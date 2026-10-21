@@ -282,9 +282,17 @@ def queue_position(registry: ProjectRegistry, job_id: str, now: datetime | None 
     """Vị trí của `job_id` theo đúng thứ tự worker sẽ nhận; None khi job không ở trong hàng đợi."""
     if registry.persistence is None:
         return None
+    from src.services.orchestration.jobs.steps import step_candidates
+
     database = registry.persistence.database
     now = now or datetime.now(UTC)
-    ordered = fair_order(waiting_jobs(registry))
+    waiting = {item.job_id: item for item in waiting_jobs(registry)}
+    # T-073: cùng thứ tự worker GPU nhận bước (bước GPU trước, rồi hạng ưu tiên, rồi xoay vòng theo người yêu cầu).
+    ordered = [
+        waiting[candidate.job.job_id]
+        for candidate in step_candidates(registry)
+        if candidate.step != "view_lod" and candidate.job.job_id in waiting
+    ]
     index = next((position for position, item in enumerate(ordered) if item.job_id == job_id), None)
     if index is None:
         return None

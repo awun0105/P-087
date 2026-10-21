@@ -36,7 +36,6 @@ from src.services.orchestration.jobs.progress import (
     awaiting_pose_step,
     awaiting_scene_extract,
 )
-from src.services.orchestration.jobs.queue import fair_order, waiting_jobs
 from src.services.orchestration.jobs.registration_worker import RegistrationOperationWorker
 from src.services.orchestration.jobs.runner import (
     run_geometry_step,
@@ -47,16 +46,15 @@ from src.services.orchestration.jobs.runner import (
     run_view_lod_step,
 )
 from src.services.orchestration.jobs.steps import (
+    DEFAULT_LANES,
     StepId,
     StepKind,
     claim_step,
     finish_claim,
-    ready_view_lods,
     release_claim,
     resync,
-    runnable_step,
+    step_candidates,
     step_cpu_slots,
-    step_rank,
 )
 from src.services.orchestration.jobs.worker_runtimes import has_live_runtime, publisher
 from src.services.orchestration.jobs.workspace import attempt_in_use, job_attempts, job_root
@@ -281,57 +279,6 @@ def recover_interrupted_jobs(registry: ProjectRegistry, settings: Settings) -> i
             logger.warning("Không thể auto-recover job %s: %s", job.job_id, exc)
 
     return recovered
-
-
-#: Làn của worker: bước loại nào worker được nhận, theo thứ tự ưu tiên (T-073). Worker trên máy GPU mặc định nhận
-#: cả hai, ưu tiên GPU; worker chỉ có làn `cpu` nhận bước CPU để bước GPU của job khác chạy song song.
-DEFAULT_LANES: tuple[StepKind, ...] = ("gpu", "cpu")
-
-
-@dataclass(frozen=True)
-class StepCandidate:
-    """Một bước sẵn sàng của một job, kèm thứ tự worker sẽ xét."""
-
-    job: JobManifest
-    step: StepId
-    kind: StepKind
-    rank: int
-    fair_index: int
-
-
-def _step_kind(step: StepId) -> StepKind:
-    """Loại tài nguyên thật của bước trên worker này: hình học chạy GPU khi máy đặt `product_geometry_gpu_index`."""
-    if step == "canonical_geometry":
-        return "gpu" if getattr(get_settings(), "product_geometry_gpu_index", None) is not None else "cpu"
-    return "cpu" if step == "prepare" else "gpu"
-
-
-def step_candidates(registry: ProjectRegistry, lanes: tuple[StepKind, ...] = DEFAULT_LANES) -> list[StepCandidate]:
-    """Bước sẵn sàng mà worker có các làn `lanes` nhận được, theo đúng thứ tự worker sẽ thử.
-
-    Thứ tự: làn của worker (bước GPU trước với worker GPU, để GPU không ngồi không khi còn bước GPU chờ) → hạng ưu tiên
-    của bước (người dùng vừa thao tác → job đã bắt đầu → job mới → bộ LOD) → xoay vòng theo người yêu cầu.
-    """
-    candidates: list[StepCandidate] = []
-    for index, item in enumerate(fair_order(waiting_jobs(registry))):
-        try:
-            job = registry.get_job(item.job_id)
-        except Exception:  # noqa: BLE001, S112 - một manifest hỏng không được chặn hàng đợi của job khác
-            continue
-        step = runnable_step(job)
-        if step is None:
-            continue
-        kind = _step_kind(step)
-        if kind in lanes:
-            candidates.append(StepCandidate(job, step, kind, step_rank(job, step), index))
-    if "gpu" in lanes and registry.persistence is not None:
-        for job_id in ready_view_lods(registry.persistence.database):
-            try:
-                job = registry.get_job(job_id)
-            except Exception:  # noqa: BLE001, S112 - job đã xoá: bỏ qua bước LOD của nó
-                continue
-            candidates.append(StepCandidate(job, "view_lod", "gpu", step_rank(job, "view_lod"), len(candidates)))
-    return sorted(candidates, key=lambda item: (lanes.index(item.kind), item.rank, item.fair_index))
 
 
 def dispatch_next(

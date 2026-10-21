@@ -37,14 +37,15 @@ from src.services.orchestration.jobs.lidar_overlay import lidar_overlay_file
 from src.services.orchestration.jobs.progress import (
     JobProgress,
     awaiting_anonymization_review,
-    awaiting_finalize,
     awaiting_metric_confirmation,
+    awaiting_worker,
     job_progress,
 )
 from src.services.orchestration.jobs.queue import job_requester_actors, job_requesters, queue_position
 from src.services.orchestration.jobs.stage_results import stage_notes
 from src.services.orchestration.jobs.stage_views import StageViewList, stage_views
 from src.services.orchestration.jobs.step_marks import list_marks
+from src.services.orchestration.jobs.steps import job_step_views
 from src.services.orchestration.jobs.thumbnails import scene_thumbnail
 from src.services.orchestration.jobs.worker_runtimes import has_live_runtime
 from src.services.orchestration.pipeline.models import PipelineView, PipelineWait
@@ -529,7 +530,7 @@ def _job_progress_response(
     reservation = job_reservation(registry.persistence.database, job_id) if registry.persistence is not None else None
     heartbeat_at = reservation.heartbeat_at if reservation is not None else None
     # Vị trí hàng đợi chỉ tính cho job đang chờ worker (đọc journal của mọi job): job đang chạy không cần.
-    position = queue_position(registry, job_id) if job.status == JobStatus.QUEUED or awaiting_finalize(job) else None
+    position = queue_position(registry, job_id) if awaiting_worker(job) else None
     # T-040: không worker nào đang sống chạy được runtime của job thì UI báo "đang chờ GPU" thay vì im lặng.
     runtime_wait = registry.persistence is not None and not has_live_runtime(
         registry.persistence.database, job.runtime_manifest_checksum
@@ -543,6 +544,10 @@ def _job_progress_response(
         heartbeat_at=heartbeat_at,
         runtime_wait=runtime_wait,
         notes=stage_notes(registry, job),
+    )
+    # T-073: các bước xếp lịch (bước CPU / GPU / chờ bạn) kèm trạng thái chờ của bước đang sẵn sàng.
+    progress = progress.model_copy(
+        update={"steps": job_step_views(registry.persistence.database if registry.persistence else None, job)}
     )
     progress = filter_job_progress_errors(progress, user)
     allowed = owner_mutation_allowed(
