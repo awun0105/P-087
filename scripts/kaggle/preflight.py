@@ -111,6 +111,40 @@ def colmap_guided() -> tuple[bool, str]:
     return ok, "có pose_prior_mapper" if ok else "COLMAP này không có pose_prior_mapper (cần COLMAP ≥ 4.0)"
 
 
+def colmap_vocabulary() -> tuple[bool, str]:
+    """Từ điển khép vòng của COLMAP (T-071 B2): có, đúng checksum ghim, đúng định dạng với phiên bản COLMAP.
+
+    Đường dẫn giống hệt worker: `PRODUCT_COLMAP_VOCAB_TREE` nếu đặt, không thì vị trí chuẩn trong repo mà image bake sẵn.
+    """
+    from src.services.reconstruction.adapters.vocab_tree import (
+        file_format,
+        verify_vocab_tree,
+        vocab_tree_spec,
+        vocabulary_format,
+    )
+
+    command = _command("R2S_COLMAP_COMMAND")
+    if command is None:
+        return False, "chưa đặt R2S_COLMAP_COMMAND"
+    try:
+        done = subprocess.run([*command, "-h"], capture_output=True, text=True, timeout=120.0, check=False)
+    except (OSError, subprocess.SubprocessError) as error:
+        return False, type(error).__name__
+    version = next(
+        (line.strip() for line in (done.stdout + done.stderr).splitlines() if line.startswith("COLMAP ")), ""
+    )
+    runtime_format = vocabulary_format(version)
+    if runtime_format is None:
+        return False, "không đọc được phiên bản COLMAP để chọn định dạng từ điển"
+    configured = os.environ.get("PRODUCT_COLMAP_VOCAB_TREE", "").strip()
+    path = Path(configured).expanduser() if configured else vocab_tree_spec(runtime_format)[3]
+    if not verify_vocab_tree(path, runtime_format):
+        return False, f"thiếu từ điển {runtime_format} hoặc sai checksum tại {path}"
+    if file_format(path) != runtime_format:
+        return False, f"từ điển không phải định dạng {runtime_format} của {version}"
+    return True, f"{runtime_format}, checksum khớp ({path.name})"
+
+
 def vulkan() -> tuple[bool, str]:
     """Brush train 3DGS qua Vulkan; phải thấy đúng card NVIDIA, không phải llvmpipe (CPU)."""
     ok, _ = _run(["vulkaninfo", "--summary"])
@@ -225,6 +259,7 @@ CHECKS: list[tuple[str, Callable[[], tuple[bool, str]], bool, str]] = [
     ("COLMAP", colmap, True, "không dựng được pose camera"),
     ("COLMAP dùng GPU", colmap_gpu, False, "đặt PRODUCT_COLMAP_USE_GPU=false"),
     ("COLMAP dựng bám quỹ đạo", colmap_guided, False, "job video + gói LiDAR sẽ dừng ở bước dựng pose"),
+    ("Từ điển COLMAP", colmap_vocabulary, True, "kịch bản khép vòng dừng ở bước dựng pose (VOCAB_TREE_MISSING)"),
     ("Vulkan (GPU thật)", vulkan, True, "Brush không train được 3DGS"),
     ("Brush", brush, True, "không train được 3DGS"),
     ("splat-transform", splat_transform, True, "không nén SOG / dựng collision"),
