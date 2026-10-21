@@ -119,6 +119,10 @@ describe("Inspect theo giai đoạn", () => {
     expect(canInspect(waiting, "ST-VISUAL-RECON")).toBe(true);
     expect(inspectionStage("ST-LIDAR-CALIBRATION-QA")?.title).toBe("Kiểm tra căn chỉnh LiDAR");
     expect(inspectionStage(LIDAR_ODOMETRY_STAGE.id)).toBe(LIDAR_ODOMETRY_STAGE);
+    // Bước của pipeline thống nhất không phải stage của job: không có trang inspection, timeline không đưa link tới đó.
+    for (const id of ["ST-ANONYMIZATION-REVIEW", "ST-OBJECT-CONFIRM", "ST-SCENE-DECOMPOSE", "ST-VIEW-LOD"]) {
+      expect(inspectionStage(id)).toBeUndefined();
+    }
     expect(stagesFor([LIDAR_ODOMETRY_STAGE.id]).map((stage) => stage.id).slice(3, 4)).toEqual([
       LIDAR_ODOMETRY_STAGE.id,
     ]);
