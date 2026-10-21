@@ -242,6 +242,10 @@ def recover_interrupted_jobs(registry: ProjectRegistry, settings: Settings) -> i
         if intentionally_unleased(job):
             # Job dừng có chủ ý giữa hai bước (chờ người dùng, hoặc chờ worker nhận bước sau): không phải tiến trình chết.
             continue
+        if has_lease(database, job.job_id):
+            # T-073: bước đang chạy có thể do worker khác (máy khác) giữ; workspace cũ trên máy này không nói gì về nó.
+            # Lease hết hạn do `recover_expired_leases` xử lý.
+            continue
 
         root = job_root(job.job_id, worker_root)
         if root is None or not root.exists():

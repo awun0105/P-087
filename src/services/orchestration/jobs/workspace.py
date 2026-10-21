@@ -28,7 +28,8 @@ from src.services.orchestration.processing.procfs import any_process_inside
 
 logger = logging.getLogger(__name__)
 
-_ATTEMPT_NAME = re.compile(r"(?:attempt|finalize)-[0-9a-f]{32}")
+#: `scene-*`: workspace của bước tách vật (T-073), cũng có lease attempt và được dọn như mọi attempt.
+_ATTEMPT_NAME = re.compile(r"(?:attempt|finalize|scene)-[0-9a-f]{32}")
 #: Log và journal luôn được giữ.
 _LOG_SUFFIXES = {".log", ".jsonl"}
 #: Request/response/cấu hình nhỏ có ích khi chẩn đoán; file lớn cùng đuôi (model COLMAP dạng

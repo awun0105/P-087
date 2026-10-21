@@ -419,3 +419,23 @@ async def test_progress_api_lists_steps_and_queue_position_between_steps(
     ]
     # Job RUNNING dừng giữa hai bước vẫn có vị trí hàng đợi (worker GPU sẽ nhận bước dựng camera).
     assert payload["queue"]["position"] == 1
+
+
+def test_worker_start_does_not_fail_a_step_another_worker_is_running(tmp_path: Path) -> None:
+    """Bước đang chạy trên worker khác (giữ lease) không bị coi là chết chỉ vì workspace cũ trên máy này đã nguội."""
+    from types import SimpleNamespace
+
+    from src.services.orchestration.jobs.lease import acquire
+
+    registry = _registry(tmp_path / "runtime")
+    job = registry.record_stage_progress(_prepared(registry), StageId.CAMERA_POSE)  # bước dựng camera đang chạy
+    root = tmp_path / "workers"
+    (root / job.job_id / ("attempt-" + "0" * 32)).mkdir(parents=True)  # bước chuẩn bị đã chạy xong trên máy này
+    settings = SimpleNamespace(product_worker_root=root)
+    assert registry.persistence is not None
+    assert acquire(registry.persistence.database, job.job_id, "gpu-worker") is not None
+    assert worker_cli.recover_interrupted_jobs(registry, settings) == 0
+    assert registry.get_job(job.job_id).status == JobStatus.RUNNING
+    with registry.persistence.database.transaction(write=True) as tx:
+        tx.execute("DELETE FROM r2s_job_leases WHERE job_id=?", (job.job_id,))
+    assert worker_cli.recover_interrupted_jobs(registry, settings) == 1  # không ai giữ: đúng là tiến trình đã chết
