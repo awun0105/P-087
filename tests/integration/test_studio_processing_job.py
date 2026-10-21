@@ -94,6 +94,8 @@ def test_job_config_drives_sampling_and_tool_configs(world: SimpleNamespace) -> 
     frame_set = next(stage for stage in running.stage_artifacts if stage.stage_id == "ST-FRAME-EXTRACT")
     frames = json.loads(world.registry.runtime_resolver.resolve(frame_set.artifact_uri).read_text())["frames"]
     assert len(frames) == 4  # 40 frame, 3,9 s × 1 fps → 4 frame
+    assert world.calls == []  # T-073: bước chuẩn bị xong; bước dựng camera là lượt nhận riêng
+    assert worker_cli.dispatch_next(world.registry) is True
     resolved = world.calls[0]["resolved"]
     assert (
         resolved.brush["total_train_iters"] == 5000 and resolved.colmap["max_image_size"] == 1280

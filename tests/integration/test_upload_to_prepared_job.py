@@ -95,6 +95,11 @@ def _queued_job(world: SimpleNamespace, anonymized: bool = True) -> str:
 
 def test_worker_prepares_uploaded_video_then_hands_frames_to_preview(world: SimpleNamespace) -> None:
     job_id = _queued_job(world)
+    # T-073: bước chuẩn bị (CPU) và bước dựng camera (GPU) là hai bước riêng của hàng đợi.
+    assert worker_cli.dispatch_next(world.registry) is True
+    prepared = world.registry.get_job(job_id)
+    assert prepared.status == JobStatus.RUNNING and prepared.current_stage == StageId.FRAME_EXTRACT
+    assert world.previews == []
     assert worker_cli.dispatch_next(world.registry) is True
     job = world.registry.get_job(job_id)
     assert job.status == JobStatus.RUNNING and job.current_stage == StageId.CAMERA_POSE
@@ -195,7 +200,8 @@ def test_worker_ingests_the_lidar_package_before_camera_pose(world: SimpleNamesp
     from src.services.reconstruction.lidar.calibration_qa import is_sensor_package_collision_eligible
 
     job_id = _queued_lidar_job(world, _lidar_package(world.root))
-    assert worker_cli.dispatch_next(world.registry) is True
+    assert worker_cli.dispatch_next(world.registry) is True  # bước chuẩn bị
+    assert worker_cli.dispatch_next(world.registry) is True  # bước dựng camera: nhận LiDAR trước COLMAP
     job = world.registry.get_job(job_id)
     assert job.status == JobStatus.RUNNING and job.current_stage == StageId.CAMERA_POSE
     assert [(stage.stage_id, stage.status) for stage in job.stage_artifacts][-2:] == [
@@ -233,7 +239,8 @@ def test_worker_ingests_the_lidar_package_before_camera_pose(world: SimpleNamesp
 def test_broken_lidar_package_stops_the_job_before_gpu_work(world: SimpleNamespace) -> None:
     """Quỹ đạo không nằm trên đám mây: job dừng ở bước LiDAR với lý do rõ, không chạy tiếp như job chỉ có video."""
     job_id = _queued_lidar_job(world, _lidar_package(world.root, floor_offset=500.0))
-    assert worker_cli.dispatch_next(world.registry) is True
+    assert worker_cli.dispatch_next(world.registry) is True  # bước chuẩn bị
+    assert worker_cli.dispatch_next(world.registry) is True  # bước dựng camera dừng ở LiDAR
     job = world.registry.get_job(job_id)
     assert job.status == JobStatus.FAILED and job.current_stage == StageId.LIDAR_INGEST
     failed = job.stage_artifacts[-1]
@@ -270,7 +277,8 @@ def test_structural_lidar_qa_failure_stops_before_colmap_and_keeps_report(
     monkeypatch.setattr(calibration_qa_worker, "run_lidar_calibration_qa", run_with_wrong_units)
     job_id = _queued_lidar_job(world, _lidar_package(world.root))
 
-    assert worker_cli.dispatch_next(world.registry) is True
+    assert worker_cli.dispatch_next(world.registry) is True  # bước chuẩn bị
+    assert worker_cli.dispatch_next(world.registry) is True  # bước dựng camera dừng ở QA calibration
     job = world.registry.get_job(job_id)
     assert job.status == JobStatus.FAILED and job.current_stage == StageId.LIDAR_CALIBRATION_QA
     assert job.completed_at is not None

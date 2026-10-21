@@ -143,18 +143,23 @@ def accept(registry: ProjectRegistry, job_id: str, frame_set_checksum: str, user
     return reference
 
 
-def accept_when_nothing_redacted(registry: ProjectRegistry, job_id: str) -> JobManifest | None:
+def accept_when_nothing_redacted(
+    registry: ProjectRegistry, job_id: str, *, claim_stage: StageId | None = StageId.CAMERA_POSE
+) -> JobManifest | None:
     """Worker gọi ngay sau bước che: không frame nào bị che thì ghi nhận tự động và trả job để chạy tiếp.
 
     Có frame bị che thì trả None và job dừng chờ người upload. Job trả về đã ở `ST-CAMERA-POSE` (worker đang giữ
     nó, không worker nào khác nhận). Bản ghi tự động có `accepted_by = None` và
     `redacted_frame_count = 0`, nên luôn phân biệt được với chấp nhận của người.
+
+    Bước `prepare` của hàng đợi theo bước (T-073) truyền `claim_stage=None`: job giữ bước tách frame và bước dựng
+    camera được worker khác nhận như mọi bước sẵn sàng.
     """
     job = registry.get_job(job_id)
     frame_set, manifest = _load(registry, job)
     if any(frame.regions for frame in manifest.frames):
         return None
-    return _record(registry, job, frame_set, manifest, None, claim_stage=StageId.CAMERA_POSE)[1]
+    return _record(registry, job, frame_set, manifest, None, claim_stage=claim_stage)[1]
 
 
 def _record(

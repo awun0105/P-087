@@ -1419,6 +1419,83 @@ class ProjectRegistry:
         self.persistence.save_job(updated, manifest_ref, event, expected=expected)
         return updated
 
+    def record_geometry(
+        self, expected: JobManifest, result: "FinalizeResult", result_ref: ProductArtifactRef
+    ) -> JobManifest:
+        """Worker-only (T-073): ghi geometry + bundle thành công của EX-REC; job chưa kết thúc, chờ bước tách vật.
+
+        Job giữ RUNNING ở `ST-RGB-GEOMETRY` kèm bundle (`awaiting_scene_extract`), không worker nào giữ. Kết quả lỗi đi
+        qua `record_finalize` như trước (job FAILED).
+        """
+        if self.persistence is None:
+            raise RuntimeStateConflictError("Real worker cần durable registry")
+        if expected.status != JobStatus.RUNNING or expected.current_stage != StageId.RGB_GEOMETRY:
+            raise ValueError("Job không ở bước hình học")
+        if result.error is not None or result.bundle_ref is None:
+            raise ValueError("Chỉ ghi được kết quả hình học thành công có bundle")
+        if result.job_id != expected.job_id or result_ref.job_id != expected.job_id:
+            raise ValueError("Kết quả hoàn tất khác job")
+        self.runtime_resolver.require(result_ref)
+        for stage in result.stage_artifacts:
+            if stage.artifact_uri is not None and stage.artifact_checksum is not None:
+                self.runtime_resolver.require_uri(stage.artifact_uri, stage.artifact_checksum)
+        if not any(stage.artifact_type == "ReconstructionBundle" for stage in result.stage_artifacts):
+            raise ValueError("Kết quả hình học thiếu stage bundle")
+        updated = with_canonical_checksum(
+            expected.model_copy(update={"stage_artifacts": [*expected.stage_artifacts, *result.stage_artifacts]}),
+            "job_manifest_checksum",
+        )
+        manifest_ref = self.lifecycle.store.publish_manifest(updated)
+        history = self.persistence.list_attempts(expected.job_id)
+        event = JobAttemptRecord(
+            attempt=history[-1].attempt,
+            status=updated.status,
+            current_stage=updated.current_stage,
+            recorded_at=datetime.now(UTC),
+            job_manifest_uri=manifest_ref.artifact_uri,
+            job_manifest_checksum=manifest_ref.artifact_checksum,
+        )
+        self.persistence.save_job(updated, manifest_ref, event, expected=expected)
+        return updated
+
+    def record_scene_extract(self, expected: JobManifest, extra_stages: list[StageArtifact]) -> JobManifest:
+        """Worker-only (T-073): kết thúc job sau bước tách vật; lỗi tách vật không làm hỏng job (như trước)."""
+        if self.persistence is None:
+            raise RuntimeStateConflictError("Real worker cần durable registry")
+        if expected.status != JobStatus.RUNNING or expected.current_stage != StageId.OBJECT_EXTRACT:
+            raise ValueError("Job không ở bước tách vật")
+        if not any(stage.artifact_type == "ReconstructionBundle" for stage in expected.stage_artifacts):
+            raise ValueError("Job chưa có bundle để tách vật")
+        for stage in extra_stages:
+            if stage.stage_id != StageId.OBJECT_EXTRACT:
+                raise ValueError("Bước tách vật chỉ ghi stage tách vật")
+            if stage.artifact_uri is not None and stage.artifact_checksum is not None:
+                self.runtime_resolver.require_uri(stage.artifact_uri, stage.artifact_checksum)
+        now = datetime.now(UTC)
+        updated = with_canonical_checksum(
+            expected.model_copy(
+                update={
+                    "stage_artifacts": [*expected.stage_artifacts, *extra_stages],
+                    "status": JobStatus.SUCCEEDED,
+                    "current_stage": StageId.OBJECT_EXTRACT if extra_stages else StageId.RGB_GEOMETRY,
+                    "completed_at": now,
+                }
+            ),
+            "job_manifest_checksum",
+        )
+        manifest_ref = self.lifecycle.store.publish_manifest(updated)
+        history = self.persistence.list_attempts(expected.job_id)
+        event = JobAttemptRecord(
+            attempt=history[-1].attempt,
+            status=updated.status,
+            current_stage=updated.current_stage,
+            recorded_at=now,
+            job_manifest_uri=manifest_ref.artifact_uri,
+            job_manifest_checksum=manifest_ref.artifact_checksum,
+        )
+        self.persistence.save_job(updated, manifest_ref, event, expected=expected)
+        return updated
+
     def record_prepared_input(self, expected: JobManifest, receipt: PreparedInputReceipt) -> JobManifest:
         """Worker-only reducer cho bước chuẩn bị video; CAS trên revision RUNNING đã claim.
 
@@ -1445,7 +1522,9 @@ class ProjectRegistry:
                 update={
                     "stage_artifacts": [*expected.stage_artifacts, *receipt.stage_artifacts],
                     "status": JobStatus.FAILED if failed else JobStatus.RUNNING,
-                    "current_stage": receipt.error.stage_id if receipt.error else StageId.CAMERA_POSE,
+                    # T-073: thành công thì job dừng ở bước tách frame (không worker nào giữ) cho tới khi một worker
+                    # nhận bước dựng camera; job có frame bị che dừng ở đây chờ người dùng duyệt (AUD-18).
+                    "current_stage": receipt.error.stage_id if receipt.error else StageId.FRAME_EXTRACT,
                     "completed_at": datetime.now(UTC) if failed else None,
                 }
             ),
