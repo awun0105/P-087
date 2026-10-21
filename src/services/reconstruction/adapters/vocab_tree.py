@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import stat
+import struct
 from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -33,6 +35,21 @@ def vocab_tree_spec(format: VocabularyFormat) -> tuple[str, str, int, Path]:
     if format == "faiss":
         return FAISS_VOCAB_TREE_URL, FAISS_VOCAB_TREE_SHA256, FAISS_VOCAB_TREE_SIZE, DEFAULT_FAISS_VOCAB_TREE_PATH
     return VOCAB_TREE_URL, VOCAB_TREE_SHA256, VOCAB_TREE_SIZE, DEFAULT_VOCAB_TREE_PATH
+
+
+def vocabulary_format(version: str) -> VocabularyFormat | None:
+    """Định dạng từ điển theo dòng phiên bản `COLMAP x.y` của chính binary; None khi không đọc được phiên bản."""
+    release = re.search(r"COLMAP (\d+)\.(\d+)", version)
+    if release is None:
+        return None
+    return "faiss" if (int(release[1]), int(release[2])) >= (3, 12) else "flann"
+
+
+def file_format(path: Path) -> VocabularyFormat:
+    """FAISS ghi số nguyên 1 hoặc 2 ở 4 byte đầu; FLANN thì không."""
+    with path.open("rb") as handle:
+        header = handle.read(4)
+    return "faiss" if len(header) == 4 and struct.unpack("<i", header)[0] in (1, 2) else "flann"
 
 
 def _signature(path: Path) -> tuple[int, int, int, int, int]:

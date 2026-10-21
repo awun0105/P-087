@@ -2,11 +2,9 @@
 
 import json
 import logging
-import re
 import shutil
-import struct
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -20,9 +18,15 @@ from src.services.reconstruction.adapters.colmap_priors import (
     guided_commands,
     prepare_guidance,
 )
-from src.services.reconstruction.adapters.colmap_runtime import ColmapError, ColmapProcess, reconstruction_commands
+from src.services.reconstruction.adapters.colmap_runtime import (
+    ColmapError,
+    ColmapProcess,
+    mapper_command,
+    reconstruction_commands,
+    retry_matching_command,
+)
 from src.services.reconstruction.adapters.log_excerpt import redacted_excerpt
-from src.services.reconstruction.adapters.vocab_tree import get_vocab_tree_path
+from src.services.reconstruction.adapters.vocab_tree import file_format, get_vocab_tree_path, vocabulary_format
 from src.services.reconstruction.resume import ResumeCache, content_key
 from src.services.reconstruction.rgb.frames.frame_set import FrameSetResolver, _sha256
 from src.services.reconstruction.rgb.pose.camera_pose import CameraPoseArtifact, ColmapConfig
@@ -66,6 +70,24 @@ class ColmapResult:
     resume_key: str | None = None
     #: Bản ghi độ lệch giữa pose cuối và quỹ đạo khi dựng bám quỹ đạo (bằng chứng cho bước xác nhận tỉ lệ).
     guidance_ref: ProductArtifactRef | None = None
+
+
+#: Bậc ghép mọi cặp chỉ chạy khi số ảnh không quá mức này (số cặp tăng theo bình phương số ảnh).
+EXHAUSTIVE_RETRY_MAX_IMAGES = 400
+RETRY_MAX_OVERLAP = 30
+LOOP_FLAGS = (
+    "loop_detection",
+    "vocab_tree_path",
+    "loop_detection_period",
+    "loop_detection_num_images",
+    "loop_detection_min_index_distance",
+)
+
+
+def _passes(config: ColmapConfig, models: list[ParsedSparseModel], frame_count: int) -> bool:
+    """Mô hình tốt nhất đạt cả hai ngưỡng đăng ký ảnh của config."""
+    best = max((len(model.poses) for model in models), default=0)
+    return best >= config.min_registered_frames and best / frame_count >= config.min_registered_ratio
 
 
 class ColmapAdapter:
@@ -132,7 +154,11 @@ class ColmapAdapter:
                 commands = guided_commands(request.config, request.guidance)
             for command in commands:
                 self.deps.process.run(command, request.workspace)
+        frame_count = len(images.frame_ids)
         models = self._models(request.workspace, images.frame_ids)
+        ladder: list[dict] = []
+        if not reused and request.guidance is None and not _passes(request.config, models, frame_count):
+            models, ladder = self._retry_ladder(request, version, match, images.frame_ids, models)
         if not models:
             log_path = request.workspace / "process.log"
             log_text = log_path.read_text(encoding="utf-8", errors="replace") if log_path.exists() else ""
@@ -148,22 +174,39 @@ class ColmapAdapter:
                         "insufficient_size": insufficient_size,
                     },
                     "log_excerpt": excerpt,
+                    **({"retry_ladder": ladder} if ladder else {}),
                 },
             )
         best = select_sparse_model(models)
-        ratio = len(best.poses) / len(images.frame_ids)
-        if len(best.poses) < request.config.min_registered_frames or ratio < request.config.min_registered_ratio:
-            raise ColmapError(
-                "COLMAP_REGISTRATION_LOW",
-                "Best COLMAP model is below configured registration threshold",
-                details={
-                    "registered_frames": len(best.poses),
-                    "input_frames": len(images.frame_ids),
-                    "min_registered_ratio": request.config.min_registered_ratio,
-                },
-            )
+        ratio = len(best.poses) / frame_count
+        warning = False
+        if not _passes(request.config, [best], frame_count):
+            accept = request.config.accept_registered_ratio_after_retry
+            # Chỉ nhận mô hình thiếu ảnh sau khi thang đã chạy (hoặc mô hình đã được nhận như vậy và lưu cache).
+            if (
+                accept is not None
+                and (ladder or reused)
+                and len(best.poses) >= request.config.min_registered_frames
+                and ratio >= accept
+            ):
+                warning = True
+            else:
+                raise ColmapError(
+                    "COLMAP_REGISTRATION_LOW",
+                    "Best COLMAP model is below configured registration threshold",
+                    details={
+                        "registered_frames": len(best.poses),
+                        "input_frames": frame_count,
+                        "min_registered_ratio": request.config.min_registered_ratio,
+                        **({"retry_ladder": ladder} if ladder else {}),
+                    },
+                )
         payload = self._payload(request, images, best)
         payload.update(colmap_version=version, models=[model.stats.model_dump() for model in models])
+        if ladder:
+            payload["retry_ladder"] = ladder
+        if warning:
+            payload["registration_warning"] = True
         artifact, reference = PosePublisher(self.deps.writer, request.job_id, request.attempt_id).manifest(payload)
         CameraPoseResolver(self.deps.resolve, self.deps.frames).load(reference)
         stage = StageArtifact(
@@ -216,10 +259,10 @@ class ColmapAdapter:
         reference = request.config.vocab_tree
         if reference is None and request.config.matching_mode != "sequential_vocab_tree":
             return None
-        release = re.search(r"COLMAP (\d+)\.(\d+)", version)
-        if request.config.matching_mode == "sequential_vocab_tree" and release is None:
+        runtime_format = vocabulary_format(version)
+        if request.config.matching_mode == "sequential_vocab_tree" and runtime_format is None:
             raise ColmapError("COLMAP_VERSION_UNKNOWN", "Cannot select vocabulary format without a COLMAP version")
-        faiss = release is not None and (int(release[1]), int(release[2])) >= (3, 12)
+        faiss = runtime_format == "faiss"
         if reference is not None:
             path = self.deps.resolve(reference)
             if not path.is_file() or _sha256(path) != reference.artifact_checksum:
@@ -237,10 +280,7 @@ class ColmapAdapter:
                 )
             checksum = _sha256(path)
         if request.config.matching_mode == "sequential_vocab_tree":
-            with path.open("rb") as handle:
-                header = handle.read(4)
-            is_faiss = len(header) == 4 and struct.unpack("<i", header)[0] in (1, 2)
-            if is_faiss != faiss:
+            if (file_format(path) == "faiss") != faiss:
                 raise ColmapError(
                     "VOCAB_TREE_INCOMPATIBLE",
                     "Vocabulary format does not match the COLMAP runtime",
@@ -252,21 +292,105 @@ class ColmapAdapter:
             raise ValueError("COLMAP vocabulary changed during staging")
         return checksum
 
-    def _models(self, workspace: Path, frame_ids: tuple[int, ...]) -> list[ParsedSparseModel]:
+    def _retry_ladder(
+        self,
+        request: ColmapRequest,
+        version: str,
+        match: str,
+        frame_ids: tuple[int, ...],
+        initial: list[ParsedSparseModel],
+    ) -> tuple[list[ParsedSparseModel], list[dict]]:
+        """Thang thử lại trên cùng database.db khi lần ghép đầu không ra mô hình đạt ngưỡng (T-071 C1).
+
+        Bậc 1: ghép liên tiếp với gấp đôi số ảnh lân cận (tối đa 30), bật khép vòng nếu worker có từ điển. Bậc 2 (chỉ
+        khi ≤ 400 ảnh): ghép mọi cặp. Dừng ở bậc đầu tiên đạt ngưỡng; không bậc nào đạt thì giữ bậc có nhiều ảnh nhất
+        (bậc sớm hơn khi bằng nhau). Thang là hàm tất định của config + frame set nên khoá resume cache không đổi.
+        """
+        config = request.config
+        if config.matching_mode == "exhaustive":
+            return initial, []  # Ghép mọi cặp đã là bậc cuối của thang: chạy lại không thêm cặp nào.
+        frame_count = len(frame_ids)
+        loop = config.matching_mode == "sequential_vocab_tree" or self._loop_vocabulary(request, version)
+        overlap = max(config.sequential_overlap, min(RETRY_MAX_OVERLAP, config.sequential_overlap * 2))
+        plan: list[tuple[int, int | None, bool]] = [(1, overlap, loop)]
+        if frame_count <= EXHAUSTIVE_RETRY_MAX_IMAGES:
+            plan.append((2, None, False))
+        attempts: list[tuple[int, str, str, list[ParsedSparseModel]]] = [(0, "sparse", "text", initial)]
+        ladder: list[dict] = []
+        for step, step_overlap, step_loop in plan:
+            sparse, text = f"sparse_r{step}", f"text_r{step}"
+            (request.workspace / sparse).mkdir()
+            command = retry_matching_command(config, match, overlap=step_overlap, loop_detection=step_loop)
+            self.deps.process.run(command, request.workspace)
+            self.deps.process.run(mapper_command(config, sparse), request.workspace)
+            models = self._models(request.workspace, frame_ids, sparse=sparse, text=text)
+            mode = "exhaustive" if step_overlap is None else "sequential_vocab_tree" if step_loop else "sequential"
+            ladder.append(
+                dict(
+                    step=step,
+                    matching_mode=mode,
+                    overlap=step_overlap,
+                    registered_frames=max((len(model.poses) for model in models), default=0),
+                    input_frames=frame_count,
+                )
+            )
+            attempts.append((step, sparse, text, models))
+            if _passes(config, models, frame_count):
+                break
+        logging.getLogger(__name__).info("REC-03 thang thử lại COLMAP: %s", ladder)
+        chosen = next((item for item in attempts if _passes(config, item[3], frame_count)), None) or max(
+            attempts, key=lambda item: (max((len(model.poses) for model in item[3]), default=0), -item[0])
+        )
+        step, sparse, text, models = chosen
+        if step == 0:
+            return models, ladder
+        # Bậc thành công thành `sparse/` (và `text/`): resume cache và artifact chỉ thấy đúng một mô hình.
+        workspace = request.workspace
+        (workspace / "sparse").rename(workspace / "sparse_r0")
+        if (workspace / "text").exists():
+            (workspace / "text").rename(workspace / "text_r0")
+        (workspace / sparse).rename(workspace / "sparse")
+        if (workspace / text).exists():
+            (workspace / text).rename(workspace / "text")
+        return [replace(model, directory=workspace / "text" / model.directory.name) for model in models], ladder
+
+    def _loop_vocabulary(self, request: ColmapRequest, version: str) -> bool:
+        """Bậc 1 của config ghép liên tiếp bật khép vòng chỉ khi binary hỗ trợ và worker có từ điển đúng định dạng.
+
+        Thiếu từ điển hoặc binary không có cờ khép vòng → chạy không khép vòng (không ném `VOCAB_TREE_MISSING`);
+        từ điển sai định dạng vẫn là lỗi cứng của deploy (`VOCAB_TREE_INCOMPATIBLE`).
+        """
+        if vocabulary_format(version) is None:
+            return False
+        options = self.deps.process.run(["sequential_matcher", "-h"], request.workspace)
+        if any(f"--SequentialMatching.{flag}" not in options for flag in LOOP_FLAGS):
+            return False
+        loop_config = request.config.model_copy(update={"matching_mode": "sequential_vocab_tree"})
+        try:
+            self._vocabulary(replace(request, config=loop_config), version)
+        except ColmapError as error:
+            if error.code in {"VOCAB_TREE_MISSING", "COLMAP_VERSION_UNKNOWN"}:
+                return False
+            raise
+        return True
+
+    def _models(
+        self, workspace: Path, frame_ids: tuple[int, ...], *, sparse: str = "sparse", text: str = "text"
+    ) -> list[ParsedSparseModel]:
         models = []
-        candidates = sorted((workspace / "sparse").iterdir(), key=lambda path: path.name)
+        candidates = sorted((workspace / sparse).iterdir(), key=lambda path: path.name)
         for source in candidates:
             if not source.is_dir() or not source.name.isdigit():
                 continue
-            output = workspace / "text" / source.name
+            output = workspace / text / source.name
             output.mkdir(parents=True)
             self.deps.process.run(
                 [
                     "model_converter",
                     "--input_path",
-                    f"sparse/{source.name}",
+                    f"{sparse}/{source.name}",
                     "--output_path",
-                    f"text/{source.name}",
+                    f"{text}/{source.name}",
                     "--output_type",
                     "TXT",
                 ],

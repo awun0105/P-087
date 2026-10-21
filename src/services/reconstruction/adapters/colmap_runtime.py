@@ -36,6 +36,10 @@ class ColmapRuntimeSettings(RuntimeSettings):
     model_config = SettingsConfigDict(env_prefix="R2S_COLMAP_", extra="forbid")
 
 
+#: Thư mục sparse của các bậc thử lại; bậc thành công được đổi tên thành `sparse/` trước khi lưu.
+RETRY_SPARSE_DIRS: tuple[str, ...] = ("sparse_r1", "sparse_r2")
+
+
 class ColmapError(ValueError):
     """Lỗi có remediation, không serialize private process path/stderr ra UI."""
 
@@ -80,6 +84,8 @@ def _run_watched(
             file_size_marker(workspace / "process.log"),
             file_size_marker(workspace / "database.db"),
             tree_marker(workspace / "sparse", depth=2),
+            # Thang thử lại ghi mô hình của từng bậc vào thư mục riêng (T-071 C1).
+            *(tree_marker(workspace / name, depth=2) for name in RETRY_SPARSE_DIRS),
             tree_marker(workspace / "training", depth=2),
         ],
         stall_code="PROCESS_STALLED",
@@ -186,9 +192,23 @@ class ColmapProcess:
 def reconstruction_commands(config: ColmapConfig, flags: tuple[str, str]) -> list[list[str]]:
     """Chuỗi Re3Sim/Nannigalaxy qua CLI; vocabulary tùy chọn đã verify trước."""
     feature, match = flags
-    mapper = ["mapper", "--database_path", "database.db", "--image_path", "images", "--output_path", "sparse"]
-    mapper += ["--Mapper.num_threads", str(config.num_threads), "--Mapper.random_seed", str(config.random_seed)]
-    return [_extraction_command(config, feature), _matching_command(config, match), mapper]
+    return [_extraction_command(config, feature), _matching_command(config, match), mapper_command(config)]
+
+
+def mapper_command(config: ColmapConfig, output: str = "sparse") -> list[str]:
+    """`mapper` trên database.db hiện có; thang thử lại ghi mỗi bậc vào thư mục riêng."""
+    mapper = ["mapper", "--database_path", "database.db", "--image_path", "images", "--output_path", output]
+    return mapper + ["--Mapper.num_threads", str(config.num_threads), "--Mapper.random_seed", str(config.random_seed)]
+
+
+def retry_matching_command(config: ColmapConfig, match: str, *, overlap: int | None, loop_detection: bool) -> list[str]:
+    """Lệnh ghép ảnh của một bậc thử lại; `overlap=None` là ghép mọi cặp.
+
+    Chạy trên cùng database.db: cặp đã ghép được bỏ qua, chỉ cặp mới được thêm vào.
+    """
+    if overlap is None:
+        return _matching_command(config.model_copy(update={"matching_mode": "exhaustive"}), match)
+    return _matching_command(config, match, overlap=overlap, loop_detection=loop_detection)
 
 
 def _extraction_command(config: ColmapConfig, feature: str) -> list[str]:
@@ -214,7 +234,11 @@ def _extraction_command(config: ColmapConfig, feature: str) -> list[str]:
     return extraction
 
 
-def _matching_command(config: ColmapConfig, match: str) -> list[str]:
+def _matching_command(
+    config: ColmapConfig, match: str, *, overlap: int | None = None, loop_detection: bool | None = None
+) -> list[str]:
+    """Lệnh ghép theo config; bậc thử lại truyền `overlap` và `loop_detection` tường minh."""
+    loop = config.matching_mode == "sequential_vocab_tree" if loop_detection is None else loop_detection
     matching = [
         "exhaustive_matcher" if config.matching_mode == "exhaustive" else "sequential_matcher",
         "--database_path",
@@ -228,11 +252,11 @@ def _matching_command(config: ColmapConfig, match: str) -> list[str]:
         return matching
     matching += [
         "--SequentialMatching.overlap",
-        str(config.sequential_overlap),
+        str(config.sequential_overlap if overlap is None else overlap),
         "--SequentialMatching.loop_detection",
-        str(int(config.matching_mode == "sequential_vocab_tree")),
+        str(int(loop)),
     ]
-    if config.matching_mode == "sequential_vocab_tree":
+    if loop:
         matching += [
             "--SequentialMatching.vocab_tree_path",
             "vocab_tree.bin",

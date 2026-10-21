@@ -47,6 +47,18 @@ class ColmapConfig(ContractModel):
     loop_detection_period: int = Field(default=10, ge=1, exclude_if=lambda value: value == 10)
     loop_detection_num_images: int = Field(default=50, ge=1, exclude_if=lambda value: value == 50)
     loop_detection_min_index_distance: int = Field(default=50, ge=0, exclude_if=lambda value: value == 50)
+    #: Sau thang thử lại vẫn dưới `min_registered_ratio`: chấp nhận mô hình đạt ngưỡng này kèm cảnh báo vùng thiếu ảnh
+    #: (T-071 C3). None = không chấp nhận (config cũ giữ nguyên bytes/checksum).
+    accept_registered_ratio_after_retry: float | None = Field(
+        default=None, gt=0, le=1, allow_inf_nan=False, exclude_if=lambda value: value is None
+    )
+
+    @model_validator(mode="after")
+    def _retry_acceptance_below_gate(self) -> "ColmapConfig":
+        accept = self.accept_registered_ratio_after_retry
+        if accept is not None and accept > self.min_registered_ratio:
+            raise ValueError("accept_registered_ratio_after_retry must not exceed min_registered_ratio")
+        return self
 
     def checksum(self) -> str:
         """Hash đầy đủ config, không thêm self-checksum field vào schema."""
@@ -99,6 +111,16 @@ class SparseModelStats(ContractModel):
     sparse_points: int = Field(gt=0)
 
 
+class ColmapRetryStep(ContractModel):
+    """Một bậc của thang thử lại COLMAP trong cùng lượt chạy (cùng database.db, không trích đặc trưng lại)."""
+
+    step: int = Field(ge=1)
+    matching_mode: Literal["sequential", "sequential_vocab_tree", "exhaustive"]
+    overlap: int | None = Field(default=None, ge=2)
+    registered_frames: int = Field(ge=0)
+    input_frames: int = Field(gt=0)
+
+
 class CameraPoseArtifact(ContractModel):
     """Manifest nội bộ cho REC-04/05/06, không phải canonical bundle REC-10."""
 
@@ -123,6 +145,10 @@ class CameraPoseArtifact(ContractModel):
     poses: list[CameraPose]
     sparse_files: dict[str, ProductArtifactRef]
     log_ref: ProductArtifactRef
+    #: Các bậc đã chạy thêm khi lần ghép đầu không đạt; vắng mặt trong JSON khi không thử lại (giữ bytes cũ).
+    retry_ladder: list[ColmapRetryStep] = Field(default_factory=list, exclude_if=lambda value: not value)
+    #: Mô hình dưới `min_registered_ratio` được nhận sau thang thử lại: vùng thiếu ảnh có thể mờ hoặc thủng.
+    registration_warning: bool = Field(default=False, exclude_if=lambda value: value is False)
     artifact_checksum: Checksum
 
     @model_validator(mode="after")
@@ -136,7 +162,13 @@ class CameraPoseArtifact(ContractModel):
             raise ValueError("unregistered inventory mismatch")
         if self.registered_ratio != len(ids) / len(self.input_frame_ids):
             raise ValueError("registered ratio mismatch")
-        if len(ids) < self.config.min_registered_frames or self.registered_ratio < self.config.min_registered_ratio:
+        if len(ids) < self.config.min_registered_frames:
+            raise ValueError("camera registration below configured threshold")
+        below = self.registered_ratio < self.config.min_registered_ratio
+        accept = self.config.accept_registered_ratio_after_retry
+        if self.registration_warning != below:
+            raise ValueError("registration warning must mark exactly a model below the configured ratio")
+        if below and (accept is None or self.registered_ratio < accept):
             raise ValueError("camera registration below configured threshold")
         camera_ids = [camera.camera_id for camera in self.cameras]
         if len(camera_ids) != len(set(camera_ids)) or any(p.camera_id not in camera_ids for p in self.poses):

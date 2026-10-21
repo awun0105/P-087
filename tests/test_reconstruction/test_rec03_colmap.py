@@ -128,8 +128,9 @@ class FixtureProcess(ColmapProcess):
         if self.mode == "failed":
             raise ColmapError("COLMAP_PROCESS_FAILED", "fixture process failure")
         if arguments[0] == "mapper" and self.mode != "empty":
+            output = arguments[arguments.index("--output_path") + 1] if "--output_path" in arguments else "sparse"
             for model in ("0", "2", "10"):
-                directory = workspace / "sparse" / model
+                directory = workspace / output / model
                 directory.mkdir()
                 (directory / "points3D.bin").write_bytes(f"fixture sparse model {model}".encode())
         if arguments[0] == "model_converter":
@@ -531,7 +532,7 @@ def test_colmap_no_model_diagnostics(tmp_path: Path) -> None:
         return orig_run(arguments, workspace)
 
     service.deps.process.run = mock_run  # type: ignore[method-assign]
-    service._models = lambda ws, ids: []  # type: ignore[assignment]
+    service._models = lambda ws, ids, **_: []  # type: ignore[assignment]
 
     with pytest.raises(ColmapError) as no_model_info:
         service.execute(request)
@@ -541,9 +542,12 @@ def test_colmap_no_model_diagnostics(tmp_path: Path) -> None:
     stage = err.to_failed_stage()
     assert stage.error is not None
     assert stage.error.retryable is False
-    assert stage.error.details["diagnostics"] == {"no_initial_pair": 2, "insufficient_size": 1}
+    # Ba lần `mapper` (lần đầu + hai bậc thử lại) cùng ghi vào process.log.
+    assert stage.error.details["diagnostics"] == {"no_initial_pair": 6, "insufficient_size": 3}
     assert "log_excerpt" in stage.error.details
     assert str(tmp_path) not in str(stage.error.details)
+    # Thang thử lại đã chạy đủ hai bậc trước khi báo lỗi (T-071 C3).
+    assert [item["step"] for item in stage.error.details["retry_ladder"]] == [1, 2]
 
 
 def test_colmap_registration_low_details(tmp_path: Path) -> None:
@@ -566,6 +570,10 @@ def test_colmap_registration_low_details(tmp_path: Path) -> None:
     assert stage.error.details["registered_frames"] == 3
     assert stage.error.details["input_frames"] == 4
     assert stage.error.details["min_registered_ratio"] == 1.0
+    assert stage.error.details["retry_ladder"] == [
+        {"step": 1, "matching_mode": "sequential", "overlap": 10, "registered_frames": 3, "input_frames": 4},
+        {"step": 2, "matching_mode": "exhaustive", "overlap": None, "registered_frames": 3, "input_frames": 4},
+    ]
 
 
 def test_excerpt_keeps_tail_of_a_single_oversized_line_and_slices_log_by_bytes(tmp_path: Path) -> None:
