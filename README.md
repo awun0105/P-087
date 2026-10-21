@@ -69,4 +69,13 @@ Test chạy trên dữ liệu giả; chúng không thay cho việc chạy job GP
 
 Toàn bộ bản đồ tài liệu: [docs/README.md](docs/README.md).
 
+## Nhóm
+
+| Thành viên | Mã học viên | GitHub |
+| --- | --- | --- |
+| Lê Mạnh Cường | 2A202602604 | [@Cuongluadu25](https://github.com/Cuongluadu25) |
+| Nguyễn Thọ Đạt | 2A202602484 | [@Usagshfil](https://github.com/Usagshfil) |
+| Lâm Quang Anh Quân | 2A202602467 | [@awun0105](https://github.com/awun0105) |
+| Nguyễn Minh Đức | 2A202602783 | [@minhduckx2004](https://github.com/minhduckx2004) |
+
 Giấy phép: [MIT](LICENSE). Thành phần bên thứ ba: [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES.md).
