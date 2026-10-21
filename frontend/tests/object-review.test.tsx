@@ -458,7 +458,7 @@ describe("ObjectReviewView", () => {
     await screen.findByText("1 vật thể · 1 chờ xác nhận");
     fireEvent.click(screen.getByRole("button", { name: /Nguồn collision LiDAR/ }));
 
-    expect(await screen.findByText(/Job chưa publish candidate LiDAR/)).toBeInTheDocument();
+    expect(await screen.findByText(/chưa có lưới va chạm từ LiDAR/)).toBeInTheDocument();
     expect(calls("/scene/collision-source/lidar")).toHaveLength(0);
   });
 
@@ -485,7 +485,7 @@ describe("ObjectReviewView", () => {
       secondary_object_ids: ["candidate-002"],
       semantic_class_source_object_id: "candidate-002",
     });
-    expect(await screen.findByText(/Lệnh gắn với revision rev-002/)).toBeInTheDocument();
+    expect(await screen.findByText(/Áp dụng cho bản rev-002/)).toBeInTheDocument();
   });
 
   it("reassign ROI gửi bounds canonical theo mét và reload scene mới", async () => {
@@ -514,7 +514,7 @@ describe("ObjectReviewView", () => {
       source_object_id: "candidate-001",
       target_object_id: null,
     });
-    expect(await screen.findByText(/Lệnh gắn với revision rev-002/)).toBeInTheDocument();
+    expect(await screen.findByText(/Áp dụng cho bản rev-002/)).toBeInTheDocument();
   });
 
   it("hủy selection và giữ canonical scene sau conflict 409", async () => {
@@ -537,7 +537,7 @@ describe("ObjectReviewView", () => {
     fireEvent.click(screen.getByRole("button", { name: "Gộp ứng viên" }));
 
     expect(await screen.findByText(/Scene đã đổi ở lượt khác/)).toBeInTheDocument();
-    expect(screen.getByText(/Lệnh gắn với revision rev-001/)).toBeInTheDocument();
+    expect(screen.getByText(/Áp dụng cho bản rev-001/)).toBeInTheDocument();
     await waitFor(() => expect(calls("/scene").filter(([url]) => String(url).endsWith("/scene"))).toHaveLength(2));
   });
 
@@ -546,7 +546,7 @@ describe("ObjectReviewView", () => {
     render(<ObjectReviewView jobId="job-a" />);
     await screen.findByText("1 vật thể · 1 chờ xác nhận");
     fireEvent.click(screen.getByRole("button", { name: /Sửa nhóm Gaussian/ }));
-    expect(await screen.findByText(/chưa lưu Gaussian membership/)).toBeInTheDocument();
+    expect(await screen.findByText(/chưa lưu vùng Gaussian của từng vật/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Gộp ứng viên" })).toBeNull();
   });
 
@@ -997,7 +997,7 @@ describe("ObjectReviewView", () => {
     render(<ObjectReviewView jobId="job-a" />);
     fireEvent.click(await screen.findByRole("button", { name: "Chọn Vật thể 1" }));
 
-    expect(await screen.findByText(/Hiện chỉ chỉnh được AABB\/OBB/)).toBeInTheDocument();
+    expect(await screen.findByText(/Chỉ chỉnh được collider dạng hộp/)).toBeInTheDocument();
     expect(screen.queryByLabelText("Kích thước collider X (m)")).toBeNull();
   });
 
@@ -1146,7 +1146,7 @@ describe("ObjectReviewView", () => {
     base.objects[0] = { ...base.objects[0], visual_ref: { ...ref, artifact_type: "ObjectGaussians" } } as (typeof base.objects)[0];
     routeFetch({ "/scene": [reply({ scene: base })] });
     render(<ObjectReviewView jobId="job-a" />);
-    expect(await screen.findByText(/SOURCE_POLICY_MISSING/)).toBeInTheDocument();
+    expect(await screen.findByText(/Thiếu dữ liệu để đặt Gaussian/)).toBeInTheDocument();
     const objects = JSON.parse(screen.getByTestId("metric-scene").dataset.objects!);
     expect(objects.every((item: { url: string | null }) => item.url === null)).toBe(true);
   });
