@@ -28,7 +28,7 @@ describe("kết quả đúng revision", () => {
   });
   it("revision đã đổi thì chỉ giữ download bản làm việc", async () => {
     render(<ResultsTab jobId="job-a" preview={preview} revision="rev-2" />);
-    expect(await screen.findByText(/Scene đã đổi revision/)).toBeInTheDocument();
+    expect(await screen.findByText(/Scene đã có phiên bản mới/)).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Tải gói" })).toBeNull();
     expect(screen.queryByRole("link", { name: "Tải bản phát hành" })).toBeNull();
     expect(screen.getByRole("link", { name: "Tải preview.sog" })).toHaveAttribute("href", "/preview.sog");

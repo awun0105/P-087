@@ -24,8 +24,8 @@ import { cn } from "@/lib/cn";
 const STATUS_LABEL: Record<RevisionStatus, { label: string; tone: "neutral" | "ochre" | "sage" | "rust" | "ember" }> = {
   DRAFT: { label: "Bản nháp", tone: "neutral" },
   PROCESSING: { label: "Đang xử lý", tone: "ember" },
-  CANDIDATE_READY: { label: "Có gói — chờ validation", tone: "ochre" },
-  VALIDATING: { label: "Đang validation", tone: "ember" },
+  CANDIDATE_READY: { label: "Có gói — chờ kiểm tra", tone: "ochre" },
+  VALIDATING: { label: "Đang kiểm tra", tone: "ember" },
   READY_FOR_REVIEW: { label: "Đạt kiểm tra — chờ duyệt", tone: "ochre" },
   APPROVED: { label: "Đã duyệt — chưa phát hành", tone: "ochre" },
   REJECTED: { label: "Bị từ chối", tone: "rust" },
@@ -84,7 +84,7 @@ export function ReviewPanel({ jobId, sceneRevision, refreshToken = 0, onState }:
     try {
       const next = await action();
       setState(next);
-      notifySuccess(next.record.status === "RELEASED" ? "Đã phát hành gói được duyệt." : next.record.status === "REJECTED" ? "Đã gửi yêu cầu sửa." : "Đã ghi nhận thao tác duyệt; xem trạng thái mới trong panel.");
+      notifySuccess(next.record.status === "RELEASED" ? "Đã phát hành gói được duyệt." : next.record.status === "REJECTED" ? "Đã gửi yêu cầu sửa." : "Đã ghi nhận quyết định duyệt.");
       setConfirming(false);
     } catch (cause: unknown) {
       setError(errorMessage(cause, "Thao tác thất bại"));
@@ -98,7 +98,7 @@ export function ReviewPanel({ jobId, sceneRevision, refreshToken = 0, onState }:
   }
   const { record, validation } = state;
   if (record.scene_revision !== sceneRevision) {
-    return <Notice tone="ochre" className="m-4">Trạng thái duyệt đang thuộc {record.scene_revision}; scene hiện tại là {sceneRevision}. Tải lại scene trước khi quyết định.</Notice>;
+    return <Notice tone="ochre" className="m-4">Scene đã có phiên bản mới. Tải lại trang trước khi duyệt.</Notice>;
   }
   const reviewer = canDecideReview(me);
   const status = STATUS_LABEL[record.status];
@@ -141,21 +141,21 @@ export function ReviewPanel({ jobId, sceneRevision, refreshToken = 0, onState }:
       {state.release_seal_error && <Notice tone="ochre">{state.release_seal_error}</Notice>}
       {validation && (
         <p className="text-ink-muted">
-          Validation <span className="font-medium text-ink">{validation.overall_result}</span> · {validation.validator_version} ·{" "}
-          {validation.checks.length} check · {validation.path_results.length} cặp Start–Goal. Chi tiết và bằng chứng ở thẻ Báo cáo validation.
+          Kết quả kiểm tra <span className="font-medium text-ink">{validation.overall_result}</span> ·{" "}
+          {validation.checks.length} mục · {validation.path_results.length} cặp Start–Goal. Chi tiết ở thẻ Báo cáo kiểm tra.
         </p>
       )}
       {validation && state.isaac_runtime_proof !== true && (
-        <Notice tone="ochre">Báo cáo này chưa gắn với validation run worker và runtime manifest đã xác minh; chỉ dùng để xem thông tin.</Notice>
+        <Notice tone="ochre">Báo cáo này chưa đến từ một lần chạy Isaac Sim đã xác minh, chỉ để tham khảo.</Notice>
       )}
       {record.status === "READY_FOR_REVIEW" && !canReview && state.blockers.length === 0 && (
-        <Notice tone="rust">Backend chưa cung cấp eligibility hợp lệ cho revision này. Tải lại trạng thái trước khi quyết định.</Notice>
+        <Notice tone="rust">Chưa đọc được điều kiện duyệt. Tải lại trang trước khi quyết định.</Notice>
       )}
       {canReview && !reviewer && (
         <Notice tone="ochre">
           {me?.auth_required === false
-            ? "Deployment chưa bật đăng nhập nên không thể duyệt. Đặt AUTH_REQUIRED=true và đăng nhập bằng tài khoản Reviewer để duyệt hoặc yêu cầu sửa."
-            : "Chỉ Reviewer có quyền phê duyệt hoặc yêu cầu sửa. Bạn có thể xem báo cáo và bằng chứng của revision này."}
+            ? "Bản cài đặt này chưa bật đăng nhập nên không duyệt được. Báo quản trị viên."
+            : "Chỉ người duyệt (Reviewer) mới phê duyệt hoặc yêu cầu sửa được."}
         </Notice>
       )}
       {canReview && reviewer && (
@@ -185,7 +185,7 @@ export function ReviewPanel({ jobId, sceneRevision, refreshToken = 0, onState }:
                     </label>
                     {(check || path) && (
                       <p id={describedBy} className="ml-5 text-xs text-ink-muted">
-                        {message ?? (path ? `Kết quả ${path.result}.` : "Check không kèm thông điệp.")} · {evidenceCount > 0 ? `${evidenceCount} bằng chứng trong báo cáo` : "không kèm bằng chứng"}
+                        {message ?? (path ? `Kết quả ${path.result}.` : "Không có mô tả.")} · {evidenceCount > 0 ? `${evidenceCount} bằng chứng trong báo cáo` : "không kèm bằng chứng"}
                       </p>
                     )}
                   </div>
@@ -196,8 +196,7 @@ export function ReviewPanel({ jobId, sceneRevision, refreshToken = 0, onState }:
           {confirming ? (
             <div className="space-y-1.5 rounded-md border border-line p-2">
               <p>
-                Phê duyệt gói <code>{record.candidate_checksum?.slice(7, 19)}</code> của {record.scene_revision}? Hệ thống
-                sẽ phát hành đúng gói này ngay sau đó.
+                Phê duyệt gói <code>{record.candidate_checksum?.slice(7, 19)}</code>? Gói sẽ được phát hành ngay sau đó.
               </p>
               <div className="flex gap-1.5">
                 <Button size="sm" disabled={busy} onClick={() => decision("APPROVE")}>
@@ -240,9 +239,9 @@ export function ReviewPanel({ jobId, sceneRevision, refreshToken = 0, onState }:
           <div className="mt-2">
             <TraceList
               rows={[
-                { label: "Checksum gói đã quyết định", value: state.approval.candidate_checksum },
-                { label: "Checksum báo cáo đã xem", value: state.approval.validation_report_checksum },
-                { label: "Checksum bản ghi duyệt", value: state.approval.record_checksum },
+                { label: "Mã gói đã duyệt", value: state.approval.candidate_checksum },
+                { label: "Mã báo cáo đã xem", value: state.approval.validation_report_checksum },
+                { label: "Mã bản ghi duyệt", value: state.approval.record_checksum },
               ]}
             />
           </div>
@@ -256,7 +255,7 @@ export function ReviewPanel({ jobId, sceneRevision, refreshToken = 0, onState }:
       {record.status === "RELEASED" && state.release && (
         <>
           <p className="text-ink-muted">
-            Phát hành {new Date(state.release.release_timestamp).toLocaleString("vi-VN")} · manifest{" "}
+            Phát hành {new Date(state.release.release_timestamp).toLocaleString("vi-VN")} · mã{" "}
             <code>{state.release.release_manifest_checksum.slice(7, 19)}</code>
           </p>
           <a href={releaseDownloadUrl(jobId)} className={cn(buttonVariants({ size: "sm" }), "w-full")}>
@@ -264,7 +263,7 @@ export function ReviewPanel({ jobId, sceneRevision, refreshToken = 0, onState }:
           </a>
         </>
       )}
-      {record.status === "REJECTED" && <p className="text-ink-muted">Sửa scene (tạo revision mới) rồi tạo gói và kiểm tra lại.</p>}
+      {record.status === "REJECTED" && <p className="text-ink-muted">Sửa scene rồi tạo gói và kiểm tra lại.</p>}
       {error && <p className="text-rust">{error}</p>}
     </section>
   );
@@ -289,22 +288,22 @@ function ReviewSteps({ state }: { state: ReviewStateView }) {
     state.blockers.length === 0;
   const decided = status === "APPROVED" || status === "REJECTED" || status === "RELEASED";
   const steps: { label: string; state: StepState; note: string }[] = [
-    { label: "Gói mô phỏng + preflight", state: hasPackage ? "done" : "next", note: hasPackage ? "Có gói cho revision này" : "Tạo gói ở mục Gói mô phỏng" },
+    { label: "Gói mô phỏng", state: hasPackage ? "done" : "next", note: hasPackage ? "Đã có gói" : "Tạo gói ở mục Gói mô phỏng" },
     {
-      label: "Validation Isaac Sim",
+      label: "Kiểm tra bằng Isaac Sim",
       state: validated ? "done" : state.blockers.length > 0 || state.validation ? "blocked" : hasPackage ? "unavailable" : "blocked",
       note: state.validation
         ? validated
-          ? `Kết quả ${state.validation.overall_result} từ run worker đã xác minh`
-          : "Báo cáo chưa đủ điều kiện làm validation proof"
+          ? `Kết quả ${state.validation.overall_result}`
+          : "Báo cáo chưa đủ điều kiện để duyệt"
         : state.blockers.length > 0
           ? "Có lý do chặn, xem bên dưới"
-          : "Chưa khả dụng: chưa có validation run được chọn",
+          : "Chưa chọn lần kiểm tra nào",
     },
     {
       label: "Người duyệt quyết định",
       state: decided ? "done" : validated && status === "READY_FOR_REVIEW" ? "next" : state.blockers.length > 0 ? "blocked" : hasPackage ? "unavailable" : "blocked",
-      note: decided ? (status === "REJECTED" ? "Bị từ chối" : "Đã duyệt") : validated ? "Chờ Reviewer xem xét" : "Chỉ mở khi đủ validation proof",
+      note: decided ? (status === "REJECTED" ? "Bị từ chối" : "Đã duyệt") : validated ? "Chờ người duyệt" : "Mở sau khi kiểm tra đạt",
     },
     {
       label: "Phát hành",

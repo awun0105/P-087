@@ -23,7 +23,7 @@ const RULE_LABEL: Record<string, string> = {
   TRANSFORM_INVALID: "Vị trí/hướng hợp lệ",
   OBJECT_OUT_OF_BOUNDS: "Vật nằm trong kho, trên sàn",
   OBJECT_CONFIRMATION_INCOMPLETE: "Không còn ứng viên đang bật chưa xác nhận",
-  COLLISION_SOURCE_COVERAGE: "Coverage ownership collider nguồn",
+  COLLISION_SOURCE_COVERAGE: "Mọi phần va chạm đều có vật sở hữu",
   REQUIRED_ARTIFACT_MISSING: "Đủ file hình học/collider",
 };
 
@@ -75,7 +75,7 @@ export function SimulationPackagePanel({
       // dù physics enrichment tạm có một scene_revision khác (backend contract).
       setResult({ revision: value.package_ref ? value.scene_revision : value.source_scene_revision, value });
       // PASS tạo revision scene có physics; màn cha tải lại scene để đồng bộ.
-      if (value.package_ref) { notifySuccess("Đã tạo gói mô phỏng của revision mới."); onSceneChanged(); }
+      if (value.package_ref) { notifySuccess("Đã tạo gói mô phỏng."); onSceneChanged(); }
     } catch (cause: unknown) {
       setError(errorMessage(cause, "Tạo gói thất bại"));
     } finally {
@@ -108,13 +108,11 @@ export function SimulationPackagePanel({
           </Button>
         )}
       </div>
-      {!canCreate && <p className="text-xs text-ink-muted">Chỉ chủ sở hữu Guest, Editor hoặc Reviewer mới được tạo gói cho job này.</p>}
+      {!canCreate && <p className="text-xs text-ink-muted">Bạn chưa có quyền tạo gói cho scene này.</p>}
       {error && <p role="alert" className="text-sm text-rust">{error}</p>}
       {!pkg && !error && (
         <p className="text-sm text-ink-muted">
-          Chỉ vật đã xác nhận thành vật riêng trong gói (hình + collider + khối lượng + nhãn); ứng viên chưa xác nhận nằm
-          trong hình của nền. Hệ thống khoét chỗ vật khỏi collision mesh môi trường, rồi kiểm
-          trước khi đóng gói USD.
+          Chỉ vật đã xác nhận mới thành vật riêng trong gói. Ứng viên chưa xác nhận được tính vào nền.
         </p>
       )}
       {pkg && (
@@ -145,9 +143,8 @@ export function SimulationPackagePanel({
           </p>
           {pkg.retained_shared_triangles > 0 && (
             <p role="status" className="rounded-md border border-line p-3 text-ink-muted" aria-label="Tam giác nền được giữ lại">
-              Giữ lại {pkg.retained_shared_triangles.toLocaleString("vi-VN")} tam giác nền nằm trong vùng chồng giữa vật
-              bị khoét và ứng viên chưa xử lý ({pkg.retained_shared_object_ids.join(", ")}) vì chưa biết chúng thuộc vật nào.
-              Xác nhận hoặc xoá các ứng viên đó rồi tạo lại gói nếu muốn khoét hết.
+              Còn {pkg.retained_shared_triangles.toLocaleString("vi-VN")} tam giác nền chưa rõ thuộc vật nào ({pkg.retained_shared_object_ids.join(", ")}).
+              Xác nhận hoặc xoá các ứng viên đó rồi tạo lại gói.
             </p>
           )}
           {pkg.export_capability && (
@@ -183,7 +180,7 @@ export function SimulationPackagePanel({
               )}
               {pkg.export_capability.status === "blocked" && (
                 <p className="text-ink-muted">
-                  Candidate chưa được tạo. Khắc phục điều kiện trên rồi thử lại; lần thử lại đánh giá cùng các yêu cầu của scene hiện tại.
+                  Chưa tạo được gói. Sửa các mục trên rồi thử lại.
                 </p>
               )}
             </div>
@@ -196,9 +193,9 @@ export function SimulationPackagePanel({
               <Download aria-hidden /> Tải gói USD cho Isaac (.zip)
             </a>
           ) : pkg.export_capability?.status === "blocked" ? null : pkg.preflight.blocking_result !== "PASS" ? (
-            <p className="text-rust">Chưa đạt Preflight; sửa theo các mục đỏ rồi tạo lại.</p>
+            <p className="text-rust">Chưa đạt kiểm tra. Sửa các mục đỏ rồi tạo lại.</p>
           ) : (
-            <p className="text-rust">Chưa có gói tải xuống; kiểm tra lại capability rồi thử tạo gói.</p>
+            <p className="text-rust">Chưa có gói để tải. Bấm Kiểm tra lại rồi tạo gói.</p>
           )}
         </div>
       )}

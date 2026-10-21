@@ -42,10 +42,10 @@ export function ValidationReportCard({ state }: { state: ReviewStateView }) {
   const collisionSupport = new Map((report.collision_path_support ?? []).map((item) => [item.pair_id, item]));
   const otherCandidate = Boolean(report.candidate_checksum && state.record.candidate_checksum && report.candidate_checksum !== state.record.candidate_checksum);
   return (
-    <section className="space-y-4 p-5 text-sm" aria-label="Báo cáo validation">
+    <section className="space-y-4 p-5 text-sm" aria-label="Báo cáo kiểm tra">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="flex items-center gap-1.5 font-bold text-ink">
-          <FileSearch className="size-4" aria-hidden /> Báo cáo validation
+          <FileSearch className="size-4" aria-hidden /> Báo cáo kiểm tra
         </h3>
         <ResultBadge value={report.overall_result} />
       </div>
@@ -59,7 +59,7 @@ export function ValidationReportCard({ state }: { state: ReviewStateView }) {
           </p>
         </Notice>
       )}
-      {otherCandidate && <Notice tone="rust">Báo cáo này thuộc một gói khác với gói của revision đang xem. Tải lại trang trước khi quyết định.</Notice>}
+      {otherCandidate && <Notice tone="rust">Báo cáo này thuộc một gói khác. Tải lại trang trước khi quyết định.</Notice>}
       <div>
         <h4 className="label-tech text-ink-muted">Check ({report.checks.length})</h4>
         <ul className="mt-2 divide-y divide-line rounded-lg border border-line">
@@ -77,10 +77,10 @@ export function ValidationReportCard({ state }: { state: ReviewStateView }) {
             {report.path_results.map((path) => {
               const support = collisionSupport.get(path.pair_id);
               const coverage = !report.collision_quality_ref
-                ? "Chưa có CollisionQualityReport; CLEAR chỉ là kết quả quan sát của candidate."
+                ? "Chưa có báo cáo chất lượng va chạm; CLEAR chỉ là kết quả quan sát."
                 : support
                   ? `Coverage collider ${(support.coverage_fraction * 100).toFixed(1)}% · ${collisionStateLabels[support.state]}`
-                  : "CollisionQualityReport chưa ghi coverage cho cặp này; không xác nhận CLEAR an toàn.";
+                  : "Chưa kiểm chất lượng va chạm cho cặp này; CLEAR chưa chắc an toàn.";
               const message = [path.message, coverage].filter(Boolean).join(" · ");
               return (
                 <ResultRow
@@ -105,13 +105,13 @@ export function ValidationReportCard({ state }: { state: ReviewStateView }) {
       <details className="rounded-lg border border-line px-3 py-2">
         <summary className="cursor-pointer font-medium text-ink focus-visible:outline-2 focus-visible:outline-ember">Nguồn kết quả</summary>
         <div className="mt-3 space-y-2">
-          <p className="text-xs text-ink-muted">Đối chiếu để chắc báo cáo thuộc đúng gói của revision đang xem.</p>
+          <p className="text-xs text-ink-muted">Dùng để đối chiếu báo cáo với đúng gói.</p>
           <TraceList
             rows={[
               { label: "Revision scene", value: state.record.scene_revision },
-              { label: "Checksum gói (candidate)", value: report.candidate_checksum },
-              { label: "Checksum báo cáo", value: report.report_checksum },
-              { label: "CollisionQualityReport", value: report.collision_quality_ref?.artifact_uri ?? "chưa có" },
+              { label: "Mã gói", value: report.candidate_checksum },
+              { label: "Mã báo cáo", value: report.report_checksum },
+              { label: "Báo cáo chất lượng va chạm", value: report.collision_quality_ref?.artifact_uri ?? "chưa có" },
               { label: "Validator", value: report.validator_version },
               ...environment.map(([key, version]) => ({ label: `Môi trường · ${key}`, value: version })),
             ]}
@@ -128,7 +128,7 @@ function ResultRow({ id, result, message, evidence, needsAcceptance }: { id: str
       <div className="flex flex-wrap items-center gap-2">
         <code className="font-mono text-xs font-medium text-ink">{id}</code>
         <ResultBadge value={result} />
-        {needsAcceptance && <Badge tone="ochre">Cần Reviewer chấp nhận</Badge>}
+        {needsAcceptance && <Badge tone="ochre">Cần người duyệt chấp nhận</Badge>}
       </div>
       {message && <p className="mt-1 text-ink-muted">{message}</p>}
       {evidence.length === 0 ? (

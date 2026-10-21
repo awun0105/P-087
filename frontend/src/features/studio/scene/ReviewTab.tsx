@@ -51,7 +51,7 @@ export function ReviewTab({ jobId, canMutateJob, onSaveState }: { jobId: string;
     <div className="mx-auto grid max-w-5xl gap-4 px-4 py-6 sm:px-6 lg:grid-cols-2">
       <div className="lg:col-span-2">
         <h2 className="flex flex-wrap items-center gap-2 text-xl font-bold tracking-tight">Kiểm tra & duyệt <Badge tone="neutral">{revision}</Badge></h2>
-        <p className="mt-1 text-sm text-ink-muted">Tạo gói và đọc preflight trước; validation cùng quyết định Reviewer áp dụng cho đúng gói của revision này.</p>
+        <p className="mt-1 text-sm text-ink-muted">Tạo gói, chạy kiểm tra rồi gửi duyệt.</p>
       </div>
       {floorFit && <div className="lg:col-span-2">
         <Notice tone={floorFit.tone}>
@@ -59,7 +59,7 @@ export function ReviewTab({ jobId, canMutateJob, onSaveState }: { jobId: string;
             <p className="font-semibold">{floorFit.title}</p>
             <p>{floorFit.message}</p>
             {floorFit.evidenceArtifactUri && <details className="pt-1 text-xs">
-              <summary className="cursor-pointer font-medium">Mã báo cáo floor fit</summary>
+              <summary className="cursor-pointer font-medium">Chi tiết kỹ thuật</summary>
               <code className="mt-1 block break-all font-mono">{floorFit.evidenceArtifactUri}</code>
             </details>}
           </div>
@@ -107,9 +107,8 @@ export function ReviewTab({ jobId, canMutateJob, onSaveState }: { jobId: string;
           <EvaluationCard jobId={jobId} revision={revision} />
         </Card>
       </details>
-      <div className="lg:col-span-2"><HelpDetails title="Gói và quyết định duyệt gắn với revision nào?">
-        Mọi thay đổi vật thể sau khi tạo gói sẽ sinh revision mới: gói, báo cáo validation và quyết định duyệt cũ không còn áp dụng
-        cho revision đó.
+      <div className="lg:col-span-2"><HelpDetails title="Gói và quyết định duyệt gắn với phiên bản nào?">
+        Sửa vật thể sau khi tạo gói sẽ tạo phiên bản mới. Gói, kết quả kiểm tra và quyết định duyệt cũ không áp dụng cho phiên bản mới.
       </HelpDetails></div>
     </div>
   );

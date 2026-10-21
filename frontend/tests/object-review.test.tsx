@@ -691,7 +691,7 @@ describe("ObjectReviewView", () => {
     expect(await screen.findByText("Vật nằm trong kho, trên sàn")).toBeInTheDocument();
     expect(screen.getByText(/user-001/)).toBeInTheDocument();
     expect(screen.queryByText(/Tải gói/)).toBeNull();
-    expect(screen.getByText(/Chưa đạt Preflight/)).toBeInTheDocument();
+    expect(screen.getByText(/Chưa đạt kiểm tra/)).toBeInTheDocument();
   });
   it("báo số tam giác nền được giữ lại vì chung hộp với ứng viên chưa xử lý, không chặn tải gói", async () => {
     const built = {
@@ -839,10 +839,10 @@ describe("ObjectReviewView", () => {
     expect(await screen.findByText("USD_RUNTIME_UNQUALIFIED")).toBeInTheDocument();
     expect(screen.getByText(/configured USD Python runtime/)).toBeInTheDocument();
     expect(screen.getByText(/Khả năng xuất USD: Bị chặn · hybrid/)).toBeInTheDocument();
-    expect(screen.queryByText(/Chưa đạt Preflight/)).toBeNull();
+    expect(screen.queryByText(/Chưa đạt kiểm tra/)).toBeNull();
     expect(await screen.findByRole("button", { name: "Thử lại xuất USD" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /Tải gói USD/ })).toBeNull();
-    expect(screen.getByText(/Candidate chưa được tạo/)).toBeInTheDocument();
+    expect(screen.getByText(/Chưa tạo được gói/)).toBeInTheDocument();
 
     const posts = calls("/simulation-package").filter(([, init]) => (init as RequestInit | undefined)?.method === "POST");
     expect(posts).toHaveLength(1);
