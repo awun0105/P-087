@@ -276,3 +276,70 @@ def test_small_scene_marker_is_shared_through_the_object_store(tmp_path, fake_cl
     second = _Registry(tmp_path / "pod-b", {small: tmp_path / "missing.sog"})
     second.runtime_resolver.remote = first.runtime_resolver.remote
     assert lod.LodBuilder(second, tmp_path / "cli.mjs", tmp_path / "wb", tmp_path / "skip-b").tick() is False
+
+
+def _bundle(root: Path, job_id: str, checksum: str, build: str = "b0123456789ab") -> Path:
+    folder = root / lod.lod_relative_dir(job_id, checksum)
+    for chunk in ("0_0", "1_0"):
+        (folder / build / chunk).mkdir(parents=True)
+        (folder / build / chunk / "meta.json").write_text("{}")
+        (folder / build / chunk / "means_l.webp").write_bytes(chunk.encode())
+    (folder / "bdeadbeef0000" / "0_0").mkdir(parents=True)  # lần tạo thua cuộc: mục lục không trỏ tới
+    (folder / "bdeadbeef0000" / "0_0" / "meta.json").write_text("{}")
+    (folder / lod.INDEX).write_text(json.dumps({"filenames": [f"{build}/0_0/meta.json", f"{build}/1_0/meta.json"]}))
+    return folder
+
+
+def test_copy_lod_bundle_takes_the_index_and_only_the_chunks_it_names(tmp_path) -> None:
+    source, target = tmp_path / "source", tmp_path / "target"
+    _bundle(source, "job-a", _CHECKSUM)
+    assert lod.copy_lod_bundle(source, None, target, "job-a", _CHECKSUM) is True
+    copied = target / lod.lod_relative_dir("job-a", _CHECKSUM)
+    names = sorted(path.relative_to(copied).as_posix() for path in copied.rglob("*") if path.is_file())
+    assert names == [
+        "b0123456789ab/0_0/means_l.webp",
+        "b0123456789ab/0_0/meta.json",
+        "b0123456789ab/1_0/means_l.webp",
+        "b0123456789ab/1_0/meta.json",
+        "lod-meta.json",
+    ]
+    assert lod.lod_ready(target, None, "job-a", _CHECKSUM)
+
+
+def test_copy_lod_bundle_without_a_complete_bundle_copies_nothing(tmp_path) -> None:
+    source, target = tmp_path / "source", tmp_path / "target"
+    folder = _bundle(source, "job-a", _CHECKSUM)
+    (folder / lod.INDEX).unlink()  # bộ đang tạo dở: chưa có mục lục
+    assert lod.copy_lod_bundle(source, None, target, "job-a", _CHECKSUM) is False
+    assert not target.exists()
+
+
+def test_copy_lod_bundle_rejects_an_index_pointing_outside_the_bundle(tmp_path) -> None:
+    source, target = tmp_path / "source", tmp_path / "target"
+    folder = _bundle(source, "job-a", _CHECKSUM)
+    (folder / lod.INDEX).write_text(json.dumps({"filenames": ["../../secret/meta.json"]}))
+    with pytest.raises(lod.LodBuildError):
+        lod.copy_lod_bundle(source, None, target, "job-a", _CHECKSUM)
+
+
+def test_copy_lod_bundle_pulls_a_bundle_kept_only_in_the_object_store(tmp_path) -> None:
+    store, cache, target = tmp_path / "store", tmp_path / "cache", tmp_path / "target"
+    _bundle(store, "job-a", _CHECKSUM)
+
+    class Remote:
+        def head(self, relative):  # noqa: ANN001, ANN202
+            return object() if (store / relative).is_file() else None
+
+        def fetch(self, relative, destination, expected_checksum=None):  # noqa: ANN001, ANN202
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes((store / relative).read_bytes())
+
+        def pull_tree(self, relative_dir, local_dir, *, skip_top=frozenset()):  # noqa: ANN001, ANN202
+            for path in (store / relative_dir).rglob("*"):
+                if path.is_file():
+                    destination = local_dir / path.relative_to(store / relative_dir)
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    destination.write_bytes(path.read_bytes())
+
+    assert lod.copy_lod_bundle(cache, Remote(), target, "job-a", _CHECKSUM) is True
+    assert (target / lod.lod_relative_dir("job-a", _CHECKSUM) / "b0123456789ab/1_0/means_l.webp").read_bytes() == b"1_0"
