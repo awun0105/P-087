@@ -224,6 +224,23 @@ export interface QueuePositionView {
   estimate_samples: number;
 }
 
+/** Một bước xếp lịch của job (T-073), khớp `JobStepView` backend: bước CPU, bước GPU, hoặc bước chờ người dùng. */
+export type JobStepId =
+  | "prepare" | "anonymization_review" | "pose_visual" | "metric_confirm" | "canonical_geometry" | "scene_extract" | "view_lod";
+export type JobStepKind = "cpu" | "gpu" | "user";
+export type JobStepState = "pending" | "ready" | "claimed" | "running" | "done" | "failed" | "waiting_user" | "skipped";
+
+export interface JobStepView {
+  step_id: JobStepId;
+  kind: JobStepKind;
+  state: JobStepState;
+  /** Chỉ có khi bước đang chờ: máy có GPU/CPU trống, hoặc bạn thao tác. */
+  waiting_on: "gpu" | "cpu" | "user" | null;
+  attempt: number;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
 export interface JobProgress {
   job_id: string;
   status: "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
@@ -242,6 +259,8 @@ export interface JobProgress {
   error: ExecutionErrorView | null;
   /** Per-job permissions supplied by the server; quota remains a separate policy. */
   capabilities?: { can_mutate: boolean; can_cancel: boolean; can_retry: boolean };
+  /** Các bước xếp lịch (T-073); server cũ không gửi trường này. */
+  steps?: JobStepView[];
 }
 
 /** Nguồn số đo: người dùng đo ngoài đời, hoặc LiDAR của dataset mẫu (ADR 0004 §6). */
@@ -595,7 +614,22 @@ export function parseJobProgress(value: unknown): JobProgress {
       throw new Error("Quyền thao tác job từ backend không hợp lệ");
     }
   }
+  if (value.steps !== undefined) {
+    // Bước lạ (backend mới hơn) bị bỏ từng dòng, không làm hỏng cả màn tiến trình.
+    value.steps = Array.isArray(value.steps) ? value.steps.filter(isJobStepView) : [];
+  }
   return value as unknown as JobProgress;
+}
+
+const JOB_STEP_IDS: readonly string[] = ["prepare", "anonymization_review", "pose_visual", "metric_confirm", "canonical_geometry", "scene_extract", "view_lod"];
+const JOB_STEP_STATES: readonly string[] = ["pending", "ready", "claimed", "running", "done", "failed", "waiting_user", "skipped"];
+
+function isJobStepView(step: unknown): step is JobStepView {
+  const optionalTime = (time: unknown) => time === null || time === undefined || (typeof time === "string" && !Number.isNaN(Date.parse(time)));
+  return isRecord(step) && JOB_STEP_IDS.includes(String(step.step_id)) && ["cpu", "gpu", "user"].includes(String(step.kind)) &&
+    JOB_STEP_STATES.includes(String(step.state)) &&
+    (step.waiting_on === null || step.waiting_on === undefined || ["gpu", "cpu", "user"].includes(String(step.waiting_on))) &&
+    optionalTime(step.started_at) && optionalTime(step.finished_at);
 }
 
 /** Loại thẻ frontend biết vẽ; loại lạ (backend mới hơn) bị bỏ qua từng thẻ chứ không làm hỏng cả mẫu. */

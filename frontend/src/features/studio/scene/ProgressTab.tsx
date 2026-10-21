@@ -18,6 +18,7 @@ import { GpuStartupNotice } from "@/features/studio/GpuStartupNotice";
 import { geometryReviewStep, objectifyStageOverride, type GeometryStep } from "@/features/studio/scene/useObjectify";
 import { QueueStatus } from "@/features/studio/scene/QueueStatus";
 import { ResourceWaitDetail } from "@/features/studio/scene/ResourceWaitDetail";
+import { ProcessingSteps } from "@/features/studio/scene/ProcessingSteps";
 import type { JobProgress } from "@/lib/contracts/studio";
 import { formatBytes } from "@/lib/format";
 import { geometryPhaseLabel } from "@/lib/scene/geometry-state";
@@ -154,6 +155,7 @@ export function ProgressTab({ jobId, progress, info, busy, canCancel, canAccept 
         {progress.waiting_for === "resources" && progress.resource_wait && <ResourceWaitDetail wait={progress.resource_wait} />}
       </div>}
       {objectify.error && objectOverride && <Notice tone="rust" className="mb-4">{objectify.error}</Notice>}
+      {progress?.steps && progress.status !== "SUCCEEDED" && <ProcessingSteps steps={progress.steps} now={now} />}
       {progress ? (
         <>
           <PipelineTimeline stageActions={shownActions} stages={shownStages} stageList={shownList} jobId={jobId} isStale={stale} timeNote={"Cập nhật lúc " + new Date(progress.updated_at).toLocaleTimeString("vi-VN") + (stale ? " · Tiến trình mất kết nối" : progress.status === "RUNNING" || progress.status === "QUEUED" ? " · Có thể đóng trang, job tiếp tục chạy trên máy chủ" : "")} />
