@@ -64,8 +64,7 @@ export function ModeComparisonView({ jobId }: { jobId: string }) {
           </dl>
           {data.lidar_ground_truth_assisted && (
             <p className="mt-2 text-xs text-ink-subtle">
-              LiDAR của dataset được căn theo quỹ đạo ground-truth (GT-assisted): dùng làm tham chiếu demo, không phải
-              đánh giá độ chính xác RGB-only độc lập.
+              LiDAR của bộ dữ liệu mẫu được căn theo quỹ đạo chuẩn, chỉ để tham khảo, không phải đánh giá độ chính xác.
             </p>
           )}
         </Card>
@@ -89,7 +88,7 @@ function ModeCard({ mode }: { mode: ModeResult }) {
         {(mode.status === "missing" || mode.status === "mock") && <Badge tone="neutral">{mode.mode === "rgb_only" ? "Chưa có đề xuất" : "Chưa có"}</Badge>}
         {mode.status === "measured" && <Badge tone="sage">Đã đo</Badge>}
       </div>
-      <p className="text-sm text-ink-muted">{mode.status === "mock" ? "Job này chưa có đề xuất MoGe-2 để hiển thị." : mode.note}</p>
+      <p className="text-sm text-ink-muted">{mode.status === "mock" ? "Scene này chưa có đề xuất tỉ lệ tự động." : mode.note}</p>
       {["estimated", "confirmed", "measured"].includes(mode.status) && mode.scale_m_per_sfm_unit !== null && (
         <dl className="mt-auto space-y-1 border-t border-line pt-2 text-sm">
           <Row label="Tỉ lệ" value={`${mode.scale_m_per_sfm_unit.toPrecision(5)} m/đơn vị`} />
