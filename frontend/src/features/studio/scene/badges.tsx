@@ -48,7 +48,7 @@ export function SaveStatus({ state }: { state: SaveState }) {
     );
   }
   return (
-    <Badge tone="neutral" title="Mỗi thao tác trên vật thể được lưu thành một revision mới">
+    <Badge tone="neutral" title="Mỗi thao tác trên vật thể được lưu thành một phiên bản mới">
       <Check aria-hidden />
       {state.revision} · đã lưu
     </Badge>

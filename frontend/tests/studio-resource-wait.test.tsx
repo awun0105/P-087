@@ -55,11 +55,11 @@ describe("đợi tài nguyên với config đã chọn", () => {
   it("hiện vị trí hàng đợi và thời gian chờ chỉ khi có số đo", () => {
     const queue = { position: 3, waiting: 4, running: 1, workers: 1, estimated_wait_seconds: 1500, estimate_samples: 6 };
     const { rerender } = render(<ProgressTab jobId={progress.job_id} progress={{ ...progress, waiting_for: null, resource_wait: null, queue }} info={null} busy={false} canCancel={false} onCancel={vi.fn()} />);
-    expect(screen.getByText(/Trước bạn còn 2 job đang chờ\. 1 job đang chạy trên 1 máy xử lý\./)).toBeInTheDocument();
-    expect(screen.getByText(/Dự kiến chờ khoảng 25 phút \(ước tính từ 6 lượt chạy đã đo/)).toBeInTheDocument();
-    expect(screen.getByText(/xoay vòng theo người gửi/)).toBeInTheDocument();
+    expect(screen.getByText(/Trước bạn còn 2 việc đang chờ\. 1 việc đang chạy trên 1 máy xử lý\./)).toBeInTheDocument();
+    expect(screen.getByText(/Dự kiến chờ khoảng 25 phút\./)).toBeInTheDocument();
+    expect(screen.getByText(/Mỗi người một lượt/)).toBeInTheDocument();
     rerender(<ProgressTab jobId={progress.job_id} progress={{ ...progress, waiting_for: null, resource_wait: null, queue: { ...queue, position: 1, waiting: 1, running: 0, estimated_wait_seconds: null, estimate_samples: 0 } }} info={null} busy={false} canCancel={false} onCancel={vi.fn()} />);
-    expect(screen.getByText(/Job của bạn là job kế tiếp\./)).toBeInTheDocument();
+    expect(screen.getByText(/Scene của bạn là việc kế tiếp\./)).toBeInTheDocument();
     expect(screen.getByText(/Chưa ước tính được thời gian chờ/)).toBeInTheDocument();
     expect(screen.queryByText(/khoảng \d+ phút/)).not.toBeInTheDocument(); // không có số đo thì không điền số
     expect(roughDuration(20)).toBe("khoảng 1 phút");

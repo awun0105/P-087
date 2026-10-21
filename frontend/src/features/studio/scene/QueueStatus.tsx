@@ -19,17 +19,17 @@ export function QueueStatus({ queue }: { queue: QueuePositionView }) {
   return (
     <div className="rounded-lg bg-paper-sunken p-3" data-testid="queue-status">
       <p className="font-medium text-ink">
-        {ahead === 0 ? "Job của bạn là job kế tiếp." : `Trước bạn còn ${ahead} job đang chờ.`}
-        {queue.running > 0 ? ` ${queue.running} job đang chạy trên ${queue.workers} máy xử lý.` : ""}
+        {ahead === 0 ? "Scene của bạn là việc kế tiếp." : `Trước bạn còn ${ahead} việc đang chờ.`}
+        {queue.running > 0 ? ` ${queue.running} việc đang chạy trên ${queue.workers} máy xử lý.` : ""}
       </p>
       <p className="mt-0.5">
         {queue.estimated_wait_seconds === null
-          ? "Chưa ước tính được thời gian chờ: máy xử lý chưa có lượt chạy nào để lấy số đo."
+          ? "Chưa ước tính được thời gian chờ."
           : queue.estimated_wait_seconds < 30
             ? "Dự kiến bắt đầu ngay khi máy xử lý rảnh."
-            : `Dự kiến chờ ${roughDuration(queue.estimated_wait_seconds)} (ước tính từ ${queue.estimate_samples} lượt chạy đã đo trên hệ thống này; job nặng hơn sẽ lâu hơn).`}
+            : `Dự kiến chờ ${roughDuration(queue.estimated_wait_seconds)}.`}
       </p>
-      {queue.waiting > 1 && <p className="mt-1 text-xs text-ink-subtle">Hàng đợi xoay vòng theo người gửi: mỗi người một lượt, rồi mới tới job thứ hai của từng người.</p>}
+      {queue.waiting > 1 && <p className="mt-1 text-xs text-ink-subtle">Mỗi người một lượt, rồi mới tới việc thứ hai của từng người.</p>}
     </div>
   );
 }
