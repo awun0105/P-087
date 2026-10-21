@@ -19,6 +19,7 @@ from src.services.orchestration.evaluation import (
     evaluation_markdown,
     scorecard,
 )
+from src.services.orchestration.evaluation.advice import summarize
 from src.services.orchestration.jobs.models import JobAttemptRecord
 from src.services.orchestration.projects.registry import ProjectRegistry
 from src.services.reconstruction.quality import GeometryProfileMismatchError
@@ -798,3 +799,35 @@ def test_system_processing_time_ignores_stages_reused_from_prior_attempt(
 
     assert by_key["system.processing_time"].value == 30
     assert by_key["system.slowest_stage"].value == StageId.RGB_GEOMETRY.value
+
+
+def test_pose_group_reports_the_retry_ladder_and_a_registration_warning(monkeypatch: pytest.MonkeyPatch) -> None:
+    """T-071 C3/D6: mô hình nhận sau thang thử lại là cảnh báo (vùng thiếu ảnh mờ/thủng), không phải lỗi."""
+    from src.services.reconstruction.quality import PoseQuality
+
+    base = dict(
+        input_frames=100,
+        registered_frames=40,
+        registered_ratio=0.4,
+        min_registered_ratio=0.5,
+        sparse_points=4000,
+        mean_reprojection_error_px=0.8,
+        mean_track_length=4.0,
+    )
+    measured = {"quality": PoseQuality(**base, retry_steps=2, registration_warning=True, accept_registered_ratio=0.35)}
+    monkeypatch.setattr(scorecard, "_reference", lambda *_args: object())
+    monkeypatch.setattr(scorecard, "pose_quality", lambda *_args: measured["quality"])
+    registry = SimpleNamespace(runtime_resolver=SimpleNamespace(require=lambda _ref: None))
+
+    metrics = {metric.key: metric for metric in scorecard._pose_metrics(registry, SimpleNamespace())}  # type: ignore[arg-type]
+    ratio = metrics["pose.registered_ratio"]
+    assert ratio.verdict == "warn" and "nhận từ 35%" in (ratio.threshold or "")
+    assert metrics["pose.retry_steps"].display == "Đã tự thử lại ghép ảnh (2 lần)"
+    advice = summarize(
+        [StageEvaluation(group_id="pose", title="Pose", status="measured", metrics=list(metrics.values()))]
+    )
+    assert any("vùng thiếu ảnh có thể bị mờ hoặc thủng" in line for line in advice)
+
+    measured["quality"] = PoseQuality(**(base | {"registered_frames": 80, "registered_ratio": 0.8}))
+    plain = {metric.key: metric for metric in scorecard._pose_metrics(registry, SimpleNamespace())}  # type: ignore[arg-type]
+    assert plain["pose.registered_ratio"].verdict == "ok" and "pose.retry_steps" not in plain

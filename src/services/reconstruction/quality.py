@@ -40,6 +40,12 @@ class PoseQuality(ContractModel):
     sparse_points: int | None
     mean_reprojection_error_px: float | None
     mean_track_length: float | None
+    #: Số bậc thang thử lại COLMAP đã chạy trong lượt này (T-071 C1); 0 = ghép lần đầu đã đạt.
+    retry_steps: int = 0
+    #: Mô hình dưới ngưỡng thường được nhận sau thang thử lại: vùng thiếu ảnh có thể mờ hoặc thủng (T-071 C3).
+    registration_warning: bool = False
+    #: Ngưỡng tối thiểu để nhận mô hình kèm cảnh báo; None = config không cho nhận.
+    accept_registered_ratio: float | None = None
 
 
 class VisualQuality(ContractModel):
@@ -140,6 +146,9 @@ def pose_quality(poses: ProductArtifactRef, resolve: Resolve) -> PoseQuality:
         sparse_points=selected.get("sparse_points") if selected else None,
         mean_reprojection_error_px=reprojection,
         mean_track_length=track,
+        retry_steps=len(document.get("retry_ladder") or []),
+        registration_warning=document.get("registration_warning") is True,
+        accept_registered_ratio=(document.get("config") or {}).get("accept_registered_ratio_after_retry"),
     )
 
 

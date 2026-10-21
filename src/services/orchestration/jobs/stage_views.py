@@ -16,7 +16,7 @@ from src.models.contracts.reconstruction import ReconstructionBundle
 from src.services.orchestration.artifacts import ArtifactStoreError
 from src.services.orchestration.artifacts.parsed_cache import ParsedArtifactCache
 from src.services.orchestration.projects.registry import ProjectRegistry
-from src.services.reconstruction import CameraMarker, camera_markers, frame_images
+from src.services.reconstruction import CameraMarker, camera_markers, frame_images, pose_registration
 from src.services.reconstruction.rgb.canonical.metric_math import compose_rotation
 from src.services.reconstruction.rgb.canonical.metric_models import MetricConfirmation
 from src.services.reconstruction.rgb.pose.camera_pose import Quaternion
@@ -43,6 +43,12 @@ class StageView(BaseModel):
     display_rotation_xyzw: Quaternion | None = None
     #: Khoá của lớp LiDAR chồng lên scene (`GET /jobs/{id}/lidar-overlay`); None = scene không có LiDAR đã căn chỉnh.
     lidar_overlay: str | None = None
+    #: Lớp camera: tỉ lệ ảnh COLMAP dựng được vị trí; None ở các lớp khác.
+    registered_ratio: float | None = None
+    #: Lớp camera: số bậc COLMAP đã tự thử lại ghép ảnh (T-071 D6).
+    retry_count: int = 0
+    #: Lớp camera: mô hình được nhận sau thang thử lại dù thiếu ảnh — vùng thiếu có thể mờ hoặc thủng (T-071 C3).
+    registration_warning: bool = False
 
 
 class StageViewList(BaseModel):
@@ -148,6 +154,7 @@ def _build_stage_views(registry: ProjectRegistry, job: JobManifest, job_id: str)
         preview = None
     if preview is not None:
         cameras = camera_markers(preview.camera_pose_ref, resolve)
+        registration = pose_registration(preview.camera_pose_ref, resolve)
         display_rotation = preview_display_rotation(registry, job, preview)
         views.append(
             StageView(
@@ -157,6 +164,9 @@ def _build_stage_views(registry: ProjectRegistry, job: JobManifest, job_id: str)
                 note="Quỹ đạo camera nhìn từ trên xuống; đơn vị SfM tùy ý, chưa quy đổi mét.",
                 unit="arbitrary",
                 cameras=cameras,
+                registered_ratio=registration.registered_ratio,
+                retry_count=registration.retry_count,
+                registration_warning=registration.registration_warning,
             )
         )
         views.append(
