@@ -55,8 +55,8 @@ export function browserPhysicsBlocker(objects: readonly PhysicsObjectInput[]): s
     if (item.dynamic !== false && (item.mass_kg === null || !Number.isFinite(item.mass_kg) || item.mass_kg <= 0)) return `${item.id}: dynamic body requires positive authored mass`;
     if (item.dynamic !== false && type === "SIMPLIFIED_MESH") return `${item.id}: dynamic concave triangle mesh is unsupported`;
     if (["AABB", "OBB"].includes(type)) {
-      if (!item.dimensions || item.dimensions.some(value => !Number.isFinite(value) || value <= 0)) return `${item.id}: thiếu kích thước box collider`;
-    } else if (!item.colliderUrl) return `${item.id}: thiếu collider artifact`;
+      if (!item.dimensions || item.dimensions.some(value => !Number.isFinite(value) || value <= 0)) return `${item.id}: thiếu kích thước hộp va chạm`;
+    } else if (!item.colliderUrl) return `${item.id}: thiếu lưới va chạm`;
   }
   return null;
 }
