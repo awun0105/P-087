@@ -140,9 +140,12 @@ def inventory(settings: Settings, source: ProjectRegistry, catalog: ReleaseCatal
     from src.services.orchestration.jobs.worker_cli import recover_expired_leases
     from src.services.orchestration.samples import distributed
     from src.services.orchestration.samples.sessions import _registry, session_settings
+    from src.services.orchestration.scene.objectify_queue import recover_interrupted
 
-    # Existing recovery uses CAS + lease expiry; never resets a healthy attempt.
+    # Existing recovery uses CAS + lease expiry; never resets a healthy attempt. Scene requests are recovered here
+    # too: an expired running request otherwise counts as GPU demand, renting a pod only to mark it failed.
     recover_expired_leases(source)
+    recover_interrupted(settings)
     assert source.persistence is not None
     result = scan_scope(
         source.persistence.database,
@@ -164,6 +167,7 @@ def inventory(settings: Settings, source: ProjectRegistry, catalog: ReleaseCatal
             db = RuntimeDatabase(demo_database_url(settings.database_url, session_id))
             scoped = _registry(private, source)
             recover_expired_leases(scoped)
+            recover_interrupted(private)
             work = scan_scope(
                 db,
                 scoped,
