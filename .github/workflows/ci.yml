@@ -1,10 +1,12 @@
 name: CI
 
+# master: the public mirror awun0105/P-087 receives develop as master and runs Actions there, because the organization
+# repository's Actions are blocked by billing.
 on:
   push:
-    branches: [main, develop]
+    branches: [main, develop, master]
   pull_request:
-    branches: [main, develop]
+    branches: [main, develop, master]
 
 jobs:
   lint-and-test:
