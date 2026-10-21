@@ -582,6 +582,51 @@ def test_unexpected_operation_exception_is_terminal_and_releases_reservation(wor
     assert len(released) == 1
 
 
+def test_gpu_inventory_recovers_expired_request_instead_of_renting_a_pod(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    from src.services.orchestration.gpu import workload
+    from src.services.orchestration.gpu.catalog import ReleaseCatalog, ReleaseProfile
+    from src.services.orchestration.jobs.profile import ExecutionProfile
+
+    registry, job, bundle, settings = world
+    monkeypatch.setattr(scene_extraction, "objectify_with_retry", _always_fail)
+    extract_scene(registry, job, bundle, settings, tmp_path / "work")
+    scene_objectify_queue.request(registry, settings, job.job_id, "rev-001", "boxes")
+    claimed = scene_objectify_queue._claim(settings)
+    assert claimed is not None
+    with scene_objectify_queue._database(settings).transaction(write=True) as tx:
+        current = scene_objectify_queue._read(tx, job.job_id, lock=True)
+        assert current is not None
+        scene_objectify_queue._write(
+            tx,
+            job.job_id,
+            current.model_copy(update={"lease_expires_at": datetime.now(UTC) - timedelta(seconds=1)}),
+        )
+    monkeypatch.setattr(workload, "waiting_jobs", lambda _: [])
+
+    gpu = ReleaseProfile(
+        name="native",
+        image="registry/worker@sha256:" + "1" * 64,
+        execution=ExecutionProfile(
+            config_checksum="sha256:" + "2" * 64, runtime_manifest_checksum="sha256:" + "3" * 64
+        ),
+        kinds={"scene"},
+        gpu_types=("qualified-gpu",),
+        cuda_versions=("12.6",),
+        min_vram_gb=24,
+        min_ram_gb=32,
+        min_cpus=4,
+        scratch_gb=50,
+        qualification_reference="fixture-only",
+        storage_hourly_usd=0.01,
+    )
+    catalog = ReleaseCatalog(profiles=(gpu,), checksum="fixture")
+    result = workload.inventory(settings, registry, catalog)
+
+    assert scene_objectify_queue.state(registry, settings, job.job_id).status == "failed"
+    assert not [item for item in result.blocked if item.startswith("scene:")]
+    assert not [item for item in result.pending if item.kind == "scene"]
+
+
 def test_expired_lease_late_worker_cannot_commit_or_overwrite_new_attempt(world, monkeypatch, tmp_path) -> None:  # noqa: ANN001
     registry, job, bundle, settings = world
     monkeypatch.setattr(scene_extraction, "objectify_with_retry", _always_fail)

@@ -12,6 +12,7 @@ REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "scripts/gpu/setup_objectgs_runtime.sh"
 LISTS = REPO / "configs/runtime/objectgs"
 SCRIPT_TEXT = SCRIPT.read_text(encoding="utf-8")
+LIB = REPO / "scripts/gpu/install.d/_lib.sh"
 
 
 def _pin(key: str) -> str:
@@ -50,10 +51,11 @@ def test_script_parses() -> None:
 def test_commit_pins_are_read_from_objectgs_module_not_copied(tmp_path: Path) -> None:
     """Đổi số ghim trong một bản sao của objectgs.py thì script in đúng số mới: một nguồn duy nhất."""
     root = tmp_path / "repo"
-    (root / "scripts/gpu").mkdir(parents=True)
+    (root / "scripts/gpu/install.d").mkdir(parents=True)
     (root / "configs/runtime/objectgs").mkdir(parents=True)
     (root / "src/services/scene").mkdir(parents=True)
     shutil.copy(SCRIPT, root / "scripts/gpu/setup_objectgs_runtime.sh")
+    shutil.copy(LIB, root / "scripts/gpu/install.d/_lib.sh")
     shutil.copy(REPO / "configs/runtime/pins.env", root / "configs/runtime/pins.env")
     for name in ["requirements.lock.txt", "torch.lock.txt", "conda-python.txt", "conda-cuda.txt"]:
         shutil.copy(LISTS / name, root / "configs/runtime/objectgs" / name)
@@ -83,9 +85,13 @@ def test_no_commit_is_hardcoded_in_the_script() -> None:
 
 
 def test_every_download_goes_through_a_checksum_check() -> None:
-    curl_lines = [line for line in SCRIPT_TEXT.splitlines() if "curl " in line]
+    """Script tải qua fetch() dùng chung của install.d/_lib.sh; curl chỉ được gọi bên trong fetch(), nơi kiểm sha256."""
+    assert not [line for line in SCRIPT_TEXT.splitlines() if "curl " in line], "script không gọi curl trực tiếp"
+    assert 'source "$ROOT/scripts/gpu/install.d/_lib.sh"' in SCRIPT_TEXT
+    lib = LIB.read_text(encoding="utf-8")
+    curl_lines = [line for line in lib.splitlines() if "curl " in line]
     assert len(curl_lines) == 1, "chỉ một chỗ được gọi curl, bên trong fetch() có kiểm sha256"
-    assert SCRIPT_TEXT.index("fetch() {") < SCRIPT_TEXT.index(curl_lines[0].strip())
+    assert lib.index("fetch() {") < lib.index(curl_lines[0].strip())
     assert re.fullmatch(r"[0-9a-f]{64}", _pin("MICROMAMBA_SHA"))
     assert 'fetch "$MICROMAMBA_URL" "$TMP/micromamba.tar.bz2" "$MICROMAMBA_SHA"' in SCRIPT_TEXT
 

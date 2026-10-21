@@ -294,6 +294,7 @@ def test_runner_failure_blocks_before_scene_revision_publication(
     assert registry.scene.current(job.job_id).scene.scene_revision == source_scene.scene_revision
 
 
+@pytest.mark.skipif(not SCENE_RUNTIME.is_file(), reason="cần runtime usd-core (data/scene_runtime)")
 def test_hybrid_zip_contains_verified_relative_asset_and_no_physics_defaults(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -330,7 +331,7 @@ def Xform "Asset"
     registry.scene.store.publish(asset_ref, payload)
     with_asset = scene.model_copy(update={"objects": [item.model_copy(update={"asset_ref": asset_ref})]})
     registry.scene.publish_next(job.job_id, scene.scene_revision, with_asset, "test_add_usd_asset")
-    runtime = Path("data/scene_runtime/bin/python")
+    runtime = SCENE_RUNTIME
     monkeypatch.setattr(
         simulation_package_service,
         "get_settings",
@@ -431,6 +432,7 @@ def test_catalog_asset_ships_as_its_box_with_provenance_instead_of_blocking_the_
     assert not any(barrel.provenance["asset_url"] in layer for layer in stage["layers"])
 
 
+@pytest.mark.skipif(not SCENE_RUNTIME.is_file(), reason="cần runtime usd-core (data/scene_runtime)")
 def test_candidate_zip_recovers_legacy_owner_and_exports_current_rotated_pose(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -494,7 +496,7 @@ def Xform "Asset"
     current_legacy_ref = registry.scene.revision(job.job_id, current_legacy.scene_revision).scene_reference
     current_legacy_bytes = registry.runtime_resolver.require(current_legacy_ref).read_bytes()
 
-    runtime = Path("data/scene_runtime/bin/python")
+    runtime = SCENE_RUNTIME
     monkeypatch.setattr(
         simulation_package_service,
         "get_settings",

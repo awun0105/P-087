@@ -210,7 +210,9 @@ def test_capability_heartbeat_records_worker_machine(tmp_path: Path) -> None:
         stop.set()
 
 
-def test_heartbeat_touches_reservation_more_often_than_it_probes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_heartbeat_touches_reservation_more_often_than_it_probes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Giữ chỗ được làm mới theo nhịp dày; đo máy nặng hơn vẫn giữ nhịp riêng thưa hơn."""
     import time
 

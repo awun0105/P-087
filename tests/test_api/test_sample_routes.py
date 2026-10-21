@@ -11,6 +11,7 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from scripts.demo.export_demo_bundle import stage_durations
+from src.config import Settings
 from src.models.contracts.manifests import JobManifest, JobStatus, StageArtifact, StageId
 from src.services.orchestration.jobs.models import JobAttemptRecord
 from src.services.orchestration.samples import (
@@ -57,6 +58,11 @@ def _write_bundle(root: Path, demo_id: str, durations: list[float | None]) -> No
     (root / "files" / "secret.txt").write_text("not listed")
 
 
+def _settings(demo_dir: Path, tmp_path: Path) -> Settings:
+    # Settings thật, DB SQLite cục bộ: route mẫu đi đúng nhánh một máy (không PostgreSQL, không R2).
+    return Settings(product_demo_dir=demo_dir, database_url=f"sqlite:///{tmp_path / 'runtime.db'}")
+
+
 @pytest.fixture
 def library(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     from src.api.studio import deps
@@ -65,7 +71,7 @@ def library(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     _write_bundle(tmp_path / "loop", "b", [10.0, None])
     (tmp_path / "broken").mkdir()
     (tmp_path / "broken" / "manifest.json").write_text("{}")
-    monkeypatch.setattr(deps, "get_settings", lambda: SimpleNamespace(product_demo_dir=tmp_path))
+    monkeypatch.setattr(deps, "get_settings", lambda: _settings(tmp_path, tmp_path))
     return tmp_path
 
 
@@ -111,10 +117,10 @@ async def test_single_bundle_root_still_works(client: AsyncClient, tmp_path: Pat
     from src.api.studio import deps
 
     _write_bundle(tmp_path / "single", "torwic-aisle-cw", [1.0, 2.0])
-    monkeypatch.setattr(deps, "get_settings", lambda: SimpleNamespace(product_demo_dir=tmp_path / "single"))
+    monkeypatch.setattr(deps, "get_settings", lambda: _settings(tmp_path / "single", tmp_path))
     samples = (await client.get("/api/v1/samples")).json()["samples"]
     assert [item["sample_id"] for item in samples] == ["torwic-aisle-cw"]
-    monkeypatch.setattr(deps, "get_settings", lambda: SimpleNamespace(product_demo_dir=tmp_path / "none"))
+    monkeypatch.setattr(deps, "get_settings", lambda: _settings(tmp_path / "none", tmp_path))
     assert (await client.get("/api/v1/samples")).json()["samples"] == []
 
 
@@ -316,7 +322,7 @@ async def test_remove_legacy_single_bundle(
     from src.api.studio import deps
 
     _write_bundle(tmp_path / "single", "legacy", [1.0, 2.0])
-    monkeypatch.setattr(deps, "get_settings", lambda: SimpleNamespace(product_demo_dir=tmp_path / "single"))
+    monkeypatch.setattr(deps, "get_settings", lambda: _settings(tmp_path / "single", tmp_path))
     assert (await client.delete("/api/v1/samples/legacy")).status_code == 200
     assert (await client.get("/api/v1/samples")).json()["samples"] == []
     assert (tmp_path / "single" / "manifest.json").is_file()

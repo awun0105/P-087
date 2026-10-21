@@ -29,8 +29,10 @@ def test_latest_running_job_ids_reads_only_the_newest_event(tmp_path: Path, back
         pytest.skip("R2S_GPU_TEST_DATABASE_URL is not configured")
     database = candidates[databases[backend]]
     events = [
-        ("scan-a", 1, "QUEUED"), ("scan-a", 2, "RUNNING"),
-        ("scan-b", 1, "RUNNING"), ("scan-b", 2, "SUCCEEDED"),
+        ("scan-a", 1, "QUEUED"),
+        ("scan-a", 2, "RUNNING"),
+        ("scan-b", 1, "RUNNING"),
+        ("scan-b", 2, "SUCCEEDED"),
         ("scan-c", 1, "RUNNING"),
     ]
     with database.transaction(write=True) as tx:

@@ -998,3 +998,73 @@ def test_rest_pod_shape_with_top_level_gpu_count_is_a_valid_allocation(world):
     with store.locked() as (_, c, now):
         c.workers["worker"] = {"ready": True, "busy": False, "heartbeat": now}
     assert controller.tick() == "ready"
+
+
+def test_control_row_stays_readable_by_workers_from_an_older_release(tmp_path):
+    """2026-10-21: a v5 worker built Control(**row) and crashed on `inventory_misses`; every pod failed to register."""
+    from dataclasses import fields
+
+    from src.services.orchestration.gpu.state import _LATE_FIELDS, Control, load_control
+
+    store = StateStore(RuntimeDatabase(f"sqlite:///{tmp_path / 'state.db'}"), "test")
+    with store.locked() as (_, control, _now):
+        control.state, control.inventory_misses = "starting", 0
+    with store.database.transaction() as tx:
+        saved = json.loads(tx.execute("SELECT payload FROM r2s_gpu_control").fetchone()[0])
+    older_release = {item.name for item in fields(Control)} - set(_LATE_FIELDS)
+    assert set(saved) <= older_release
+
+    with store.locked() as (_, control, _now):
+        control.inventory_misses = 2
+    assert store.read().inventory_misses == 2
+
+    newer = {**saved, "field_from_a_newer_controller": 1}
+    assert load_control(newer).state == "starting"
+
+
+def _mark_boot(monkeypatch, tmp_path, store, step, *, failed=False):
+    from src.services.orchestration.gpu import boot as gpu_boot
+
+    monkeypatch.setenv("GPU_BOOT_TOKEN", store.read().boot_token)
+    monkeypatch.setenv("GPU_DEPLOYMENT_ID", "test")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'state.db'}")
+    return gpu_boot.mark(step, failed=failed)
+
+
+def test_pod_whose_boot_step_failed_is_dropped_at_once(world, monkeypatch, tmp_path):
+    controller, store, provider, work = world
+    assert controller.tick() == "created"
+    assert _mark_boot(monkeypatch, tmp_path, store, "weights", failed=True)
+    assert controller.tick() == "draining"
+    assert store.read().error == "boot_failed:weights"
+
+
+def test_pod_stuck_on_a_boot_step_is_dropped_before_the_startup_timeout(world, monkeypatch, tmp_path):
+    controller, store, provider, work = world
+    assert controller.tick() == "created"
+    assert _mark_boot(monkeypatch, tmp_path, store, "preflight")
+    assert controller.tick() == "starting"
+    with store.locked() as (_, c, now):
+        c.workers["boot"]["at"] = now - controller.policy.boot_stall_seconds
+    assert controller.tick() == "draining"
+    assert store.read().error == "boot_stalled:preflight"
+
+
+def test_pod_without_boot_marks_still_waits_for_the_image_pull(world):
+    controller, store, provider, work = world
+    assert controller.tick() == "created"
+    with store.locked() as (_, c, now):
+        c.created_at = now - controller.policy.boot_stall_seconds
+    assert controller.tick() == "starting"
+
+
+def test_boot_mark_from_a_retired_generation_is_ignored(world, monkeypatch, tmp_path):
+    controller, store, provider, work = world
+    assert controller.tick() == "created"
+    monkeypatch.setenv("GPU_BOOT_TOKEN", "stale")
+    monkeypatch.setenv("GPU_DEPLOYMENT_ID", "test")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'state.db'}")
+    from src.services.orchestration.gpu import boot as gpu_boot
+
+    assert not gpu_boot.mark("weights", failed=True)
+    assert controller.tick() == "starting"

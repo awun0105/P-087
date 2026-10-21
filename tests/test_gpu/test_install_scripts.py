@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -51,6 +52,14 @@ def _stub_bin(directory: Path, name: str, body: str) -> None:
 
 def _run(args: list[str], env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     return subprocess.run(args, capture_output=True, text=True, check=False, env=env)
+
+
+def _colmap_licenses(root: Path) -> None:
+    """Giấy phép COLMAP/onnxruntime đúng sha256 ghim trong pins.env, như sau một lần cài thật: fetch() không tải lại."""
+    target = root / "colmap/LICENSES"
+    target.mkdir(parents=True, exist_ok=True)
+    for source in (Path(__file__).parent / "fixtures/colmap_licenses").iterdir():
+        shutil.copyfile(source, target / source.name)
 
 
 def _env_with_failing_curl(tmp_path: Path) -> tuple[dict[str, str], Path]:
@@ -218,6 +227,7 @@ def test_colmap_binary_bundle_already_extracted_is_recognised_without_download(t
         'if [ "$1" = help ]; then echo "COLMAP 4.3.0.dev0 (Commit Unknown)"; else echo "  --prior_position_std_x"; fi'
     )
     _stub_bin(wrapper.parent, wrapper.name, body)
+    _colmap_licenses(root)
     env, curl_log = _env_with_failing_curl(tmp_path)
 
     result = _run(
@@ -330,6 +340,7 @@ def test_extracted_colmap_tree_from_the_image_only_gets_a_wrapper(tmp_path: Path
         "colmap",
         'if [ "$1" = help ]; then echo "COLMAP 4.3.0.dev0 (Commit Unknown)"; else echo "  --prior_position_std_x"; fi',
     )
+    _colmap_licenses(root)
     env, curl_log = _env_with_failing_curl(tmp_path)
 
     result = _run(

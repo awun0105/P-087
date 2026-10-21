@@ -4,8 +4,8 @@
 
 | Thuộc tính | Nội dung |
 | --- | --- |
-| Ngày đối chiếu | 20/10/2026 |
-| Snapshot source | `develop`, HEAD `4fb0f8f9`, có thay đổi chưa commit |
+| Ngày đối chiếu | 21/10/2026 |
+| Snapshot source | `develop`, sau commit `bd142f6f` |
 | Vai trò | Mỗi năng lực đang ở mức nào, bằng chứng nằm đâu, còn giới hạn gì, việc kế tiếp |
 | Cập nhật | Sửa bảng khi có bằng chứng mới; mỗi ô kèm ngày và nguồn. Không nâng mức chỉ vì task chuyển sang `implemented` hay `accepted` |
 
@@ -24,17 +24,30 @@ Yêu cầu và tiêu chí nghiệm thu ở [PRD](PRD.md); cách đo ở [EVALUAT
 
 ## 1. Hệ thống đang chạy
 
-| Phần | Trạng thái ngày 20/10/2026 | Nguồn |
+| Phần | Trạng thái ngày 21/10/2026 | Nguồn |
 | --- | --- | --- |
 | Studio web | Chạy tại https://real2sim-studio.vercel.app; bản đang chạy có nút dùng thử Guest | Kiểm trực tiếp bundle trang đăng nhập, 20/10 |
-| API | Chạy trên máy ảo Google Cloud ở Seoul, cùng vùng Supabase; `/health` và `/ready` trả 200, `/ready` báo có catalog GPU và 3 mẫu | Gọi trực tiếp 20/10; workflow `deploy-api.yml` chạy thành công trên repo `awun0105/P-087` |
+| API | Chạy trên máy ảo Google Cloud ở Seoul, cùng vùng Supabase; `/health` và `/ready` trả 200, `/ready` báo có catalog GPU và 3 mẫu | Gọi trực tiếp 21/10; workflow `deploy-api.yml` trên repo `awun0105/P-087` |
 | Database, artifact | PostgreSQL Supabase, Cloudflare R2 | Cấu hình production; xem [OPERATIONS mục 6](OPERATIONS.md) |
-| Worker GPU | Controller RunPod đang bật thật, thuê A5000 khi có job; image GPU được chứng nhận trên A5000 ngày 20/10 (preflight đạt, kể cả COLMAP GPU) | Ghi chép vận hành của chủ dự án, lưu ngoài repo; plan T-071, T-072. Repo chưa có job id hay log của một job chạy hết trên pod |
+| Worker GPU | Controller RunPod bật thật, thuê A5000 Secure khi có job, trả máy sau 10 phút rảnh (`GPU_IDLE_SECONDS=600` từ 21/10). Image đang dùng: v5, build từ `ae7e3aca`, chứng nhận A5000 ngày 20/10 | Ghi chép vận hành ngoài repo; mục 1.1. Repo chưa có job id/log của một job chạy hết trên pod |
 | Theo dõi GPU | Workflow `gpu-watchdog.yml` chạy 15 phút một lần, thành công | Lịch chạy GitHub Actions trên `awun0105/P-087`, 20/10 |
 | Trang giới thiệu | Cloudflare Pages, deploy thành công 20/10 04:14Z | Workflow `deploy-landing.yml` |
-| CI | **Không chạy.** Repo tổ chức bị khóa thanh toán GitHub Actions; lần xanh cuối 17/09 | Lịch sử `ci.yml`; deploy chạy nhờ repo cá nhân |
+| CI | Repo tổ chức không chạy được Actions (khóa thanh toán). Từ 21/10 `ci.yml` chạy trên `master` của repo cá nhân `awun0105/P-087` | Commit `bd142f6f` |
 
-Deploy Studio tự động bằng workflow đang lỗi vì `VERCEL_TOKEN` hết hạn; hiện deploy thủ công bằng `vercel deploy --prod`.
+Deploy Studio tự động bằng `deploy-studio.yml` chạy lại được từ tối 20/10 sau khi thay `VERCEL_TOKEN`.
+
+### 1.1 Sự cố GPU và chi phí ngày 20–21/10
+
+Ngày 20/10 controller thuê A5000 15 lần, tổng khoảng 12,2 giờ máy, ước 3,56 USD (0,29 USD/giờ). Chỉ 5,3 giờ là xử lý job; còn lại là khởi động (tải image), chờ rảnh 30 phút, chờ job xong khi đổi image và khởi động hỏng. Hai lỗi đã tìm ra và sửa ngày 21/10:
+
+| Lỗi | Hệ quả | Sửa |
+| --- | --- | --- |
+| Deploy `4e6d5c72` lúc 00:25 cho controller ghi trường mới `inventory_misses`; worker trong image v5 đọc bảng điều khiển bằng `Control(**row)` nên lỗi `TypeError` | Luồng nhịp sống của worker chết lặng lẽ, pod đang chạy bị bỏ lúc 00:29; mọi pod thuê sau đó không đăng ký được và bị bỏ sau 40 phút | `79f684fb`: trường mới chỉ ghi khi khác mặc định, đọc bảng bỏ qua trường lạ, nhịp sống lỗi thì ghi log và dừng nhận việc |
+| Yêu cầu "Tạo mesh" kẹt ở `running` sau khi worker chết được tính là nhu cầu GPU | Thuê 3 pod lúc 04:35–06:39 chỉ để đánh dấu lỗi, khoảng 0,6 USD | `7e7a8cce`: controller tự thu hồi yêu cầu hết lease; hai yêu cầu Room/Playroom đã chuyển `failed` lúc 15:06 ngày 21/10 |
+
+Thêm từ 21/10: pod đã chạy entrypoint mà bước khởi động lỗi hoặc đứng yên quá `GPU_BOOT_STALL_SECONDS` (900 giây) bị bỏ ngay (`91d557a8`); phần entrypoint chỉ có hiệu lực từ lần build image GPU kế tiếp. **Trần tổng chi `GPU_PROJECT_BUDGET_USD=5` tính dồn mọi lần thuê, đã dùng 3,56 USD**: còn khoảng 1,44 USD là controller ngừng thuê.
+
+Phiên demo trên PostgreSQL từng giữ một kết nối database suốt mỗi request, làm cạn pool của Supabase và treo toàn bộ API sáng 21/10; đã sửa ở `3eb108c8`. Worker của phiên demo vẫn giữ một kết nối trong lúc chạy một việc (tối đa một kết nối mỗi tiến trình worker); thay bằng lease cần migration, chỉ làm cùng lần build image GPU mới vì image v5 từ chối schema mới hơn.
 
 ## 2. Năng lực theo luồng sản phẩm
 
@@ -53,34 +66,34 @@ Deploy Studio tự động bằng workflow đang lỗi vì `VERCEL_TOKEN` hết 
 | Chỉnh scene, revision, Walk trên trình duyệt | Code; Local chỉ điều hướng | 1110 test vitest; mở trang scene drjohnson qua DevTools, không chỉnh (17/10) | Cảm giác Walk, Walk tải chậm, sửa lỗi kéo đơ còn chờ chủ dự án kiểm bằng mắt (handoff Sprint 8) |
 | Gói mô phỏng OpenUSD, preflight | Local | Preflight PASS 6/6 (`job-123dfd4868d8`, khoảng 30/09); `scene.usda` của drjohnson (18/10) | Chưa thử với job có 60 vật trên production |
 | Kiểm định Isaac, duyệt, phát hành | Code | Test process Isaac, cổng validation, niêm phong release | **Chưa từng chạy**: DB local có 0 lần validation, 0 release; image cloud không có Isaac Sim (cần chấp nhận giấy phép NVIDIA, +20–30 GB) |
-| Thư viện mẫu, phiên demo | Production cho thư viện | 3 mẫu: drjohnson rev-198, room rev-062, playroom rev-003; `/api/v1/samples` trả 200 | Phiên demo dùng SQLite và thư mục cục bộ; chưa kiểm mở phiên demo trên production. Mẫu không được ghi là đã kiểm định Isaac |
-| Tài khoản Guest/Editor/Reviewer, dùng thử | Production | Đăng nhập và nút dùng thử trên web thật, 20/10 | Test ma trận quyền đang đỏ vì route mẫu và phiên demo chưa được phân loại |
+| Thư viện mẫu, phiên demo | Production | 3 mẫu drjohnson rev-198, room rev-062, playroom rev-003; mở phiên demo và hiện mô hình 3D cả ba mẫu trên trình duyệt thật, 21/10 | Mẫu không được ghi là đã kiểm định Isaac |
+| Tài khoản Guest/Editor/Reviewer, dùng thử | Production | Nút dùng thử tạo Guest và vào Tổng quan trên web thật, 21/10 | — |
 | Bảng giá trị `/benchmark` | Code | Audit trên SQLite local tìm 4 lỗi, đã sửa F1 và F3 (`.ai/reports/benchmark-*-20261018/`) | Chưa rõ F2 (giới hạn giờ GPU bỏ qua lần chạy lỗi) đã sửa; chi phí là giá khai báo × giờ, không phải hóa đơn |
 | Đo so với dữ liệu đối chứng | Local, lịch sử | Kết quả trong `eval/results/`, chỉ TorWIC; dự án ngừng dùng TorWIC từ 20/10/2026 | Không có `EvaluationReport`, chưa có so đường đi Start–Goal (EVALUATION mục 7) |
-| Controller GPU, hàng đợi, chia GPU | Production cho controller | Controller bật, giới hạn 0,55 USD/giờ, tổng 5 USD, trả máy sau 30 phút rảnh; pod A5000 chạy 3 worker | Chia GPU theo mức đo (T-072) và hàng đợi theo bước (T-073) mới là plan; RunPod hay hết A5000 trong mức giá, controller tạm dừng sau 3 lần và cần `resume` |
+| Controller GPU, hàng đợi, chia GPU | Production cho controller | Controller bật, giới hạn 0,55 USD/giờ, tổng 5 USD, trả máy sau 10 phút rảnh; pod A5000 chạy 3 worker | Chia GPU theo mức đo (T-072) và hàng đợi theo bước (T-073) mới là plan; RunPod hay hết A5000 trong mức giá. Sự cố 20–21/10 ở mục 1.1 |
 
 ## 3. Chất lượng code
 
 | Kiểm tra | Kết quả | Nguồn |
 | --- | --- | --- |
-| Toàn bộ pytest | 4254 đạt, 16 lỗi, 40 bỏ qua; một lỗi đã sửa sau đó | `.ai/tasks/T-069/report.md`, 20/10 |
-| Toàn bộ vitest, typecheck | 1110 đạt; typecheck sạch | Như trên |
+| Toàn bộ pytest | 4313 đạt, 0 lỗi, 41 bỏ qua (cần PostgreSQL thật) | Chạy lại 21/10 |
+| Toàn bộ vitest, typecheck, lint | 1113 đạt; typecheck sạch; lint 0 lỗi, 7 cảnh báo | Chạy lại 21/10 |
 | Test đánh giá và bảng giá trị | 210 pytest, 39 vitest đạt | Chạy lại 20/10, EVALUATION mục 8 |
 | Foundation | 5/5 đạt | Chạy lại 20/10 |
 | Migration v26 | Đã chạy trên PostgreSQL 16 thật | T-069 |
 
-Các test đang đỏ: ma trận quyền và 7 test route mẫu (route mới chưa phân loại); 2 test migration v11/v12 (còn kỳ vọng schema 23, code đã là 26); file env mẫu lệch với nguồn sinh; 4 test script cài GPU/ObjectGS (2 lỗi do tải giấy phép COLMAP trong sandbox).
+Ngày 21/10 đã làm xanh các test đỏ của T-069: cập nhật test theo code đã đổi (ma trận quyền có thêm route phiên demo, route mẫu dùng `Settings` thật, phiên bản schema 26, script cài GPU tải giấy phép và dùng `fetch` chung) và sinh lại file env mẫu bằng `scripts.studio.deploy_env render --examples`.
 
 ## 4. Việc kế tiếp
 
 Theo thứ tự ảnh hưởng tới nghiệm thu:
 
-1. **Chạy một job GPU đầy đủ trên production** (thuê máy → xử lý → tự trả máy) và lưu job id, log vào repo.
-2. **Chốt bộ dữ liệu nghiệm thu**: cảnh nào, split, robot, 5 cặp Start–Goal kèm nhãn (EVALUATION mục 7; PRD mục 10.1).
-3. **Sửa mesh bề mặt hở** để vật trên cảnh thật qua QA collision (PR-05).
-4. **Có runtime Isaac** (image riêng cho kiểm định) rồi chạy validation → duyệt → phát hành một lần thật.
-5. **Kiểm bằng mắt trên trình duyệt**: Walk, chỉnh vật, LOD, va chạm (danh sách trong handoff Sprint 8).
-6. **Làm xanh 15 test đỏ** và khôi phục CI (thanh toán GitHub của tổ chức, hoặc chạy CI ở repo cá nhân).
+1. **Build và chứng nhận image GPU mới từ `develop`**: đưa entrypoint ghi mốc khởi động lên pod, cho phép thêm migration (lease cho worker demo). Quyết định trần tổng chi GPU trước khi chạy tiếp.
+2. **Chạy một job GPU đầy đủ trên production** (thuê máy → xử lý → tự trả máy) và lưu job id, log vào repo; có thể dùng việc chạy lại "Tạo mesh" cho Room và Playroom.
+3. **Chốt bộ dữ liệu nghiệm thu**: cảnh nào, split, robot, 5 cặp Start–Goal kèm nhãn (EVALUATION mục 7; PRD mục 10.1).
+4. **Sửa mesh bề mặt hở** để vật trên cảnh thật qua QA collision (PR-05).
+5. **Có runtime Isaac** (image riêng cho kiểm định) rồi chạy validation → duyệt → phát hành một lần thật.
+6. **Kiểm bằng mắt trên trình duyệt**: Walk, chỉnh vật, LOD, va chạm (danh sách trong handoff Sprint 8).
 7. Thực hiện các plan T-071 (preset theo video thật, thử lại COLMAP, vocab tree), T-072, T-073.
 
 ## 5. Hồ sơ chưa cập nhật

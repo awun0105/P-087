@@ -11,10 +11,11 @@ from uuid import uuid4
 
 from dotenv import dotenv_values
 
+from src.services.orchestration.gpu.boot import BOOT_KEY
 from src.services.orchestration.gpu.catalog import ReleaseCatalog, ReleaseProfile, load_catalog
 from src.services.orchestration.gpu.config import GpuSettings
 from src.services.orchestration.gpu.provider import Provider, ProviderError
-from src.services.orchestration.gpu.state import Control, StateStore
+from src.services.orchestration.gpu.state import Control, StateStore, load_control
 from src.services.orchestration.gpu.workload import Workload
 
 logger = logging.getLogger(__name__)
@@ -298,7 +299,7 @@ class Controller:
                 # Reconcile even with an empty queue or disabled provisioning. An eventual-consistency
                 # false absence must not strand an owned stopped/running Pod forever.
                 pod, record = historic[0]
-                old = Control(**{key: value for key, value in record.items() if key in Control.__dataclass_fields__})
+                old = load_control(record)
                 pinned = ReleaseProfile.model_validate(old.profile_payload) if old.profile_payload else None
                 if len(historic) == 1 and pinned is not None and self.owned(pod, old, pinned):
                     with self.store.locked() as (_, current, _):
@@ -467,7 +468,13 @@ class Controller:
             else:
                 expired = now - c.created_at >= self.policy.startup_timeout_seconds
                 overprice = actual < float("inf") and actual > (self.policy.max_hourly_usd or 0)
-                if expired or overprice or retire or (ready and not allocation_ok):
+                # Marks exist only once the image is pulled and the entrypoint runs; until then the startup timeout rules.
+                boot = c.workers.get(BOOT_KEY)
+                if not ready and boot and boot.get("failed"):
+                    c.state, c.error = "draining", f"boot_failed:{boot.get('step')}"
+                elif not ready and boot and now - float(boot.get("at") or now) >= self.policy.boot_stall_seconds:
+                    c.state, c.error = "draining", f"boot_stalled:{boot.get('step')}"
+                elif expired or overprice or retire or (ready and not allocation_ok):
                     c.state, c.error = "draining", "startup_or_allocation_failed"
                 self._save(c)
                 return c.state

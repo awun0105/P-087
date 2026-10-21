@@ -149,17 +149,33 @@ def unpublish(settings: Settings, sample_id: str) -> None:
 
 @contextmanager
 def hold(settings: Settings, session_id: str, *, worker: bool = False) -> Iterator[bool]:
-    """A database lock fences active readers/workers against cleanup across hosts."""
+    """A database lock fences active readers/workers against cleanup across hosts.
+
+    Readers only check that cleanup is not running, then release the connection: holding one pooled connection per
+    request (including streaming large scene files) while the handler checks out its own connection deadlocks the
+    transaction pooler. Cleanup only removes closed sessions, which `get` already rejects.
+    """
     _validate(session_id)
+    if not worker:
+        with RuntimeDatabase(settings.database_url).transaction() as tx:
+            shared = tx.execute(
+                "SELECT pg_try_advisory_xact_lock_shared(hashtextextended(?,0))", (f"r2s.demo.session:{session_id}",)
+            ).fetchone()
+        if shared is None or not shared[0]:
+            from src.services.orchestration.samples.sessions import DemoSessionUnavailableError
+
+            raise DemoSessionUnavailableError("Phiên demo đang được thu hồi")
+        get(settings, session_id)
+        yield True
+        return
     with RuntimeDatabase(settings.database_url).transaction() as tx:
         tx.execute("SET LOCAL idle_in_transaction_session_timeout=0")
-        if worker:
-            row = tx.execute(
-                "SELECT pg_try_advisory_xact_lock(hashtextextended(?,0))", (f"r2s.demo.worker:{session_id}",)
-            ).fetchone()
-            if row is None or not row[0]:
-                yield False
-                return
+        row = tx.execute(
+            "SELECT pg_try_advisory_xact_lock(hashtextextended(?,0))", (f"r2s.demo.worker:{session_id}",)
+        ).fetchone()
+        if row is None or not row[0]:
+            yield False
+            return
         shared = tx.execute(
             "SELECT pg_try_advisory_xact_lock_shared(hashtextextended(?,0))", (f"r2s.demo.session:{session_id}",)
         ).fetchone()

@@ -13,6 +13,19 @@ import pytest
 from src.api import auth
 from src.main import app
 
+#: Phiên demo dùng một lần, không cần đăng nhập: mã phiên ngẫu nhiên là quyền truy cập, proxy chỉ cho đi vào
+#: job/project của chính phiên đó (`src/api/demo_sessions.py`).
+DEMO_SESSION = {
+    ("POST", "/samples/{sample_id}/sessions"),
+    ("DELETE", "/demo-sessions/{session_id}"),
+    ("POST", "/demo-sessions/{session_id}/heartbeat"),
+    ("GET", "/demo-sessions/{session_id}/api/v1/{path:path}"),
+    ("POST", "/demo-sessions/{session_id}/api/v1/{path:path}"),
+    ("PUT", "/demo-sessions/{session_id}/api/v1/{path:path}"),
+    ("PATCH", "/demo-sessions/{session_id}/api/v1/{path:path}"),
+    ("DELETE", "/demo-sessions/{session_id}/api/v1/{path:path}"),
+}
+
 #: Không cần đăng nhập (đọc cấu hình, thư viện mẫu, các bước đăng nhập/đăng ký).
 PUBLIC = {
     ("POST", "/auth/login"),
@@ -26,7 +39,7 @@ PUBLIC = {
     ("GET", "/samples"),
     ("GET", "/samples/{sample_id}"),
     ("GET", "/samples/{sample_id}/files/{name}"),
-}
+} | DEMO_SESSION
 
 #: Chỉ Reviewer: quản lý thành viên, audit, mốc demo, phát hành, xoá hẳn thùng rác.
 REVIEWER = {
@@ -153,6 +166,7 @@ AUTHENTICATED = {
     ("GET", "/projects"),
     ("POST", "/projects"),
     ("GET", "/projects/{project_id}"),
+    ("GET", "/projects/{project_id}/display-video"),
     ("GET", "/projects/{project_id}/jobs"),
     ("POST", "/projects/{project_id}/jobs"),
     ("GET", "/projects/{project_id}/privacy"),
@@ -249,6 +263,13 @@ def test_mutating_routes_are_never_public_except_login_flow_and_stateless_calcul
         ("POST", "/auth/register/guest"),
         ("POST", "/processing/evaluate"),
         ("POST", "/processing/suggest"),
-    }
+    } | (DEMO_SESSION - {("GET", "/demo-sessions/{session_id}/api/v1/{path:path}")})
     mutating = {route for route in PUBLIC if route[0] in {"POST", "PUT", "PATCH", "DELETE"}}
     assert mutating == allowed
+
+
+def test_demo_session_routes_are_served_by_the_capability_scoped_module() -> None:
+    actual = _actual()
+    assert {route: actual[route][1].__module__ for route in DEMO_SESSION} == dict.fromkeys(
+        DEMO_SESSION, "src.api.demo_sessions"
+    )

@@ -12,7 +12,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
-from src.services.orchestration.gpu.state import Control, db_time
+from src.services.orchestration.gpu.state import db_time, load_control
 from src.services.orchestration.jobs.database import RuntimeDatabase
 
 #: Used until the deployment has finished at least one cold start (image pull + worker preflight).
@@ -73,7 +73,7 @@ def gpu_capacity(database: RuntimeDatabase | None, deployment_id: str) -> GpuCap
     if row is None:
         return GpuCapacity(state="off", expected_startup_seconds=expected, sample_count=samples)
     raw = json.loads(row[0])
-    control = Control(**{key: value for key, value in raw.items() if key in Control.__dataclass_fields__})
+    control = load_control(raw)
 
     def stamp(value: float) -> datetime | None:
         return datetime.fromtimestamp(value, UTC) if value else None
