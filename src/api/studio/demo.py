@@ -91,7 +91,7 @@ def _run(job_id: str, action: str, operation: Callable[[ProjectRegistry, str], D
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
     except SceneNotAvailableError as error:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="Scene chưa có SceneIR để làm bản demo"
+            status_code=status.HTTP_409_CONFLICT, detail="Scene chưa dựng xong nên chưa làm bản demo được"
         ) from error
     except (SceneRevisionConflictError, RuntimeStateConflictError) as error:
         raise HTTPException(

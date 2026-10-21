@@ -66,7 +66,7 @@ def get_job_preview(job_id: str) -> ReconstructionPreview:
     except (JobNotFoundError, ArtifactNotFoundError) as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except (ArtifactStoreError, ValueError) as error:
-        raise HTTPException(status_code=409, detail="Preview identity/schema/checksum không hợp lệ") from error
+        raise HTTPException(status_code=409, detail="Bản xem trước bị hỏng hoặc không thuộc scene này") from error
 
 
 @router.get("/jobs/{job_id}/artifacts/content")

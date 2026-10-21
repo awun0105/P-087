@@ -438,10 +438,13 @@ def run_input_assembly(
     # `qa_verified`: mọi video phải qua bộ che và được người upload chấp nhận; thiếu bộ che thì từ chối ngay.
     deps.require_anonymize(request.anonymize)
     if registry.job_profile() is None:
+        _LOGGER.warning(
+            "Chưa có runtime cho job: cần PRODUCT_PROCESSING_CONFIG và PRODUCT_RUNTIME_MANIFEST, "
+            "hoặc GPU worker đã công bố runtime (PRODUCT_RUNTIME_FROM_WORKERS=true)"
+        )
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Chưa có runtime cho job: cần PRODUCT_PROCESSING_CONFIG và PRODUCT_RUNTIME_MANIFEST, "
-            "hoặc GPU worker đã công bố runtime (PRODUCT_RUNTIME_FROM_WORKERS=true)",
+            detail="Máy chủ chưa sẵn sàng xử lý scene. Báo quản trị viên.",
         )
     processing = None
     if settings.product_processing_config is not None and is_presets_file(settings.product_processing_config):
