@@ -70,8 +70,9 @@ class Settings(BaseSettings):
     product_worker_root: Path = Path("./data/product_workers")
     #: Giữ scratch để chẩn đoán; mặc định chỉ dọn attempt đã publish và commit thành công.
     product_worker_keep_scratch: bool = False
-    #: Giới hạn bao ngoài của bước preview (COLMAP 14400 + Brush 21600 chạy trong một lượt; T-043 round 2).
-    product_preview_timeout_seconds: float = Field(default=36000, gt=0, allow_inf_nan=False)
+    #: Giới hạn bao ngoài của bước preview (COLMAP rồi Brush trong một lượt). T-071 C5: 4 giờ là giới hạn thật — A5000
+    #: với cấu hình trần của preset chạy dưới 2 giờ; hạn tự tính theo `expected_duration` vẫn ưu tiên khi đủ mẫu.
+    product_preview_timeout_seconds: float = Field(default=14400, gt=0, allow_inf_nan=False)
     #: Thông số REC-05 (voxel/capsule) cho bước hoàn tất sau xác nhận tỉ lệ (owner chốt 2026-09-29).
     product_geometry_config: Path = Path("configs/product/geometry_v1.json")
     product_evaluation_reference: Path = Path("configs/product/evaluation_reference_v1.json")
