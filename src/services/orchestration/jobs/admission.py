@@ -607,29 +607,25 @@ class ResourceAdmission:
             cpu_slots=cpu_slots,
         )
         # Trường mới chỉ ghi khi có giá trị: payload của job theo lượt giữ nguyên dạng cũ.
-        late = {name for name in ("step", "cpu_slots") if getattr(reservation, name) is None}
+        # Trường mới (T-073) chỉ ghi khi có giá trị, nên giữ chỗ của job theo lượt giữ nguyên dạng payload cũ.
+        exclude = {name for name in ("step", "cpu_slots") if getattr(reservation, name) is None}
+        if job_id is not None:
+            exclude |= {
+                "operation_kind",
+                "operation_id",
+                "parent_kind",
+                "parent_id",
+                "input_checksum",
+                "config_checksum",
+                "lease_token",
+                "lease_generation",
+            }
+            if gpu_required:
+                exclude.add("gpu_required")  # mặc định True; bước CPU phải ghi rõ là không giữ GPU
         tx.execute(
             "INSERT INTO r2s_resource_reservations(worker_id,payload) VALUES (?,?) "
             "ON CONFLICT(worker_id) DO UPDATE SET payload=excluded.payload",
-            (
-                self.worker_id,
-                reservation.model_dump_json(
-                    exclude={
-                        "gpu_required",
-                        "operation_kind",
-                        "operation_id",
-                        "parent_kind",
-                        "parent_id",
-                        "input_checksum",
-                        "config_checksum",
-                        "lease_token",
-                        "lease_generation",
-                        *late,
-                    }
-                    if job_id is not None
-                    else late
-                ),
-            ),
+            (self.worker_id, reservation.model_dump_json(exclude=exclude)),
         )
         self._reserved = True
 

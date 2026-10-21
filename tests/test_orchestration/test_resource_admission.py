@@ -1013,3 +1013,86 @@ def test_wait_exceeded_needs_a_known_non_busy_reason() -> None:
     assert admission.wait_exceeded({}, since, later, 1800) is False
     assert admission.wait_exceeded({"vram": "unmeasured"}, since, later, 1800) is False
     assert admission.wait_exceeded({"vram": "external"}, since, later, 1800) is True
+
+
+# --- T-073: giữ chỗ theo bước -----------------------------------------------------------------------------------------
+
+
+def test_cpu_step_keeps_ram_and_disk_but_never_the_gpu(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Bước chuẩn bị chạy được khi GPU đang bị job khác dùng hết, và không làm GPU bận với worker khác."""
+    registry, job, gate = _queued(tmp_path)
+    second = _second_job(registry)
+    _machine(monkeypatch, {**LIVE, "vram_free_gb": 0.0})
+    other = _second_worker(gate)
+    assert other(second)  # job khác đang chạy một mình trên GPU
+    assert gate.admit_step(job, "prepare", gpu_required=False, cpu_slots=4)
+    mine = _reservations(gate)[gate.worker_id]
+    assert not mine.gpu_required and mine.gpu_uuid is None and not mine.exclusive
+    assert mine.required_gb is not None and mine.required_gb["vram"] == 0.0
+    assert mine.step == "prepare" and mine.cpu_slots == 4 and mine.phase == "preview"
+
+
+def test_gpu_step_keeps_the_t072_sharing_rules(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Bước dựng camera xin đúng như lượt preview cũ: chưa có số đo, ước lượng lớn → chạy một mình."""
+    registry, first, gate = _queued(tmp_path)
+    second = _second_job(registry)
+    _machine(monkeypatch)
+    other = _second_worker(gate)
+    assert gate.admit_step(first, "pose_visual", gpu_required=True, cpu_slots=2)
+    assert _reservations(gate)[gate.worker_id].exclusive
+    assert not other.admit_step(second, "pose_visual", gpu_required=True, cpu_slots=2)
+    wait = resource_wait(gate.database, second)
+    assert wait is not None and wait.waiting_on == ["vram"] and wait.reasons == {"vram": "busy"}
+    # Bước CPU của job thứ hai vẫn chạy song song.
+    assert other.admit_step(second, "prepare", gpu_required=False, cpu_slots=2)
+
+
+def test_step_demand_uses_measurements_of_its_own_tool(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    registry, job, gate = _queued(tmp_path)
+    _machine(monkeypatch)
+    _measure(gate, "prepare", 0.0, 3.0)
+    demand = gate.step_demand(job, "prepare", gpu_required=False)
+    assert demand is not None and demand.measured_scope == "exact" and demand.required_gb["ram"] == 3.0
+    assert demand.required_gb["vram"] == 0.0 and not demand.gpu_required
+    # Bước dựng camera chưa có số đo của `preview`: vẫn theo ước lượng.
+    pose = gate.step_demand(job, "pose_visual", gpu_required=True)
+    assert pose is not None and pose.measured_scope == "estimate"
+    # Bộ LOD không có số đo theo tool: luôn theo ước lượng, không bao giờ "đo được 0 GB".
+    lod = gate.step_demand(job, "view_lod", gpu_required=True)
+    assert lod is not None and lod.measured_scope == "estimate" and lod.required_gb["vram"] > 0
+
+
+def test_cpu_slots_full_waits_without_a_resource_snapshot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    registry, job, gate = _queued(tmp_path)
+    second = _second_job(registry)
+    _machine_24(monkeypatch)
+    monkeypatch.setattr(admission.os, "cpu_count", lambda: 8)
+    other = _second_worker(gate)
+    assert other.admit_step(second, "pose_visual", gpu_required=True, cpu_slots=6)
+    assert not gate.admit_step(job, "prepare", gpu_required=False, cpu_slots=4)
+    assert resource_wait(gate.database, job) is None and gate.worker_id not in _reservations(gate)
+    assert gate.admit_step(job, "canonical_geometry", gpu_required=False, cpu_slots=2)
+    other.release()
+    gate.release()
+    # Bước khai nhiều luồng hơn cả máy vẫn chạy được khi máy rảnh.
+    assert gate.admit_step(job, "prepare", gpu_required=False, cpu_slots=64)
+
+
+def test_step_reservation_payload_stays_readable_by_the_queue_estimate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registry, job, gate = _queued(tmp_path)
+    _machine(monkeypatch)
+    assert gate(job)
+    payload = json.loads(next(iter(_reservations_raw(gate).values())))
+    assert "step" not in payload and "cpu_slots" not in payload  # lượt cũ: payload giữ nguyên dạng
+    gate.release()
+    assert gate.admit_step(job, "pose_visual", gpu_required=True, cpu_slots=3)
+    payload = json.loads(next(iter(_reservations_raw(gate).values())))
+    assert payload["step"] == "pose_visual" and payload["cpu_slots"] == 3 and payload["phase"] == "preview"
+
+
+def _reservations_raw(gate: ResourceAdmission) -> dict[str, str]:
+    with gate.database.transaction() as tx:
+        rows = tx.execute("SELECT worker_id, payload FROM r2s_resource_reservations").fetchall()
+    return {row[0]: row[1] for row in rows}
