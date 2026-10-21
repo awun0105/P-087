@@ -316,7 +316,8 @@ def test_prepare_volume_rejects_symlinked_managed_directory(tmp_path: Path, monk
     monkeypatch.setattr(
         container_entrypoint.pwd,
         "getpwnam",
-        lambda name: SimpleNamespace(pw_name=name, pw_uid=1000, pw_gid=1000),
+        # The caller's own ids keep the ownership step a no-op on any machine, so only the symlink check can refuse.
+        lambda name: SimpleNamespace(pw_name=name, pw_uid=os.getuid(), pw_gid=os.getgid()),
     )
 
     with pytest.raises(container_entrypoint.StartupError, match="symlink"):

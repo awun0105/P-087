@@ -41,6 +41,8 @@ jobs:
         env:
           APP_ENV: test
           OPENAI_API_KEY: test-key
+          # Same origins as .env.example; the CORS middleware reads them when the app is imported.
+          CORS_ORIGINS: http://localhost:3000,http://localhost:5173
 
       - name: Check Integration Foundation readiness
         run: python -m scripts.check_foundation
