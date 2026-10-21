@@ -59,8 +59,8 @@ const VIDEO_FORMATS = new Set(["video_mp4", "video_mov"]);
 const CLOUD_FORMATS = new Set(["point_cloud_ply", "point_cloud_pcd"]);
 const GAUSSIAN_FORMATS = new Set(["gaussian_ply", "gaussian_ply_colmap", "gaussian_sog"]);
 const VIDEO_PRESETS: { value: VideoResolutionPreset; detail: string }[] = [
-  { value: "1080p", detail: "tối đa 1920 × 1080 ngang / 1080 × 1920 dọc" },
-  { value: "720p", detail: "mặc định · tối đa 1280 × 720 ngang / 720 × 1280 dọc" },
+  { value: "1080p", detail: "mặc định · tối đa 1920 × 1080 ngang / 1080 × 1920 dọc" },
+  { value: "720p", detail: "tối đa 1280 × 720 ngang / 720 × 1280 dọc" },
   { value: "480p", detail: "tối đa 854 × 480 ngang / 480 × 854 dọc" },
 ];
 const INPUT_DRAFT_PREFIX = "r2s:input-assembly:v1";
@@ -153,7 +153,7 @@ function newEntry(file: File, isVideo: boolean): InputEntry {
     file,
     originalName: file.name,
     isVideo,
-    preset: "720p",
+    preset: "1080p",
     included: true,
     status: "selected",
     progress: null,
@@ -658,7 +658,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
         file: null,
         originalName: staged.source_file.original_name,
         isVideo: staged.staged_files.some((item) => VIDEO_FORMATS.has(item.observed_format)),
-        preset: "720p",
+        preset: "1080p",
         included: true,
         status: "ready",
         progress: 1,
@@ -1127,7 +1127,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
       <main className="mx-auto max-w-4xl px-4 pt-10 pb-20 sm:px-6">
         <PageHeader title="Tạo scene mới" description="Một khung tải lên cho video, LiDAR, metadata và scene 3DGS." />
         <EmptyState icon={<FileUp aria-hidden />} title="Đăng nhập để tải dữ liệu lên" className="mt-8" action={<a href={`/login?next=${encodeURIComponent(loginHref)}`} className={buttonVariants({})}>Đăng nhập</a>}>
-          Video được chuẩn bị ở 720p mặc định trước khi gửi; file khác được phân loại theo nội dung sau upload.
+          Video được chuẩn bị ở 1080p mặc định trước khi gửi; file khác được phân loại theo nội dung sau upload.
         </EmptyState>
       </main>
     );

@@ -798,7 +798,8 @@ describe("unified input flow", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Tải file đã chọn lên" }));
     expect(await screen.findAllByText("Đã xác minh")).toHaveLength(2);
     expect(mocks.prepareVideo).toHaveBeenCalledTimes(2);
-    expect(mocks.prepareVideo.mock.calls[0][0]).toMatchObject({ preset: "720p", source: first });
+    // T-071 D5: mặc định chuẩn bị video ở 1080p.
+    expect(mocks.prepareVideo.mock.calls[0][0]).toMatchObject({ preset: "1080p", source: first });
     expect(mocks.uploadPrepared).toHaveBeenCalledTimes(2);
     await waitFor(() => expect(JSON.parse(window.sessionStorage.getItem("r2s:input-assembly:v1:user-1") ?? "{}").uploads).toHaveLength(2));
 
