@@ -18,8 +18,8 @@ if TYPE_CHECKING:
 DISPATCH_CLEARED: frozenset[PrivacyResult] = frozenset({PrivacyResult.VERIFIED_ANONYMIZED})
 
 _HUMAN_REASON: dict[PrivacyResult, str] = {
-    PrivacyResult.QUARANTINED: "input bị quarantine: còn thông tin nhận dạng chưa xử lý",
-    PrivacyResult.PRELIMINARY_SCREENED: "input mới ở mức sàng lọc sơ bộ, chưa được QA xác nhận ẩn danh",
+    PrivacyResult.QUARANTINED: "dữ liệu còn thông tin nhận dạng chưa được che",
+    PrivacyResult.PRELIMINARY_SCREENED: "dữ liệu chưa được xác nhận đã ẩn danh",
 }
 
 
@@ -32,14 +32,14 @@ def block_reason(result: PrivacyResult) -> str | None:
     """Human-readable Vietnamese reason, or None when dispatch is allowed."""
     if dispatch_allowed(result):
         return None
-    return _HUMAN_REASON.get(result, f"privacy state {result} không cho phép dispatch")
+    return _HUMAN_REASON.get(result, f"dữ liệu chưa được phép xử lý ({result})")
 
 
 def require_dispatch_allowed(result: PrivacyResult) -> None:
     """Raise PrivacyGateBlockedError unless the input may enter the pipeline."""
     reason = block_reason(result)
     if reason is not None:
-        raise PrivacyGateBlockedError(f"không thể tạo job: {reason}")
+        raise PrivacyGateBlockedError(f"Chưa tạo được scene: {reason}")
 
 
 #: Cờ tự khai bắt buộc trong `source_rights_attestation` cho chế độ MVP.
@@ -65,9 +65,9 @@ def project_block_reason(project: "ProjectRecord") -> str | None:
     ):
         attestation = project.source_rights_attestation
         if report.unresolved_findings:
-            return "input có finding privacy chưa xử lý"
+            return "dữ liệu còn vấn đề riêng tư chưa xử lý"
         if any(attestation.get(flag) is not True for flag in SELF_ATTESTATION_FLAGS):
-            return "người upload chưa xác nhận quyền dùng và việc ẩn danh khuôn mặt/biển số"
+            return "người tải lên chưa xác nhận quyền dùng và việc che khuôn mặt, biển số"
         return None
     return block_reason(report.result)
 
@@ -81,4 +81,4 @@ def require_project_dispatch(project: "ProjectRecord") -> None:
     """Raise PrivacyGateBlockedError khi project chưa được phép dispatch."""
     reason = project_block_reason(project)
     if reason is not None:
-        raise PrivacyGateBlockedError(f"không thể tạo job: {reason}")
+        raise PrivacyGateBlockedError(f"Chưa tạo được scene: {reason}")
