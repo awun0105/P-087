@@ -142,12 +142,12 @@ export function ProgressTab({ jobId, progress, info, busy, canCancel, canAccept 
       )
     : stageActions;
   return <div className="mx-auto max-w-5xl space-y-4 px-4 py-6 sm:px-6">
-    <ProgressFrame hint="Bấm tên bước đã xong để mở Xem giai đoạn; bước lỗi hoặc cần bạn thao tác có nút ngay tại bước đó.">
+    <ProgressFrame hint="Bấm tên bước đã xong để xem kết quả.">
       {reviewing && <div id={ANONYMIZATION_PANEL_ID} className="scroll-mt-4"><AnonymizationReviewPanel key={jobId + ":" + progress.attempt} jobId={jobId} canAccept={canAccept} onAccepted={() => onChanged?.()} /></div>}
       {!reviewing && (progress?.status === "QUEUED" || progress?.waiting_for === "resources" || progress?.queue) && <div role="status" className="mb-5 space-y-2 text-sm text-ink-muted">
         <p>{progress.waiting_for === "runtime"
           ? runtimeWaitText(progress)
-          : progress.waiting_for === "resources" ? "Đang chờ đủ tài nguyên trên máy xử lý." : "Job đã vào hàng đợi, đang chờ máy xử lý."} Cấu hình đã chọn được giữ nguyên; job tự chạy tiếp khi đến lượt và đủ tài nguyên.</p>
+          : progress.waiting_for === "resources" ? "Đang chờ máy xử lý đủ tài nguyên." : "Đang xếp hàng chờ máy xử lý."} Scene tự chạy khi đến lượt.</p>
         <ProgressBar value={null} label="Đang chờ trong hàng đợi" />
         {progress.queue && <QueueStatus queue={progress.queue} />}
         {pipelineView?.gpu && <GpuStartupNotice capacity={pipelineView.gpu} />}
@@ -156,7 +156,7 @@ export function ProgressTab({ jobId, progress, info, busy, canCancel, canAccept 
       {objectify.error && objectOverride && <Notice tone="rust" className="mb-4">{objectify.error}</Notice>}
       {progress ? (
         <>
-          <PipelineTimeline stageActions={shownActions} stages={shownStages} stageList={shownList} jobId={jobId} isStale={stale} timeNote={"Cập nhật lúc " + new Date(progress.updated_at).toLocaleTimeString("vi-VN") + (stale ? " · Tiến trình mất kết nối" : progress.status === "RUNNING" || progress.status === "QUEUED" ? " · Có thể đóng trang, job tiếp tục chạy trên máy chủ" : "")} />
+          <PipelineTimeline stageActions={shownActions} stages={shownStages} stageList={shownList} jobId={jobId} isStale={stale} timeNote={"Cập nhật lúc " + new Date(progress.updated_at).toLocaleTimeString("vi-VN") + (stale ? " · Tiến trình mất kết nối" : progress.status === "RUNNING" || progress.status === "QUEUED" ? " · Có thể đóng trang, scene vẫn chạy" : "")} />
         </>
       ) : <p role="status" className="text-sm text-ink-muted">Đang tải tiến trình…</p>}
       {canCancel && <div className="mt-4 flex justify-end gap-3">
@@ -171,8 +171,8 @@ export function ProgressTab({ jobId, progress, info, busy, canCancel, canAccept 
         <figcaption className="mt-1.5 text-xs text-ink-muted">Video ghép từ ảnh gốc, chỉ để xem lại</figcaption>
       </figure>}
       {info?.createdBy && <p>Scene do {info.createdBy} tạo.</p>}
-      <p>Job vẫn chạy khi bạn rời trang. Bước tỉ lệ mét cần thao tác của bạn trong Studio; view giai đoạn 6 chỉ mở sau khi bước này hoàn tất.</p>
-      <p>Thời gian từng bước lấy từ API; thời gian chờ bạn xác nhận không được trình bày như thời gian máy xử lý.</p>
+      <p>Scene vẫn chạy khi bạn rời trang. Bước tỉ lệ mét cần bạn thao tác trong Studio.</p>
+      <p>Thời gian chờ bạn thao tác không tính vào thời gian xử lý.</p>
     </HelpDetails>
   </div>;
 }

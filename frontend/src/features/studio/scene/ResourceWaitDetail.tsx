@@ -4,11 +4,11 @@ const LABEL = { vram: "VRAM GPU", ram: "RAM", disk: "Ổ đĩa" } as const;
 
 /** Mỗi lý do nói rõ việc chờ có tự hết hay cần người dùng làm gì; không tự đổi cấu hình. */
 const REASON: Record<ResourceWaitReason, string> = {
-  busy: "Job khác đang dùng phần này. Job của bạn tự chạy khi job đó xong.",
-  external: "Máy xử lý đang rảnh với pipeline nhưng phần này bị chương trình khác chiếm. Job chạy khi phần đó được giải phóng; nếu không, huỷ và tạo lại với cấu hình thấp hơn.",
-  exceeds_machine: "Cấu hình cần nhiều hơn tổng năng lực của máy xử lý này nên sẽ không tự chạy ở đây. Huỷ và tạo lại với cấu hình thấp hơn, hoặc dùng máy mạnh hơn.",
-  unmeasured: "Máy xử lý chưa đo được phần này nên chưa dám chạy. Kiểm tra GPU và driver của máy xử lý.",
-  gate_error: "Bước kiểm tra tài nguyên bị lỗi trên máy xử lý nên chưa chạy. Nếu kéo dài quá 30 phút, việc sẽ dừng để bạn thử lại; báo quản trị viên kiểm tra máy xử lý.",
+  busy: "Việc khác đang dùng phần này. Scene của bạn tự chạy khi việc đó xong.",
+  external: "Một chương trình khác trên máy đang chiếm phần này. Nếu chờ lâu, huỷ và tạo lại với cấu hình thấp hơn.",
+  exceeds_machine: "Cấu hình vượt sức máy xử lý nên sẽ không chạy. Huỷ và tạo lại với cấu hình thấp hơn.",
+  unmeasured: "Máy xử lý chưa đo được phần này nên chưa chạy. Báo quản trị viên.",
+  gate_error: "Máy xử lý kiểm tra tài nguyên bị lỗi. Quá 30 phút việc sẽ dừng để bạn thử lại. Báo quản trị viên.",
 };
 
 function gigabytes(value: number | null | undefined): string {
@@ -32,7 +32,7 @@ export function ResourceWaitDetail({ wait }: { wait: ResourceWaitView }) {
             return (
               <li key={resource}>
                 <p className="font-medium text-ink">GPU: đang chờ được chạy một mình</p>
-                <p className="mt-0.5">Cấu hình này chưa có số đo trên máy xử lý, nên job sẽ chạy một mình trên GPU để đo. Job tự chạy khi job đang dùng GPU xong.</p>
+                <p className="mt-0.5">Cấu hình này chạy lần đầu nên cần dùng GPU một mình. Scene tự chạy khi GPU rảnh.</p>
               </li>
             );
           }
@@ -47,7 +47,7 @@ export function ResourceWaitDetail({ wait }: { wait: ResourceWaitView }) {
           );
         })}
       </ul>
-      <p className="mt-2 text-xs text-ink-subtle">Máy xử lý đo lúc {new Date(wait.checked_at).toLocaleTimeString("vi-VN")} và đo lại mỗi lượt kiểm tra.</p>
+      <p className="mt-2 text-xs text-ink-subtle">Đo lúc {new Date(wait.checked_at).toLocaleTimeString("vi-VN")}.</p>
     </div>
   );
 }

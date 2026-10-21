@@ -45,12 +45,12 @@ describe("GpuStartupNotice", () => {
 
   it("tells the user a stopped GPU will start automatically and how long that takes", () => {
     render(<GpuStartupNotice capacity={capacity({ state: "off", expected_startup_seconds: 720 })} now={NOW} />);
-    expect(screen.getByText(/tự bật máy.*khoảng 12 phút/)).toBeInTheDocument();
+    expect(screen.getByText(/tự bật, thường mất khoảng 12 phút/)).toBeInTheDocument();
   });
 
   it("flags a blocked GPU as an alert for the administrator", () => {
     render(<GpuStartupNotice capacity={capacity({ state: "blocked" })} now={NOW} />);
-    expect(screen.getByRole("alert")).toHaveTextContent("Chưa thuê được máy GPU");
+    expect(screen.getByRole("alert")).toHaveTextContent("Chưa có máy GPU");
   });
 
   it("renders nothing when the GPU is ready, unmanaged, or unknown", () => {
