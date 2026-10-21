@@ -115,7 +115,7 @@ function preparationFailure(error: VideoPreparationError): { message: string; re
     media_processing_failed: "Trình duyệt gặp lỗi khi nén video.",
   };
   return {
-    message: `${reasons[error.code] ?? "Không thể chuẩn bị video trên trình duyệt này."} Video gốc chưa được tải lên; bạn có thể chọn tải video gốc không nén.`,
+    message: `${reasons[error.code] ?? "Không thể chuẩn bị video trên trình duyệt này."} Bạn có thể tải video gốc không nén.`,
     recovery: "upload_original",
   };
 }
@@ -269,7 +269,7 @@ function formatLabel(format: string): string {
     calibration_kalibr_camchain: "Camera ↔ IMU (Kalibr, chưa dùng được làm calibration LiDAR)",
     tum_trajectory: "Trajectory TUM",
     rgb_frame_times: "RGB frame times (legacy)",
-    timestamp_rows: "Timestamp rows (chưa gán vai trò)",
+    timestamp_rows: "File thời điểm (chưa gán vai trò)",
     zip_unknown: "ZIP cần kiểm tra thành phần",
     unknown: "Định dạng chưa nhận diện",
   };
@@ -280,8 +280,8 @@ function preparationLabel(phase: VideoPreparationPhase | undefined): string {
   switch (phase) {
     case "hashing": return "Đang đọc và kiểm tra video gốc";
     case "probing": return "Đang kiểm tra video";
-    case "encoding": return "Đang chuẩn bị video trước khi upload";
-    case "verifying": return "Đang kiểm tra frame map";
+    case "encoding": return "Đang chuẩn bị video trước khi tải lên";
+    case "verifying": return "Đang kiểm tra khung hình";
     default: return "Đang chuẩn bị video";
   }
 }
@@ -457,7 +457,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
       entryUploads.current.set(entryId, uploads);
     }
     void temporaryUploads("heartbeat", [uploadId]).catch((cause: unknown) => {
-      setError(errorMessage(cause, "Không giữ được phiên upload; hãy tải lại file."));
+      setError(errorMessage(cause, "Mất phiên tải lên. Hãy tải lại file."));
     });
   }, []);
 
@@ -590,8 +590,8 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
       setDataOrigin(draft.data_origin);
       setDataOwner(draft.data_owner);
       setDataPurpose(draft.data_purpose);
-      if (restored.length) setNotice("Đã khôi phục các upload của tài khoản này và xác minh lại với máy chủ.");
-      if (missing.length) setError(`Không thể khôi phục một số upload đã hết hạn hoặc không còn quyền truy cập: ${missing.join(", ")}`);
+      if (restored.length) setNotice("Đã khôi phục các file bạn tải lên trước đó.");
+      if (missing.length) setError(`Không khôi phục được (đã hết hạn): ${missing.join(", ")}`);
       setDraftLoaded(true);
       if (restored.length) invalidateResolution();
     }
@@ -673,11 +673,11 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
       appendScanFiles(staged);
       trackUpload(staged.upload_id);
       invalidateResolution();
-      setNotice("Đã nối upload cũ vào inventory chung; file đã xác minh không cần tải lại.");
+      setNotice("Đã thêm các file tải lên trước đó; không cần tải lại.");
       const videoName = staged.staged_files.find((item) => VIDEO_FORMATS.has(item.observed_format))?.source_file.original_name;
       if (videoName) setSceneName((current) => current || videoName.replace(/\.[^.]+$/, ""));
     }).catch((cause: unknown) => {
-      if (alive) setError(errorMessage(cause, "Không thể nối upload cũ vào inventory chung."));
+      if (alive) setError(errorMessage(cause, "Không thêm được các file tải lên trước đó."));
     });
     return () => { alive = false; };
   }, [draftLoaded, params, me, invalidateResolution, trackUpload]);
@@ -704,7 +704,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
     const candidates = dropped.filter((file) => rejectAssemblyFileName(file.name) === null);
     // Chỉ ghi đè notice khi thật sự có file bị bỏ qua: notice đang hiện có thể là lời nhắc khác.
     const skipped = unusable.length
-      ? `Đã bỏ qua ${unusable.length} file pipeline không đọc được: ${unusable.map((file) => file.name).join(", ")}.`
+      ? `Đã bỏ qua ${unusable.length} file không đọc được: ${unusable.map((file) => file.name).join(", ")}.`
       : null;
     if (!candidates.length) {
       setError(`${rejectAssemblyFileName(dropped[0].name)} Đã bỏ qua: ${dropped.map((file) => file.name).join(", ")}.`);
@@ -746,7 +746,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
         invalidateResolution();
         return;
       } catch (cause: unknown) {
-        patchEntry(entry.id, { status: "failed", progress: null, error: errorMessage(cause, "Không thể nối upload hiện có.") });
+        patchEntry(entry.id, { status: "failed", progress: null, error: errorMessage(cause, "Không tiếp tục tải lên được.") });
         return;
       }
     }
@@ -814,7 +814,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
         status: cancelled ? "cancelled" : "failed",
         progress: null,
         preparation: null,
-        error: cancelled ? "Đã hủy thao tác. Có thể chọn Tiếp tục để nối phiên upload." : failure?.message ?? errorMessage(cause, "Upload thất bại."),
+        error: cancelled ? "Đã hủy. Bấm Tiếp tục tải để tải tiếp." : failure?.message ?? errorMessage(cause, "Tải lên thất bại."),
         recovery: failure?.recovery ?? null,
       });
     }
@@ -949,7 +949,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
       return;
     }
     if (!stagedEntries.length) {
-      setError("Chọn ít nhất một file đã upload để phân tích.");
+      setError("Chọn ít nhất một file đã tải lên.");
       return;
     }
     if (hasMixedSceneKinds && !nextIntent) {
@@ -978,7 +978,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
       setBindings(request.bindings);
       if (cloudOverride !== undefined) setCloudState(cloudOverride ?? "");
     } catch (cause: unknown) {
-      setError(errorMessage(cause, "Không phân tích được tập input."));
+      setError(errorMessage(cause, "Không đọc được bộ file."));
       setAnalysisFailed(true);
     } finally {
       setBusy(false);
@@ -1036,15 +1036,15 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
         return;
       }
       if (!dataOrigin || !dataOwner.trim() || !dataPurpose.trim() || !rights || !anonymized || !retention) {
-        setError("Hoàn tất xác nhận nguồn dữ liệu trước khi tạo job.");
+        setError("Hoàn tất xác nhận nguồn dữ liệu trước khi tạo scene.");
         return;
       }
       if (guestQuotaEmpty) {
-        setError("Bạn đã dùng hết 3 lượt chạy job Guest hôm nay. Hạn mức sẽ đặt lại lúc 00:00 giờ Việt Nam.");
+        setError("Bạn đã dùng hết 3 lượt chạy của khách hôm nay. Lượt mới có lúc 00:00 giờ Việt Nam.");
         return;
       }
       if (processingBlocked) {
-        setError("Cấu hình xử lý chưa được xác nhận hoặc vượt tài nguyên worker.");
+        setError("Cấu hình xử lý chưa được xác nhận hoặc vượt sức máy xử lý.");
         return;
       }
       const attestation: SourceRightsAttestation = {
@@ -1071,7 +1071,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
       router.push(`/scenes/${encodeURIComponent(result.job.job_id)}`);
     } catch (cause: unknown) {
       if (isGuest) await refresh();
-      setError(errorMessage(cause, "Không thể tiếp tục luồng input đã chọn."));
+      setError(errorMessage(cause, "Không tiếp tục được với cách xử lý đã chọn."));
     } finally {
       setSubmitting(false);
     }
@@ -1114,20 +1114,20 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
       if (!anonymized) createBlockers.push("Xác nhận video không có khuôn mặt/biển số hoặc đã được làm mờ.");
       if (!retention) createBlockers.push("Xác nhận việc lưu dữ liệu và kết quả.");
       if (processingBlocked) createBlockers.push("Cấu hình xử lý chưa được xác nhận hoặc vượt tài nguyên máy.");
-      if (guestQuotaEmpty) createBlockers.push("Đã dùng hết lượt chạy Guest hôm nay.");
+      if (guestQuotaEmpty) createBlockers.push("Đã dùng hết lượt chạy của khách hôm nay.");
     }
   }
 
   if (me === null) {
-    return <main className="mx-auto max-w-4xl px-4 pt-10 pb-20 sm:px-6"><PageHeader title="Tạo scene mới" description="Một khung tải lên cho video, LiDAR, metadata và scene 3DGS." /><p className="mt-8 text-sm text-ink-muted" role="status">Đang kiểm tra quyền truy cập…</p></main>;
+    return <main className="mx-auto max-w-4xl px-4 pt-10 pb-20 sm:px-6"><PageHeader title="Tạo scene mới" description="Tải video, dữ liệu LiDAR hoặc scene 3DGS." /><p className="mt-8 text-sm text-ink-muted" role="status">Đang kiểm tra quyền truy cập…</p></main>;
   }
 
   if (!canEdit(me)) {
     return (
       <main className="mx-auto max-w-4xl px-4 pt-10 pb-20 sm:px-6">
-        <PageHeader title="Tạo scene mới" description="Một khung tải lên cho video, LiDAR, metadata và scene 3DGS." />
+        <PageHeader title="Tạo scene mới" description="Tải video, dữ liệu LiDAR hoặc scene 3DGS." />
         <EmptyState icon={<FileUp aria-hidden />} title="Đăng nhập để tải dữ liệu lên" className="mt-8" action={<a href={`/login?next=${encodeURIComponent(loginHref)}`} className={buttonVariants({})}>Đăng nhập</a>}>
-          Video được chuẩn bị ở 720p mặc định trước khi gửi; file khác được phân loại theo nội dung sau upload.
+          Đăng nhập để tải video và dữ liệu đi kèm.
         </EmptyState>
       </main>
     );
@@ -1135,9 +1135,9 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
 
   return (
     <main className="mx-auto max-w-5xl px-4 pt-10 pb-20 sm:px-6">
-      <PageHeader action={<CaptureGuide />} title="Tạo scene từ video" description="Thả video, LiDAR, calibration, quỹ đạo, thời điểm frame, PLY/SOG hoặc ZIP vào cùng một khung. Hệ thống đọc nội dung rồi tự chọn cách xử lý phù hợp." />
+      <PageHeader action={<CaptureGuide />} title="Tạo scene từ video" description="Thả mọi file vào một chỗ. Hệ thống tự nhận loại file và chọn cách xử lý." />
       <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-ink-muted">Tải lên và phân tích chưa tạo job hay trừ quota.</p>
+        <p className="text-sm text-ink-muted">Tải lên chưa tính lượt chạy.</p>
         <a className="text-sm font-medium text-ember-strong hover:underline" href="/new/try-demo">Xem scene mẫu đã xử lý</a>
       </div>
 
@@ -1147,8 +1147,8 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
       </h2>
 
       {step === 0 && <>
-      <section className="mt-5 space-y-4" aria-label="Tập input">
-        {!draftLoaded && <p className="text-sm text-ink-muted" role="status">Đang khôi phục upload của tài khoản…</p>}
+      <section className="mt-5 space-y-4" aria-label="Bộ file">
+        {!draftLoaded && <p className="text-sm text-ink-muted" role="status">Đang khôi phục file đã tải lên…</p>}
         <Card
           className={`p-5 sm:p-6 ${dragging ? "border-ember bg-ember-soft/30" : "border-dashed"}`}
           onDragOver={(event) => { event.preventDefault(); setDragging(true); }}
@@ -1167,7 +1167,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
           <label htmlFor={ids.upload} className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl px-4 py-8 text-center outline-none focus-within:ring-3 focus-within:ring-ember/30">
             <FileUp className="size-8 text-ember-strong" aria-hidden />
             <span className="font-semibold text-ink">Thả tất cả file vào đây hoặc chọn từ máy</span>
-            <span className="max-w-2xl text-sm text-ink-muted">Hỗ trợ video MP4/MOV, point cloud PLY/PCD, calibration, trajectory TUM, timestamp RGB/LiDAR, Gaussian PLY/SOG và ZIP. Hệ thống xác định vai trò theo nội dung.</span>
+            <span className="max-w-2xl text-sm text-ink-muted">Video MP4/MOV, đám mây điểm PLY/PCD, file hiệu chuẩn, quỹ đạo, thời điểm, scene 3DGS PLY/SOG hoặc ZIP.</span>
           </label>
           {adding && <p className="text-center text-sm text-ink-muted" role="status">Đang đọc danh sách file…</p>}
         </Card>
@@ -1177,7 +1177,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <h2 className="text-base font-bold">Danh sách file</h2>
-                <p className="mt-1 text-sm text-ink-muted">Chỉ file đã tải lên và được xác minh mới được dùng. Bỏ chọn một file sẽ loại nó khỏi lần phân tích kế tiếp.</p>
+                <p className="mt-1 text-sm text-ink-muted">Chỉ dùng file đã tải lên xong. Bỏ chọn để loại file.</p>
               </div>
               <Button variant="secondary" onClick={() => void uploadPending()} disabled={busy || adding || !entries.some((item) => item.included && item.status !== "ready" && item.file)}>
                 {busy ? <><Loader2 className="size-4 animate-spin" aria-hidden /> Đang xử lý</> : <>Tải file đã chọn lên</>}
@@ -1203,14 +1203,14 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
                       <div className="min-w-0 flex-1">
                         <p className="break-all text-sm font-medium text-ink">{entry.originalName}</p>
                         <p className="mt-0.5 text-sm text-ink-muted">
-                          {entry.staged ? formats.join(" · ") || "ZIP chưa phân loại" : entry.isVideo ? `Video · ${formatBytes(entry.file?.size ?? 0)}` : `Đang chờ server phân loại · ${formatBytes(entry.file?.size ?? 0)}`}
+                          {entry.staged ? formats.join(" · ") || "ZIP chưa phân loại" : entry.isVideo ? `Video · ${formatBytes(entry.file?.size ?? 0)}` : `Chờ nhận loại file · ${formatBytes(entry.file?.size ?? 0)}`}
                           {entry.staged && ` · ${formatBytes(entry.staged.source_file.size_bytes)}`}
                         </p>
                         {unusable > 0 && (
                           <p className="mt-1 text-sm text-ochre-strong">
                             {allUnusable
-                              ? "Máy chủ không nhận ra vai trò nào trong file này, nên mọi hướng xử lý đều loại nó. Bỏ chọn hoặc xoá file để phân tích tiếp."
-                              : `${unusable}/${total} thành phần trong file này không nhận ra vai trò; mọi hướng xử lý sẽ loại riêng những thành phần đó.`}
+                              ? "Không nhận ra loại file này. Bỏ chọn hoặc xoá file để tiếp tục."
+                              : `${unusable}/${total} file trong gói không nhận ra loại và sẽ bị bỏ qua.`}
                           </p>
                         )}
                         {entry.isVideo && entry.status !== "ready" && (
@@ -1234,7 +1234,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
                         )}
                         {active && entry.status !== "preparing" && (
                           <div className="mt-3" role="status" aria-live="polite">
-                            <p className="text-xs text-ink-muted">{entry.progress === null ? "Đang xác minh file…" : entry.progress >= 1 ? "Đang kiểm tra nội dung và tạo inventory…" : `Đang upload ${Math.round(entry.progress * 100)}%`}</p>
+                            <p className="text-xs text-ink-muted">{entry.progress === null ? "Đang xác minh file…" : entry.progress >= 1 ? "Đang kiểm tra nội dung…" : `Đang tải lên ${Math.round(entry.progress * 100)}%`}</p>
                             <ProgressBar value={entry.progress} label={`Tải lên ${entry.originalName}`} className="mt-2" />
                           </div>
                         )}
@@ -1272,23 +1272,23 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
             <option value="video_reconstruction">Dựng scene từ video</option>
             <option value="gaussian_view_import">Mở scene 3DGS để xem</option>
           </select>
-          <p className="mt-2 text-xs text-ink-muted">Hai mục đích là hai luồng riêng. Chọn một luồng sẽ giữ nguyên các file; không tự gửi cả hai lệnh.</p>
+          <p className="mt-2 text-xs text-ink-muted">Chỉ chọn một. File vẫn được giữ nguyên.</p>
         </Card>
       )}
 
       {timestampFiles.length > 0 && (
         <Card className="mt-5 p-5 sm:p-6">
-          <h2 className="text-base font-bold">Gán vai trò cho file timestamp</h2>
-          <p className="mt-1 text-sm text-ink-muted">Hệ thống tự gán khi chỉ có một file có số dòng khớp số scan hoặc số pose; còn không thì các dòng số không tự cho biết là thời gian camera hay LiDAR, hãy chọn đúng file cho từng cảm biến. Hệ thống sẽ kiểm tra thứ tự và số dòng.</p>
+          <h2 className="text-base font-bold">Gán file thời điểm</h2>
+          <p className="mt-1 text-sm text-ink-muted">Chọn file thời điểm cho camera và cho LiDAR. Hệ thống sẽ kiểm tra số dòng.</p>
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
-            <label htmlFor={ids.rgbTimes} className="text-sm">File timestamp của frame RGB
+            <label htmlFor={ids.rgbTimes} className="text-sm">File thời điểm của khung hình video
               <select id={ids.rgbTimes} value={rgbFrameTimesFileId} onChange={(event) => { const fileId = event.target.value; setRgbFrameTimesFileId(fileId); if (fileId !== rgbFrameTimesFileId) setRgbTimestampUnit(""); if (fileId && fileId === lidarScanTimesFileId) { setLidarScanTimesFileId(""); setLidarTimestampUnit(""); } setBindings((current) => current.filter((item) => item.role !== "rgb_frame_times" && !(fileId && fileId === lidarScanTimesFileId && item.role === "lidar_scan_times"))); invalidateResolution(); }} className="mt-1.5 h-10 w-full rounded-[10px] border border-line-strong bg-paper-raised px-3">
                 <option value="">Chưa gán</option>
                 {timestampFiles.map((file) => <option key={file.file_id} value={file.file_id} disabled={file.file_id === lidarScanTimesFileId}>{fileNamesById.get(file.file_id) ?? file.file_id}</option>)}
               </select>
             </label>
             {rgbFrameTimesFileId && (
-              <label className="text-sm">Đơn vị timestamp RGB
+              <label className="text-sm">Đơn vị thời điểm video
                 <select value={rgbTimestampUnit} onChange={(event) => { setRgbTimestampUnit(event.target.value as DeclarationChoice<"seconds" | "milliseconds" | "microseconds" | "nanoseconds">); invalidateResolution(); }} className="mt-1.5 h-10 w-full rounded-[10px] border border-line-strong bg-paper-raised px-3">
                   <option value="">Chưa xác nhận</option><option value="seconds">Giây (s)</option><option value="milliseconds">Mili giây (ms)</option><option value="microseconds">Micro giây (µs)</option><option value="nanoseconds">Nano giây (ns)</option>
                 </select>
@@ -1296,14 +1296,14 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
             )}
             {cloudState === "raw_scan_sequence" && (
               <>
-                <label htmlFor={ids.lidarTimes} className="text-sm">File có một timestamp cho mỗi scan LiDAR
+                <label htmlFor={ids.lidarTimes} className="text-sm">File thời điểm của từng lượt quét LiDAR
                   <select id={ids.lidarTimes} value={lidarScanTimesFileId} onChange={(event) => { const fileId = event.target.value; setLidarScanTimesFileId(fileId); if (fileId !== lidarScanTimesFileId) setLidarTimestampUnit(""); if (fileId && fileId === rgbFrameTimesFileId) { setRgbFrameTimesFileId(""); setRgbTimestampUnit(""); } setBindings((current) => current.filter((item) => item.role !== "lidar_scan_times" && !(fileId && fileId === rgbFrameTimesFileId && item.role === "rgb_frame_times"))); invalidateResolution(); }} className="mt-1.5 h-10 w-full rounded-[10px] border border-line-strong bg-paper-raised px-3">
                     <option value="">Chưa gán</option>
                     {timestampFiles.map((file) => <option key={file.file_id} value={file.file_id} disabled={file.file_id === rgbFrameTimesFileId}>{fileNamesById.get(file.file_id) ?? file.file_id}</option>)}
                   </select>
                 </label>
                 {lidarScanTimesFileId && (
-                  <label className="text-sm">Đơn vị timestamp LiDAR
+                  <label className="text-sm">Đơn vị thời điểm LiDAR
                     <select value={lidarTimestampUnit} onChange={(event) => { setLidarTimestampUnit(event.target.value as DeclarationChoice<"seconds" | "milliseconds" | "microseconds" | "nanoseconds">); invalidateResolution(); }} className="mt-1.5 h-10 w-full rounded-[10px] border border-line-strong bg-paper-raised px-3">
                       <option value="">Chưa xác nhận</option><option value="seconds">Giây (s)</option><option value="milliseconds">Mili giây (ms)</option><option value="microseconds">Micro giây (µs)</option><option value="nanoseconds">Nano giây (ns)</option>
                     </select>
@@ -1330,11 +1330,11 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
       {observedClouds.length > 0 && (
         <Card className="mt-5 p-5 sm:p-6">
           <h2 className="text-base font-bold">Thông tin LiDAR cần khai báo</h2>
-          <p className="mt-1 text-sm text-ink-muted">Các giá trị này do bạn khai báo; hệ thống không suy ra đơn vị, scene hoặc frame từ tên file.</p>
+          <p className="mt-1 text-sm text-ink-muted">Hệ thống không tự đoán các giá trị này từ tên file.</p>
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
-            <label className="text-sm">Trạng thái cloud
+            <label className="text-sm">Loại đám mây điểm
               <select value={cloudState} onChange={(event) => { const nextCloudState = event.target.value as DeclarationChoice<CloudObservationState>; setCloudState(nextCloudState); if (nextCloudState !== "raw_scan_sequence") { setLidarScanTimesFileId(""); setLidarTimestampUnit(""); } setBindings((current) => current.filter((item) => !["registered_lidar_map", "static_lidar_cloud", "lidar_scan"].includes(item.role) && (nextCloudState === "raw_scan_sequence" || item.role !== "lidar_scan_times"))); setScanOrderConfirmed(false); invalidateResolution(); }} className="mt-1.5 h-10 w-full rounded-[10px] border border-line-strong bg-paper-raised px-3">
-                <option value="">Chọn trạng thái</option><option value="registered_map">Map đã đăng ký</option><option value="single_static_cloud">Một cloud quan sát tĩnh</option><option value="raw_scan_sequence">Chuỗi scan thô theo thời gian</option>
+                <option value="">Chọn trạng thái</option><option value="registered_map">Bản đồ đã ghép</option><option value="single_static_cloud">Một lần quét tĩnh</option><option value="raw_scan_sequence">Chuỗi lượt quét thô</option>
               </select>
             </label>
             <label className="text-sm">Đơn vị tọa độ
@@ -1366,7 +1366,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
           {cloudState === "raw_scan_sequence" && scanFileNames.length > 1 && (
             <fieldset className="mt-5 rounded-xl border border-line p-4">
               <legend className="px-1 text-sm font-semibold">Thứ tự scan theo thời gian</legend>
-              <p className="text-xs text-ink-muted">Danh sách ban đầu theo thứ tự upload, không phải bằng chứng thời gian. Sắp xếp lại nếu cần rồi xác nhận thứ tự thực tế.</p>
+              <p className="text-xs text-ink-muted">Đang xếp theo thứ tự tải lên. Sắp xếp lại theo thời gian thật nếu cần.</p>
               <ol className="mt-3 space-y-2">
                 {scanFileNames.map((item, index) => (
                   <li key={item.fileId} className="flex items-center gap-2 rounded-lg border border-line p-2 text-sm">
@@ -1393,7 +1393,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
               &quot;Gán vai trò cho file timestamp&quot; và khai đúng đơn vị.
             </Notice>
           )}
-          {report.state !== "ready" && <Notice tone={report.state === "invalid" ? "rust" : "ochre"}>{report.state === "needs_input" ? "Cần bổ sung lựa chọn hoặc khai báo trước khi tiếp tục." : report.state === "pending_verification" ? "Một hoặc nhiều file vẫn đang chờ xác minh." : report.state === "unsupported" ? "Chưa có runtime đủ điều kiện cho các hướng này." : "Có dữ liệu mâu thuẫn hoặc không hợp lệ; sửa đầu vào để hệ thống kiểm tra lại."}</Notice>}
+          {report.state !== "ready" && <Notice tone={report.state === "invalid" ? "rust" : "ochre"}>{report.state === "needs_input" ? "Cần bổ sung lựa chọn hoặc khai báo trước khi tiếp tục." : report.state === "pending_verification" ? "Một số file vẫn đang được kiểm tra." : report.state === "unsupported" ? "Máy xử lý chưa hỗ trợ dữ liệu này." : "Dữ liệu mâu thuẫn hoặc không hợp lệ. Sửa file rồi thử lại."}</Notice>}
           {report.missing_facts.length > 0 && (
             <Card className="p-5">
               <h3 className="text-sm font-semibold">Thông tin còn thiếu</h3>
@@ -1506,7 +1506,7 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
         <form id={`${ids.name}-confirm`} onSubmit={submitReadyRoute} className="mt-6 space-y-4">
           <Card className="space-y-4 p-5 sm:p-6">
             <div className="flex items-center gap-2"><Check className="size-4 text-sage" aria-hidden /><h3 className="font-semibold">Đã sẵn sàng tạo scene</h3></div>
-            <p className="text-sm text-ink-muted">{routeName(activeCandidate)}. Đây mới là kiểm tra dữ liệu có chạy được, chưa phải kết quả kiểm tra hình học hay an toàn vật lý.</p>
+            <p className="text-sm text-ink-muted">{routeName(activeCandidate)}.</p>
             <label htmlFor={ids.name} className="block text-sm font-medium">Tên scene</label>
             <input id={ids.name} value={sceneName} onChange={(event) => setSceneName(event.target.value)} maxLength={200} required className="h-10 w-full rounded-[10px] border border-line-strong bg-paper-raised px-3 text-sm" />
             {activeCandidate.candidate_kind === "video_recipe" && (
@@ -1518,14 +1518,14 @@ function UnifiedInputFlowBody({ accountId }: { accountId: string }) {
                 </div>
                 <div className="space-y-3 text-sm">
                   <label className="flex items-start gap-2"><input type="checkbox" checked={rights} onChange={(event) => setRights(event.target.checked)} className="mt-1 size-4 accent-ember-strong" />Tôi có quyền sử dụng dữ liệu cho mục đích đã khai báo.</label>
-                  <label className="flex items-start gap-2"><input type="checkbox" checked={anonymized} onChange={(event) => setAnonymized(event.target.checked)} className="mt-1 size-4 accent-ember-strong" />Video không có khuôn mặt/biển số hoặc đã được làm mờ trước khi upload.</label>
-                  {processing.options?.anonymize_available && <label className="flex items-start gap-2"><input type="checkbox" checked={autoAnonymize || Boolean(processing.options.anonymize_enforced)} disabled={Boolean(processing.options.anonymize_enforced)} onChange={(event) => setAutoAnonymize(event.target.checked)} className="mt-1 size-4 accent-ember-strong" /><span>Tự động che khuôn mặt và biển số trước khi dựng 3D.<span className="mt-0.5 block text-xs text-ink-muted">Lớp bảo vệ thêm: bộ phát hiện có thể bỏ sót, nên vẫn cần xác nhận ở dòng trên. Vùng bị che sẽ hiện thành mảng đen trong scene.{processing.options.anonymize_enforced ? " Máy xử lý này luôn bật bước che." : ""}</span></span></label>}
+                  <label className="flex items-start gap-2"><input type="checkbox" checked={anonymized} onChange={(event) => setAnonymized(event.target.checked)} className="mt-1 size-4 accent-ember-strong" />Video không có khuôn mặt, biển số hoặc đã được làm mờ.</label>
+                  {processing.options?.anonymize_available && <label className="flex items-start gap-2"><input type="checkbox" checked={autoAnonymize || Boolean(processing.options.anonymize_enforced)} disabled={Boolean(processing.options.anonymize_enforced)} onChange={(event) => setAutoAnonymize(event.target.checked)} className="mt-1 size-4 accent-ember-strong" /><span>Tự động che khuôn mặt và biển số trước khi dựng 3D.<span className="mt-0.5 block text-xs text-ink-muted">Có thể bỏ sót, nên vẫn cần xác nhận ở dòng trên. Vùng bị che hiện thành mảng đen.{processing.options.anonymize_enforced ? " Máy xử lý này luôn bật bước che." : ""}</span></span></label>}
                   <label className="flex items-start gap-2"><input type="checkbox" checked={retention} onChange={(event) => setRetention(event.target.checked)} className="mt-1 size-4 accent-ember-strong" />Tôi hiểu dữ liệu và kết quả được lưu để xử lý scene.</label>
                 </div>
-                {guestQuotaEmpty && <Notice tone="ochre">Đã dùng hết 3 lượt Guest hôm nay; quota reset lúc 00:00 giờ Việt Nam.</Notice>}
+                {guestQuotaEmpty && <Notice tone="ochre">Đã dùng hết 3 lượt chạy của khách hôm nay. Lượt mới có lúc 00:00 giờ Việt Nam.</Notice>}
               </>
             )}
-            {activeCandidate.candidate_kind === "gaussian_view_import" && <p className="text-sm text-ink-muted">Import chỉ đưa scene 3DGS vào viewer hiện tại. Chưa có luồng xử lý tiếp scene đã import.</p>}
+            {activeCandidate.candidate_kind === "gaussian_view_import" && <p className="text-sm text-ink-muted">Scene 3DGS chỉ được mở để xem, không xử lý thêm.</p>}
             {createBlockers.length > 0 && (
               <div className="rounded-lg border border-line p-3 text-sm text-ink-muted" role="status">
                 <p className="font-medium text-ink">Còn thiếu để tạo scene:</p>

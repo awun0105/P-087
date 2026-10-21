@@ -14,7 +14,7 @@ export const SOURCE_ROUTES: Record<Source, string> = {
 
 /** Tên và mô tả duy nhất của ba cách bắt đầu: trang chọn, tiêu đề từng trang và breadcrumb đều đọc từ đây. */
 export const SOURCE_TITLES: Record<Source, { title: string; description: string }> = {
-  video: { title: "Dựng từ video", description: "Tải video MP4/MOV, khai báo dữ liệu rồi bắt đầu dựng scene 3D." },
-  gaussian: { title: "Mở 3DGS có sẵn", description: (GAUSSIAN_EDIT_ENABLED ? "Tải file PLY/SOG/ZIP đã dựng để xem, chỉnh Gaussian và xuất file." : "Tải file PLY/SOG/ZIP đã dựng để xem.") + " Không có tỉ lệ mét, collision hay duyệt." },
-  sample: { title: "Thử mẫu", description: "Xem tiến trình và kết quả đã xử lý sẵn; không tạo scene mới." },
+  video: { title: "Dựng từ video", description: "Tải video lên để dựng scene 3D." },
+  gaussian: { title: "Mở 3DGS có sẵn", description: (GAUSSIAN_EDIT_ENABLED ? "Tải file PLY/SOG/ZIP để xem và chỉnh." : "Tải file PLY/SOG/ZIP để xem.") },
+  sample: { title: "Thử mẫu", description: "Xem một scene đã xử lý sẵn." },
 };

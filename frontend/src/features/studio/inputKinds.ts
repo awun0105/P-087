@@ -31,7 +31,7 @@ const ASSEMBLY_NAME = new RegExp(`\\.(${ASSEMBLY_EXTENSIONS.join("|")})$`, "i");
 export function rejectAssemblyFileName(name: string): string | null {
   return ASSEMBLY_NAME.test(name)
     ? null
-    : "Pipeline không đọc được loại file này. Nhận video .mp4/.mov, point cloud .ply/.pcd, scene 3DGS .ply/.sog, .zip, và metadata .json/.yaml/.yml/.txt/.tum/.csv.";
+    : "Chưa hỗ trợ loại file này. Nhận video .mp4/.mov, đám mây điểm .ply/.pcd, scene 3DGS .ply/.sog, .zip và file đi kèm .json/.yaml/.yml/.txt/.tum/.csv.";
 }
 
 const INPUT_KIND_LABELS: Record<InputKind, string> = {
@@ -39,15 +39,15 @@ const INPUT_KIND_LABELS: Record<InputKind, string> = {
   gaussian_ply: "Scene 3DGS (.ply)",
   gaussian_ply_colmap: "3DGS + COLMAP (.zip)",
   gaussian_sog: "Scene 3DGS (.sog)",
-  registered_lidar: "Gói LiDAR: đám mây đã đăng ký (.zip)",
-  lidar_scan_sequence: "Gói LiDAR: scan thô + quỹ đạo (.zip)",
+  registered_lidar: "Gói LiDAR: đám mây đã ghép (.zip)",
+  lidar_scan_sequence: "Gói LiDAR: lượt quét thô + quỹ đạo (.zip)",
 };
 
 /** Lọc sớm cho nhánh "Mở 3DGS"; kết quả nhận diện của máy chủ vẫn là authority cuối cùng. */
 export function rejectGaussianFileName(name: string): string | null {
   return /\.(ply|sog|zip)$/i.test(name)
     ? null
-    : "Mở 3DGS chỉ nhận .ply, .sog hoặc .zip có PLY. Dùng trang Tạo scene cho video và metadata.";
+    : "Chỉ nhận .ply, .sog hoặc .zip có PLY. Video thì dùng trang Tạo scene.";
 }
 
 /** Record cũ (trước ADR 0004) không có `input_kind` là video. */

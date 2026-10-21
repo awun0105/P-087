@@ -22,7 +22,7 @@ import { PageHeader } from "@/components/studio/feedback";
 import { cn } from "@/lib/cn";
 import type { DemoManifest, SampleSummary, UploadRecord } from "@/lib/contracts/studio";
 
-const IMPORT_STEPS = [{ key: "gaussian", label: "Chọn file 3DGS" }, { key: "import", label: "Mở scene import" }];
+const IMPORT_STEPS = [{ key: "gaussian", label: "Chọn file 3DGS" }, { key: "import", label: "Mở scene" }];
 const SAMPLE_STEPS = [
   { key: "sample", label: "Chọn mẫu" },
   { key: "inspect", label: "Xem thông tin" },
@@ -137,7 +137,7 @@ function NewSceneFlowBody({ source }: { source: ReadyMadeSource }) {
     // Máy chủ nhận diện theo nội dung, kể cả khi người dùng vào nhánh này với file khác.
     if (isLidar(record)) {
       // LiDAR không phải video hay scene 3DGS (ADR 0009): nói rõ đã nhận diện gì, không đẩy sang nhánh import 3DGS.
-      setLidarNotice(`Máy chủ nhận diện file là ${describeDetection(record)}. Đây là dữ liệu LiDAR, không phải scene 3DGS; file đã được lưu nhưng trang này không dùng nó.`);
+      setLidarNotice(`File này là ${describeDetection(record)}, không phải scene 3DGS. Hãy dùng trang Dựng từ video.`);
       return;
     }
     setLidarNotice(null);
@@ -191,7 +191,7 @@ function NewSceneFlowBody({ source }: { source: ReadyMadeSource }) {
             </div>
           ) : me !== null ? (
             <EmptyState icon={<LogIn aria-hidden />} title="Đăng nhập để dùng dữ liệu của bạn" action={<Link href={loginHref} className={buttonVariants({})}>Đăng nhập</Link>}>
-              Khách có thể thử bằng mẫu đã xử lý sẵn; tải file và tạo job cần tài khoản của nhóm.
+              Khách có thể xem mẫu. Cần tài khoản để tải file và tạo scene.
             </EmptyState>
           ) : <p role="status" className="text-sm text-ink-muted">Đang kiểm tra quyền truy cập…</p>
         )}
