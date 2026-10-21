@@ -27,7 +27,8 @@ beforeEach(() => {
 describe("collision mesh step loads only the mesh (T-065)", () => {
   it("shows the mesh alone until the user asks for the 3DGS", async () => {
     render(<StageViewer jobId="job-a" stageId="ST-RGB-GEOMETRY" />);
-    const button = await screen.findByRole("button", { name: "Hiện kèm 3DGS" });
+    // Khung 3D nạp động: khi cả bộ test chạy song song có thể lâu hơn 1 s mặc định.
+    const button = await screen.findByRole("button", { name: "Hiện kèm 3DGS" }, { timeout: 5000 });
     expect(screen.queryByText("Metric renderer")).toBeNull();
     expect(vi.mocked(global.fetch).mock.calls.map(([url]) => String(url)).some((url) => url.includes("collision.glb"))).toBe(true);
     fireEvent.click(button);
