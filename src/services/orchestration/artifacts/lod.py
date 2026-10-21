@@ -111,6 +111,20 @@ def copy_lod_bundle(source_root: Path, remote: object | None, target_root: Path,
     return True
 
 
+def copy_view_lods(
+    source_root: Path, remote: object | None, target_root: Path, job_id: str, references: list[dict]
+) -> int:
+    """Bộ LOD của mọi SOG trong danh sách artifact (`artifact_uri`, `artifact_checksum`) đã chép; trả số bộ đã chép.
+
+    Bộ LOD là bản dẫn xuất ngoài đồ thị artifact, nên bản chụp workspace mẫu và phiên demo phải chép riêng; thiếu nó
+    thì scene lớn của mẫu luôn mở SOG gốc (không có LOD).
+    """
+    checksums = dict.fromkeys(
+        str(item["artifact_checksum"]) for item in references if str(item.get("artifact_uri", "")).endswith(".sog")
+    )
+    return sum(copy_lod_bundle(source_root, remote, target_root, job_id, checksum) for checksum in checksums)
+
+
 def _run(cli: Path, *arguments: str, gpu: bool = False) -> None:
     device = () if gpu else ("-g", "cpu")
     try:

@@ -343,3 +343,18 @@ def test_copy_lod_bundle_pulls_a_bundle_kept_only_in_the_object_store(tmp_path) 
 
     assert lod.copy_lod_bundle(cache, Remote(), target, "job-a", _CHECKSUM) is True
     assert (target / lod.lod_relative_dir("job-a", _CHECKSUM) / "b0123456789ab/1_0/means_l.webp").read_bytes() == b"1_0"
+
+
+def test_copy_view_lods_copies_each_sog_bundle_once_and_skips_sogs_without_one(tmp_path) -> None:
+    source, target = tmp_path / "source", tmp_path / "target"
+    other = "sha256:" + "b" * 64
+    _bundle(source, "job-a", _CHECKSUM)
+    references = [
+        {"artifact_uri": "artifact://jobs/job-a/scene/environment/x/background.sog", "artifact_checksum": _CHECKSUM},
+        {"artifact_uri": "artifact://jobs/job-a/reconstruction/preview.sog", "artifact_checksum": _CHECKSUM},
+        {"artifact_uri": "artifact://jobs/job-a/reconstruction/small.sog", "artifact_checksum": other},
+        {"artifact_uri": "artifact://jobs/job-a/scene/scene_ir.json", "artifact_checksum": "sha256:" + "c" * 64},
+    ]
+    assert lod.copy_view_lods(source, None, target, "job-a", references) == 1
+    assert lod.lod_ready(target, None, "job-a", _CHECKSUM)
+    assert not (target / lod.lod_relative_dir("job-a", other)).exists()

@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict
 from src.models.contracts.identity import verify_content_checksum
 from src.models.contracts.manifests import JobManifest, JobStatus
 from src.models.contracts.validation_run import ValidationRunRecord, ValidationRunSelection, ValidationRunStatus
-from src.services.orchestration.artifacts import ArtifactResolver, sha256_file
+from src.services.orchestration.artifacts import ArtifactResolver, lod, sha256_file
 from src.services.orchestration.jobs.models import JobAttemptRecord
 from src.services.orchestration.jobs.progress import sanitized_frame_stage
 from src.services.orchestration.processing.config import job_config_reference
@@ -171,6 +171,8 @@ def freeze_workspace(registry: ProjectRegistry, bundle: DemoBundle, *, recording
             {"artifact_uri": uri, "artifact_checksum": sha256_file(target.resolve(uri)), "_demo_shallow": True}
             for uri in dict.fromkeys([*copied, *protected])
         ]
+        # Bộ LOD của SOG lớn nằm ngoài đồ thị artifact; không chép thì scene của mẫu không bao giờ mở được LOD.
+        lod.copy_view_lods(resolver.artifact_root, resolver.remote, target.artifact_root, job_id, files)
         snapshot = DemoWorkspaceSnapshot(
             sample_manifest_checksum=sha256_file(bundle.root / "manifest.json"),
             job=job,
