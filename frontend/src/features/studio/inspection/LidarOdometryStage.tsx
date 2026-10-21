@@ -64,13 +64,13 @@ function parseTrajectoryRef(value: unknown, jobId: string): ProductArtifactRef {
     typeof value.artifact_checksum !== "string" ||
     !CHECKSUM.test(value.artifact_checksum)
   ) {
-    throw new Error("Artifact trajectory không khớp job hoặc lineage odometry hiện tại.");
+    throw new Error("Dữ liệu quỹ đạo không khớp scene này.");
   }
   return value as unknown as ProductArtifactRef;
 }
 
 function parseEvidence(value: unknown, jobId: string): LidarOdometryEvidence {
-  if (!isRecord(value)) throw new Error("Artifact odometry phải là JSON object.");
+  if (!isRecord(value)) throw new Error("Dữ liệu quỹ đạo không hợp lệ.");
   let record = value;
   let mapEvidence: LidarOdometryEvidence["map_evidence"];
   if (value.artifact_type === "EstimatedTrajectoryProductEvidence") {
@@ -88,7 +88,7 @@ function parseEvidence(value: unknown, jobId: string): LidarOdometryEvidence {
         (typeof map.point_count !== "number" || !Number.isSafeInteger(map.point_count) || map.point_count < 1)) ||
       (map.diagnostic_code !== null && map.diagnostic_code !== "MAP_FUSION_FAILED")
     ) {
-      throw new Error("Artifact map odometry không khớp contract hoặc job hiện tại.");
+      throw new Error("Bản đồ quỹ đạo không khớp scene này.");
     }
     record = consumer;
     mapEvidence = {
@@ -99,10 +99,10 @@ function parseEvidence(value: unknown, jobId: string): LidarOdometryEvidence {
     };
     if ((map.map_status === "ready") !== (map.point_count !== null) ||
       (map.map_status === "blocked") !== (map.diagnostic_code === "MAP_FUSION_FAILED")) {
-      throw new Error("Trạng thái fused map thiếu point count hoặc diagnostic tương ứng.");
+      throw new Error("Bản đồ đã ghép thiếu số liệu.");
     }
   } else if (value.artifact_type !== "EstimatedTrajectoryConsumerEvidence") {
-    throw new Error("Artifact odometry không khớp contract hoặc job hiện tại.");
+    throw new Error("Dữ liệu quỹ đạo không khớp scene này.");
   }
   const binding = record.ingest_binding as Record<string, unknown> | undefined;
   if (
@@ -120,7 +120,7 @@ function parseEvidence(value: unknown, jobId: string): LidarOdometryEvidence {
     record.floor_status !== "pending_floor_and_up_axis_evidence" ||
     record.alignment_status !== "not_registered"
   ) {
-    throw new Error("Artifact odometry không khớp contract hoặc job hiện tại.");
+    throw new Error("Dữ liệu quỹ đạo không khớp scene này.");
   }
   return {
     ...record,
@@ -143,7 +143,7 @@ function parseTrajectoryDiagnostics(
     value.runtime_qualification_status !== runtimeStatus ||
     !isRecord(value.diagnostics)
   ) {
-    throw new Error("Trajectory artifact không khớp product evidence hiện tại.");
+    throw new Error("Dữ liệu quỹ đạo không khớp scene này.");
   }
   const diagnostics = value.diagnostics;
   const {
@@ -175,7 +175,7 @@ function parseTrajectoryDiagnostics(
     (timestamp_gap_count === 0 && maximum_timestamp_gap_seconds > timestamp_gap_threshold_seconds) ||
     (timestamp_gap_count > 0 && maximum_timestamp_gap_seconds <= timestamp_gap_threshold_seconds)
   ) {
-    throw new Error("Diagnostics trajectory không khớp contract.");
+    throw new Error("Số liệu chất lượng quỹ đạo không hợp lệ.");
   }
   return {
     scan_count,
@@ -230,7 +230,7 @@ export function LidarOdometryStage({ jobId, artifacts }: { jobId: string; artifa
         }
       } catch (cause) {
         if (controller.signal.aborted) return;
-        const message = cause instanceof Error ? cause.message : "Không đọc được bằng chứng odometry.";
+        const message = cause instanceof Error ? cause.message : "Không đọc được dữ liệu quỹ đạo.";
         if (parsedEvidence) {
           setLoaded({ key, evidence: parsedEvidence, diagnostics: null, diagnosticsError: message, error: null });
         } else {
@@ -242,10 +242,10 @@ export function LidarOdometryStage({ jobId, artifacts }: { jobId: string; artifa
   }, [jobId, evidenceContentUrl]);
 
   if (!evidenceRef) {
-    return <Notice tone="ochre" className="m-4">Job này chưa có artifact bằng chứng quỹ đạo LiDAR ước lượng.</Notice>;
+    return <Notice tone="ochre" className="m-4">Scene này chưa có quỹ đạo LiDAR ước lượng.</Notice>;
   }
-  if (current?.error) return <Notice tone="rust" className="m-4">Không thể xác minh bằng chứng odometry: {current.error}</Notice>;
-  if (!evidence) return <p role="status" className="p-6 text-sm text-ink-muted">Đang tải bằng chứng quỹ đạo LiDAR…</p>;
+  if (current?.error) return <Notice tone="rust" className="m-4">Không đọc được quỹ đạo LiDAR: {current.error}</Notice>;
+  if (!evidence) return <p role="status" className="p-6 text-sm text-ink-muted">Đang tải quỹ đạo LiDAR…</p>;
 
   return (
     <div className="mx-auto max-w-4xl space-y-4 p-4 sm:p-6">
@@ -260,11 +260,11 @@ export function LidarOdometryStage({ jobId, artifacts }: { jobId: string; artifa
             </Badge>
           )}
         </div>
-        <p className="mt-3">Quỹ đạo này là ước lượng trong local odometry map. Nó chưa được biến đổi vào world, chưa có bằng chứng mặt sàn/trục lên và chưa đăng ký với scene RGB; không dùng làm LiDAR canonical hoặc collision source.</p>
+        <p className="mt-3">Đây là quỹ đạo ước lượng, chưa căn với scene và mặt sàn nên chưa dùng để dựng va chạm.</p>
       </Notice>
 
       <Card className="p-5">
-        <h2 className="text-lg font-bold">Bằng chứng nguồn và trạng thái consumer</h2>
+        <h2 className="text-lg font-bold">Nguồn dữ liệu và trạng thái</h2>
         <dl className="mt-3 divide-y divide-line">
           <Row label="R5 runtime" value={`${evidence.odometry_runtime_id} · ${evidence.odometry_runtime_version}`} />
           <Row label="Profile checksum" value={evidence.odometry_profile_checksum} />
@@ -296,21 +296,21 @@ export function LidarOdometryStage({ jobId, artifacts }: { jobId: string; artifa
             </dl>
             {diagnostics.timestamp_gap_count > 0 && (
               <Notice tone="ochre" className="mt-3">
-                Có khoảng timestamp vượt ngưỡng. Kiểm tra thứ tự và đơn vị timestamp của các scan trước khi dùng quỹ đạo.
+                Có khoảng thời gian bị hở quá lớn. Kiểm tra thứ tự và đơn vị thời điểm của các lượt quét.
               </Notice>
             )}
             {diagnostics.valid_pose_count < diagnostics.scan_count && (
               <Notice tone="ochre" className="mt-3">
-                Một số scan chưa có pose được ước lượng. Kiểm tra các scan bị bỏ qua trước khi dùng quỹ đạo.
+                Một số lượt quét chưa ước lượng được vị trí. Kiểm tra các lượt bị bỏ qua.
               </Notice>
             )}
           </>
         ) : current?.diagnosticsError ? (
-          <Notice tone="ochre" className="mt-3">Không tải được diagnostics trajectory: {current.diagnosticsError}</Notice>
+          <Notice tone="ochre" className="mt-3">Không tải được số liệu chất lượng quỹ đạo: {current.diagnosticsError}</Notice>
         ) : (
-          <p role="status" className="mt-3 text-sm text-ink-muted">Đang tải diagnostics quỹ đạo…</p>
+          <p role="status" className="mt-3 text-sm text-ink-muted">Đang tải số liệu chất lượng quỹ đạo…</p>
         )}
-        <p className="mt-4 text-sm text-ink-muted">Calibration và RGB/LiDAR timestamp được giữ theo checksum trong artifact. Trước khi ingest hoặc alignment, hệ thống cần bước xác nhận riêng và QA tương ứng.</p>
+        <p className="mt-4 text-sm text-ink-muted">Cần thêm một bước xác nhận và kiểm tra trước khi dùng quỹ đạo này để căn với scene.</p>
       </Card>
     </div>
   );

@@ -94,7 +94,7 @@ export function StageInspectionPage({ jobId, stageId }: { jobId: string; stageId
     setReload((value) => value + 1);
   }
 
-  if (!meta) return <Notice tone="rust" className="m-6">Giai đoạn không thuộc pipeline Studio.</Notice>;
+  if (!meta) return <Notice tone="rust" className="m-6">Không có bước này.</Notice>;
   const pageStages = snapshot ? stagesFor(snapshot.progress.stages.map((stage) => stage.stage_id)) : STUDIO_STAGES;
   const index = Math.max(0, pageStages.findIndex((stage) => stage.id === meta.id));
   const ready = snapshot && canInspect(snapshot.progress, meta.id);
@@ -106,7 +106,7 @@ export function StageInspectionPage({ jobId, stageId }: { jobId: string; stageId
       <header className="flex flex-wrap items-center gap-3 border-b border-line bg-paper-raised px-4 py-3">
         <Link href={progressHref(jobId)} className="inline-flex items-center gap-1 text-sm text-ember-strong hover:underline"><ArrowLeft className="size-4" aria-hidden /> Về Tiến trình</Link>
         <div className="min-w-0 flex-1"><h1 className="truncate font-bold">{index + 1}. {meta.title}</h1><p className="truncate text-xs text-ink-muted">{snapshot?.project?.name ?? jobId}</p></div>
-        {ready && (failedQA ? <Badge tone="rust">QA thất bại</Badge> : <Badge tone="sage">Đã xử lý xong</Badge>)}
+        {ready && (failedQA ? <Badge tone="rust">Kiểm tra không đạt</Badge> : <Badge tone="sage">Đã xử lý xong</Badge>)}
         {snapshot && <Badge tone="neutral">Lần chạy {snapshot.progress.attempt}</Badge>}
         {ready && <Button variant="ghost" size="sm" aria-expanded={details} aria-controls="stage-output-info" onClick={() => setDetails((value) => !value)}><Info aria-hidden /> Thông tin đầu ra</Button>}
       </header>
@@ -120,7 +120,7 @@ export function StageInspectionPage({ jobId, stageId }: { jobId: string; stageId
       </nav>
       {error ? <Notice tone="rust" className="m-4">{error} <Button variant="secondary" size="sm" onClick={retry}>Thử lại</Button><Link href={`/login?next=${encodeURIComponent(inspectHref(jobId, meta.id))}`} className="ml-3 underline">Đăng nhập</Link></Notice>
         : !snapshot ? <Loading />
-          : !ready ? <Notice tone="ochre" className="m-4">Giai đoạn này chưa hoàn tất trong lần chạy hiện tại. Quay về Tiến trình để theo dõi; xác nhận tỉ lệ khi đang chờ được thực hiện ở Studio.</Notice>
+          : !ready ? <Notice tone="ochre" className="m-4">Bước này chưa xong. Quay về Tiến trình để theo dõi.</Notice>
             : <>
               {snapshot.warnings.length > 0 && <Notice tone="rust" className="m-3">Chưa đọc đủ dữ liệu: {snapshot.warnings.join(" · ")} <Button size="sm" variant="secondary" onClick={retry}>Thử lại</Button></Notice>}
               <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
@@ -139,10 +139,10 @@ export function StageInspectionPage({ jobId, stageId }: { jobId: string; stageId
                   <StageMetrics jobId={jobId} groupId={meta.id} />
                   <h2 className="mt-6 font-bold">Đầu ra của giai đoạn</h2>
                   <p className="mt-2 text-sm leading-relaxed text-ink-muted">{meta.description}</p>
-                  <p className="mt-3 text-xs text-ink-muted">Artifact đã publish là bất biến. {GAUSSIAN_EDIT_ENABLED ? "Chỉnh Gaussian xuất file riêng; chỉnh" : "Chỉnh"} vật thể tạo SceneIR revision mới.</p>
+                  <p className="mt-3 text-xs text-ink-muted">File của bước này không thay đổi. {GAUSSIAN_EDIT_ENABLED ? "Chỉnh Gaussian xuất file riêng; chỉnh" : "Chỉnh"} vật thể tạo phiên bản scene mới.</p>
                   <p className="mt-3 text-xs text-ink-muted">Hoàn tất: {snapshot.progress.stages.find((stage) => stage.stage_id === meta.id)?.completed_at ? new Date(snapshot.progress.stages.find((stage) => stage.stage_id === meta.id)!.completed_at!).toLocaleString("vi-VN") : "Không có mốc thời gian"}</p>
                   <ul className="mt-4 space-y-4">{snapshot.artifacts.map((ref) => <li key={`${ref.artifact_uri}:${ref.artifact_checksum}`} className="space-y-1 border-t border-line pt-3"><p className="text-sm font-medium">{ref.artifact_type}</p><p className="break-all font-mono text-[10px] text-ink-subtle">{ref.artifact_checksum}</p><a href={jobArtifactContentUrl(jobId, ref)} download className="inline-flex items-center gap-1 text-sm text-ember-strong hover:underline"><Download className="size-4" aria-hidden /> Tải artifact</a></li>)}</ul>
-                  {!snapshot.artifacts.length && <p className="mt-4 text-sm text-ink-muted">API chưa cung cấp artifact tải riêng cho bước này.</p>}
+                  {!snapshot.artifacts.length && <p className="mt-4 text-sm text-ink-muted">Bước này không có file tải riêng.</p>}
                 </aside>}
               </div>
             </>}
@@ -157,17 +157,17 @@ function Loading() {
 /** Dữ liệu đầu vào/privacy được đọc từ project, không suy thành quality report chưa có. */
 function InputStage({ stageId, snapshot }: { stageId: StageId; snapshot: Snapshot }) {
   const project = snapshot.project;
-  if (!project) return <Notice tone="ochre" className="m-4">Chưa đọc được thông tin đầu vào. Dùng Thử lại hoặc xem artifact của giai đoạn.</Notice>;
+  if (!project) return <Notice tone="ochre" className="m-4">Chưa đọc được thông tin đầu vào. Bấm Thử lại.</Notice>;
   const privacy = stageId === "ST-PRIVACY-GATE";
   const values = privacy ? [
-    ["Kết quả privacy", project.privacy.result], ["Phạm vi kiểm tra", project.privacy.inspection_scope],
-    ["Được dispatch", project.privacy.dispatch_allowed ? "Có" : "Không"], ["Lý do chặn", project.privacy.block_reason ?? "Không có"],
+    ["Kết quả kiểm tra riêng tư", project.privacy.result], ["Phạm vi kiểm tra", project.privacy.inspection_scope],
+    ["Được phép xử lý", project.privacy.dispatch_allowed ? "Có" : "Không"], ["Lý do chặn", project.privacy.block_reason ?? "Không có"],
     ["Đã xác nhận quyền sử dụng", project.source_rights_attestation.rights_to_use_confirmed === true ? "Có" : "Chưa xác nhận"],
     ["Đã xác nhận ẩn danh", project.source_rights_attestation.anonymization_confirmed === true ? "Có" : "Chưa xác nhận"],
   ] : [
     ["Tên scene", project.name], ["Nguồn", project.source_type], ["Video", project.input_video?.original_name ?? "Không có metadata video"],
     ["Định dạng", project.input_video?.media_type ?? "Không có dữ liệu"], ["Dung lượng", project.input_video ? formatBytes(project.input_video.size_bytes) : "Không có dữ liệu"],
-    ["Checksum đầu vào", project.input_manifest_checksum],
+    ["Mã kiểm tra đầu vào", project.input_manifest_checksum],
   ];
   return <div className="mx-auto max-w-3xl space-y-4 p-6"><Card className="p-5"><h2 className="text-lg font-bold tracking-tight">{privacy ? "Quyền riêng tư của đầu vào" : "Đầu vào đã kiểm tra"}</h2><dl className="mt-4 divide-y divide-line">{values.map(([label, value]) => <div key={label} className="grid gap-1 py-3 sm:grid-cols-[12rem_1fr]"><dt className="text-sm text-ink-muted">{label}</dt><dd className="break-all text-sm">{value}</dd></div>)}</dl></Card><Notice>{privacy ? "Xác nhận của người tải lên và kết quả QA là hai cơ chế riêng. Thông tin trên lấy từ project hiện tại; report chi tiết chỉ xem khi backend publish artifact." : "API hiện cung cấp metadata video và artifact của bước. Chưa có API summary cho từng chỉ số nhòe/chuyển động; không hiển thị số đo giả."}</Notice></div>;
 }

@@ -45,14 +45,14 @@ describe("stage viewer selection", () => {
 
   it("thiếu view cho stage không mount kết quả bước khác", async () => {
     render(<StageViewer jobId="job-a" stageId="ST-RGB-GEOMETRY" />);
-    expect(await screen.findByText(/API chưa cung cấp lớp xem/)).toBeInTheDocument();
+    expect(await screen.findByText(/Bước này không có hình để xem/)).toBeInTheDocument();
     expect(screen.queryByRole("tab")).toBeNull();
     expect(screen.queryByText("Gaussian renderer")).toBeNull();
   });
 
   it("6 chưa có derivative hiển thị cảnh báo và giữ đơn vị SfM", async () => {
     render(<StageViewer jobId="job-a" stageId="ST-METRIC-CANONICALIZE" fallbackStageId="ST-VISUAL-RECON" />);
-    expect(await screen.findByText(/Đang xem lại Gaussian gốc, đơn vị SfM/)).toBeInTheDocument();
+    expect(await screen.findByText(/Đang hiện bản gốc/)).toBeInTheDocument();
     expect(screen.queryByText(/Đơn vị: tùy ý \(SfM\)/)).toBeNull();
     expect(screen.queryByText(/Đơn vị: mét\./)).toBeNull();
   });

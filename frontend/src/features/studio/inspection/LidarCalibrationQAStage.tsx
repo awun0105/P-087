@@ -22,26 +22,26 @@ export function LidarCalibrationQAStage({ jobId, artifacts }: { jobId: string; a
         const value: unknown = await response.json();
         if (!controller.signal.aborted) setReport(parseLidarCalibrationQAReport(value, jobId));
       } catch (cause) {
-        if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "Không đọc được báo cáo QA.");
+        if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "Không đọc được báo cáo.");
       }
     })();
     return () => controller.abort();
   }, [jobId, reportRef?.artifact_checksum, reportRef?.artifact_uri]);
 
   if (!reportRef) {
-    return <Notice tone="ochre" className="m-4">Job cũ chưa có artifact QA calibration. Tạo job mới để chạy QA trên dữ liệu đầu vào hiện tại.</Notice>;
+    return <Notice tone="ochre" className="m-4">Scene này tạo trước khi có bước kiểm tra căn chỉnh. Tạo scene mới để chạy kiểm tra.</Notice>;
   }
-  if (error) return <Notice tone="rust" className="m-4">Không thể xác minh báo cáo QA calibration: {error}</Notice>;
-  if (!report) return <p role="status" className="p-6 text-sm text-ink-muted">Đang tải báo cáo QA calibration…</p>;
+  if (error) return <Notice tone="rust" className="m-4">Không đọc được báo cáo căn chỉnh: {error}</Notice>;
+  if (!report) return <p role="status" className="p-6 text-sm text-ink-muted">Đang tải báo cáo căn chỉnh…</p>;
 
-  const status = report.result === "FAIL" ? "Có lỗi cấu trúc" : "Chẩn đoán, chưa đủ điều kiện nghiệm thu";
+  const status = report.result === "FAIL" ? "Có lỗi cấu trúc" : "Chỉ để tham khảo";
   const statusTone = report.result === "FAIL" ? "rust" : "ochre";
   return (
     <div className="mx-auto max-w-5xl space-y-4 p-4 sm:p-6">
       <Notice tone="ochre">
-        <div className="flex flex-wrap items-center gap-2"><Badge tone={statusTone}>{status}</Badge><Badge tone="neutral">Collision eligibility: không</Badge></div>
-        <p className="mt-2">Overlay và điểm số chỉ có giá trị chẩn đoán. Ngưỡng sản xuất và kiểm chứng trên chuỗi thực địa held-out vẫn đang chờ; kết quả này không được dùng làm collision source.</p>
-        <p className="mt-1">Muốn thay calibration hoặc timing, hãy tạo job mới để giữ nguyên report và artifact bất biến của job này.</p>
+        <div className="flex flex-wrap items-center gap-2"><Badge tone={statusTone}>{status}</Badge><Badge tone="neutral">Chưa dùng cho va chạm</Badge></div>
+        <p className="mt-2">Ảnh chồng và điểm số chỉ để tham khảo, chưa dùng để dựng va chạm.</p>
+        <p className="mt-1">Muốn đổi file hiệu chuẩn hoặc thời điểm, hãy tạo scene mới.</p>
       </Notice>
 
       <Card className="p-5">
@@ -49,10 +49,10 @@ export function LidarCalibrationQAStage({ jobId, artifacts }: { jobId: string; a
         <dl className="mt-3 grid gap-x-6 divide-y divide-line sm:grid-cols-2 sm:divide-y-0">
           <Metric label="Frame lấy mẫu" value={`${report.sampled_frame_count}`} />
           <Metric label="Frame ghép được với pose LiDAR" value={`${report.matched_frame_count}`} />
-          <Metric label="Frame có overlap đủ theo profile" value={`${report.observable_frame_count}`} />
+          <Metric label="Frame chồng khớp đủ" value={`${report.observable_frame_count}`} />
           <Metric label="Điểm LiDAR được chiếu" value={`${report.projected_point_count.toLocaleString("vi-VN")}`} />
           <Metric label="Điểm nằm gần cạnh ảnh" value={`${report.overlap_point_count.toLocaleString("vi-VN")}`} />
-          <Metric label="Tỉ lệ overlap" value={report.overlap_fraction === null ? "Chưa đo được" : `${(report.overlap_fraction * 100).toFixed(1)}%`} />
+          <Metric label="Tỉ lệ chồng khớp" value={report.overlap_fraction === null ? "Chưa đo được" : `${(report.overlap_fraction * 100).toFixed(1)}%`} />
           <Metric label="Sai lệch timestamp lớn nhất" value={report.maximum_timestamp_residual_sec === null ? "Chưa đo được" : `${(report.maximum_timestamp_residual_sec * 1000).toFixed(1)} ms`} />
           <Metric label="Khả năng quan sát" value={report.observability} />
         </dl>
@@ -72,9 +72,9 @@ export function LidarCalibrationQAStage({ jobId, artifacts }: { jobId: string; a
       </Card>
 
       <Card className="p-5">
-        <h2 className="text-lg font-bold">Overlay LiDAR trên frame RGB ({report.overlay_refs.length})</h2>
+        <h2 className="text-lg font-bold">Điểm LiDAR chồng lên ảnh ({report.overlay_refs.length})</h2>
         {report.overlay_refs.length === 0
-          ? <p className="mt-3 text-sm text-ink-muted">Chưa có overlay inspectable. Xem các finding để biết dữ liệu hoặc khai báo nào còn thiếu.</p>
+          ? <p className="mt-3 text-sm text-ink-muted">Chưa có ảnh chồng. Xem mục Phát hiện để biết còn thiếu gì.</p>
           : <ul className="mt-4 grid gap-4 lg:grid-cols-2">{report.overlay_refs.map((ref) => (
             <li key={`${ref.artifact_uri}:${ref.artifact_checksum}`} className="overflow-hidden rounded-xl border border-line bg-paper-raised p-2">
               <img src={jobArtifactContentUrl(jobId, ref)} alt="Frame RGB với các điểm chiếu LiDAR màu cyan" className="h-auto max-h-[70vh] w-full object-contain" />
