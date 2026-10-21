@@ -14,7 +14,7 @@ from dotenv import dotenv_values
 from src.services.orchestration.gpu.catalog import ReleaseCatalog, ReleaseProfile, load_catalog
 from src.services.orchestration.gpu.config import GpuSettings
 from src.services.orchestration.gpu.provider import Provider, ProviderError
-from src.services.orchestration.gpu.state import Control, StateStore
+from src.services.orchestration.gpu.state import Control, StateStore, load_control
 from src.services.orchestration.gpu.workload import Workload
 
 logger = logging.getLogger(__name__)
@@ -298,7 +298,7 @@ class Controller:
                 # Reconcile even with an empty queue or disabled provisioning. An eventual-consistency
                 # false absence must not strand an owned stopped/running Pod forever.
                 pod, record = historic[0]
-                old = Control(**{key: value for key, value in record.items() if key in Control.__dataclass_fields__})
+                old = load_control(record)
                 pinned = ReleaseProfile.model_validate(old.profile_payload) if old.profile_payload else None
                 if len(historic) == 1 and pinned is not None and self.owned(pod, old, pinned):
                     with self.store.locked() as (_, current, _):

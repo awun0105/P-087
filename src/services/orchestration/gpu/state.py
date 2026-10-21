@@ -36,6 +36,23 @@ class Control:
     phase_seconds: dict[str, float] = field(default_factory=dict)
 
 
+#: Fields added after the oldest worker image still in a release catalog, with their defaults. Older images build
+#: `Control(**payload)` from the row and crash on a key they do not know (2026-10-21: every v5 pod failed to register
+#: once the controller wrote `inventory_misses`), so these are written only when they differ from the default.
+_LATE_FIELDS = {"inventory_misses": 0}
+
+
+def control_payload(control: Control) -> dict:
+    return {
+        key: value for key, value in control.__dict__.items() if key not in _LATE_FIELDS or value != _LATE_FIELDS[key]
+    }
+
+
+def load_control(raw: dict) -> Control:
+    """Ignore keys written by a newer controller, so this worker keeps working across a release."""
+    return Control(**{key: value for key, value in raw.items() if key in Control.__dataclass_fields__})
+
+
 def table(tx: RuntimeTransaction, name: str) -> str:
     return f"public.{name}" if tx.postgres else name
 
@@ -62,12 +79,12 @@ class StateStore:
             row = tx.execute(
                 "SELECT payload FROM r2s_gpu_control WHERE deployment_id=?" + tx.lock_suffix(), (self.deployment,)
             ).fetchone()
-            control = Control(**json.loads(row[0]))
+            control = load_control(json.loads(row[0]))
             yield tx, control, db_time(tx)
             control.version += 1
             tx.execute(
                 "UPDATE r2s_gpu_control SET payload=? WHERE deployment_id=?",
-                (json.dumps(control.__dict__), self.deployment),
+                (json.dumps(control_payload(control)), self.deployment),
             )
 
     def read(self) -> Control:
@@ -78,7 +95,7 @@ class StateStore:
         tx.execute(
             "INSERT INTO r2s_gpu_history(intent_id,deployment_id,payload) VALUES (?,?,?) "
             "ON CONFLICT(intent_id) DO UPDATE SET payload=excluded.payload",
-            (control.intent, control.deployment, json.dumps({**control.__dict__, "observed_at": now})),
+            (control.intent, control.deployment, json.dumps({**control_payload(control), "observed_at": now})),
         )
 
 

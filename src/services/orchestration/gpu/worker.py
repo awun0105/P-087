@@ -1,5 +1,6 @@
 """Managed worker registration and whole-dispatch publication protection."""
 
+import logging
 import os
 import shutil
 import tempfile
@@ -17,6 +18,8 @@ from src.services.orchestration.gpu.state import StateStore
 from src.services.orchestration.jobs.database import RuntimeDatabase
 from src.services.orchestration.jobs.profile import ExecutionProfile
 from src.services.orchestration.processing.capability import _live_ram_gb, bound_gpu
+
+logger = logging.getLogger(__name__)
 
 
 class ManagedWorker:
@@ -92,7 +95,8 @@ class ManagedWorker:
         while not self.stop.wait(15):
             try:
                 self._touch()
-            except (OSError, RuntimeError):
+            except Exception as error:  # noqa: BLE001 - any failure must stop claims, never kill the thread silently
+                logger.error("gpu_worker heartbeat stopped category=%s", type(error).__name__)
                 self.stop.set()  # No further claims; existing execution remains fenced by queue leases.
 
     @contextmanager

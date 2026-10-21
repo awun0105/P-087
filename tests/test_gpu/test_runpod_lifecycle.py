@@ -998,3 +998,25 @@ def test_rest_pod_shape_with_top_level_gpu_count_is_a_valid_allocation(world):
     with store.locked() as (_, c, now):
         c.workers["worker"] = {"ready": True, "busy": False, "heartbeat": now}
     assert controller.tick() == "ready"
+
+
+def test_control_row_stays_readable_by_workers_from_an_older_release(tmp_path):
+    """2026-10-21: a v5 worker built Control(**row) and crashed on `inventory_misses`; every pod failed to register."""
+    from dataclasses import fields
+
+    from src.services.orchestration.gpu.state import _LATE_FIELDS, Control, load_control
+
+    store = StateStore(RuntimeDatabase(f"sqlite:///{tmp_path / 'state.db'}"), "test")
+    with store.locked() as (_, control, _now):
+        control.state, control.inventory_misses = "starting", 0
+    with store.database.transaction() as tx:
+        saved = json.loads(tx.execute("SELECT payload FROM r2s_gpu_control").fetchone()[0])
+    older_release = {item.name for item in fields(Control)} - set(_LATE_FIELDS)
+    assert set(saved) <= older_release
+
+    with store.locked() as (_, control, _now):
+        control.inventory_misses = 2
+    assert store.read().inventory_misses == 2
+
+    newer = {**saved, "field_from_a_newer_controller": 1}
+    assert load_control(newer).state == "starting"
