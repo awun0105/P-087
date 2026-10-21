@@ -181,6 +181,20 @@ def write_manifest(out: Path, manifest: DemoManifest) -> None:
     (out / "manifest.json").write_text(manifest.model_dump_json(indent=2) + "\n", encoding="utf-8")
 
 
+def _frame_image(resolver: object, image: Mapping[str, object]) -> Path:
+    """Ảnh frame trên đĩa này hoặc tải từ kho file (API và worker ở hai máy)."""
+    uri, checksum = str(image["artifact_uri"]), image.get("artifact_checksum")
+    try:
+        if isinstance(checksum, str):
+            return resolver.require_uri(uri, checksum)  # type: ignore[attr-defined]
+        path = resolver.locate(uri)  # type: ignore[attr-defined]
+    except ArtifactStoreError as error:
+        raise SampleExportError("Không đọc được frame của scene") from error
+    if path is None:
+        raise SampleExportError("Không đọc được frame của scene")
+    return path
+
+
 def _job_processing(resolver: object, job: JobManifest) -> dict[str, int | float | str] | None:
     """Thông số thật của job từ `config/processing.json`; job legacy không có → None."""
     from src.services.orchestration.processing import JobProcessingConfig, job_config_reference
@@ -284,9 +298,11 @@ def _export_job_bundle(
                 (item for item in manifest.files if item.media_type in {"video/mp4", "video/quicktime"}), None
             )
             if source_video is not None:
-                path = resolver.resolve(source_video.artifact_uri)
-                if sha256_file(path) != source_video.checksum:
-                    raise SampleExportError("Video gốc sai checksum")
+                # require_uri tải từ kho file khi máy API chưa có bản cục bộ, và kiểm checksum.
+                try:
+                    path = resolver.require_uri(source_video.artifact_uri, source_video.checksum)
+                except ArtifactStoreError as error:
+                    raise SampleExportError("Không đọc được video gốc của scene") from error
                 video = add_file(out, path, "input" + Path(source_video.original_name).suffix.lower())
             video_caption = (
                 "Video ghép từ ảnh gốc, dùng làm đầu vào giả lập và xem lại"
@@ -304,7 +320,7 @@ def _export_job_bundle(
         frame_count = len(rows)
         for marker in evenly([Path(str(i)) for i in range(len(rows))], frames):
             row = rows[int(marker.name)]
-            image = resolver.resolve(row["image"]["artifact_uri"])
+            image = _frame_image(resolver, row["image"])
             frame_files.append(add_file(out, image, f"frame-{row['frame_id']:06d}.png"))
     cameras = []
     if preview.camera_pose_ref is not None:

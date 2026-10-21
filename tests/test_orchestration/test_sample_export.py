@@ -632,3 +632,19 @@ def test_background_publish_records_the_failure_for_the_demo_state(
     shutil_lock = export.acquire_publish_lock(root, JOB_ID)
     assert export.publication_status(root, JOB_ID) == (True, None)
     shutil_lock.rmdir()
+
+
+def test_frame_images_come_from_the_artifact_store_when_the_api_disk_lacks_them(tmp_path: Path) -> None:
+    from src.services.orchestration.samples.export import _frame_image
+
+    fetched = tmp_path / "frame.png"
+    fetched.write_bytes(b"png")
+    calls: list[tuple] = []
+    resolver = SimpleNamespace(
+        require_uri=lambda uri, checksum: calls.append(("require_uri", uri, checksum)) or fetched,
+        locate=lambda uri: calls.append(("locate", uri)) or None,
+    )
+    assert _frame_image(resolver, {"artifact_uri": "jobs/p/f.png", "artifact_checksum": "sha256:x"}) == fetched
+    with pytest.raises(SampleExportError):
+        _frame_image(resolver, {"artifact_uri": "jobs/p/g.png"})
+    assert calls == [("require_uri", "jobs/p/f.png", "sha256:x"), ("locate", "jobs/p/g.png")]
