@@ -139,41 +139,41 @@ export function NextAction({
   } else if (retryState) {
     title = retryState === "submitting" ? "Đang gửi yêu cầu thử lại" : retryState === "rejected" ? "Đang kiểm tra phản hồi thử lại" : "Đang đồng bộ lần chạy mới";
     description = retryState === "uncertain"
-      ? "Chưa xác nhận được máy chủ đã nhận yêu cầu. Trang đang đọc lại trạng thái job; nút thử lại tạm ẩn để tránh gửi trùng."
+      ? "Đang kiểm tra máy chủ đã nhận yêu cầu chưa. Nút Thử lại tạm ẩn để tránh gửi trùng."
       : retryState === "accepted"
-        ? "Máy chủ đã nhận yêu cầu. Nút thử lại chỉ hiện lại sau khi tiến trình xác nhận attempt mới hoặc lỗi từ chối rõ ràng."
-        : "Đang tải lại trạng thái máy chủ trước khi mở lại thao tác.";
+        ? "Máy chủ đã nhận yêu cầu. Đang chờ lần chạy mới bắt đầu."
+        : "Đang tải lại trạng thái.";
   } else if (stale) {
-    title = "Worker chưa cập nhật tiến trình";
-    description = "Backend vẫn ghi RUNNING nên chưa thể mở attempt mới. Trang đang tiếp tục đồng bộ; retry chỉ hiện khi backend ghi FAILED và lỗi cho phép thử lại.";
+    title = "Đang cập nhật trạng thái";
+    description = "Lần chạy trước chưa kết thúc hẳn. Nút Thử lại sẽ hiện khi xong.";
   } else if (progress.status === "FAILED") {
     title = "Xử lý chưa hoàn tất";
     description = progress.error?.retryable
-      ? "Xem nguyên nhân ở giai đoạn lỗi. Sau khi xử lý được nguyên nhân, có thể tạo attempt mới."
+      ? "Xem nguyên nhân ở bước lỗi rồi chạy lại."
       : progress.error
-        ? "Lỗi của attempt này cần được khắc phục trước; backend chưa cho phép tạo attempt mới."
-        : "Backend chưa ghi lỗi retryable cho attempt này. Tải lại trạng thái hoặc tạo job mới sau khi xử lý nguyên nhân.";
+        ? "Cần sửa lỗi trước khi chạy lại."
+        : "Lỗi này không chạy lại được. Tải lại trang hoặc tạo scene mới.";
   } else if (progress.status === "CANCELLED") {
     title = "Đã huỷ xử lý";
-    description = "Kết quả đã publish vẫn được giữ; mở giai đoạn hoàn tất để xem.";
+    description = "Kết quả đã có vẫn được giữ.";
   } else if (progress.waiting_for === "resources") {
     title = "Đang chờ tài nguyên";
-    description = "Giữ nguyên cấu hình đã chọn. Máy xử lý kiểm tra lại và tự chạy tiếp khi đủ tài nguyên; có thể rời trang hoặc huỷ job.";
+    description = "Scene tự chạy khi máy đủ tài nguyên. Bạn có thể rời trang.";
   } else if (progress.waiting_for === "anonymization_review") {
     title = "Cần bạn xem bản đã che";
-    description = "Khuôn mặt và biển số phát hiện được đã bị che. Xem lại rồi xác nhận để pipeline dựng 3D, hoặc huỷ job.";
+    description = "Khuôn mặt và biển số đã được che. Xem lại rồi xác nhận để dựng 3D.";
     action = { label: "Xem bản đã che", tab: "progress" };
   } else if (progress.waiting_for === "metric_confirmation") {
     // Hiện trong chuông; nút tương ứng cũng nằm ngay ở bước đang chờ trong timeline Tiến trình.
     title = "Cần bạn xác nhận tỉ lệ mét";
-    description = "Chọn điểm và nhập kích thước thật để pipeline tiếp tục.";
+    description = "Chọn điểm và nhập kích thước thật để tiếp tục.";
     action = { label: "Xác nhận tỉ lệ mét", tab: "studio", mode: "metric" };
   } else if (progress.status === "QUEUED") {
-    title = "Đang chờ worker";
-    description = "Job đã vào hàng đợi. Theo dõi các giai đoạn bên dưới.";
+    title = "Đang xếp hàng";
+    description = "Scene sẽ tự chạy khi đến lượt.";
   } else if (sceneReady) {
     title = "Đang đọc bước tiếp theo";
-    description = "Đối chiếu vật thể, gói và trạng thái duyệt của revision hiện tại.";
+    description = "Đang kiểm tra vật thể, gói và trạng thái duyệt.";
     reading = true;
     if (detail && (revision === null || detail.scene.scene_revision === revision)) {
       reading = false;
@@ -200,7 +200,7 @@ export function NextAction({
       } else if (awaitingChoice) {
         // Pipeline v2: tách theo vật lỗi hết số lần thử; scene chỉ có môi trường cho tới khi người dùng chọn.
         title = "Tách theo vật chưa thành công";
-        description = "Chạy lại tách theo vật hoặc dùng hộp ứng viên ngay tại bước “Tách vật thể”.";
+        description = "Chạy lại hoặc dùng hộp ứng viên ở bước “Tách vật thể”.";
         action = { label: "Xem bước tách vật thể", tab: "progress" };
       } else if (pending) {
         title = "Cần xác nhận vật thể";
@@ -209,12 +209,12 @@ export function NextAction({
       } else if (review?.record.status === "RELEASED" && review.release && review.release_archive) {
         title = "Đã có bản phát hành"; description = "Tải đúng gói đã được kiểm tra và duyệt."; action = { label: "Xem kết quả", tab: "results" };
       } else if (review?.record.status === "READY_FOR_REVIEW") {
-        title = "Đạt kiểm tra — chờ duyệt"; description = isReviewer(me) ? "Kiểm tra bằng chứng trước khi quyết định." : "Reviewer sẽ quyết định trên đúng gói của revision này."; action = { label: "Xem kiểm tra & duyệt", tab: "review" };
+        title = "Đạt kiểm tra — chờ duyệt"; description = isReviewer(me) ? "Kiểm tra bằng chứng trước khi quyết định." : "Đang chờ người duyệt."; action = { label: "Xem kiểm tra & duyệt", tab: "review" };
       } else if (pkg?.package_ref) {
-        title = "Đã có gói mô phỏng"; description = review?.blockers[0] ?? "Gói candidate có thể tải; bản phát hành cần validation và Reviewer duyệt."; action = { label: "Xem kiểm tra & duyệt", tab: "review" };
+        title = "Đã có gói mô phỏng"; description = review?.blockers[0] ?? "Đã tải được gói. Để phát hành, gói cần qua kiểm tra và được duyệt."; action = { label: "Xem kiểm tra & duyệt", tab: "review" };
       } else {
-        title = pkg?.preflight.blocking_result === "FAIL" ? "Cần sửa theo preflight" : "Sẵn sàng tạo gói";
-        description = "Tạo gói và đọc preflight ở Kiểm tra & duyệt."; action = { label: "Mở tạo gói mô phỏng", tab: "review" };
+        title = pkg?.preflight.blocking_result === "FAIL" ? "Gói chưa đạt kiểm tra" : "Sẵn sàng tạo gói";
+        description = pkg?.preflight.blocking_result === "FAIL" ? "Xem mục cần sửa ở tab Kiểm tra & duyệt." : "Tạo gói ở tab Kiểm tra & duyệt."; action = { label: "Mở tạo gói mô phỏng", tab: "review" };
       }
     }
   }
@@ -284,7 +284,7 @@ export function NextAction({
                   <div className="space-y-2 text-right">
                     {isGuest && (
                       <>
-                        <p className="text-xs text-ink-muted">Retry thủ công dùng 1 lượt Guest khi máy chủ chấp nhận.</p>
+                        <p className="text-xs text-ink-muted">Mỗi lần thử lại dùng 1 lượt chạy của khách.</p>
                         <GuestQuotaStatus quota={guestQuota} />
                       </>
                     )}
@@ -323,7 +323,7 @@ export function NextAction({
           <div className="space-y-2 text-right">
             {isGuest && (
               <>
-                <p className="text-xs text-ink-muted">Retry thủ công dùng 1 lượt Guest khi máy chủ chấp nhận.</p>
+                <p className="text-xs text-ink-muted">Mỗi lần thử lại dùng 1 lượt chạy của khách.</p>
                 <GuestQuotaStatus quota={guestQuota} />
               </>
             )}
