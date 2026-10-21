@@ -118,6 +118,9 @@ def test_probe_keeps_idle_baseline_while_busy(tmp_path: Path, monkeypatch: pytes
         capability.subprocess, "run", lambda *args, **kwargs: _rows((0, "GPU-aaaa", 16384, free["mib"]))
     )
     monkeypatch.setattr(capability, "_live_ram_gb", lambda: 20.0)
+    # `subprocess.run` giả chỉ trả bảng nvidia-smi; không để lượt đọc phiên bản COLMAP (có cache theo tiến trình)
+    # làm kết quả phụ thuộc thứ tự chạy test.
+    monkeypatch.setattr(capability, "colmap_vocab_tree_available", lambda: None)
     first = capability.probe(tmp_path, idle=True)
     assert first.idle_vram_free_gb == 15 and first.idle_measured_at == first.measured_at
     assert first.gpu_uuid == "GPU-aaaa" and first.disk_total_gb is not None and first.vram_total_gb == 16
