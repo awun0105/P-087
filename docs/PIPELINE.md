@@ -97,7 +97,21 @@ flowchart TD
     ISAAC --> RELEASE["Reviewer quyết định / seal release"]
 ```
 
-Sơ đồ là đường thành công của preset hiện tại, không thể hiện mọi nhánh lỗi/legacy. Finalize hoàn tất phần reconstruction trước operation geometry; validation/release không tự nằm trong cùng một attempt của `run_video_job()`.
+Sơ đồ là đường thành công của preset hiện tại, không thể hiện mọi nhánh lỗi/legacy. Finalize hoàn tất phần reconstruction trước operation geometry; validation/release không nằm trong lượt chạy của pipeline.
+
+Từ T-073 worker nhận **từng bước** chứ không nhận cả job một mạch ([steps.py](../src/services/orchestration/jobs/steps.py)). Mỗi bước khai loại tài nguyên và chỉ giữ chỗ tài nguyên trong lúc chạy, nên bước CPU của job này chạy song song với bước GPU của job khác:
+
+| Bước | Tài nguyên | Gồm | Job dừng ở đâu sau bước |
+|---|---|---|---|
+| `prepare` | CPU | kiểm video, che (nếu bật), tách frame | RUNNING ở `ST-FRAME-EXTRACT` |
+| `anonymization_review` | người dùng | chỉ khi có frame bị che | như trên, đến khi chấp nhận |
+| `pose_visual` | GPU | LiDAR (nếu có), COLMAP, Brush, đề xuất tỉ lệ | RUNNING ở `ST-METRIC-CANONICALIZE` |
+| `metric_confirm` | người dùng | xác nhận tỉ lệ | như trên, có bản xác nhận |
+| `canonical_geometry` | CPU (GPU nếu máy đặt `product_geometry_gpu_index`) | `finalize_cli`: REC-06, REC-05, REC-10 bundle | RUNNING ở `ST-RGB-GEOMETRY` có bundle |
+| `scene_extract` | GPU | tách vật (ADR 0006) | SUCCEEDED |
+| `view_lod` | GPU, ưu tiên thấp | bộ LOD cho SOG lớn | (job đã xong) |
+
+Danh sách bước suy tất định từ JobManifest và được ghi vào `r2s_job_steps` trong cùng transaction với mỗi revision; worker nhận bước bằng CAS `ready → claimed` rồi giữ lease của job như trước. `run_video_job()`/`run_finalize_job()` vẫn còn làm đường chạy một mạch cho chạy tay và test.
 
 ## 4. Chuẩn bị input và sensor
 
@@ -107,7 +121,7 @@ Sơ đồ là đường thành công của preset hiện tại, không thể hi�
 
 Output gồm quality/privacy report và `NormalizedRGBFrameSet` với source/timestamp mapping. Không trả frame set thành công nếu các bước bắt buộc thất bại. Frame đã được chuẩn bị trên browser cần mapping nguồn để các bước sau không ghép sai calibration/trajectory.
 
-`run_video_job()` gọi prepare rồi lấy frame reference thành công đã ghi trong job. Khi bắt đầu từ frame set chuẩn bị sẵn, runner vẫn kiểm allow-list/identity; không bỏ qua nguồn dữ liệu chỉ vì file ảnh đã tồn tại trên đĩa.
+Bước `prepare` (hoặc `run_video_job()` khi chạy một mạch) gọi prepare rồi lấy frame reference thành công đã ghi trong job; job dừng ở bước tách frame để một worker có GPU nhận bước dựng camera. Khi bắt đầu từ frame set chuẩn bị sẵn, runner vẫn kiểm allow-list/identity; không bỏ qua nguồn dữ liệu chỉ vì file ảnh đã tồn tại trên đĩa.
 
 ### 4.2 Che dữ liệu và chờ chấp nhận
 
