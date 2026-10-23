@@ -22,20 +22,15 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     settings = get_settings()
     print(f"Starting {settings.app_name} in {settings.app_env} mode")
+    from src.services.orchestration.jobs.database import RuntimeDatabase
+    from src.services.orchestration.samples.catalog import prepare_library
     from src.services.orchestration.samples.distributed import enabled
-    from src.services.orchestration.samples.release import bootstrap_library
     from src.services.orchestration.samples.sessions import purge_sessions
 
-    await run_in_threadpool(bootstrap_library, settings)
-    if settings.product_demo_required:
-        from src.services.orchestration.samples.bundle import DemoLibrary
-        from src.services.orchestration.samples.workspace import load_workspace
-
-        bundles = DemoLibrary(settings.product_demo_dir).bundles()
-        if not bundles:
-            raise RuntimeError("Demo library is required but has not been provisioned")
-        for bundle in bundles.values():
-            await run_in_threadpool(load_workspace, bundle)
+    # Thư viện mẫu: catalog trong DB + kho file là nguồn sự thật; đĩa thiếu/sai được tải lại, không làm API chết.
+    report = await run_in_threadpool(prepare_library, settings, RuntimeDatabase(settings.database_url))
+    if report.repaired or report.broken:
+        logger.warning("Demo library: repaired=%s broken=%s", report.repaired, report.broken)
 
     async def collect_sessions() -> None:
         while True:
