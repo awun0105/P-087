@@ -137,9 +137,7 @@ def _validation_policy() -> tuple[ValidationConfig, IsaacValidationRuntimeProfil
             detail=f"Cấu hình Isaac validation không hợp lệ: {error}",
         ) from error
     if config.runtime_profile_ref is not None:
-        _LOGGER.warning(
-            "PRODUCT_ISAAC_VALIDATION_CONFIG là policy template; profile được bind riêng từ server setting"
-        )
+        _LOGGER.warning("PRODUCT_ISAAC_VALIDATION_CONFIG là policy template; profile được bind riêng từ server setting")
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Cấu hình kiểm tra Isaac Sim trên máy chủ chưa đúng. Báo quản trị viên.",
@@ -154,7 +152,9 @@ def _validation_job_access(job_id: str, user: UserRecord | None, *, mutation: bo
         if mutation:
             authorize_job_mutation(user, registry, job_id, operation="quản lý Isaac validation của")
         elif user is not None and not owner_mutation_allowed(user, registry.get_job_owner_user_id(job_id)):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tài khoản khách chỉ thao tác được trên scene mình tạo")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="Tài khoản khách chỉ thao tác được trên scene mình tạo"
+            )
     except JobNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
     return registry
