@@ -19,14 +19,9 @@ import { currentLanguage, subscribeLanguage, type Language } from "@/lib/i18n";
 const LOGIN_HREF = STUDIO_LOGIN_URL;
 
 const TRACK_CARD: Record<TrackState, string> = {
-  current: "border-2 border-ember-strong bg-paper-raised",
-  partial: "border border-line-strong bg-paper-raised",
-  later: "border border-dashed border-line-strong",
-};
-const TRACK_TAG: Record<TrackState, string> = {
-  current: "text-ember-strong",
-  partial: "text-ink",
-  later: "text-ink-muted",
+  current: "lp-card lp-card-featured",
+  partial: "lp-card",
+  later: "lp-card lp-card-dashed",
 };
 const TRY_DEMO_HREF = `${STUDIO_URL}/new/try-demo`;
 
@@ -63,15 +58,14 @@ export function LandingPage() {
 
       {/* ── HERO ── */}
       <section className="lp-hero">
-        <div className="lp-wrap grid gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)] lg:items-center">
+        <div className="lp-wrap lp-hero-grid">
           <div>
             <p className="lp-kicker">{HERO.eyebrow}</p>
             <h1 className="lp-display mt-5">
-              {HERO.titleLead}
-              <span className="block text-ember-strong">{HERO.titleEmphasis}</span>
+              {HERO.titleLead} {HERO.titleEmphasis}
             </h1>
             <p className="lp-lead mt-6">{HERO.lead}</p>
-            <p className="mt-3 max-w-xl text-[15px] leading-relaxed text-ink-muted">{HERO.note}</p>
+            <p className="lp-body mt-4 max-w-xl">{HERO.note}</p>
 
             <div className="mt-9 flex flex-wrap gap-3">
               <a href={TRY_DEMO_HREF} className="lp-btn lp-btn-primary">
@@ -82,12 +76,9 @@ export function LandingPage() {
               </a>
             </div>
 
-            <ul className="mt-10 grid gap-3 border-t border-line pt-6 sm:grid-cols-3">
+            <ul className="lp-benefits">
               {HERO.benefits.map((b) => (
-                <li key={b} className="flex gap-2.5 text-[14px] leading-snug text-ink">
-                  <span aria-hidden className="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full bg-ember-strong" />
-                  {b}
-                </li>
+                <li key={b}>{b}</li>
               ))}
             </ul>
           </div>
@@ -97,29 +88,31 @@ export function LandingPage() {
       </section>
 
       {/* ── 01 BỐI CẢNH ── */}
-      <section id="context" className="lp-section bg-paper-sunken">
+      <section id="context" className="lp-section">
         <div className="lp-wrap">
           <SectionHead index={CONTEXT.index} lead={CONTEXT.titleLead} emphasis={CONTEXT.titleEmphasis} body={CONTEXT.lead} />
 
-          <ol className="lp-flow mt-12">
+          <ol className="lp-flow lp-section-sub">
             {CONTEXT.steps.map((s, i) => (
               <li key={s.title} className="lp-flow-step">
-                <span className="font-mono text-[12px] font-semibold text-ember-strong">{String(i + 1).padStart(2, "0")}</span>
-                <h3 className="mt-1 text-[17px] font-bold text-ink">{s.title}</h3>
-                <p className="mt-1.5 text-[15px] leading-relaxed text-ink-muted">{s.body}</p>
+                <span className="lp-flow-num">{String(i + 1).padStart(2, "0")}</span>
+                <h3 className="lp-h3 mt-2">{s.title}</h3>
+                <p className="lp-body mt-2">{s.body}</p>
               </li>
             ))}
           </ol>
 
-          <h3 className="mt-14 text-lg font-bold text-ink">{CONTEXT.waysTitle}</h3>
-          <div className="mt-4 grid gap-4 md:grid-cols-2">
-            {CONTEXT.ways.map((w, i) => (
-              <div key={w.name} className={`rounded-xl p-6 ${i === 1 ? "border-2 border-ember-strong bg-paper-raised" : "border border-line-strong bg-paper-raised"}`}>
-                <p className="text-[17px] font-bold text-ink">{w.name}</p>
-                <p className={`mt-1 text-[14px] font-semibold ${i === 1 ? "text-ember-strong" : "text-ink-muted"}`}>{w.verdict}</p>
-                <p className="mt-3 text-[15px] leading-relaxed text-ink-muted">{w.body}</p>
-              </div>
-            ))}
+          <div className="lp-section-sub">
+            <h3 className="lp-h3">{CONTEXT.waysTitle}</h3>
+            <div className="mt-5 grid gap-4 md:grid-cols-2">
+              {CONTEXT.ways.map((w, i) => (
+                <div key={w.name} className={i === 1 ? "lp-card lp-card-featured" : "lp-card"}>
+                  <p className="text-[17px] font-semibold text-ink">{w.name}</p>
+                  <p className="mt-1 text-[14px] text-ink-subtle">{w.verdict}</p>
+                  <p className="lp-body mt-4">{w.body}</p>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </section>
@@ -129,132 +122,124 @@ export function LandingPage() {
         <div className="lp-wrap">
           <SectionHead index={PROBLEM.index} lead={PROBLEM.titleLead} emphasis={PROBLEM.titleEmphasis} body={PROBLEM.lead} />
 
-          <h3 className="mt-14 text-lg font-bold text-ink">{PROBLEM.analogy.title}</h3>
-          <div className="mt-4">
-            <CompareScene analogy={PROBLEM.analogy} lang={lang} />
+          <div className="lp-section-sub">
+            <h3 className="lp-h3">{PROBLEM.analogy.title}</h3>
+            <div className="mt-5">
+              <CompareScene analogy={PROBLEM.analogy} lang={lang} />
+            </div>
           </div>
 
-          <h3 className="mt-14 text-lg font-bold text-ink">{PROBLEM.issuesTitle}</h3>
-          <ol className="mt-5 grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
-            {PROBLEM.issues.map((c, i) => (
-              <li key={c.title} className="border-l-2 border-rust pl-4">
-                <span className="font-mono text-[12px] font-semibold text-rust">{String(i + 1).padStart(2, "0")}</span>
-                <h4 className="mt-1 text-[16px] font-bold text-ink">{c.title}</h4>
-                <p className="mt-1.5 text-[14px] leading-relaxed text-ink-muted">{c.body}</p>
-                <p className="mt-3 text-[14px] leading-snug text-ink">
-                  <span className="text-ink-muted">{ui.consequence}</span>
-                  {c.effect}
-                </p>
-              </li>
-            ))}
-          </ol>
+          <div className="lp-section-sub">
+            <h3 className="lp-h3">{PROBLEM.issuesTitle}</h3>
+            <ul className="lp-issues mt-6">
+              {PROBLEM.issues.map((c) => (
+                <li key={c.title} className="lp-issue">
+                  <h4 className="text-[16px] font-semibold text-ink">{c.title}</h4>
+                  <p className="lp-body mt-2 text-[14px]">{c.body}</p>
+                  <p className="mt-3 text-[14px] leading-snug text-ink">
+                    <span className="text-ink-subtle">{ui.consequence}</span>
+                    {c.effect}
+                  </p>
+                </li>
+              ))}
+            </ul>
+            <p className="lp-consequence mt-14">{PROBLEM.consequence}</p>
+          </div>
 
-          <p className="lp-consequence mt-12">{PROBLEM.consequence}</p>
-
-          <h3 className="mt-16 text-lg font-bold text-ink">{PROBLEM.personasTitle}</h3>
-          <ol className="mt-5 grid gap-px overflow-hidden rounded-xl border border-line bg-line lg:grid-cols-3">
-            {PROBLEM.personas.map((p) => (
-              <li key={p.role} className="relative flex flex-col bg-paper-raised p-7 sm:p-8">
-                <p className="lp-label">{p.tag}</p>
-                <h4 className="mt-1 text-xl font-bold tracking-tight text-ink">{p.role}</h4>
-                <p className="mt-6 text-[1.75rem] font-extrabold leading-none tracking-tight text-ember-strong">{p.highlight}</p>
-                <p className="mt-2 text-[14px] leading-snug text-ink-muted">{p.highlightNote}</p>
-                <ul className="mt-6 space-y-2.5 border-t border-line pt-5">
-                  {p.pains.map((pain) => (
-                    <li key={pain} className="flex gap-3 text-[15px] leading-snug text-ink">
-                      <span aria-hidden className="mt-2 h-px w-3 shrink-0 bg-ink-muted" />
-                      {pain}
-                    </li>
-                  ))}
-                </ul>
-                <p className="mt-auto pt-7 font-mono text-[12px] text-ink-muted">
-                  {p.handoff}
-                  <span aria-hidden className="lp-handoff-arrow" />
-                </p>
-              </li>
-            ))}
-          </ol>
-
-          <p className="mt-10 max-w-3xl text-[13px] leading-relaxed text-ink-muted">{PROBLEM.footnote}</p>
+          <div className="lp-section-sub">
+            <h3 className="lp-h3">{PROBLEM.personasTitle}</h3>
+            <ol className="lp-cells mt-6 lg:grid-cols-3">
+              {PROBLEM.personas.map((p) => (
+                <li key={p.role} className="lp-cell">
+                  <p className="lp-label">{p.tag}</p>
+                  <h4 className="mt-1 text-xl font-semibold tracking-tight text-ink">{p.role}</h4>
+                  <p className="mt-6 text-[1.5rem] font-semibold leading-tight tracking-tight text-ink">{p.highlight}</p>
+                  <p className="lp-body mt-2 text-[14px]">{p.highlightNote}</p>
+                  <ul className="lp-list mt-6 border-t border-line pt-5">
+                    {p.pains.map((pain) => (
+                      <li key={pain}>{pain}</li>
+                    ))}
+                  </ul>
+                  <p className="mt-auto pt-7 text-[13px] text-ink-subtle">{p.handoff}</p>
+                </li>
+              ))}
+            </ol>
+            <p className="mt-8 max-w-3xl text-[13px] leading-relaxed text-ink-subtle">{PROBLEM.footnote}</p>
+          </div>
         </div>
       </section>
 
       {/* ── 03 GIẢI PHÁP ── */}
-      <section id="solution" className="lp-section bg-paper-sunken">
+      <section id="solution" className="lp-section">
         <div className="lp-wrap">
           <SectionHead index={SOLUTION.index} lead={SOLUTION.titleLead} emphasis={SOLUTION.titleEmphasis} body={SOLUTION.lead} />
 
-          <h3 className="mt-14 text-lg font-bold text-ink">{SOLUTION.mapTitle}</h3>
-          <ol className="lp-map mt-5">
-            {SOLUTION.map.map((m) => (
-              <li key={m.problem} className="lp-map-row">
-                <p className="text-[15px] font-semibold text-ink-muted">
-                  <span aria-hidden className="mr-2 inline-block h-2 w-2 rounded-full bg-rust align-middle" />
-                  {m.problem}
-                </p>
-                <span aria-hidden className="lp-map-arrow" />
-                <p className="text-[15px] leading-snug text-ink">{m.answer}</p>
-                <div className="lp-map-status">
-                  <StatusTag status={m.status} label={STATUS_LABEL[m.status]} />
-                </div>
-              </li>
-            ))}
-          </ol>
-          <div className="mt-6 max-w-3xl rounded-xl border border-line-strong bg-paper-raised p-5">
-            <p className="text-[15px] font-bold text-ink">{SOLUTION.extra.title}</p>
-            <p className="mt-1.5 text-[15px] leading-relaxed text-ink-muted">{SOLUTION.extra.body}</p>
-          </div>
-
-          <div className="mt-14 grid gap-4 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
-            <div className="rounded-xl border border-dashed border-line-strong p-6">
-              <p className="text-[13px] font-semibold text-ink-muted">{SOLUTION.contribution.notTitle}</p>
-              <p className="mt-2 text-[15px] leading-relaxed text-ink-muted">{SOLUTION.contribution.not}</p>
-            </div>
-            <div className="rounded-xl border-2 border-ember-strong bg-paper-raised p-6">
-              <p className="text-[13px] font-semibold text-ember-strong">{SOLUTION.contribution.isTitle}</p>
-              <p className="mt-2 text-[17px] font-semibold leading-snug text-ink">{SOLUTION.contribution.is}</p>
+          <div className="lp-section-sub">
+            <h3 className="lp-h3">{SOLUTION.mapTitle}</h3>
+            <ol className="lp-map mt-6">
+              {SOLUTION.map.map((m) => (
+                <li key={m.problem} className="lp-map-row">
+                  <p className="text-[15px] font-medium text-ink-muted">{m.problem}</p>
+                  <p className="text-[15px] leading-snug text-ink">{m.answer}</p>
+                  <div className="lp-map-status">
+                    <StatusTag status={m.status} label={STATUS_LABEL[m.status]} />
+                  </div>
+                </li>
+              ))}
+            </ol>
+            <div className="mt-6 max-w-3xl">
+              <p className="text-[15px] font-semibold text-ink">{SOLUTION.extra.title}</p>
+              <p className="lp-body mt-1.5">{SOLUTION.extra.body}</p>
             </div>
           </div>
 
-          <h3 className="mt-16 text-lg font-bold text-ink">{SOLUTION.columnsTitle}</h3>
-          <div className="mt-5 grid gap-10 lg:grid-cols-3 lg:gap-8">
-            {SOLUTION.columns.map((c) => (
-              <article key={c.title} className="flex flex-col">
-                <p className="lp-label">{c.for}</p>
-                <h4 className="mt-1 text-xl font-bold tracking-tight text-ink">{c.title}</h4>
-                <ul className="mt-5 space-y-3">
-                  {c.points.map((pt) => (
-                    <li key={pt} className="flex gap-3 text-[15px] leading-snug text-ink">
-                      <CheckIcon />
-                      {pt}
-                    </li>
-                  ))}
-                </ul>
-                <p className="mt-auto pt-6 text-[14px] font-semibold text-sage">{c.outcome}</p>
-              </article>
-            ))}
+          <div className="lp-section-sub grid gap-4 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+            <div className="lp-card lp-card-dashed">
+              <p className="lp-label">{SOLUTION.contribution.notTitle}</p>
+              <p className="lp-body mt-2">{SOLUTION.contribution.not}</p>
+            </div>
+            <div className="lp-card lp-card-featured">
+              <p className="lp-label text-ink">{SOLUTION.contribution.isTitle}</p>
+              <p className="mt-2 text-[17px] font-medium leading-snug text-ink">{SOLUTION.contribution.is}</p>
+            </div>
+          </div>
+
+          <div className="lp-section-sub">
+            <h3 className="lp-h3">{SOLUTION.columnsTitle}</h3>
+            <div className="mt-6 grid gap-10 lg:grid-cols-3 lg:gap-8">
+              {SOLUTION.columns.map((c) => (
+                <article key={c.title} className="flex flex-col border-t border-line-strong pt-5">
+                  <p className="lp-label">{c.for}</p>
+                  <h4 className="mt-1 text-xl font-semibold tracking-tight text-ink">{c.title}</h4>
+                  <ul className="lp-list mt-5">
+                    {c.points.map((pt) => (
+                      <li key={pt}>{pt}</li>
+                    ))}
+                  </ul>
+                  <p className="mt-auto pt-6 text-[14px] font-medium text-ink-muted">{c.outcome}</p>
+                </article>
+              ))}
+            </div>
           </div>
 
           {/* Ba lớp biểu diễn: xếp chồng như các lớp của một scene */}
-          <div className="mt-16 grid gap-10 rounded-2xl bg-viewport p-6 text-on-dark sm:p-10 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:items-center">
+          <div className="lp-layers-block lp-section-sub">
             <div>
-              <h3 className="text-2xl font-extrabold tracking-tight">{ui.oneObjectThreeLayers}</h3>
-              <p className="mt-3 max-w-md text-[15px] leading-relaxed text-on-dark/70">{SOLUTION.layersNote}</p>
-              <p className="mt-8 text-[13px] text-on-dark/60">{ui.humanDecisions}</p>
-              <ul className="mt-3 flex flex-wrap gap-2">
+              <h3 className="text-2xl font-semibold tracking-tight text-ink">{ui.oneObjectThreeLayers}</h3>
+              <p className="lp-body mt-3 max-w-md">{SOLUTION.layersNote}</p>
+              <p className="lp-label mt-8">{ui.humanDecisions}</p>
+              <ul className="lp-chips mt-3">
                 {SOLUTION.checkpoints.map((c) => (
-                  <li key={c} className="rounded-md border border-line-dark px-3 py-1.5 text-[13px] font-medium">
-                    {c}
-                  </li>
+                  <li key={c}>{c}</li>
                 ))}
               </ul>
             </div>
             <ol className="lp-layers">
               {SOLUTION.layers.map((l) => (
                 <li key={l.code} className="lp-layer" data-tone={l.tone}>
-                  <span className="font-mono text-[12px] font-semibold">{l.code}</span>
-                  <span className="mt-1 block text-[15px] font-bold">{l.question}</span>
-                  <span className="mt-1 block text-[14px] leading-snug text-on-dark/70">{l.answer}</span>
+                  <span className="lp-layer-code">{l.code}</span>
+                  <span className="mt-1 block text-[15px] font-semibold text-ink">{l.question}</span>
+                  <span className="lp-body mt-1 block text-[14px]">{l.answer}</span>
                 </li>
               ))}
             </ol>
@@ -267,26 +252,26 @@ export function LandingPage() {
         <div className="lp-wrap">
           <SectionHead index={WORKFLOW.index} lead={WORKFLOW.titleLead} emphasis={WORKFLOW.titleEmphasis} body={WORKFLOW.lead} />
 
-          <ol className="lp-timeline mt-14">
+          <ol className="lp-timeline lp-section-sub">
             {WORKFLOW.steps.map((s) => (
               <li key={s.code} className="lp-step" data-status={s.status}>
                 <span className="lp-step-dot" aria-hidden>{s.code}</span>
-                <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_14rem] md:gap-10">
+                <div className="lp-step-grid">
                   <div>
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-                      <h3 className="text-lg font-bold tracking-tight text-ink">{s.title}</h3>
-                      <span className="font-mono text-[12px] text-ink-muted">{s.actor}</span>
+                      <h3 className="lp-h3">{s.title}</h3>
+                      <span className="text-[13px] text-ink-subtle">{s.actor}</span>
                       <StatusTag status={s.status} label={STATUS_LABEL[s.status]} />
                     </div>
-                    <p className="mt-2 max-w-2xl text-[15px] leading-relaxed text-ink-muted">{s.body}</p>
+                    <p className="lp-body mt-2 max-w-2xl">{s.body}</p>
                     {s.image ? (
                       // eslint-disable-next-line @next/next/no-img-element -- ảnh tĩnh, trang có thể xuất static
-                      <img src={s.image} alt={`Studio, ${ui.step} ${s.title}`} loading="lazy" className="mt-4 w-full max-w-2xl rounded-lg border border-line" />
+                      <img src={s.image} alt={`Studio, ${ui.step} ${s.title}`} loading="lazy" className="lp-step-shot" />
                     ) : null}
                   </div>
-                  <div className="md:border-l md:border-line md:pl-5">
-                    <p className="text-[12px] text-ink-muted">{ui.result}</p>
-                    <p className="mt-0.5 text-[15px] font-semibold text-ink">{s.output}</p>
+                  <div className="lp-step-result">
+                    <p className="lp-label">{ui.result}</p>
+                    <p className="mt-0.5 text-[15px] font-medium text-ink">{s.output}</p>
                   </div>
                 </div>
               </li>
@@ -296,38 +281,37 @@ export function LandingPage() {
       </section>
 
       {/* ── 05 TIẾN ĐỘ ── */}
-      <section id="progress" className="lp-section bg-paper-sunken">
+      <section id="progress" className="lp-section">
         <div className="lp-wrap">
           <SectionHead index={PROGRESS.index} lead={PROGRESS.titleLead} emphasis={PROGRESS.titleEmphasis} body={PROGRESS.lead} />
 
-          <div className="mt-14 grid gap-px overflow-hidden rounded-xl border border-line bg-line lg:grid-cols-3">
+          <div className="lp-cells lp-section-sub lg:grid-cols-3">
             {PROGRESS.tiers.map((t) => (
-              <div key={t.title} className="bg-paper-raised p-7 sm:p-8">
-                <StatusTag status={t.status} label={STATUS_LABEL[t.status]} />
-                <h3 className="mt-4 text-xl font-bold tracking-tight text-ink">{t.title}</h3>
-                <ul className="mt-4 space-y-2.5">
+              <div key={t.title} className="lp-cell">
+                <div>
+                  <StatusTag status={t.status} label={STATUS_LABEL[t.status]} />
+                </div>
+                <h3 className="mt-4 text-xl font-semibold tracking-tight text-ink">{t.title}</h3>
+                <ul className="lp-list mt-5">
                   {t.items.map((it) => (
-                    <li key={it} className="flex gap-3 text-[15px] leading-snug text-ink">
-                      <span aria-hidden className="mt-2 h-px w-3 shrink-0 bg-ink-muted" />
-                      {it}
-                    </li>
+                    <li key={it}>{it}</li>
                   ))}
                 </ul>
               </div>
             ))}
           </div>
 
-          <div className="mt-12">
-            <h3 className="text-lg font-bold text-ink">{PROGRESS.metricsTitle}</h3>
-            <dl className="mt-4 grid gap-x-8 gap-y-5 border-t border-line pt-5 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="lp-section-sub">
+            <h3 className="lp-h3">{PROGRESS.metricsTitle}</h3>
+            <dl className="lp-metrics mt-5">
               {PROGRESS.metrics.map((m) => (
                 <div key={m.group}>
-                  <dt className="text-[13px] text-ink-muted">{m.group}</dt>
+                  <dt className="lp-label">{m.group}</dt>
                   <dd className="mt-1 text-[15px] font-medium leading-snug text-ink">{m.items}</dd>
                 </div>
               ))}
             </dl>
-            <p className="mt-5 text-[13px] text-ink-muted">{PROGRESS.metricsNote}</p>
+            <p className="mt-5 text-[13px] leading-relaxed text-ink-subtle">{PROGRESS.metricsNote}</p>
           </div>
 
           <LandingSamples
@@ -344,24 +328,24 @@ export function LandingPage() {
         <div className="lp-wrap">
           <SectionHead index={ROADMAP.index} lead={ROADMAP.titleLead} emphasis={ROADMAP.titleEmphasis} body={ROADMAP.lead} />
 
-          <div className="mt-14 grid gap-6 lg:grid-cols-[16rem_minmax(0,1fr)] lg:items-stretch">
-            <div className="flex flex-col justify-center rounded-xl bg-viewport p-6 text-on-dark">
-              <p className="text-lg font-extrabold tracking-tight">{ROADMAP.core}</p>
+          <div className="lp-section-sub grid gap-4 lg:grid-cols-[15rem_minmax(0,1fr)]">
+            <div className="lp-card lp-card-sunken flex flex-col justify-center">
+              <p className="text-lg font-semibold tracking-tight text-ink">{ROADMAP.core}</p>
               <ul className="mt-4 space-y-2">
                 {ROADMAP.adapters.map((a) => (
-                  <li key={a} className="rounded-md border border-line-dark px-3 py-2 font-mono text-[12px] text-on-dark/80">
+                  <li key={a} className="text-[14px] text-ink-muted">
                     {a}
                   </li>
                 ))}
               </ul>
             </div>
-            <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               {ROADMAP.tracks.map((t) => (
-                <div key={t.domain} className={`rounded-xl p-6 sm:p-7 ${TRACK_CARD[t.state]}`}>
-                  <p className={`text-[13px] font-semibold ${TRACK_TAG[t.state]}`}>{t.tag}</p>
-                  <p className="mt-3 text-xl font-bold tracking-tight text-ink">{t.domain}</p>
-                  <p className="mt-1 font-mono text-[13px] text-ink-muted">↳ {t.simulator}</p>
-                  <p className="mt-4 text-[15px] leading-relaxed text-ink-muted">{t.body}</p>
+                <div key={t.domain} className={TRACK_CARD[t.state]}>
+                  <p className="lp-label">{t.tag}</p>
+                  <p className="mt-3 text-xl font-semibold tracking-tight text-ink">{t.domain}</p>
+                  <p className="mt-1 text-[13px] text-ink-subtle">{t.simulator}</p>
+                  <p className="lp-body mt-4">{t.body}</p>
                 </div>
               ))}
             </div>
@@ -370,15 +354,14 @@ export function LandingPage() {
       </section>
 
       {/* ── BẮT ĐẦU ── */}
-      <section id="start" className="lp-section bg-viewport text-on-dark">
-        <div className="lp-wrap grid gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:items-center">
+      <section id="start" className="lp-section lp-start">
+        <div className="lp-wrap grid gap-12 lg:grid-cols-2 lg:items-center">
           <div>
             <h2 className="lp-h2 text-on-dark">
-              {START.titleLead}
-              <span className="block text-on-dark/60">{START.titleEmphasis}</span>
+              {START.titleLead} {START.titleEmphasis}
             </h2>
             <div className="mt-8 flex flex-wrap gap-3">
-              <a href={TRY_DEMO_HREF} className="lp-btn lp-btn-primary">
+              <a href={TRY_DEMO_HREF} className="lp-btn lp-btn-on-dark">
                 {ui.tryDemo}
               </a>
               <a href={LOGIN_HREF} className="lp-btn lp-btn-ghost-dark">
@@ -386,13 +369,13 @@ export function LandingPage() {
               </a>
             </div>
           </div>
-          <ol className="space-y-px overflow-hidden rounded-xl border border-line-dark">
+          <ol className="lp-start-steps">
             {START.steps.map((s, i) => (
-              <li key={s.title} className="flex gap-4 bg-viewport-deep p-5">
-                <span className="font-mono text-[13px] font-semibold text-ember">{String(i + 1).padStart(2, "0")}</span>
+              <li key={s.title}>
+                <span className="lp-start-num">{String(i + 1).padStart(2, "0")}</span>
                 <div>
-                  <p className="text-[15px] font-bold">{s.title}</p>
-                  <p className="mt-1 text-[14px] leading-relaxed text-on-dark/70">{s.body}</p>
+                  <p className="text-[15px] font-semibold">{s.title}</p>
+                  <p className="mt-1 text-[14px] leading-relaxed text-on-dark/65">{s.body}</p>
                 </div>
               </li>
             ))}
@@ -404,9 +387,9 @@ export function LandingPage() {
       <footer className="border-t border-line py-10">
         <div className="lp-wrap flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
           <div>
-            <p className="text-[15px] font-bold text-ink">Real2Sim Studio</p>
-            <p className="mt-1 max-w-sm text-[14px] text-ink-muted">{FOOTER.tagline}</p>
-            <p className="mt-4 text-[13px] text-ink-muted">{FOOTER.team}</p>
+            <p className="text-[15px] font-semibold text-ink">Real2Sim Studio</p>
+            <p className="mt-1 max-w-sm text-[14px] leading-relaxed text-ink-muted">{FOOTER.tagline}</p>
+            <p className="mt-4 text-[13px] text-ink-subtle">{FOOTER.team}</p>
           </div>
           <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-[14px] text-ink-muted">
             <a href={FOOTER.github} target="_blank" rel="noreferrer" className="lp-link">
@@ -422,23 +405,14 @@ export function LandingPage() {
 
 function SectionHead({ index, lead, emphasis, body }: { index: string; lead: string; emphasis: string; body: string }) {
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)] lg:items-end">
+    <div className="lp-section-head">
       <div>
         <p className="lp-index">{index}</p>
-        <h2 className="lp-h2 mt-3 text-ink">
-          {lead}
-          <span className="block text-ink-muted">{emphasis}</span>
+        <h2 className="lp-h2">
+          {lead} {emphasis}
         </h2>
       </div>
-      <p className="max-w-xl text-[16px] leading-relaxed text-ink-muted">{body}</p>
+      <p>{body}</p>
     </div>
-  );
-}
-
-function CheckIcon() {
-  return (
-    <svg viewBox="0 0 16 16" aria-hidden className="mt-[3px] h-4 w-4 shrink-0 text-sage" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M3 8.5l3 3 7-7" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
   );
 }
