@@ -535,6 +535,26 @@ MIGRATIONS += (
         ),
     ),
 )
+MIGRATIONS += (
+    (
+        28,
+        (
+            # Catalog mẫu demo: DB + kho file là nguồn sự thật, đĩa chỉ là bộ đệm (samples/catalog.py).
+            # `r2s_demo_unpublished` giữ nguyên để nhập một lần; code không đọc/ghi nữa.
+            """CREATE TABLE IF NOT EXISTS r2s_demo_samples (
+                sample_id TEXT PRIMARY KEY,
+                state TEXT NOT NULL,
+                job_id TEXT,
+                manifest_checksum TEXT NOT NULL,
+                published_by TEXT,
+                published_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                payload TEXT NOT NULL
+            )""",
+            "CREATE INDEX IF NOT EXISTS r2s_demo_samples_by_job ON r2s_demo_samples(job_id, state)",
+        ),
+    ),
+)
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1][0]
 
 
