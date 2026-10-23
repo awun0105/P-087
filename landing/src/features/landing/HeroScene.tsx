@@ -75,7 +75,10 @@ export function HeroScene({
   return (
     <figure className="lp-viewport">
       <div className="lp-viewport-bar">
-        <span>{hero.sceneLabel}</span>
+        <span>
+          <span className="lp-window-dots" aria-hidden><i /><i /><i /></span>
+          {hero.sceneLabel}
+        </span>
         <span className="lp-viewport-pills" role="group" aria-label={lang === "en" ? "Layers" : "Các lớp"}>
           {hero.pillars.map((p, i) => {
             const k = LAYER_KEYS[i] ?? "visual";

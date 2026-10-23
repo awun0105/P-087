@@ -864,6 +864,8 @@ export const UI_LABELS = {
     humanDecisions: "Những chỗ con người quyết định",
     diagramCaption: "Sơ đồ minh hoạ luồng xử lý, không phải ảnh chụp kết quả.",
     step: "Bước",
+    explore: "Khám phá",
+    layersGroup: "Các lớp",
   },
   en: {
     tryDemo: "Try sample scene",
@@ -891,6 +893,8 @@ export const UI_LABELS = {
     humanDecisions: "Human verification checkpoints",
     diagramCaption: "Pipeline schematic diagram, not rendered result.",
     step: "Step",
+    explore: "Explore",
+    layersGroup: "Layers",
   },
 };
 

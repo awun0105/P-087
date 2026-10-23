@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { IBM_Plex_Mono, Plus_Jakarta_Sans } from "next/font/google";
+import { IBM_Plex_Mono, Plus_Jakarta_Sans, Space_Grotesk } from "next/font/google";
 
 import { LANG_INIT_SCRIPT } from "@/lib/i18n";
 import { THEME_INIT_SCRIPT } from "@/lib/theme";
@@ -10,6 +10,13 @@ import "@/features/landing/landing.css";
 const sans = Plus_Jakarta_Sans({
   subsets: ["latin", "vietnamese"],
   variable: "--font-jakarta",
+  display: "swap",
+});
+
+const display = Space_Grotesk({
+  subsets: ["latin", "vietnamese"],
+  weight: ["500", "600", "700"],
+  variable: "--font-grotesk",
   display: "swap",
 });
 
@@ -39,7 +46,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="vi" className={`${sans.variable} ${mono.variable} h-full antialiased`} suppressHydrationWarning>
+    <html lang="vi" className={`${sans.variable} ${display.variable} ${mono.variable} h-full antialiased`} suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT + LANG_INIT_SCRIPT }} />
       </head>

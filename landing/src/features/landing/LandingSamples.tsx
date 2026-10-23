@@ -37,12 +37,12 @@ export function LandingSamples({
   if (samples.length === 0) return null;
 
   return (
-    <div className="lp-section-sub border-t border-line pt-10">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <h3 className="lp-h3">{title}</h3>
-        <p className="text-[14px] text-ink-muted">{lead}</p>
+    <div className="lp-section-sub">
+      <div className="lp-section-head">
+        <h3 className="lp-h2">{title}</h3>
+        <p>{lead}</p>
       </div>
-      <ul className="mt-6 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+      <ul className="lp-carousel mt-8">
         {samples.map((s) => (
           <li key={s.sample_id}>
             <a
