@@ -1,9 +1,15 @@
+"use client";
+
+import { useId, useState } from "react";
+
 import { PROBLEM } from "@/features/landing/content";
 import type { Language } from "@/lib/i18n";
 
 /**
- * Hai sơ đồ mặt bằng cạnh nhau: bản dựng từ video (một khối điểm liền) và scene robot cần
- * (từng vật có hộp va chạm, có thước mét). Là hình minh hoạ, không phải ảnh chụp kết quả.
+ * Hai sơ đồ mặt bằng chồng lên nhau với thanh kéo trước/sau: bản dựng từ video (một khối
+ * điểm liền) và scene robot cần (từng vật có hộp va chạm, có thước mét).
+ * Thanh kéo là một ô input kiểu range nên dùng được bằng bàn phím và trình đọc màn hình.
+ * Là hình minh hoạ, không phải ảnh chụp kết quả.
  */
 
 type Dot = { x: number; y: number; r: number; o: number };
@@ -15,10 +21,10 @@ function makeDots(): Dot[] {
     return seed / 2147483647;
   };
   const areas = [
-    { x0: 24, x1: 296, y0: 26, y1: 54, n: 70 },
-    { x0: 24, x1: 296, y0: 126, y1: 154, n: 70 },
-    { x0: 168, x1: 214, y0: 74, y1: 108, n: 22 },
-    { x0: 10, x1: 310, y0: 54, y1: 126, n: 26 },
+    { x0: 24, x1: 616, y0: 26, y1: 54, n: 140 },
+    { x0: 24, x1: 616, y0: 126, y1: 154, n: 140 },
+    { x0: 328, x1: 374, y0: 74, y1: 108, n: 22 },
+    { x0: 10, x1: 630, y0: 54, y1: 126, n: 52 },
   ];
   const dots: Dot[] = [];
   for (const a of areas) {
@@ -35,7 +41,7 @@ function makeDots(): Dot[] {
 }
 
 const DOTS = makeDots();
-const RACKS = [24, 94, 164, 234];
+const RACKS = [24, 94, 164, 234, 334, 404, 474, 544];
 
 function Dots({ faded = false }: { faded?: boolean }) {
   return (
@@ -55,7 +61,8 @@ export function CompareScene({
   lang?: Language;
 }) {
   const { have, need } = analogy;
-  const rackLabel = lang === "en" ? "Rack" : "Kệ";
+  const [pos, setPos] = useState(50);
+  const id = useId();
   const palletLabel = "Pallet";
   const scanAria =
     lang === "en"
@@ -65,21 +72,16 @@ export function CompareScene({
     lang === "en"
       ? "Scene required by robots: each rack and pallet has dedicated collision hull, with 1-meter ruler."
       : "Scene robot cần: từng kệ và pallet là một vật riêng có hộp va chạm, kèm thước một mét.";
+  const sliderLabel = lang === "en" ? "Compare: drag to reveal the robot-ready scene" : "So sánh: kéo để hiện scene robot cần";
 
   return (
-    <div className="grid gap-4 md:grid-cols-2">
-      <figure className="lp-compare">
-        <svg viewBox="0 0 320 180" className="block h-auto w-full" role="img" aria-label={scanAria}>
+    <div className="lp-compare" style={{ "--lp-pos": `${pos}%` } as React.CSSProperties}>
+      <div className="lp-compare-stage">
+        <svg viewBox="0 0 640 180" className="block h-auto w-full" role="img" aria-label={scanAria}>
           <Dots />
         </svg>
-        <figcaption className="lp-compare-caption">
-          <span className="lp-label">{have.label}, {have.like}</span>
-          <span className="mt-1 block text-[15px] leading-snug text-ink">{have.body}</span>
-        </figcaption>
-      </figure>
-
-      <figure className="lp-compare">
-        <svg viewBox="0 0 320 180" className="block h-auto w-full" role="img" aria-label={simAria}>
+        <svg viewBox="0 0 640 180" className="lp-compare-after" role="img" aria-label={simAria}>
+          <rect width="640" height="180" fill="var(--studio-viewport)" />
           <Dots faded />
           <g fill="none" stroke="var(--studio-ochre)" strokeWidth="1.5">
             {RACKS.map((x) => (
@@ -88,10 +90,9 @@ export function CompareScene({
             {RACKS.map((x) => (
               <rect key={`b${x}`} x={x} y="126" width="62" height="28" rx="2" />
             ))}
-            <rect x="168" y="74" width="46" height="34" rx="2" strokeDasharray="4 3" />
+            <rect x="328" y="74" width="46" height="34" rx="2" strokeDasharray="4 3" />
           </g>
-          <text x="28" y="20" className="lp-svg-label" fill="var(--studio-on-dark)">{rackLabel}</text>
-          <text x="222" y="94" className="lp-svg-label" fill="var(--studio-ochre)">{palletLabel}</text>
+          <text x="382" y="94" className="lp-svg-label" fill="var(--studio-ochre)">{palletLabel}</text>
           <g stroke="var(--studio-on-dark)" strokeOpacity="0.8">
             <line x1="24" y1="168" x2="56" y2="168" />
             <line x1="24" y1="164" x2="24" y2="172" />
@@ -99,11 +100,32 @@ export function CompareScene({
           </g>
           <text x="62" y="172" className="lp-svg-label" fill="var(--studio-on-dark)">1 m</text>
         </svg>
-        <figcaption className="lp-compare-caption">
+        <div className="lp-compare-handle" aria-hidden>
+          <span />
+        </div>
+        <span className="lp-compare-tag lp-compare-tag-left" aria-hidden>{have.label}</span>
+        <span className="lp-compare-tag lp-compare-tag-right" aria-hidden>{need.label}</span>
+        <input
+          id={id}
+          type="range"
+          min={0}
+          max={100}
+          value={pos}
+          onChange={(e) => setPos(Number(e.target.value))}
+          aria-label={sliderLabel}
+          className="lp-compare-range"
+        />
+      </div>
+      <div className="lp-compare-captions">
+        <div>
+          <span className="lp-label">{have.label}, {have.like}</span>
+          <span className="mt-1 block text-[15px] leading-snug text-ink">{have.body}</span>
+        </div>
+        <div>
           <span className="lp-label">{need.label}, {need.like}</span>
           <span className="mt-1 block text-[15px] leading-snug text-ink">{need.body}</span>
-        </figcaption>
-      </figure>
+        </div>
+      </div>
     </div>
   );
 }

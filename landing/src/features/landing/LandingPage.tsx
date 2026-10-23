@@ -1,9 +1,11 @@
 "use client";
 
+import { ArrowRight } from "lucide-react";
 import { useSyncExternalStore } from "react";
 
 import { LandingAnchors } from "@/features/landing/LandingAnchors";
 import { LandingHeader } from "@/features/landing/LandingHeader";
+import { LandingMotion } from "@/features/landing/LandingMotion";
 import { LandingSamples } from "@/features/landing/LandingSamples";
 import { CompareScene } from "@/features/landing/CompareScene";
 import { HeroScene } from "@/features/landing/HeroScene";
@@ -54,12 +56,13 @@ export function LandingPage() {
   return (
     <main id="landing-top" className="landing-page">
       <LandingAnchors />
+      <LandingMotion />
       <LandingHeader tryDemoHref={TRY_DEMO_HREF} studioHref={LOGIN_HREF} />
 
       {/* ── HERO ── */}
       <section className="lp-hero">
         <div className="lp-wrap lp-hero-grid">
-          <div>
+          <div className="lp-hero-copy">
             <p className="lp-kicker">{HERO.eyebrow}</p>
             <h1 className="lp-display mt-5">
               {HERO.titleLead} {HERO.titleEmphasis}
@@ -70,6 +73,7 @@ export function LandingPage() {
             <div className="mt-9 flex flex-wrap gap-3">
               <a href={TRY_DEMO_HREF} className="lp-btn lp-btn-primary">
                 {ui.tryDemo}
+                <ArrowRight aria-hidden />
               </a>
               <a href={LOGIN_HREF} className="lp-btn lp-btn-ghost">
                 {ui.loginStudio}
@@ -92,7 +96,7 @@ export function LandingPage() {
         <div className="lp-wrap">
           <SectionHead index={CONTEXT.index} lead={CONTEXT.titleLead} emphasis={CONTEXT.titleEmphasis} body={CONTEXT.lead} />
 
-          <ol className="lp-flow lp-section-sub">
+          <ol className="lp-flow lp-section-sub" data-reveal>
             {CONTEXT.steps.map((s, i) => (
               <li key={s.title} className="lp-flow-step">
                 <span className="lp-flow-num">{String(i + 1).padStart(2, "0")}</span>
@@ -102,11 +106,11 @@ export function LandingPage() {
             ))}
           </ol>
 
-          <div className="lp-section-sub">
+          <div className="lp-section-sub" data-reveal>
             <h3 className="lp-h3">{CONTEXT.waysTitle}</h3>
             <div className="mt-5 grid gap-4 md:grid-cols-2">
               {CONTEXT.ways.map((w, i) => (
-                <div key={w.name} className={i === 1 ? "lp-card lp-card-featured" : "lp-card"}>
+                <div key={w.name} className={i === 1 ? "lp-card lp-card-featured" : "lp-card"} data-reveal style={{ "--lp-delay": `${i * 100}ms` } as React.CSSProperties}>
                   <p className="text-[17px] font-semibold text-ink">{w.name}</p>
                   <p className="mt-1 text-[14px] text-ink-subtle">{w.verdict}</p>
                   <p className="lp-body mt-4">{w.body}</p>
@@ -122,18 +126,18 @@ export function LandingPage() {
         <div className="lp-wrap">
           <SectionHead index={PROBLEM.index} lead={PROBLEM.titleLead} emphasis={PROBLEM.titleEmphasis} body={PROBLEM.lead} />
 
-          <div className="lp-section-sub">
+          <div className="lp-section-sub" data-reveal>
             <h3 className="lp-h3">{PROBLEM.analogy.title}</h3>
             <div className="mt-5">
               <CompareScene analogy={PROBLEM.analogy} lang={lang} />
             </div>
           </div>
 
-          <div className="lp-section-sub">
+          <div className="lp-section-sub" data-reveal>
             <h3 className="lp-h3">{PROBLEM.issuesTitle}</h3>
             <ul className="lp-issues mt-6">
-              {PROBLEM.issues.map((c) => (
-                <li key={c.title} className="lp-issue">
+              {PROBLEM.issues.map((c, i) => (
+                <li key={c.title} className="lp-issue" data-reveal style={{ "--lp-delay": `${i * 90}ms` } as React.CSSProperties}>
                   <h4 className="text-[16px] font-semibold text-ink">{c.title}</h4>
                   <p className="lp-body mt-2 text-[14px]">{c.body}</p>
                   <p className="mt-3 text-[14px] leading-snug text-ink">
@@ -143,10 +147,10 @@ export function LandingPage() {
                 </li>
               ))}
             </ul>
-            <p className="lp-consequence mt-14">{PROBLEM.consequence}</p>
+            <p className="lp-consequence mt-14" data-reveal>{PROBLEM.consequence}</p>
           </div>
 
-          <div className="lp-section-sub">
+          <div className="lp-section-sub" data-reveal>
             <h3 className="lp-h3">{PROBLEM.personasTitle}</h3>
             <ol className="lp-cells mt-6 lg:grid-cols-3">
               {PROBLEM.personas.map((p) => (
@@ -174,7 +178,7 @@ export function LandingPage() {
         <div className="lp-wrap">
           <SectionHead index={SOLUTION.index} lead={SOLUTION.titleLead} emphasis={SOLUTION.titleEmphasis} body={SOLUTION.lead} />
 
-          <div className="lp-section-sub">
+          <div className="lp-section-sub" data-reveal>
             <h3 className="lp-h3">{SOLUTION.mapTitle}</h3>
             <ol className="lp-map mt-6">
               {SOLUTION.map.map((m) => (
@@ -193,7 +197,7 @@ export function LandingPage() {
             </div>
           </div>
 
-          <div className="lp-section-sub grid gap-4 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+          <div className="lp-section-sub grid gap-4 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]" data-reveal>
             <div className="lp-card lp-card-dashed">
               <p className="lp-label">{SOLUTION.contribution.notTitle}</p>
               <p className="lp-body mt-2">{SOLUTION.contribution.not}</p>
@@ -204,7 +208,7 @@ export function LandingPage() {
             </div>
           </div>
 
-          <div className="lp-section-sub">
+          <div className="lp-section-sub" data-reveal>
             <h3 className="lp-h3">{SOLUTION.columnsTitle}</h3>
             <div className="mt-6 grid gap-10 lg:grid-cols-3 lg:gap-8">
               {SOLUTION.columns.map((c) => (
@@ -223,7 +227,7 @@ export function LandingPage() {
           </div>
 
           {/* Ba lớp biểu diễn: xếp chồng như các lớp của một scene */}
-          <div className="lp-layers-block lp-section-sub">
+          <div className="lp-layers-block lp-section-sub" data-reveal>
             <div>
               <h3 className="text-2xl font-semibold tracking-tight text-ink">{ui.oneObjectThreeLayers}</h3>
               <p className="lp-body mt-3 max-w-md">{SOLUTION.layersNote}</p>
@@ -252,7 +256,7 @@ export function LandingPage() {
         <div className="lp-wrap">
           <SectionHead index={WORKFLOW.index} lead={WORKFLOW.titleLead} emphasis={WORKFLOW.titleEmphasis} body={WORKFLOW.lead} />
 
-          <ol className="lp-timeline lp-section-sub">
+          <ol className="lp-timeline lp-section-sub" data-reveal>
             {WORKFLOW.steps.map((s) => (
               <li key={s.code} className="lp-step" data-status={s.status}>
                 <span className="lp-step-dot" aria-hidden>{s.code}</span>
@@ -285,7 +289,7 @@ export function LandingPage() {
         <div className="lp-wrap">
           <SectionHead index={PROGRESS.index} lead={PROGRESS.titleLead} emphasis={PROGRESS.titleEmphasis} body={PROGRESS.lead} />
 
-          <div className="lp-cells lp-section-sub lg:grid-cols-3">
+          <div className="lp-cells lp-section-sub lg:grid-cols-3" data-reveal>
             {PROGRESS.tiers.map((t) => (
               <div key={t.title} className="lp-cell">
                 <div>
@@ -301,7 +305,7 @@ export function LandingPage() {
             ))}
           </div>
 
-          <div className="lp-section-sub">
+          <div className="lp-section-sub" data-reveal>
             <h3 className="lp-h3">{PROGRESS.metricsTitle}</h3>
             <dl className="lp-metrics mt-5">
               {PROGRESS.metrics.map((m) => (
@@ -328,7 +332,7 @@ export function LandingPage() {
         <div className="lp-wrap">
           <SectionHead index={ROADMAP.index} lead={ROADMAP.titleLead} emphasis={ROADMAP.titleEmphasis} body={ROADMAP.lead} />
 
-          <div className="lp-section-sub grid gap-4 lg:grid-cols-[15rem_minmax(0,1fr)]">
+          <div className="lp-section-sub grid gap-4 lg:grid-cols-[15rem_minmax(0,1fr)]" data-reveal>
             <div className="lp-card lp-card-sunken flex flex-col justify-center">
               <p className="text-lg font-semibold tracking-tight text-ink">{ROADMAP.core}</p>
               <ul className="mt-4 space-y-2">
@@ -340,8 +344,8 @@ export function LandingPage() {
               </ul>
             </div>
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {ROADMAP.tracks.map((t) => (
-                <div key={t.domain} className={TRACK_CARD[t.state]}>
+              {ROADMAP.tracks.map((t, i) => (
+                <div key={t.domain} className={TRACK_CARD[t.state]} data-reveal style={{ "--lp-delay": `${100 + i * 100}ms` } as React.CSSProperties}>
                   <p className="lp-label">{t.tag}</p>
                   <p className="mt-3 text-xl font-semibold tracking-tight text-ink">{t.domain}</p>
                   <p className="mt-1 text-[13px] text-ink-subtle">{t.simulator}</p>
@@ -356,20 +360,21 @@ export function LandingPage() {
       {/* ── BẮT ĐẦU ── */}
       <section id="start" className="lp-section lp-start">
         <div className="lp-wrap grid gap-12 lg:grid-cols-2 lg:items-center">
-          <div>
+          <div data-reveal>
             <h2 className="lp-h2 text-on-dark">
               {START.titleLead} {START.titleEmphasis}
             </h2>
             <div className="mt-8 flex flex-wrap gap-3">
               <a href={TRY_DEMO_HREF} className="lp-btn lp-btn-on-dark">
                 {ui.tryDemo}
+                <ArrowRight aria-hidden />
               </a>
               <a href={LOGIN_HREF} className="lp-btn lp-btn-ghost-dark">
                 {ui.loginStudio}
               </a>
             </div>
           </div>
-          <ol className="lp-start-steps">
+          <ol className="lp-start-steps" data-reveal style={{ "--lp-delay": "120ms" } as React.CSSProperties}>
             {START.steps.map((s, i) => (
               <li key={s.title}>
                 <span className="lp-start-num">{String(i + 1).padStart(2, "0")}</span>
@@ -405,7 +410,7 @@ export function LandingPage() {
 
 function SectionHead({ index, lead, emphasis, body }: { index: string; lead: string; emphasis: string; body: string }) {
   return (
-    <div className="lp-section-head">
+    <div className="lp-section-head" data-reveal>
       <div>
         <p className="lp-index">{index}</p>
         <h2 className="lp-h2">
