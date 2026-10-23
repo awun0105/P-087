@@ -73,7 +73,7 @@ export function CompareScene({
           <Dots />
         </svg>
         <figcaption className="lp-compare-caption">
-          <span className="text-[13px] text-ink-muted">{have.label}, {have.like}</span>
+          <span className="lp-label">{have.label}, {have.like}</span>
           <span className="mt-1 block text-[15px] leading-snug text-ink">{have.body}</span>
         </figcaption>
       </figure>
@@ -100,7 +100,7 @@ export function CompareScene({
           <text x="62" y="172" className="lp-svg-label" fill="var(--studio-on-dark)">1 m</text>
         </svg>
         <figcaption className="lp-compare-caption">
-          <span className="text-[13px] text-ink-muted">{need.label}, {need.like}</span>
+          <span className="lp-label">{need.label}, {need.like}</span>
           <span className="mt-1 block text-[15px] leading-snug text-ink">{need.body}</span>
         </figcaption>
       </figure>
