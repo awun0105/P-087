@@ -30,7 +30,17 @@ export function LandingMotion() {
       },
       { rootMargin: "0px 0px -10% 0px", threshold: 0.1 },
     );
-    document.querySelectorAll<HTMLElement>(".landing-page [data-reveal]").forEach((el) => revealIo.observe(el));
+    const revealEls = Array.from(document.querySelectorAll<HTMLElement>(".landing-page [data-reveal]"));
+    revealEls.forEach((el) => revealIo.observe(el));
+    // Dự phòng: mục nào đã nằm trong khung nhìn thì hiện ngay, không chờ observer.
+    const revealInView = () => {
+      const limit = window.innerHeight * 0.92;
+      for (const el of revealEls) {
+        if (el.classList.contains("is-in")) continue;
+        const r = el.getBoundingClientRect();
+        if (r.top < limit && r.bottom > 0) el.classList.add("is-in");
+      }
+    };
 
     // 2. Menu theo mục đang xem
     const links = Array.from(document.querySelectorAll<HTMLAnchorElement>('.lp-nav a[href^="#"]'));
@@ -70,6 +80,7 @@ export function LandingMotion() {
       raf = requestAnimationFrame(() => {
         raf = 0;
         header?.classList.toggle("is-scrolled", window.scrollY > 8);
+        revealInView();
         if (timeline) {
           const r = timeline.getBoundingClientRect();
           const anchor = window.innerHeight * 0.6;
