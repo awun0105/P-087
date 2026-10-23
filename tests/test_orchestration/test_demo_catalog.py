@@ -165,6 +165,16 @@ def test_register_bundle_without_store_only_writes_the_row(tmp_path: Path, monke
     ]
 
 
+def test_register_bundle_reuploads_an_object_that_lacks_checksum_metadata(tmp_path: Path, monkeypatch) -> None:
+    settings = _settings(tmp_path)
+    store = _with_store(monkeypatch)
+    root = _bundle(settings.product_demo_dir, "kho")
+    store.objects["demo/library/kho/files/scene.sog"] = (b"sog", None)
+    store.puts = 0
+    register_bundle(settings, DemoCatalog(RuntimeDatabase(settings.database_url)), root, actor=None)
+    assert store.puts == 2 and store.objects["demo/library/kho/files/scene.sog"][1] is not None
+
+
 def test_register_bundle_refuses_an_object_with_other_bytes(tmp_path: Path, monkeypatch) -> None:
     settings = _settings(tmp_path)
     store = _with_store(monkeypatch)

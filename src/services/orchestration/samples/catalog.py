@@ -171,10 +171,11 @@ def upload_bundle(store: ObjectStore, prefix: str, sample_id: str, root: Path, f
     def put(file: SampleFile) -> int:
         key = object_key(prefix, sample_id, file.path)
         existing = store.head(key)
-        if existing is not None:
+        if existing is not None and existing.checksum is not None:
             if existing.checksum != file.checksum:
                 raise ValueError("Immutable demo object already exists with different bytes")
             return 0
+        # Chưa có, hoặc object cũ không ghi checksum trong metadata: đẩy lại cùng nội dung để lần sau so được.
         store.put_file(key, root / file.path, file.checksum)
         return 1
 
