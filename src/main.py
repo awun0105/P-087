@@ -124,7 +124,7 @@ async def ready() -> JSONResponse:
         from src.services.orchestration.jobs.worker_runtimes import has_live_runtime
         from src.services.orchestration.projects import get_project_registry
         from src.services.orchestration.samples.bundle import DemoLibrary
-        from src.services.orchestration.samples.distributed import unpublished
+        from src.services.orchestration.samples.catalog import DemoCatalog
         from src.services.orchestration.samples.workspace import load_workspace
 
         current = get_settings()
@@ -132,10 +132,10 @@ async def ready() -> JSONResponse:
         assert registry.persistence is not None
         registry.persistence.database.ping()
         samples = []
-        for sample_id, bundle in DemoLibrary(current.product_demo_dir).bundles().items():
-            if not unpublished(current, sample_id):
-                load_workspace(bundle)
-                samples.append(sample_id)
+        library = DemoLibrary(current.product_demo_dir, catalog=DemoCatalog(registry.persistence.database))
+        for sample_id, bundle in library.bundles().items():
+            load_workspace(bundle)
+            samples.append(sample_id)
         profile = registry.job_profile()
         available = profile is not None and has_live_runtime(
             registry.persistence.database, profile.runtime_manifest_checksum

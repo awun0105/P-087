@@ -19,7 +19,8 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict
 from src.config import Settings
 from src.services.orchestration.artifacts import ObjectStore, sha256_file
 from src.services.orchestration.jobs.database import RuntimeDatabase
-from src.services.orchestration.samples.bundle import DemoUnavailableError
+from src.services.orchestration.samples.bundle import DemoLibrary, DemoUnavailableError
+from src.services.orchestration.samples.models import DemoManifest
 from src.services.orchestration.storage import artifact_remote
 
 logger = logging.getLogger(__name__)
@@ -181,6 +182,29 @@ def upload_bundle(store: ObjectStore, prefix: str, sample_id: str, root: Path, f
         return sum(executor.map(put, files))
 
 
+def record_from_disk(
+    root: Path, sample_id: str, *, state: SampleState, actor: str | None, job_id: str | None = None
+) -> SampleRecord:
+    """Dòng catalog dựng từ bundle trên đĩa (chưa ghi, chưa đẩy lên kho). Mã mẫu là tên thư mục; manifest phải hợp lệ."""
+    try:
+        manifest = DemoManifest.model_validate_json((root / "manifest.json").read_bytes())
+    except ValueError as error:
+        raise ValueError(f"Demo bundle manifest is invalid: {error}") from error
+    if job_id is None:
+        job_id = manifest.provenance.get("job_id")
+    now = datetime.now(UTC)
+    return SampleRecord(
+        sample_id=sample_id,
+        state=state,
+        job_id=job_id,
+        manifest_checksum=sha256_file(root / "manifest.json"),
+        files=inventory(root),
+        published_by=actor,
+        published_at=now,
+        updated_at=now,
+    )
+
+
 def register_bundle(
     settings: Settings,
     catalog: DemoCatalog,
@@ -191,30 +215,17 @@ def register_bundle(
     job_id: str | None = None,
 ) -> SampleRecord:
     """Kiểm kê bundle trên đĩa, đẩy lên kho file (nếu có), rồi ghi dòng catalog. Chỉ ghi dòng khi kho đã có đủ file."""
-    manifest = json.loads((root / "manifest.json").read_bytes())
-    sample_id = root.name
-    if manifest.get("demo_id") != sample_id:
-        raise ValueError("Demo bundle directory name differs from its demo_id")
-    if job_id is None:
-        provenance = manifest.get("provenance")
-        job_id = provenance.get("job_id") if isinstance(provenance, dict) else None
-    files = inventory(root)
+    record = record_from_disk(root, root.name, state=state, actor=actor, job_id=job_id)
     remote = artifact_remote(settings)
     if remote is not None:
-        upload_bundle(remote.store, settings.product_demo_object_prefix, sample_id, root, files)
-    now = datetime.now(UTC)
-    record = SampleRecord(
-        sample_id=sample_id,
-        state=state,
-        job_id=job_id,
-        manifest_checksum=sha256_file(root / "manifest.json"),
-        files=files,
-        published_by=actor,
-        published_at=now,
-        updated_at=now,
-    )
+        upload_bundle(remote.store, settings.product_demo_object_prefix, record.sample_id, root, record.files)
     catalog.save(record)
     return record
+
+
+def library(settings: Settings) -> DemoLibrary:
+    """Thư viện mẫu của deployment: thư mục đệm trên đĩa gắn với catalog trong DB của `settings`."""
+    return DemoLibrary(settings.product_demo_dir, catalog=DemoCatalog(RuntimeDatabase(settings.database_url)))
 
 
 class SyncReport(BaseModel):

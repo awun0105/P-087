@@ -24,22 +24,13 @@ class SampleListResponse(BaseModel):
 @router.get("/samples", response_model=SampleListResponse)
 def list_samples() -> SampleListResponse:
     """Mọi video mẫu hợp lệ trong thư viện; rỗng khi deployment chưa có bundle nào."""
-    current = deps.settings()
-    return SampleListResponse(
-        samples=[
-            sample
-            for sample in deps.sample_library().summaries()
-            if not distributed.unpublished(current, sample.sample_id)
-        ]
-    )
+    return SampleListResponse(samples=deps.sample_library().summaries())
 
 
 @router.get("/samples/{sample_id}", response_model=DemoManifest)
 def get_sample(sample_id: str) -> DemoManifest:
     """Manifest của một video mẫu: stage, thời lượng thật, thông số, file."""
     try:
-        if distributed.unpublished(deps.settings(), sample_id):
-            raise DemoUnavailableError("Mẫu đã được bỏ khỏi thư viện demo")
         return deps.sample_library().bundle(sample_id).manifest()
     except DemoUnavailableError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
@@ -49,8 +40,6 @@ def get_sample(sample_id: str) -> DemoManifest:
 def get_sample_file(sample_id: str, name: str) -> Response:
     """Một file của video mẫu; chỉ tên trong allow-list và đúng checksum mới được trả."""
     try:
-        if distributed.unpublished(deps.settings(), sample_id):
-            raise DemoUnavailableError("Mẫu đã được bỏ khỏi thư viện demo")
         entry, path = deps.sample_library().bundle(sample_id).file(name)
     except DemoUnavailableError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
@@ -74,9 +63,9 @@ def remove_sample(sample_id: str, user: UserRecord | None = Depends(auth.require
     if user is None:
         raise HTTPException(status_code=401, detail="Đăng nhập tài khoản Reviewer để bỏ mẫu khỏi demo")
     try:
-        if distributed.enabled(deps.settings()):
-            distributed.unpublish(deps.settings(), sample_id)
         deps.sample_library().unpublish(sample_id)
+        if distributed.enabled(deps.settings()):
+            distributed.close_sessions_of(deps.settings(), sample_id)
     except DemoUnavailableError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except OSError as error:

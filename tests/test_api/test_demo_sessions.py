@@ -12,6 +12,7 @@ from src.services.orchestration.artifacts import sha256_file
 from src.services.orchestration.jobs.database import RuntimeDatabase
 from src.services.orchestration.projects.registry import ProjectRegistry
 from src.services.orchestration.samples import DemoFile, DemoManifest, DemoSource
+from src.services.orchestration.samples.catalog import DemoCatalog, import_library
 from src.services.orchestration.samples.sessions import get_session, hold_session, purge_sessions, session_path
 
 JOB = "job-fixture-001"
@@ -69,6 +70,7 @@ def source(tmp_path, monkeypatch):
     from src.services.orchestration.samples.workspace import freeze_workspace
 
     freeze_workspace(registry, DemoBundle(sample))
+    assert import_library(settings, DemoCatalog(RuntimeDatabase(settings.database_url))) == ["sample"]
     monkeypatch.setattr(product, "get_project_registry", lambda: registry)
     monkeypatch.setattr(studio, "get_project_registry", lambda: registry)
     monkeypatch.setattr(product, "get_settings", lambda: settings)
@@ -149,7 +151,7 @@ async def test_unpublished_sample_revokes_its_session(source):
         opened = await client.post("/api/v1/samples/sample/sessions")
         assert opened.status_code == 201, opened.text
         token = opened.json()["session_id"]
-        (settings.product_demo_dir / "sample/.unpublished").touch()
+        DemoCatalog(RuntimeDatabase(settings.database_url)).set_state("sample", "unpublished")
         result = await client.get(f"/api/v1/demo-sessions/{token}/api/v1/jobs/{JOB}/scene")
         assert result.status_code == 410
         await client.delete(f"/api/v1/demo-sessions/{token}")

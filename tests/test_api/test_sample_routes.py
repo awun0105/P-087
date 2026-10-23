@@ -63,6 +63,14 @@ def _settings(demo_dir: Path, tmp_path: Path) -> Settings:
     return Settings(product_demo_dir=demo_dir, database_url=f"sqlite:///{tmp_path / 'runtime.db'}")
 
 
+def _import(settings: Settings) -> list[str]:
+    """Việc API làm lúc khởi động: nhập bundle trên đĩa vào catalog (ASGITransport không chạy lifespan)."""
+    from src.services.orchestration.jobs.database import RuntimeDatabase
+    from src.services.orchestration.samples.catalog import DemoCatalog, import_library
+
+    return import_library(settings, DemoCatalog(RuntimeDatabase(settings.database_url)))
+
+
 @pytest.fixture
 def library(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     from src.api.studio import deps
@@ -71,7 +79,9 @@ def library(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     _write_bundle(tmp_path / "loop", "b", [10.0, None])
     (tmp_path / "broken").mkdir()
     (tmp_path / "broken" / "manifest.json").write_text("{}")
-    monkeypatch.setattr(deps, "get_settings", lambda: _settings(tmp_path, tmp_path))
+    settings = _settings(tmp_path, tmp_path)
+    assert _import(settings) == ["aisle", "loop"]  # "broken" không có demo_id hợp lệ nên không vào catalog
+    monkeypatch.setattr(deps, "get_settings", lambda: settings)
     return tmp_path
 
 

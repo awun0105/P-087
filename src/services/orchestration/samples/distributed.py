@@ -38,13 +38,6 @@ def _validate(session_id: str) -> str:
     return session_id
 
 
-def unpublished(settings: Settings, sample_id: str) -> bool:
-    if not enabled(settings):
-        return False
-    with RuntimeDatabase(settings.database_url).transaction() as tx:
-        return tx.execute("SELECT 1 FROM r2s_demo_unpublished WHERE sample_id=?", (sample_id,)).fetchone() is not None
-
-
 def reserve(settings: Settings, sample_id: str) -> str:
     """Reserve capacity and create the namespace atomically before copying any files."""
     from src.services.orchestration.samples.bundle import DemoUnavailableError
@@ -55,7 +48,7 @@ def reserve(settings: Settings, sample_id: str) -> str:
     now = datetime.now(UTC)
     with RuntimeDatabase(settings.database_url).transaction(write=True) as tx:
         tx.execute("SELECT pg_advisory_xact_lock(hashtextextended('real2sim.demo.capacity',0))")
-        if tx.execute("SELECT 1 FROM r2s_demo_unpublished WHERE sample_id=?", (sample_id,)).fetchone():
+        if not _published(tx, sample_id):
             raise DemoUnavailableError("Mẫu đã được bỏ khỏi thư viện demo")
         count = tx.execute("SELECT COUNT(*) FROM r2s_demo_sessions WHERE state IN ('creating','open')").fetchone()
         if count is not None and count[0] >= settings.product_demo_max_sessions:
@@ -79,7 +72,7 @@ def reserve(settings: Settings, sample_id: str) -> str:
 def publish(settings: Settings, session: DemoSession) -> None:
     with RuntimeDatabase(settings.database_url).transaction(write=True) as tx:
         tx.execute("SELECT pg_advisory_xact_lock(hashtextextended(?,0))", (f"r2s.demo.sample:{session.sample_id}",))
-        if tx.execute("SELECT 1 FROM r2s_demo_unpublished WHERE sample_id=?", (session.sample_id,)).fetchone():
+        if not _published(tx, session.sample_id):
             raise ValueError("Sample was unpublished during session initialization")
         result = tx.execute(
             "UPDATE r2s_demo_sessions SET state='open',last_seen_at=?,expires_at=?,payload=? "
@@ -132,25 +125,24 @@ def close(settings: Settings, session_id: str) -> None:
         tx.execute("UPDATE r2s_demo_sessions SET state='closed' WHERE session_id=?", (session_id,))
 
 
-def republish(settings: Settings, sample_id: str) -> None:
-    with RuntimeDatabase(settings.database_url).transaction(write=True) as tx:
-        tx.execute("SELECT pg_advisory_xact_lock(hashtextextended(?,0))", (f"r2s.demo.sample:{sample_id}",))
-        tx.execute("DELETE FROM r2s_demo_unpublished WHERE sample_id=?", (sample_id,))
+def _published(tx: RuntimeTransaction, sample_id: str) -> bool:
+    row = tx.execute("SELECT 1 FROM r2s_demo_samples WHERE sample_id=? AND state='published'", (sample_id,)).fetchone()
+    return row is not None
 
 
-def unpublish(settings: Settings, sample_id: str) -> None:
+def close_sessions_of(settings: Settings, sample_id: str) -> int:
+    """Đóng mọi phiên đang mở của một mẫu vừa bị bỏ khỏi thư viện; trả số phiên đã đóng."""
+    from src.services.orchestration.samples.sessions import DemoSession
+
+    closed = 0
     with RuntimeDatabase(settings.database_url).transaction(write=True) as tx:
         tx.execute("SELECT pg_advisory_xact_lock(hashtextextended(?,0))", (f"r2s.demo.sample:{sample_id}",))
-        tx.execute(
-            "INSERT INTO r2s_demo_unpublished(sample_id,at) VALUES (?,?) ON CONFLICT(sample_id) DO NOTHING",
-            (sample_id, datetime.now(UTC).isoformat()),
-        )
         rows = tx.execute("SELECT session_id,payload FROM r2s_demo_sessions WHERE state='open'").fetchall()
-        from src.services.orchestration.samples.sessions import DemoSession
-
         for session_id, payload in rows:
             if DemoSession.model_validate_json(payload).sample_id == sample_id:
                 tx.execute("UPDATE r2s_demo_sessions SET state='closed' WHERE session_id=?", (session_id,))
+                closed += 1
+    return closed
 
 
 @contextmanager

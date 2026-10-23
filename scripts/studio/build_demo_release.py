@@ -70,7 +70,7 @@ def main() -> int:
     if reused and args.sample and set(args.sample) != set(reused["samples"]):
         raise ValueError("Reused archive must contain exactly the requested samples")
     selected = (reused["samples"] if reused else args.sample) or [
-        p.name for p in library.iterdir() if (p / "manifest.json").is_file() and not (p / ".unpublished").exists()
+        p.name for p in library.iterdir() if (p / "manifest.json").is_file()
     ]
     same_disk = args.demo_archive and args.demo_archive.stat().st_dev == output.stat().st_dev
     input_bytes = (

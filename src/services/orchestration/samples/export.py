@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
+from src.config import Settings
 from src.models.contracts.manifests import InputManifest, JobManifest, JobStatus, StageId, StageStatus
 from src.services.orchestration.artifacts import ArtifactStoreError, sha256_file
 from src.services.orchestration.jobs.dispatch import prepared_frame_reference
@@ -25,7 +26,8 @@ from src.services.orchestration.jobs.models import JobAttemptRecord
 from src.services.orchestration.jobs.progress import MVP_PIPELINE, sanitized_frame_stage
 from src.services.orchestration.jobs.stage_results import recorded_results, result_facts
 from src.services.orchestration.jobs.stage_views import preview_display_rotation
-from src.services.orchestration.samples.bundle import UNPUBLISHED_MARKER, DemoLibrary, DemoUnavailableError
+from src.services.orchestration.samples.bundle import DemoUnavailableError
+from src.services.orchestration.samples.catalog import DemoCatalog, _healthy, register_bundle
 from src.services.orchestration.samples.models import (
     DemoFact,
     DemoFile,
@@ -480,16 +482,10 @@ def slugify(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", ascii_text.lower()).strip("-")
 
 
-def published_sample_id(library_root: Path, job_id: str) -> str | None:
-    """ID mẫu trong thư viện được xuất từ `job_id` (theo `provenance.job_id`), nếu có."""
-    library = DemoLibrary(library_root)
-    for sample_id, bundle in library.bundles().items():
-        try:
-            if bundle.manifest().provenance.get("job_id") == job_id:
-                return sample_id
-        except DemoUnavailableError:
-            continue
-    return None
+def published_sample_id(catalog: DemoCatalog, job_id: str) -> str | None:
+    """ID mẫu đang công khai được xuất từ `job_id`, nếu có."""
+    record = catalog.by_job(job_id)
+    return record.sample_id if record is not None else None
 
 
 def _frozen_scene_revision(bundle_root: Path) -> str | None:
@@ -500,75 +496,122 @@ def _frozen_scene_revision(bundle_root: Path) -> str | None:
 
 
 def restore_unpublished(
-    registry: "ProjectRegistry", library_root: Path, job_id: str, *, title: str | None, description: str | None
+    registry: "ProjectRegistry",
+    catalog: DemoCatalog,
+    library_root: Path,
+    job_id: str,
+    *,
+    title: str | None,
+    description: str | None,
 ) -> DemoManifest | None:
-    """Mẫu của job đã bị bỏ mà scene (và tên, mô tả nếu có truyền) vẫn y như lúc xuất: gỡ dấu bỏ, không chép lại.
+    """Mẫu của job đã bị bỏ mà scene (và tên, mô tả nếu có truyền) vẫn y như lúc xuất: đổi lại trạng thái, không chép lại.
 
-    Chỉ dùng khi xuất bản mới thất bại, để thêm lại vẫn được dù bản chép mới hỏng.
+    Chỉ dùng khi xuất bản mới thất bại, để thêm lại vẫn được dù bản chép mới hỏng. Mọi file ghi trong catalog phải còn
+    nguyên trên đĩa.
     """
     try:
         current = registry.scene.current(job_id).scene.scene_revision
     except Exception:  # noqa: BLE001 - chưa có scene thì không có gì để so
         return None
     candidates = []
-    for child in library_root.iterdir():
-        marker = child / UNPUBLISHED_MARKER
-        if not (child.is_dir() and marker.is_file()):
+    for record in catalog.records(state="unpublished"):
+        if record.job_id != job_id:
             continue
+        child = library_root / record.sample_id
         try:
             manifest = DemoManifest.model_validate_json((child / "manifest.json").read_bytes())
         except (OSError, ValueError):
             continue
         if (
-            manifest.demo_id == child.name
-            and manifest.provenance.get("job_id") == job_id
+            manifest.demo_id == record.sample_id
             and title in (None, manifest.title)
             and description in (None, manifest.description)
             and _frozen_scene_revision(child) == current
+            and all(_healthy(child / file.path, file) for file in record.files)
         ):
-            candidates.append((marker.stat().st_mtime, child, manifest))
+            candidates.append((record.updated_at, record.sample_id, manifest))
     if not candidates:
         return None
-    _, child, manifest = max(candidates, key=lambda item: item[0])
-    (child / UNPUBLISHED_MARKER).unlink()
+    _, sample_id, manifest = max(candidates, key=lambda item: item[0])
+    catalog.set_state(sample_id, "published")
     return manifest
 
 
 def publish_job_bundle(
     registry: "ProjectRegistry",
     job_id: str,
-    library_root: Path,
+    settings: Settings,
+    catalog: DemoCatalog,
     *,
     title: str,
     description: str,
     source: DemoSource,
     frames: int = 12,
     recording_dir: Path | None = None,
+    actor: str | None = None,
 ) -> DemoManifest:
-    """Xuất job vào thư viện mẫu: dựng trong thư mục tạm rồi đổi tên một lần, không bao giờ ghi đè.
+    """Xuất job vào thư viện mẫu: dựng trong thư mục tạm, đổi tên một lần, đẩy lên kho file rồi ghi catalog.
 
     Thư mục tạm bắt đầu bằng '.' nên `DemoLibrary` bỏ qua; lỗi giữa chừng thì thư mục tạm bị xoá.
     """
-    lock = acquire_publish_lock(library_root, job_id)
+    library_root = settings.product_demo_dir
+    lock = acquire_publish_lock(library_root, catalog, job_id)
     try:
-        return _publish_locked(
+        return _publish_and_register(
             registry,
             job_id,
-            library_root,
+            settings,
+            catalog,
             title=title,
             description=description,
             source=source,
             frames=frames,
             recording_dir=recording_dir,
+            actor=actor,
         )
     finally:
         shutil.rmtree(lock, ignore_errors=True)
 
 
-def acquire_publish_lock(library_root: Path, job_id: str) -> Path:
+def _publish_and_register(
+    registry: "ProjectRegistry",
+    job_id: str,
+    settings: Settings,
+    catalog: DemoCatalog,
+    *,
+    title: str,
+    description: str,
+    source: DemoSource,
+    frames: int,
+    recording_dir: Path | None,
+    actor: str | None,
+) -> DemoManifest:
+    library_root = settings.product_demo_dir
+    manifest = _publish_locked(
+        registry,
+        job_id,
+        library_root,
+        catalog=catalog,
+        title=title,
+        description=description,
+        source=source,
+        frames=frames,
+        recording_dir=recording_dir,
+    )
+    target = library_root / manifest.demo_id
+    try:
+        register_bundle(settings, catalog, target, actor=actor, job_id=job_id)
+    except Exception as error:
+        logger.exception("demo sample registration failed for %s", manifest.demo_id)
+        shutil.rmtree(target, ignore_errors=True)
+        raise SampleExportError("Không đưa được mẫu lên kho file; thử lại sau") from error
+    return manifest
+
+
+def acquire_publish_lock(library_root: Path, catalog: DemoCatalog, job_id: str) -> Path:
     """Giữ khoá xuất của job; khoá còn thì `publication_status` báo đang chuẩn bị mẫu."""
     library_root.mkdir(parents=True, exist_ok=True)
-    existing = published_sample_id(library_root, job_id)
+    existing = published_sample_id(catalog, job_id)
     if existing is not None:
         raise AlreadyPublishedError(existing)
     lock = _acquire_publish_lock(library_root, job_id)
@@ -581,19 +624,21 @@ def _publish_locked(
     job_id: str,
     library_root: Path,
     *,
+    catalog: DemoCatalog,
     title: str,
     description: str,
     source: DemoSource,
     frames: int,
     recording_dir: Path | None,
 ) -> DemoManifest:
-    existing = published_sample_id(library_root, job_id)
+    existing = published_sample_id(catalog, job_id)
     if existing is not None:
         raise AlreadyPublishedError(existing)
     slug = slugify(title) or "scene"
     demo_id = f"{slug[:60]}-{job_id.removeprefix('job-')[:8]}"
     target = library_root / demo_id
-    if (target / UNPUBLISHED_MARKER).exists():
+    if catalog.get(demo_id) is not None or target.exists():
+        # ID đã dùng (mẫu cũ đã bỏ vẫn giữ thư mục và dòng catalog): cấp ID mới, không ghi đè.
         demo_id = f"{demo_id}-{uuid4().hex[:8]}"
         target = library_root / demo_id
     if target.exists():
@@ -641,31 +686,36 @@ def publication_status(library_root: Path, job_id: str) -> tuple[bool, str | Non
 def publish_in_background(
     registry: "ProjectRegistry",
     job_id: str,
-    library_root: Path,
+    settings: Settings,
+    catalog: DemoCatalog,
     lock: Path,
     *,
     title: str,
     description: str,
     source: DemoSource,
     recording_dir: Path | None = None,
+    actor: str | None = None,
     on_published: Callable[[DemoManifest], None] | None = None,
 ) -> None:
     """Chạy trong luồng nền với khoá đã giữ: xuất bản mới từ job; lỗi thì dùng lại mẫu cũ chưa đổi, không thì ghi lỗi."""
+    library_root = settings.product_demo_dir
     try:
         try:
-            manifest = _publish_locked(
+            manifest = _publish_and_register(
                 registry,
                 job_id,
-                library_root,
+                settings,
+                catalog,
                 title=title,
                 description=description,
                 source=source,
                 frames=12,
                 recording_dir=recording_dir,
+                actor=actor,
             )
         except Exception as error:
             logger.exception("demo publish failed for %s", job_id)
-            restored = restore_unpublished(registry, library_root, job_id, title=None, description=None)
+            restored = restore_unpublished(registry, catalog, library_root, job_id, title=None, description=None)
             if restored is None:
                 detail = str(error) if isinstance(error, SampleExportError) else "Không ghi được vào thư viện mẫu"
                 _failure_path(library_root, job_id).write_text(json.dumps({"detail": detail}), encoding="utf-8")

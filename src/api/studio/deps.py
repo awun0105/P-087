@@ -26,6 +26,7 @@ from src.services.orchestration.processing.models import ParamValue
 from src.services.orchestration.processing.observed import load_usages, observed_for_config
 from src.services.orchestration.projects import ProjectRegistry, get_project_registry
 from src.services.orchestration.samples import DemoLibrary
+from src.services.orchestration.samples.catalog import DemoCatalog
 from src.services.orchestration.samples.session_context import demo_runtime
 from src.services.orchestration.storage import runtime_resolver
 from src.services.orchestration.uploads import DirectUploadService, VideoUploadService
@@ -90,9 +91,14 @@ def direct_uploads() -> DirectUploadService:
     return DirectUploadService(RuntimeDatabase(current.database_url), resolver, current.product_upload_max_bytes)
 
 
+def sample_catalog() -> DemoCatalog:
+    """Catalog mẫu demo trong DB của deployment (nguồn sự thật về mẫu nào đang công khai)."""
+    return DemoCatalog(RuntimeDatabase(settings().database_url))
+
+
 def sample_library() -> DemoLibrary:
-    """Thư viện video mẫu tại PRODUCT_DEMO_DIR."""
-    return DemoLibrary(settings().product_demo_dir)
+    """Thư viện video mẫu tại PRODUCT_DEMO_DIR, chỉ liệt kê mẫu catalog ghi là đang công khai."""
+    return DemoLibrary(settings().product_demo_dir, catalog=sample_catalog())
 
 
 def presets() -> tuple[ProcessingPresets, str]:

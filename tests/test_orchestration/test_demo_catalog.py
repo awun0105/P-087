@@ -12,6 +12,7 @@ import pytest
 from src.config import Settings
 from src.services.orchestration.artifacts import sha256_file
 from src.services.orchestration.jobs.database import RuntimeDatabase
+from src.services.orchestration.samples import DemoFile, DemoManifest, DemoSource
 from src.services.orchestration.samples import catalog as catalog_module
 from src.services.orchestration.samples.bundle import DemoUnavailableError
 from src.services.orchestration.samples.catalog import (
@@ -111,8 +112,23 @@ def _settings(tmp_path: Path, **overrides) -> Settings:
 def _bundle(library: Path, sample_id: str, *, job_id: str = "job-1", payload: bytes = b"sog") -> Path:
     root = library / sample_id
     (root / "files").mkdir(parents=True)
-    (root / "manifest.json").write_text(json.dumps({"demo_id": sample_id, "provenance": {"job_id": job_id}}))
     (root / "files" / "scene.sog").write_bytes(payload)
+    manifest = DemoManifest(
+        demo_id=sample_id,
+        title=f"Mẫu {sample_id}",
+        origin="pipeline_job",
+        source=DemoSource(dataset="Test", sequence="x"),
+        produced_at=datetime(2026, 10, 1, tzinfo=UTC),
+        provenance={"job_id": job_id},
+        stages=[],
+        splat=DemoFile(
+            name="scene.sog",
+            media_type="application/octet-stream",
+            size_bytes=len(payload),
+            checksum="sha256:" + hashlib.sha256(payload).hexdigest(),
+        ),
+    )
+    (root / "manifest.json").write_text(manifest.model_dump_json())
     return root
 
 

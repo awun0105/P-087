@@ -1,16 +1,22 @@
-"""Đọc demo bundle đã export; chỉ phục vụ file nằm trong allow-list và đúng checksum."""
+"""Đọc demo bundle đã export; chỉ phục vụ file nằm trong allow-list và đúng checksum.
+
+Trạng thái xuất bản (đang công khai hay đã bỏ) nằm ở catalog trong DB (`samples/catalog.py`), không ở file đánh dấu.
+"""
 
 import logging
 import re
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict
 
 from src.services.orchestration.artifacts import sha256_file
 from src.services.orchestration.samples.models import DemoFile, DemoManifest, DemoSource
 
+if TYPE_CHECKING:
+    from src.services.orchestration.samples.catalog import DemoCatalog
+
 logger = logging.getLogger(__name__)
-UNPUBLISHED_MARKER = ".unpublished"
 
 
 class DemoUnavailableError(LookupError):
@@ -25,8 +31,6 @@ class DemoBundle:
 
     def manifest(self) -> DemoManifest:
         """Đọc và validate manifest; thiếu/hỏng → DemoUnavailableError."""
-        if (self.root / UNPUBLISHED_MARKER).exists():
-            raise DemoUnavailableError("Mẫu đã được bỏ khỏi thư viện demo")
         path = self.root / "manifest.json"
         if not path.is_file():
             raise DemoUnavailableError("Chưa có demo bundle trên deployment này")
@@ -74,28 +78,38 @@ class DemoLibrary:
 
     `root` có `manifest.json` → một mẫu (tương thích bundle đơn cũ, id = `demo_id`);
     ngược lại mỗi thư mục con có `manifest.json` là một mẫu, id = tên thư mục.
+
+    Có `catalog` thì chỉ mẫu ở trạng thái `published` trong catalog mới được liệt kê (bundle đơn cũ: trừ khi catalog
+    ghi đã bỏ). Không có catalog (script, test đọc thẳng thư mục) thì liệt kê theo đĩa.
     """
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, catalog: "DemoCatalog | None" = None) -> None:
         self.root = root.expanduser().resolve()
+        self.catalog = catalog
 
     def bundles(self) -> dict[str, DemoBundle]:
         """Các bundle theo id; thư mục tên không an toàn bị bỏ qua."""
         if (self.root / "manifest.json").is_file():
             single = DemoBundle(self.root)
             try:
-                return {single.manifest().demo_id: single}
+                demo_id = single.manifest().demo_id
             except DemoUnavailableError:
                 return {}
+            if self.catalog is not None:
+                record = self.catalog.get(demo_id)
+                if record is not None and record.state != "published":
+                    return {}
+            return {demo_id: single}
         if not self.root.is_dir():
             return {}
+        published = self.catalog.published_ids() if self.catalog is not None else None
         return {
             child.name: DemoBundle(child)
             for child in sorted(self.root.iterdir())
             if child.is_dir()
             and _SAMPLE_ID.fullmatch(child.name)
             and (child / "manifest.json").is_file()
-            and not (child / UNPUBLISHED_MARKER).exists()
+            and (published is None or child.name in published)
         }
 
     def bundle(self, sample_id: str) -> DemoBundle:
@@ -106,12 +120,20 @@ class DemoLibrary:
         return found
 
     def unpublish(self, sample_id: str) -> None:
-        """Gỡ mẫu khỏi thư viện công khai; giữ manifest và mọi artifact trên đĩa."""
+        """Gỡ mẫu khỏi thư viện công khai (đổi trạng thái trong catalog); giữ mọi file trên đĩa và trong kho."""
         bundle = self.bundle(sample_id)
         if not bundle.root.is_relative_to(self.root):
             raise DemoUnavailableError("Mẫu không thuộc thư viện demo")
         bundle.manifest()
-        (bundle.root / UNPUBLISHED_MARKER).touch()
+        if self.catalog is None:
+            raise DemoUnavailableError("Thư viện demo chưa gắn catalog")
+        if self.catalog.get(sample_id) is None:
+            # Bundle đơn cũ hoặc thư mục chép tay chưa nhập: ghi dòng catalog từ đĩa để trạng thái bỏ được lưu lại.
+            from src.services.orchestration.samples.catalog import record_from_disk
+
+            self.catalog.save(record_from_disk(bundle.root, sample_id, state="unpublished", actor=None))
+            return
+        self.catalog.set_state(sample_id, "unpublished")
 
     def summaries(self) -> list[SampleSummary]:
         """Thẻ của mọi mẫu hợp lệ; bundle hỏng bị bỏ qua (có log) thay vì làm hỏng cả danh sách."""

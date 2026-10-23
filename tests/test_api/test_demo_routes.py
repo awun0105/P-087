@@ -112,7 +112,11 @@ def library(tmp_path, monkeypatch):
         studio_deps,
         "settings",
         lambda: SimpleNamespace(
-            product_demo_dir=root, product_rerun_recording_dir=root / "recordings", database_url="sqlite://"
+            product_demo_dir=root,
+            product_rerun_recording_dir=root / "recordings",
+            database_url=f"sqlite:///{tmp_path / 'runtime.db'}",
+            artifact_s3_bucket=None,
+            product_demo_object_prefix="demo/library",
         ),
     )
     return root
@@ -147,7 +151,7 @@ def _fake_publish(calls):
 
     from src.services.orchestration.samples import DemoFile, DemoManifest
 
-    def fake(registry, job_id, root, *, title, description, source, frames=12, recording_dir=None):
+    def fake(registry, job_id, root, *, catalog, title, description, source, frames=12, recording_dir=None):
         calls.append((job_id, root, title, description, source))
         (root / "kho-1").mkdir(parents=True)
         manifest = DemoManifest(

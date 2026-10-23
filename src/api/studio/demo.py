@@ -23,7 +23,7 @@ from src.services.orchestration.auth import UserRecord, actor_of
 from src.services.orchestration.jobs.database import RuntimeStateConflictError
 from src.services.orchestration.projects import JobNotFoundError
 from src.services.orchestration.projects.registry import ProjectRegistry
-from src.services.orchestration.samples import DemoManifest, DemoSource, distributed
+from src.services.orchestration.samples import DemoManifest, DemoSource
 from src.services.orchestration.samples.export import (
     SampleExportError,
     acquire_publish_lock,
@@ -88,8 +88,9 @@ def _with_publication(state: DemoState, job_id: str) -> DemoStateResponse:
     """Gắn mẫu đã xuất của job (tra theo `provenance.job_id` của thư viện)."""
     root = deps.settings().product_demo_dir
     try:
-        sample_id = published_sample_id(root, job_id)
-    except OSError:
+        sample_id = published_sample_id(deps.sample_catalog(), job_id)
+    except Exception:  # noqa: BLE001 - trạng thái demo vẫn đọc được khi catalog tạm không truy cập được
+        logger.warning("demo catalog unavailable while reading the demo state of %s", job_id, exc_info=True)
         sample_id = None
     publishing, error = publication_status(root, job_id)
     return DemoStateResponse(
@@ -209,9 +210,9 @@ def post_demo_publish(
         )
     title = request.title or project.name.strip() or "Scene"
     current = deps.settings()
-    root = current.product_demo_dir
+    catalog = deps.sample_catalog()
     try:
-        lock = acquire_publish_lock(root, job_id)
+        lock = acquire_publish_lock(current.product_demo_dir, catalog, job_id)
     except SampleExportError as error:  # gồm AlreadyPublishedError và "đang được xuất"
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     except OSError as error:
@@ -221,19 +222,18 @@ def post_demo_publish(
         ) from error
 
     def published(manifest: DemoManifest) -> None:
-        if distributed.enabled(current):
-            distributed.republish(current, manifest.demo_id)
         auth.auth_service().audit(user.user_id, "demo.publish", job_id, {"sample_id": manifest.demo_id})
 
     # Chép bundle (tới vài GB) lâu hơn thời gian chờ của proxy: chạy nền, giao diện đọc trạng thái qua GET …/demo.
     Thread(
         target=publish_in_background,
-        args=(registry, job_id, root, lock),
+        args=(registry, job_id, current, catalog, lock),
         kwargs={
             "title": title,
             "description": request.description.strip(),
             "source": DemoSource(dataset="Real2Sim Studio", sequence=project.name[:200], note=""),
             "recording_dir": current.product_rerun_recording_dir,
+            "actor": user.user_id,
             "on_published": published,
         },
         name=f"demo-publish-{job_id}",

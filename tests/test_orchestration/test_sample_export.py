@@ -6,10 +6,13 @@ from types import SimpleNamespace
 
 import pytest
 
+from src.config import Settings
 from src.models.contracts.manifests import StageId
 from src.services.orchestration.artifacts import ArtifactStoreError, sha256_file
+from src.services.orchestration.jobs.database import RuntimeDatabase
 from src.services.orchestration.projects.registry import ProjectRegistry
 from src.services.orchestration.samples import DemoLibrary, DemoSource
+from src.services.orchestration.samples.catalog import DemoCatalog
 from src.services.orchestration.samples.export import (
     AlreadyPublishedError,
     SampleExportError,
@@ -95,12 +98,26 @@ def test_slugify_drops_vietnamese_marks() -> None:
     assert slugify("???") == ""
 
 
+def _library(tmp_path: Path) -> tuple[Settings, DemoCatalog, Path]:
+    """Thư viện mẫu một máy (SQLite, không kho file): settings, catalog và thư mục đệm."""
+    settings = Settings(
+        product_demo_dir=tmp_path / "library",
+        database_url=f"sqlite:///{tmp_path / 'runtime.db'}",
+        artifact_root=tmp_path / "artifacts",
+    )
+    return settings, DemoCatalog(RuntimeDatabase(settings.database_url)), settings.product_demo_dir
+
+
+def _publish(registry, tmp_path: Path, **kwargs):  # noqa: ANN001, ANN202
+    settings, catalog, _ = _library(tmp_path)
+    kwargs.setdefault("description", "")
+    return publish_job_bundle(registry, JOB_ID, settings, catalog, source=SOURCE, **kwargs)
+
+
 def test_publish_writes_a_valid_bundle_atomically(tmp_path: Path) -> None:
     registry, splat = _registry(tmp_path)
-    library = tmp_path / "library"
-    manifest = publish_job_bundle(
-        registry, JOB_ID, library, title="Kho thử Đường đi", description="Mô tả", source=SOURCE
-    )
+    _, catalog, library = _library(tmp_path)
+    manifest = _publish(registry, tmp_path, title="Kho thử Đường đi", description="Mô tả")
     assert manifest.demo_id.startswith("kho-thu-duong-di-")
     assert manifest.provenance["job_id"] == JOB_ID
     assert manifest.splat.checksum == sha256_file(splat)
@@ -108,7 +125,8 @@ def test_publish_writes_a_valid_bundle_atomically(tmp_path: Path) -> None:
     assert [child.name for child in library.iterdir()] == [manifest.demo_id]
     summaries = DemoLibrary(library).summaries()
     assert [item.sample_id for item in summaries] == [manifest.demo_id]
-    assert published_sample_id(library, JOB_ID) == manifest.demo_id
+    assert published_sample_id(catalog, JOB_ID) == manifest.demo_id
+    assert catalog.get(manifest.demo_id).state == "published" and catalog.get(manifest.demo_id).job_id == JOB_ID
     assert len(manifest.stages) == 8 and manifest.stages[0].stage_id == StageId.INPUT_VALIDATE
 
 
@@ -132,10 +150,10 @@ def test_export_preserves_preview_orientation_without_changing_splat_bytes(
 def test_publishing_twice_returns_the_existing_sample_and_never_overwrites(tmp_path: Path) -> None:
     registry, _ = _registry(tmp_path)
     library = tmp_path / "library"
-    first = publish_job_bundle(registry, JOB_ID, library, title="Kho A", description="", source=SOURCE)
+    first = _publish(registry, tmp_path, title="Kho A")
     before = (library / first.demo_id / "manifest.json").read_bytes()
     with pytest.raises(AlreadyPublishedError) as error:
-        publish_job_bundle(registry, JOB_ID, library, title="Tên khác", description="", source=SOURCE)
+        _publish(registry, tmp_path, title="Tên khác")
     assert error.value.demo_id == first.demo_id
     assert (library / first.demo_id / "manifest.json").read_bytes() == before
     assert [child.name for child in library.iterdir()] == [first.demo_id]
@@ -145,7 +163,7 @@ def test_failed_export_leaves_no_partial_directory(tmp_path: Path) -> None:
     registry, _ = _registry(tmp_path, preview_ok=False)
     library = tmp_path / "library"
     with pytest.raises(SampleExportError, match="bản xem 3DGS"):
-        publish_job_bundle(registry, JOB_ID, library, title="Kho A", description="", source=SOURCE)
+        _publish(registry, tmp_path, title="Kho A")
     assert list(library.iterdir()) == []
 
 
@@ -292,7 +310,7 @@ def test_a_lock_held_by_another_publisher_blocks_a_second_publish(tmp_path: Path
     library = tmp_path / "library"
     (library / f".publishing-{JOB_ID}").mkdir(parents=True)
     with pytest.raises(SampleExportError, match="đang được xuất"):
-        publish_job_bundle(registry, JOB_ID, library, title="Kho", description="", source=SOURCE)
+        _publish(registry, tmp_path, title="Kho")
     assert [child.name for child in library.iterdir()] == [f".publishing-{JOB_ID}"]
 
 
@@ -354,43 +372,56 @@ def test_the_raw_video_is_not_published_when_the_job_masked_faces_and_plates(tmp
 
 def test_removed_job_can_be_published_again_without_overwriting_the_old_bundle(tmp_path: Path) -> None:
     registry, _ = _registry(tmp_path)
-    root = tmp_path / "library"
-    first = publish_job_bundle(registry, JOB_ID, root, title="Kho", description="", source=SOURCE)
+    _, catalog, root = _library(tmp_path)
+    first = _publish(registry, tmp_path, title="Kho")
     original = (root / first.demo_id / "manifest.json").read_bytes()
-    DemoLibrary(root).unpublish(first.demo_id)
-    assert published_sample_id(root, JOB_ID) is None
-    second = publish_job_bundle(registry, JOB_ID, root, title="Kho", description="Mới", source=SOURCE)
+    DemoLibrary(root, catalog=catalog).unpublish(first.demo_id)
+    assert published_sample_id(catalog, JOB_ID) is None and catalog.get(first.demo_id).state == "unpublished"
+    second = _publish(registry, tmp_path, title="Kho", description="Mới")
     assert second.demo_id != first.demo_id
-    assert published_sample_id(root, JOB_ID) == second.demo_id
+    assert published_sample_id(catalog, JOB_ID) == second.demo_id
     assert (root / first.demo_id / "manifest.json").read_bytes() == original
 
 
 def test_an_unchanged_removed_sample_can_be_restored_without_copying(tmp_path: Path) -> None:
     registry, _ = _registry(tmp_path)
-    root = tmp_path / "library"
-    first = publish_job_bundle(registry, JOB_ID, root, title="Kho", description="", source=SOURCE)
+    _, catalog, root = _library(tmp_path)
+    first = _publish(registry, tmp_path, title="Kho")
     (root / first.demo_id / "workspace").mkdir()
     revision = registry.scene.current(JOB_ID).scene.scene_revision
     (root / first.demo_id / "workspace/snapshot.json").write_text(json.dumps({"head": {"scene_revision": revision}}))
-    DemoLibrary(root).unpublish(first.demo_id)
+    DemoLibrary(root, catalog=catalog).unpublish(first.demo_id)
 
-    again = restore_unpublished(registry, root, JOB_ID, title=None, description=None)
+    again = restore_unpublished(registry, catalog, root, JOB_ID, title=None, description=None)
 
     assert again is not None and again.demo_id == first.demo_id
-    assert published_sample_id(root, JOB_ID) == first.demo_id
+    assert published_sample_id(catalog, JOB_ID) == first.demo_id
     assert sorted(path.name for path in root.iterdir() if not path.name.startswith(".")) == [first.demo_id]
 
 
 def test_a_removed_sample_whose_scene_changed_is_not_restored(tmp_path: Path) -> None:
     registry, _ = _registry(tmp_path)
-    root = tmp_path / "library"
-    first = publish_job_bundle(registry, JOB_ID, root, title="Kho", description="", source=SOURCE)
+    _, catalog, root = _library(tmp_path)
+    first = _publish(registry, tmp_path, title="Kho")
     (root / first.demo_id / "workspace").mkdir()
     (root / first.demo_id / "workspace/snapshot.json").write_text(json.dumps({"head": {"scene_revision": "rev-old"}}))
-    DemoLibrary(root).unpublish(first.demo_id)
+    DemoLibrary(root, catalog=catalog).unpublish(first.demo_id)
 
-    assert restore_unpublished(registry, root, JOB_ID, title=None, description=None) is None
-    assert (root / first.demo_id / ".unpublished").exists()
+    assert restore_unpublished(registry, catalog, root, JOB_ID, title=None, description=None) is None
+    assert catalog.get(first.demo_id).state == "unpublished"
+
+
+def test_a_removed_sample_whose_files_changed_on_disk_is_not_restored(tmp_path: Path) -> None:
+    registry, _ = _registry(tmp_path)
+    _, catalog, root = _library(tmp_path)
+    first = _publish(registry, tmp_path, title="Kho")
+    (root / first.demo_id / "workspace").mkdir()
+    revision = registry.scene.current(JOB_ID).scene.scene_revision
+    (root / first.demo_id / "workspace/snapshot.json").write_text(json.dumps({"head": {"scene_revision": revision}}))
+    DemoLibrary(root, catalog=catalog).unpublish(first.demo_id)
+    (root / first.demo_id / "files" / first.splat.name).write_bytes(b"bi sua")
+
+    assert restore_unpublished(registry, catalog, root, JOB_ID, title=None, description=None) is None
 
 
 def test_sample_optional_object_geometry_is_validated(tmp_path: Path) -> None:
@@ -589,24 +620,25 @@ def test_background_publish_falls_back_to_the_unchanged_removed_sample_when_copy
     from src.services.orchestration.samples import export
 
     registry, _ = _registry(tmp_path)
-    root = tmp_path / "library"
-    first = publish_job_bundle(registry, JOB_ID, root, title="Kho", description="", source=SOURCE)
+    settings, catalog, root = _library(tmp_path)
+    first = _publish(registry, tmp_path, title="Kho")
     (root / first.demo_id / "workspace").mkdir()
     revision = registry.scene.current(JOB_ID).scene.scene_revision
     (root / first.demo_id / "workspace/snapshot.json").write_text(json.dumps({"head": {"scene_revision": revision}}))
-    DemoLibrary(root).unpublish(first.demo_id)
+    DemoLibrary(root, catalog=catalog).unpublish(first.demo_id)
 
     def broken(*args, **kwargs):
         raise OSError("disk")
 
     monkeypatch.setattr(export, "_publish_locked", broken)
     published: list[str] = []
-    lock = export.acquire_publish_lock(root, JOB_ID)
+    lock = export.acquire_publish_lock(root, catalog, JOB_ID)
     assert export.publication_status(root, JOB_ID) == (True, None)
     export.publish_in_background(
         registry,
         JOB_ID,
-        root,
+        settings,
+        catalog,
         lock,
         title="Kho",
         description="",
@@ -623,13 +655,13 @@ def test_background_publish_records_the_failure_for_the_demo_state(
     from src.services.orchestration.samples import export
 
     registry, _ = _registry(tmp_path)
-    root = tmp_path / "library"
+    settings, catalog, root = _library(tmp_path)
     monkeypatch.setattr(export, "_publish_locked", lambda *args, **kwargs: (_ for _ in ()).throw(OSError("disk")))
-    lock = export.acquire_publish_lock(root, JOB_ID)
-    export.publish_in_background(registry, JOB_ID, root, lock, title="Kho", description="", source=SOURCE)
+    lock = export.acquire_publish_lock(root, catalog, JOB_ID)
+    export.publish_in_background(registry, JOB_ID, settings, catalog, lock, title="Kho", description="", source=SOURCE)
     assert export.publication_status(root, JOB_ID) == (False, "Không ghi được vào thư viện mẫu")
     # Lần xuất kế tiếp xoá lỗi cũ ngay khi bắt đầu.
-    shutil_lock = export.acquire_publish_lock(root, JOB_ID)
+    shutil_lock = export.acquire_publish_lock(root, catalog, JOB_ID)
     assert export.publication_status(root, JOB_ID) == (True, None)
     shutil_lock.rmdir()
 

@@ -22,7 +22,8 @@ from src.services.orchestration.jobs.models import JobAttemptRecord
 from src.services.orchestration.projects.models import DemoBaseline
 from src.services.orchestration.projects.registry import ProjectRegistry
 from src.services.orchestration.samples import distributed
-from src.services.orchestration.samples.bundle import DemoLibrary, DemoUnavailableError
+from src.services.orchestration.samples.bundle import DemoUnavailableError
+from src.services.orchestration.samples.catalog import library
 from src.services.orchestration.samples.session_context import DemoRuntime
 from src.services.orchestration.samples.snapshot import copy_artifact_graph
 from src.services.orchestration.samples.workspace import load_workspace
@@ -115,7 +116,7 @@ def _create_session(
     settings: Settings, registry: ProjectRegistry, sample_id: str, *, reserved_id: str | None = None
 ) -> DemoSession:
     """Clone the frozen published workspace; never read the source job's current state."""
-    bundle = DemoLibrary(settings.product_demo_dir).bundle(sample_id)
+    bundle = library(settings).bundle(sample_id)
     snapshot = load_workspace(bundle)
     job, project, head = snapshot.job, snapshot.project, snapshot.head
     job_id = job.job_id
@@ -233,7 +234,7 @@ def _create_session(
 def create_session(settings: Settings, registry: ProjectRegistry, sample_id: str) -> DemoSession:
     if distributed.enabled(settings):
         # Validate the published baseline before reserving a database namespace.
-        load_workspace(DemoLibrary(settings.product_demo_dir).bundle(sample_id))
+        load_workspace(library(settings).bundle(sample_id))
         distributed.purge(settings)
         session_id = distributed.reserve(settings, sample_id)
         try:
@@ -268,7 +269,7 @@ def get_session(settings: Settings, session_id: str) -> DemoSession:
             or datetime.now(UTC).timestamp() - (root / "heartbeat").stat().st_mtime > settings.product_demo_idle_seconds
         ):
             raise DemoSessionUnavailableError("Phiên demo đã kết thúc; mở lại mẫu để tạo phiên mới")
-        DemoLibrary(settings.product_demo_dir).bundle(session.sample_id).manifest()
+        library(settings).bundle(session.sample_id).manifest()
         return session
     except (OSError, ValueError, DemoUnavailableError) as error:
         raise DemoSessionUnavailableError("Phiên demo đã kết thúc hoặc không còn khả dụng") from error
