@@ -2,7 +2,7 @@ name: Deploy API (GCE VM)
 
 on:
   push:
-    branches: [develop, master]
+    branches: [develop]
     paths:
       - "src/**"
       - "scripts/**"

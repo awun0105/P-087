@@ -17,8 +17,6 @@ permissions:
 
 jobs:
   watchdog:
-    # Secrets live only on the personal deployment repository.
-    if: github.repository == 'awun0105/P-087'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

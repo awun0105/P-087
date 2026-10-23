@@ -2,7 +2,7 @@ name: Deploy Studio (Vercel)
 
 on:
   push:
-    branches: [develop, master]
+    branches: [develop]
     paths:
       - "frontend/**"
       - ".github/workflows/deploy-studio.yml"
