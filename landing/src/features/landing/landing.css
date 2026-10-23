@@ -17,9 +17,10 @@
   --lp-fg-subtle: var(--studio-ink-subtle);
   --lp-line: var(--studio-line);
   --lp-line-strong: var(--studio-line-strong);
-  --lp-primary: var(--studio-geometry);
-  --lp-primary-soft: color-mix(in srgb, var(--studio-geometry) 14%, transparent);
-  --lp-accent: var(--studio-ember-strong);
+  /* Màu chính là cam (ember) theo bảng gruvbox; xanh "geometry" chỉ dùng cho lớp hình học trong hình minh hoạ. */
+  --lp-primary: var(--studio-ember-strong);
+  --lp-primary-soft: color-mix(in srgb, var(--studio-ember-strong) 14%, transparent);
+  --lp-accent: var(--studio-ochre);
   --lp-accent-strong: var(--studio-ember-strong);
   --lp-ok: var(--studio-sage);
   --lp-warn: var(--studio-ochre);
@@ -55,8 +56,9 @@
   --lp-fg-subtle: color-mix(in srgb, var(--studio-on-dark) 42%, transparent);
   --lp-line: color-mix(in srgb, var(--studio-on-dark) 10%, transparent);
   --lp-line-strong: color-mix(in srgb, var(--studio-on-dark) 20%, transparent);
-  --lp-primary-soft: color-mix(in srgb, var(--studio-geometry) 18%, transparent);
-  --lp-accent: var(--studio-ember);
+  --lp-primary: var(--studio-ember);
+  --lp-primary-soft: color-mix(in srgb, var(--studio-ember) 18%, transparent);
+  --lp-accent: var(--studio-ochre);
   --lp-gradient-primary: linear-gradient(135deg, color-mix(in srgb, var(--lp-primary) 70%, #fff) 0%, var(--lp-primary) 55%, color-mix(in srgb, var(--lp-primary) 70%, var(--lp-bg)) 100%);
   --lp-gradient-card: linear-gradient(145deg, color-mix(in srgb, var(--lp-fg) 7%, var(--lp-bg)) 0%, color-mix(in srgb, var(--lp-fg) 3%, var(--lp-bg)) 100%);
   --lp-shadow-card: 0 8px 32px -8px rgb(0 0 0 / 0.6);

@@ -10,12 +10,12 @@ import Image from "next/image";
 import { applyPalette, applyTheme, currentPalette, currentTheme, subscribeTheme, type Palette, type Theme } from "@/lib/theme";
 
 const serverTheme = (): Theme => "dark";
-const serverPalette = (): Palette => "default";
+const serverPalette = (): Palette => "gruvbox";
 const serverLang = (): Language => "vi";
 
 const PALETTES: { value: Palette; swatch: [string, string, string] }[] = [
-  { value: "default", swatch: ["#f5efe6", "#c2551f", "#2f7ea8"] },
   { value: "gruvbox", swatch: ["#fbf1c7", "#af3a03", "#076678"] },
+  { value: "classic", swatch: ["#f5efe6", "#c2551f", "#2f7ea8"] },
 ];
 
 export function LandingHeader({
@@ -121,8 +121,8 @@ export function LandingHeader({
                 <div className="lp-menu-title">{ui.paletteTitle}</div>
                 {PALETTES.map((item) => {
                   const isSelected = palette === item.value;
-                  const label = item.value === "default" ? ui.paletteDefault : ui.paletteGruvbox;
-                  const note = item.value === "default" ? ui.paletteDefaultNote : ui.paletteGruvboxNote;
+                  const label = item.value === "classic" ? ui.paletteClassic : ui.paletteGruvbox;
+                  const note = item.value === "classic" ? ui.paletteClassicNote : ui.paletteGruvboxNote;
                   return (
                     <button
                       key={item.value}

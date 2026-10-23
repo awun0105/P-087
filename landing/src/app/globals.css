@@ -38,61 +38,6 @@
 }
 
 :root {
-  --studio-paper: #f5efe6;
-  --studio-paper-raised: #fbf8f3;
-  --studio-paper-sunken: #ede4d6;
-  --studio-line: rgb(107 95 82 / 0.16);
-  --studio-line-strong: rgb(107 95 82 / 0.36);
-  --studio-ink: #2b2520;
-  --studio-ink-muted: #6b5f52;
-  --studio-ink-subtle: #8a7e70;
-  --studio-ember-strong: #c2551f;
-  --studio-ember-soft: #fbe3d3;
-  --studio-geometry: #2f7ea8;
-  --studio-viewport: #1f1b17;
-  --studio-viewport-deep: #171412;
-  --studio-sage: #5e8c61;
-  --studio-sage-soft: #e3ede0;
-  --studio-ochre: #b7862a;
-  --studio-ochre-soft: #f6ead0;
-  --studio-rust: #b8452f;
-  --studio-rust-soft: #f6dcd5;
-  --studio-ember: #e8743b;
-  --studio-line-dark: rgb(245 239 230 / 0.12);
-  --studio-on-dark: #f5efe6;
-  --studio-on-accent: #ffffff;
-}
-
-.dark {
-  --studio-paper: #1b1714;
-  --studio-paper-raised: #25201c;
-  --studio-paper-sunken: #141110;
-  --studio-line: rgb(245 239 230 / 0.12);
-  --studio-line-strong: rgb(245 239 230 / 0.26);
-  --studio-ink: #f5efe6;
-  --studio-ink-muted: #b8ab9b;
-  --studio-ink-subtle: #9a8d7e;
-  --studio-ember-strong: #f0935f;
-  --studio-ember-soft: #3d2518;
-  --studio-geometry: #5aa9d1;
-  --studio-viewport: #110f0d;
-  --studio-viewport-deep: #0b0a09;
-  --studio-media-preview-surface: #000000;
-  --studio-sage: #8fb891;
-  --studio-sage-soft: #1f2b20;
-  --studio-ochre: #d9a94a;
-  --studio-ochre-soft: #33290f;
-  --studio-rust: #e88771;
-  --studio-rust-soft: #3a1d16;
-  --studio-scrollbar: #4a4038;
-  --studio-shadow: rgb(0 0 0 / 0.3);
-  --studio-ember: #e8743b;
-  --studio-line-dark: rgb(245 239 230 / 0.12);
-  --studio-on-dark: #f5efe6;
-  --studio-on-accent: #ffffff;
-}
-
-.theme-gruvbox {
   --studio-paper: #fbf1c7;
   --studio-paper-raised: #f4e8be;
   --studio-paper-sunken: #e5d5ad;
@@ -123,7 +68,7 @@
   --studio-destructive-fill: #9d0006;
 }
 
-.theme-gruvbox.dark {
+.dark {
   --studio-paper: #282828;
   --studio-paper-raised: #32302f;
   --studio-paper-sunken: #45403d;
@@ -154,8 +99,63 @@
   --studio-destructive-fill: #fb4934;
 }
 
-.dark .landing-page,
-.theme-gruvbox.dark .landing-page {
+/* Bảng màu phụ "classic" (be + cam): chỉ bật khi khách chọn; mặc định là gruvbox ở :root/.dark. */
+.theme-classic {
+  --studio-paper: #f5efe6;
+  --studio-paper-raised: #fbf8f3;
+  --studio-paper-sunken: #ede4d6;
+  --studio-line: rgb(107 95 82 / 0.16);
+  --studio-line-strong: rgb(107 95 82 / 0.36);
+  --studio-ink: #2b2520;
+  --studio-ink-muted: #6b5f52;
+  --studio-ink-subtle: #8a7e70;
+  --studio-ember-strong: #c2551f;
+  --studio-ember-soft: #fbe3d3;
+  --studio-geometry: #2f7ea8;
+  --studio-viewport: #1f1b17;
+  --studio-viewport-deep: #171412;
+  --studio-sage: #5e8c61;
+  --studio-sage-soft: #e3ede0;
+  --studio-ochre: #b7862a;
+  --studio-ochre-soft: #f6ead0;
+  --studio-rust: #b8452f;
+  --studio-rust-soft: #f6dcd5;
+  --studio-ember: #e8743b;
+  --studio-line-dark: rgb(245 239 230 / 0.12);
+  --studio-on-dark: #f5efe6;
+  --studio-on-accent: #ffffff;
+}
+
+.theme-classic.dark {
+  --studio-paper: #1b1714;
+  --studio-paper-raised: #25201c;
+  --studio-paper-sunken: #141110;
+  --studio-line: rgb(245 239 230 / 0.12);
+  --studio-line-strong: rgb(245 239 230 / 0.26);
+  --studio-ink: #f5efe6;
+  --studio-ink-muted: #b8ab9b;
+  --studio-ink-subtle: #9a8d7e;
+  --studio-ember-strong: #f0935f;
+  --studio-ember-soft: #3d2518;
+  --studio-geometry: #5aa9d1;
+  --studio-viewport: #110f0d;
+  --studio-viewport-deep: #0b0a09;
+  --studio-media-preview-surface: #000000;
+  --studio-sage: #8fb891;
+  --studio-sage-soft: #1f2b20;
+  --studio-ochre: #d9a94a;
+  --studio-ochre-soft: #33290f;
+  --studio-rust: #e88771;
+  --studio-rust-soft: #3a1d16;
+  --studio-scrollbar: #4a4038;
+  --studio-shadow: rgb(0 0 0 / 0.3);
+  --studio-ember: #e8743b;
+  --studio-line-dark: rgb(245 239 230 / 0.12);
+  --studio-on-dark: #f5efe6;
+  --studio-on-accent: #ffffff;
+}
+
+.dark .landing-page {
   color-scheme: dark;
 }
 
