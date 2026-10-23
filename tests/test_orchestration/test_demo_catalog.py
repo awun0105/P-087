@@ -19,6 +19,7 @@ from src.services.orchestration.samples.catalog import (
     DemoCatalog,
     SampleFile,
     SampleRecord,
+    SyncReport,
     import_library,
     inventory,
     prepare_library,
@@ -221,7 +222,7 @@ def test_sync_reports_a_sample_nobody_can_provide_and_keeps_the_rest(tmp_path: P
     assert sync_library(settings, catalog).broken == ["hong"]
 
 
-def test_import_registers_disk_bundles_and_honours_the_legacy_unpublished_row(tmp_path: Path, monkeypatch) -> None:
+def test_import_registers_disk_bundles_as_published_and_ignores_the_legacy_table(tmp_path: Path, monkeypatch) -> None:
     settings = _settings(tmp_path)
     _with_store(monkeypatch)
     database = RuntimeDatabase(settings.database_url)
@@ -238,8 +239,8 @@ def test_import_registers_disk_bundles_and_honours_the_legacy_unpublished_row(tm
 
     assert import_library(settings, catalog) == ["bo-tren-dia", "bo-trong-db", "moi"]
 
-    assert catalog.published_ids() == {"moi"}
-    assert {record.sample_id for record in catalog.records(state="unpublished")} == {"bo-trong-db", "bo-tren-dia"}
+    assert catalog.published_ids() == {"moi", "bo-trong-db"}
+    assert {record.sample_id for record in catalog.records(state="unpublished")} == {"bo-tren-dia"}
     assert import_library(settings, catalog) == []
 
 
@@ -280,5 +281,4 @@ def test_prepare_seeds_from_the_pinned_archive_once(tmp_path: Path, monkeypatch)
     assert calls == ["demo/releases/v1.zip"]
     assert first.verified == ["goc"] and second.repaired == ["goc"]
     DemoCatalog(database).set_state("goc", "unpublished")
-    with pytest.raises(RuntimeError, match="required"):
-        prepare_library(settings, database)
+    assert prepare_library(settings, database) == SyncReport()  # bắt buộc có demo nhưng không chết; readiness báo chờ

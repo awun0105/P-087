@@ -239,21 +239,16 @@ class SyncReport(BaseModel):
     broken: list[str] = []
 
 
-def _legacy_unpublished(database: RuntimeDatabase) -> set[str]:
-    try:
-        with database.transaction() as tx:
-            rows = tx.execute("SELECT sample_id FROM r2s_demo_unpublished").fetchall()
-    except Exception:  # noqa: BLE001 - bảng cũ có thể không tồn tại
-        return set()
-    return {row[0] for row in rows}
-
-
 def import_library(settings: Settings, catalog: DemoCatalog, *, actor: str | None = "import") -> list[str]:
-    """Đưa bundle đang có trên đĩa mà catalog chưa biết vào catalog (và kho file)."""
+    """Đưa bundle đang có trên đĩa mà catalog chưa biết vào catalog (và kho file).
+
+    Bundle trên đĩa là do bản phát hành đã ghim hoặc người vận hành đặt vào, nên được coi là đang công khai; trừ khi
+    thư mục mang file `.unpublished` của cơ chế cũ. Bảng `r2s_demo_unpublished` cũ không được đọc: trạng thái của nó
+    từng lệch với đĩa (lý do có catalog này), Reviewer bỏ lại trong Studio nếu cần.
+    """
     root = settings.product_demo_dir.expanduser()
     if not root.is_dir():
         return []
-    legacy = _legacy_unpublished(catalog.database)
     registered: list[str] = []
     for child in sorted(root.iterdir()):
         if (
@@ -264,7 +259,7 @@ def import_library(settings: Settings, catalog: DemoCatalog, *, actor: str | Non
             or catalog.get(child.name) is not None
         ):
             continue
-        state: SampleState = "unpublished" if (child / ".unpublished").exists() or child.name in legacy else "published"
+        state: SampleState = "unpublished" if (child / ".unpublished").exists() else "published"
         try:
             register_bundle(settings, catalog, child, actor=actor, state=state)
         except (OSError, ValueError) as error:
@@ -344,5 +339,6 @@ def prepare_library(settings: Settings, database: RuntimeDatabase) -> SyncReport
         logger.info("Đã nhập %d mẫu từ đĩa vào catalog: %s", len(imported), ", ".join(imported))
     report = sync_library(settings, catalog)
     if settings.product_demo_required and not (report.verified or report.repaired):
-        raise RuntimeError("Demo library is required but no published sample is usable")
+        # Không chết: API vẫn phục vụ việc khác; `/health/ready` báo "waiting" cho tới khi có mẫu dùng được.
+        logger.error("Demo library is required but no published sample is usable (broken=%s)", report.broken)
     return report
