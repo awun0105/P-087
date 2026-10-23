@@ -82,7 +82,38 @@ export function LandingMotion() {
     window.addEventListener("scroll", onScroll, { passive: true });
     window.addEventListener("resize", onScroll);
 
+    // 4. Đèn rọi theo con trỏ trên thẻ; khung sơ đồ nghiêng theo chuột
+    const onPointerMove = (e: PointerEvent) => {
+      const target = e.target instanceof Element ? e.target : null;
+      const card = target?.closest<HTMLElement>(".lp-card, .lp-cell, .lp-viewport");
+      if (card) {
+        const r = card.getBoundingClientRect();
+        card.style.setProperty("--lp-mx", `${(((e.clientX - r.left) / r.width) * 100).toFixed(1)}%`);
+        card.style.setProperty("--lp-my", `${(((e.clientY - r.top) / r.height) * 100).toFixed(1)}%`);
+      }
+      const tilt = target?.closest<HTMLElement>(".lp-viewport-tilt");
+      if (tilt) {
+        const r = tilt.getBoundingClientRect();
+        const dx = (e.clientX - r.left) / r.width - 0.5;
+        const dy = (e.clientY - r.top) / r.height - 0.5;
+        const vp = tilt.querySelector<HTMLElement>(".lp-viewport");
+        vp?.style.setProperty("--lp-ry", `${(dx * 8).toFixed(2)}deg`);
+        vp?.style.setProperty("--lp-rx", `${(-dy * 8).toFixed(2)}deg`);
+      }
+    };
+    const onPointerLeave = (e: PointerEvent) => {
+      const tilt = e.target instanceof Element ? e.target.closest<HTMLElement>(".lp-viewport-tilt") : null;
+      const vp = tilt?.querySelector<HTMLElement>(".lp-viewport");
+      vp?.style.setProperty("--lp-rx", "0deg");
+      vp?.style.setProperty("--lp-ry", "0deg");
+    };
+    const page = document.querySelector<HTMLElement>(".landing-page");
+    page?.addEventListener("pointermove", onPointerMove, { passive: true });
+    document.querySelectorAll<HTMLElement>(".lp-viewport-tilt").forEach((t) => t.addEventListener("pointerleave", onPointerLeave));
+
     return () => {
+      page?.removeEventListener("pointermove", onPointerMove);
+      document.querySelectorAll<HTMLElement>(".lp-viewport-tilt").forEach((t) => t.removeEventListener("pointerleave", onPointerLeave));
       revealIo.disconnect();
       spyIo.disconnect();
       window.removeEventListener("scroll", onScroll);

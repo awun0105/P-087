@@ -1,12 +1,14 @@
 "use client";
 
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, ChevronDown } from "lucide-react";
+import Image from "next/image";
 import { useSyncExternalStore } from "react";
 
 import { LandingAnchors } from "@/features/landing/LandingAnchors";
 import { LandingHeader } from "@/features/landing/LandingHeader";
 import { LandingMotion } from "@/features/landing/LandingMotion";
 import { LandingSamples } from "@/features/landing/LandingSamples";
+import { RotatingText } from "@/features/landing/RotatingText";
 import { CompareScene } from "@/features/landing/CompareScene";
 import { HeroScene } from "@/features/landing/HeroScene";
 import { StatusTag } from "@/features/landing/StatusTag";
@@ -61,33 +63,58 @@ export function LandingPage() {
 
       {/* ── HERO ── */}
       <section className="lp-hero">
-        <div className="lp-wrap lp-hero-grid">
-          <div className="lp-hero-copy">
-            <p className="lp-kicker">{HERO.eyebrow}</p>
-            <h1 className="lp-display mt-5">
-              {HERO.titleLead} {HERO.titleEmphasis}
-            </h1>
-            <p className="lp-lead mt-6">{HERO.lead}</p>
-            <p className="lp-body mt-4 max-w-xl">{HERO.note}</p>
+        <div className="lp-hero-bg" aria-hidden />
+        <div className="lp-hero-shade" aria-hidden />
+        <svg className="lp-ribbons" viewBox="0 0 1600 900" preserveAspectRatio="none" aria-hidden>
+          <defs>
+            <linearGradient id="lp-rg1" x1="0" x2="1">
+              <stop offset="0" stopColor="var(--lp-primary)" stopOpacity="0" />
+              <stop offset="0.5" stopColor="var(--lp-primary)" />
+              <stop offset="1" stopColor="var(--lp-ok)" stopOpacity="0" />
+            </linearGradient>
+            <linearGradient id="lp-rg2" x1="0" x2="1">
+              <stop offset="0" stopColor="var(--lp-accent)" stopOpacity="0" />
+              <stop offset="0.5" stopColor="var(--lp-accent)" />
+              <stop offset="1" stopColor="var(--lp-warn)" stopOpacity="0" />
+            </linearGradient>
+            <linearGradient id="lp-rg3" x1="0" x2="1">
+              <stop offset="0" stopColor="var(--lp-ok)" stopOpacity="0" />
+              <stop offset="0.5" stopColor="var(--lp-fg)" />
+              <stop offset="1" stopColor="var(--lp-primary)" stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          <path className="r1" d="M -100 650 C 300 450, 700 900, 1100 600 S 1500 300, 1750 450" />
+          <path className="r2" d="M -100 300 C 400 100, 600 500, 1000 350 S 1400 150, 1750 250" />
+          <path className="r3" d="M -100 760 C 500 600, 800 820, 1200 700 S 1500 600, 1750 680" />
+        </svg>
 
-            <div className="mt-9 flex flex-wrap gap-3">
-              <a href={TRY_DEMO_HREF} className="lp-btn lp-btn-primary">
-                {ui.tryDemo}
-                <ArrowRight aria-hidden />
-              </a>
-              <a href={LOGIN_HREF} className="lp-btn lp-btn-ghost">
-                {ui.loginStudio}
-              </a>
-            </div>
-
-            <ul className="lp-benefits">
-              {HERO.benefits.map((b) => (
-                <li key={b}>{b}</li>
-              ))}
-            </ul>
+        <div className="lp-wrap lp-hero-inner">
+          <div className="lp-hero-mark" aria-hidden>
+            <Image src="/icon.svg" alt="" width={40} height={40} />
           </div>
-
-          <HeroScene hero={HERO} heroChain={HERO_CHAIN} lang={lang} />
+          <p className="lp-kicker">{HERO.eyebrow}</p>
+          <h1 className="lp-display">
+            <span className="lp-gradient">{HERO.titleLead}</span> {HERO.titleEmphasis}
+          </h1>
+          <RotatingText items={HERO.benefits} />
+          <p className="lp-lead">{HERO.lead}</p>
+          <p className="lp-body">{HERO.note}</p>
+          <div className="lp-hero-cta">
+            <a href={TRY_DEMO_HREF} className="lp-btn lp-btn-primary">
+              {ui.tryDemo}
+              <ArrowRight aria-hidden />
+            </a>
+            <a href={LOGIN_HREF} className="lp-btn lp-btn-ghost">
+              {ui.loginStudio}
+            </a>
+          </div>
+          <div className="lp-viewport-tilt">
+            <HeroScene hero={HERO} heroChain={HERO_CHAIN} lang={lang} />
+          </div>
+          <a href="#context" className="lp-scroll-cue">
+            {ui.explore}
+            <ChevronDown aria-hidden />
+          </a>
         </div>
       </section>
 
@@ -100,7 +127,7 @@ export function LandingPage() {
             {CONTEXT.steps.map((s, i) => (
               <li key={s.title} className="lp-flow-step">
                 <span className="lp-flow-num">{String(i + 1).padStart(2, "0")}</span>
-                <h3 className="lp-h3 mt-2">{s.title}</h3>
+                <h3 className="lp-h3 mt-4">{s.title}</h3>
                 <p className="lp-body mt-2">{s.body}</p>
               </li>
             ))}
@@ -359,12 +386,12 @@ export function LandingPage() {
 
       {/* ── BẮT ĐẦU ── */}
       <section id="start" className="lp-section lp-start">
-        <div className="lp-wrap grid gap-12 lg:grid-cols-2 lg:items-center">
-          <div data-reveal>
-            <h2 className="lp-h2 text-on-dark">
-              {START.titleLead} {START.titleEmphasis}
+        <div className="lp-wrap">
+          <div className="lp-start-card" data-reveal>
+            <h2 className="lp-h2">
+              {START.titleLead} <span className="lp-gradient">{START.titleEmphasis}</span>
             </h2>
-            <div className="mt-8 flex flex-wrap gap-3">
+            <div className="mt-8 flex flex-wrap justify-center gap-3">
               <a href={TRY_DEMO_HREF} className="lp-btn lp-btn-on-dark">
                 {ui.tryDemo}
                 <ArrowRight aria-hidden />
@@ -373,18 +400,18 @@ export function LandingPage() {
                 {ui.loginStudio}
               </a>
             </div>
+            <ol className="lp-start-steps">
+              {START.steps.map((s, i) => (
+                <li key={s.title}>
+                  <span className="lp-start-num">{String(i + 1).padStart(2, "0")}</span>
+                  <div>
+                    <p className="text-[15px] font-semibold">{s.title}</p>
+                    <p className="mt-1 text-[14px] leading-relaxed text-on-dark/65">{s.body}</p>
+                  </div>
+                </li>
+              ))}
+            </ol>
           </div>
-          <ol className="lp-start-steps" data-reveal style={{ "--lp-delay": "120ms" } as React.CSSProperties}>
-            {START.steps.map((s, i) => (
-              <li key={s.title}>
-                <span className="lp-start-num">{String(i + 1).padStart(2, "0")}</span>
-                <div>
-                  <p className="text-[15px] font-semibold">{s.title}</p>
-                  <p className="mt-1 text-[14px] leading-relaxed text-on-dark/65">{s.body}</p>
-                </div>
-              </li>
-            ))}
-          </ol>
         </div>
       </section>
 
@@ -411,12 +438,10 @@ export function LandingPage() {
 function SectionHead({ index, lead, emphasis, body }: { index: string; lead: string; emphasis: string; body: string }) {
   return (
     <div className="lp-section-head" data-reveal>
-      <div>
-        <p className="lp-index">{index}</p>
-        <h2 className="lp-h2">
-          {lead} {emphasis}
-        </h2>
-      </div>
+      <p className="lp-index">{index}</p>
+      <h2 className="lp-h2">
+        {lead} <span className="lp-gradient">{emphasis}</span>
+      </h2>
       <p>{body}</p>
     </div>
   );
