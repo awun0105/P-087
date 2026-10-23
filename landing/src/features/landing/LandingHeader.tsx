@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Globe, Moon, Palette as PaletteIcon, Sun } from "lucide-react";
+import { ArrowRight, Check, Globe, Moon, Palette as PaletteIcon, Sun } from "lucide-react";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import { getContent, getUiLabels } from "@/features/landing/content";
@@ -91,6 +91,7 @@ export function LandingHeader({
           </a>
           <a href={tryDemoHref} className="lp-btn lp-btn-primary lp-btn-sm ml-1">
             {ui.tryDemo}
+            <ArrowRight aria-hidden />
           </a>
 
           <div className="lp-tools-sep" aria-hidden />
