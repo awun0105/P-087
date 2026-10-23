@@ -321,15 +321,22 @@ Riêng subcommand `publish` không có `--apply` kiểm gói và đích, không 
 
 Subcommand `provision --target-root ...` có thể ghi các nhóm optional như demo/preview/Rerun/cache ngay cả khi không có `--apply`; không gọi toàn bộ CLI này là dry-run chỉ dựa vào việc thiếu flag.
 
-### 9.3 Phát hành và cài thư viện mẫu
+### 9.3 Thư viện mẫu: catalog trong DB + kho file là nguồn sự thật, đĩa chỉ là bộ đệm
 
-[`scripts.demo.release`](../scripts/demo/release.py) có bốn lệnh `pack`, `verify`, `publish`, `bootstrap`. Đây là **demo library archive**, khác data package chứa SQLite; dùng đúng verifier theo loại gói. Kiểm archive demo bằng:
+Từ 2026-10-24, mẫu nào đang công khai được quyết định bởi bảng `r2s_demo_samples` (trạng thái `published` / `unpublished`, danh sách file kèm checksum) và các object ở `PRODUCT_DEMO_OBJECT_PREFIX/<mã mẫu>/…` trong kho file. Thư mục `PRODUCT_DEMO_DIR` trên máy API chỉ là bộ đệm:
+
+- **Đặt làm bản demo** từ Studio: xuất bundle vào thư mục tạm, đẩy mọi file lên kho, rồi mới ghi dòng catalog. Không đẩy được lên kho thì mẫu không xuất hiện và thư mục mới bị xoá.
+- **Bỏ khỏi demo** và thêm lại: chỉ đổi trạng thái dòng catalog; không có file đánh dấu trên đĩa, không chép lại bundle.
+- **Khởi động API** (`prepare_library`): nếu catalog trống, thư mục trống và có ghim `PRODUCT_DEMO_ARCHIVE_KEY` thì tải bản phát hành đó một lần; nhập bundle lạ trên đĩa vào catalog; rồi đối chiếu từng file của mẫu đang công khai với catalog, file thiếu hoặc sai được tải lại từ kho. Đĩa lệch **không** làm API từ chối chạy, chỉ ghi cảnh báo `Demo library: repaired=… broken=…`; API chỉ dừng khi `PRODUCT_DEMO_REQUIRED=true` mà không mẫu nào dùng được.
+- Không sửa tay thư mục mẫu trên máy ảo. Muốn thay mẫu: bỏ mẫu cũ trong Studio rồi đặt mẫu mới làm bản demo.
+
+[`scripts.demo.release`](../scripts/demo/release.py) có các lệnh `pack`, `verify`, `publish`, `import`, `bootstrap`. Đây là **demo library archive**, khác data package chứa SQLite; dùng đúng verifier theo loại gói. Kiểm archive demo bằng:
 
 ```bash
 .venv/bin/python -m scripts.demo.release verify /duong/dan/demo-library.zip
 ```
 
-`publish` ghi object store; `bootstrap` tải/cài thư viện theo Settings. Khóa object/checksum và prefix bản phát hành phải khớp, giữ baseline bất biến. Nếu thư viện đã provision từ release khác, dùng vị trí mới và cấu hình tương ứng thay vì chồng nội dung lên baseline cũ.
+`pack`/`publish` vẫn dùng để sao lưu hoặc chuyển bộ mẫu sang deployment khác. `import` đăng ký bundle đã chép tay vào `PRODUCT_DEMO_DIR` (đẩy lên kho + ghi catalog); `bootstrap` làm đúng việc API làm lúc khởi động và in báo cáo đối chiếu.
 
 API cần volume thư viện và chỗ staging giải nén đủ dung lượng; thư mục tải ZIP tạm có thể tách khỏi thư viện trên volume. Phiên demo PostgreSQL dùng schema cách ly và output prefix riêng, cần role DB có quyền phù hợp; không công khai các schema này qua Data API. Janitor chờ kết thúc/cancel công việc còn sở hữu trước khi dọn phiên. Nội dung demo đã ghi không phải kết quả vừa chạy reconstruction/Isaac.
 
