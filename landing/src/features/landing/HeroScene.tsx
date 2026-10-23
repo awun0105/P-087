@@ -59,13 +59,11 @@ export function HeroScene({
 
   return (
     <figure className="lp-viewport">
-      <div className="flex items-center justify-between gap-3 border-b border-line-dark px-4 py-2.5">
-        <span className="font-mono text-[12px] text-on-dark/70">{hero.sceneLabel}</span>
-        <span className="hidden gap-1.5 sm:flex" aria-hidden>
+      <div className="lp-viewport-bar">
+        <span>{hero.sceneLabel}</span>
+        <span className="lp-viewport-pills" aria-hidden>
           {hero.pillars.map((p) => (
-            <span key={p} className="rounded border border-line-dark px-1.5 py-0.5 font-mono text-[11px] text-on-dark/60">
-              {p}
-            </span>
+            <span key={p}>{p}</span>
           ))}
         </span>
       </div>
@@ -101,7 +99,7 @@ export function HeroScene({
           <rect x="300" y="148" width="60" height="50" rx="2" strokeDasharray="5 4" />
         </g>
         <text x="300" y="140" className="lp-svg-label" fill="var(--studio-ochre)">
-          Object_004 · collider
+          Object_004 collider
         </text>
 
         {/* Đường đi Start → Goal vòng qua pallet */}
@@ -128,16 +126,16 @@ export function HeroScene({
         <text x="88" y="340" className="lp-svg-label" fill="var(--studio-on-dark)">1 m</text>
       </svg>
 
-      <ol className="grid grid-cols-2 gap-px border-t border-line-dark bg-line-dark sm:grid-cols-5">
+      <ol className="lp-chain">
         {heroChain.map((c, i) => (
-          <li key={c.label} className="bg-viewport-deep px-3 py-3" data-tone={c.tone}>
-            <span className="font-mono text-[11px] text-on-dark/50">{String(i + 1).padStart(2, "0")}</span>
-            <span className="lp-chain-label mt-0.5 block text-[13px] font-semibold">{c.label}</span>
-            <span className="mt-0.5 block text-[12px] leading-snug text-on-dark/60">{c.detail}</span>
+          <li key={c.label} data-tone={c.tone}>
+            <span className="lp-chain-step">{String(i + 1).padStart(2, "0")}</span>
+            <span className="lp-chain-label">{c.label}</span>
+            <span className="lp-chain-detail">{c.detail}</span>
           </li>
         ))}
       </ol>
-      <figcaption className="px-4 py-2 text-[12px] text-on-dark/50">{caption}</figcaption>
+      <figcaption>{caption}</figcaption>
     </figure>
   );
 }
