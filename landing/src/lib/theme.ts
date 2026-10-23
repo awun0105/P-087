@@ -6,8 +6,8 @@ export const PALETTE_STORAGE_KEY = "r2s-palette";
 const GRUVBOX_CLASS = "theme-gruvbox";
 const EVENT = "r2s:theme";
 
-/** Chạy trong <head> trước khi vẽ; lỗi đọc storage (chế độ riêng tư, bị chặn) thì giữ giao diện mặc định. */
-export const THEME_INIT_SCRIPT = `try{var c=document.documentElement.classList;if(localStorage.getItem("${THEME_STORAGE_KEY}")==="dark")c.add("dark");if(localStorage.getItem("${PALETTE_STORAGE_KEY}")==="gruvbox")c.add("${GRUVBOX_CLASS}")}catch(e){}`;
+/** Chạy trong <head> trước khi vẽ. Landing mặc định tối; chỉ sáng khi người dùng đã chọn sáng. Lỗi đọc storage thì tối. */
+export const THEME_INIT_SCRIPT = `try{var c=document.documentElement.classList;if(localStorage.getItem("${THEME_STORAGE_KEY}")!=="light")c.add("dark");if(localStorage.getItem("${PALETTE_STORAGE_KEY}")==="gruvbox")c.add("${GRUVBOX_CLASS}")}catch(e){}`;
 
 export function currentTheme(): Theme {
   return typeof document !== "undefined" && document.documentElement.classList.contains("dark") ? "dark" : "light";

@@ -9,7 +9,7 @@ import { applyLanguage, currentLanguage, subscribeLanguage, type Language } from
 import Image from "next/image";
 import { applyPalette, applyTheme, currentPalette, currentTheme, subscribeTheme, type Palette, type Theme } from "@/lib/theme";
 
-const serverTheme = (): Theme => "light";
+const serverTheme = (): Theme => "dark";
 const serverPalette = (): Palette => "default";
 const serverLang = (): Language => "vi";
 
